@@ -96,3 +96,61 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+## Project Structure
+
+Gacha Hub uses a monorepo-style structure with a separated backend and frontend.
+
+```txt
+Gacha Hub/
+├── backend/                  # NestJS backend API
+│   ├── prisma/               # Prisma database schema and migrations
+│   │   ├── migrations/        # Generated Prisma migration files
+│   │   └── schema.prisma      # Main database schema
+│   │
+│   ├── src/
+│   │   ├── auth/              # Better Auth configuration
+│   │   │   └── auth.ts        # Better Auth instance, Prisma adapter, auth settings
+│   │   │
+│   │   ├── common/            # Shared reusable backend utilities
+│   │   │   ├── constants/     # Global constants such as roles and app settings
+│   │   │   ├── decorators/    # Custom decorators used across controllers
+│   │   │   ├── dto/           # Shared DTOs such as pagination query DTO
+│   │   │   ├── filters/       # Global/custom exception filters
+│   │   │   ├── guards/        # Reusable guards for roles, permissions, moderation
+│   │   │   ├── interceptors/  # Logging and response formatting interceptors
+│   │   │   ├── pipes/         # Custom validation/transformation pipes
+│   │   │   ├── types/         # Shared TypeScript types
+│   │   │   └── utils/         # Shared helper functions such as slugify
+│   │   │
+│   │   ├── config/            # Environment and app configuration
+│   │   │   ├── app.config.ts  # App-level config such as port and frontend URL
+│   │   │   └── env.ts         # Central place for reading environment variables
+│   │   │
+│   │   ├── health/            # Health check endpoints
+│   │   │   ├── health.controller.ts
+│   │   │   └── health.module.ts
+│   │   │
+│   │   ├── prisma/            # Prisma service used by NestJS dependency injection
+│   │   │   ├── prisma.module.ts
+│   │   │   └── prisma.service.ts
+│   │   │
+│   │   ├── users/             # User/profile related endpoints
+│   │   │   ├── users.controller.ts
+│   │   │   ├── users.module.ts
+│   │   │   └── users.service.ts
+│   │   │
+│   │   ├── app.controller.ts  # Root test controller
+│   │   ├── app.module.ts      # Root NestJS module
+│   │   ├── app.service.ts     # Root test service
+│   │   └── main.ts            # Application entry point
+│   │
+│   ├── test/                  # Backend test files
+│   ├── .env.example           # Example environment variables
+│   ├── package.json           # Backend dependencies and scripts
+│   └── tsconfig.json          # TypeScript configuration
+│
+├── frontend/                  # React frontend app, added after backend core setup
+│
+├── .gitignore                 # Git ignored files for backend/frontend
+└── README.md                  # Project documentation
