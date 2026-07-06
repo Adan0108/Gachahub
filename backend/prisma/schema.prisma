@@ -1,4 +1,3 @@
-
 generator client {
   provider     = "prisma-client"
   output       = "../src/generated/prisma"
@@ -70,4 +69,58 @@ model Verification {
 
   @@index([identifier])
   @@map("verification")
+}
+
+enum GameStatus {
+  ACTIVE
+  ARCHIVED
+  HIDDEN
+}
+
+model Game {
+  id          String     @id @default(cuid())
+  name        String
+  slug        String     @unique
+  description String?
+  iconUrl     String?
+  bannerUrl   String?
+  developer   String?
+  publisher   String?
+  status      GameStatus @default(ACTIVE)
+
+  memberCount Int @default(0)
+  postCount   Int @default(0)
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  categories GameCategory[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("games")
+}
+
+model GameCategory {
+  id     String @id @default(cuid())
+  gameId String
+
+  name        String
+  slug        String
+  description String?
+  icon        String?
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, slug])
+  @@index([gameId])
+  @@index([isActive])
+  @@index([sortOrder])
+  @@map("game_categories")
 }
