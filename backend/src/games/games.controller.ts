@@ -6,10 +6,11 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
-import type { auth } from '../auth/auth';
+import { AdminGuard } from '../common/guards/admin.guard';
 import { Public } from '../common/decorators/public.decorator';
 import { CreateGameDto } from './dto/create-game.dto';
 import { QueryGamesDto } from './dto/query-games.dto';
@@ -57,32 +58,26 @@ export class GamesController {
   }
 
   /**
-   * Protected endpoint for creating a game.
+   * Admin-only endpoint for creating a game.
    *
-   * Current behavior:
-   * - Any logged-in user can create a game while the project is in early stage
-   *
-   * Future behavior:
-   * - Restrict this route to ADMIN only using a RolesGuard
+   * Only platform admins should create official game communities.
+   * Normal users should not be able to create games because games are
+   * top-level system data used by posts, categories, moderators, builds,
+   * teams, and reports.
    */
   @Post()
-  create(
-    @Body() dto: CreateGameDto,
-    @Session() session: UserSession<typeof auth>,
-  ) {
+  @UseGuards(AdminGuard)
+  create(@Body() dto: CreateGameDto, @Session() session: UserSession) {
     return this.gamesService.create(dto, session.user.id);
   }
-
   /**
-   * Protected endpoint for updating a game.
+   * Admin-only endpoint for updating a game.
    *
-   * Current behavior:
-   * - Any logged-in user can update during early development
-   *
-   * Future behavior:
-   * - Restrict this route to ADMIN only
+   * This protects important game metadata such as name, slug, banner,
+   * icon, developer, publisher, and status.
    */
   @Patch(':id')
+  @UseGuards(AdminGuard)
   update(@Param('id') id: string, @Body() dto: UpdateGameDto) {
     return this.gamesService.update(id, dto);
   }

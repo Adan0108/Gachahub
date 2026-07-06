@@ -6,8 +6,10 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { Public } from '../common/decorators/public.decorator';
+import { AdminGuard } from '../common/guards/admin.guard';
 import { CreateGameCategoryDto } from './dto/create-game-category.dto';
 import { QueryGameCategoriesDto } from './dto/query-game-categories.dto';
 import { UpdateGameCategoryDto } from './dto/update-game-category.dto';
@@ -39,15 +41,14 @@ export class GameCategoriesController {
   }
 
   /**
-   * Protected endpoint for creating a category inside a game.
+   * Admin-only endpoint for creating a category inside a game.
    *
-   * Current behavior:
-   * - Any logged-in user can create during early development
-   *
-   * Future behavior:
-   * - Restrict this route to ADMIN or game moderator.
+   * Categories are core community structure, so only admins should manage them.
+   * Game moderators should manage content later, not change category structure
+   * in the MVP.
    */
   @Post('games/:gameSlug/categories')
+  @UseGuards(AdminGuard)
   create(
     @Param('gameSlug') gameSlug: string,
     @Body() dto: CreateGameCategoryDto,
@@ -56,15 +57,12 @@ export class GameCategoriesController {
   }
 
   /**
-   * Protected endpoint for updating a category.
+   * Admin-only endpoint for updating a category.
    *
-   * Current behavior:
-   * - Any logged-in user can update during early development
-   *
-   * Future behavior:
-   * - Restrict this route to ADMIN or game moderator.
+   * This protects category name, slug, order, active status, and description.
    */
   @Patch('game-categories/:id')
+  @UseGuards(AdminGuard)
   update(@Param('id') id: string, @Body() dto: UpdateGameCategoryDto) {
     return this.gameCategoriesService.update(id, dto);
   }

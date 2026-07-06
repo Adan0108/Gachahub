@@ -9,15 +9,22 @@ datasource db {
 }
 
 model User {
-  id            String    @id
+  id            String   @id
   name          String
   email         String
-  emailVerified Boolean   @default(false)
+  emailVerified Boolean  @default(false)
   image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  sessions      Session[]
-  accounts      Account[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  role   UserRole   @default(USER)
+  status UserStatus @default(ACTIVE)
+
+  sessions Session[]
+  accounts Account[]
+
+  moderatedGames     GameModerator[] @relation("GameModeratorUser")
+  assignedModerators GameModerator[] @relation("GameModeratorAssigner")
 
   @@unique([email])
   @@map("user")
@@ -71,6 +78,18 @@ model Verification {
   @@map("verification")
 }
 
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+  DELETED
+}
+
 enum GameStatus {
   ACTIVE
   ARCHIVED
@@ -96,6 +115,7 @@ model Game {
   updatedAt DateTime @updatedAt
 
   categories GameCategory[]
+  moderators GameModerator[]
 
   @@index([status])
   @@index([createdAt])
@@ -123,4 +143,24 @@ model GameCategory {
   @@index([isActive])
   @@index([sortOrder])
   @@map("game_categories")
+}
+
+model GameModerator {
+  id String @id @default(cuid())
+
+  gameId     String
+  userId     String
+  assignedBy String?
+
+  createdAt DateTime @default(now())
+
+  game     Game  @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user     User  @relation("GameModeratorUser", fields: [userId], references: [id], onDelete: Cascade)
+  assigner User? @relation("GameModeratorAssigner", fields: [assignedBy], references: [id], onDelete: SetNull)
+
+  @@unique([gameId, userId])
+  @@index([gameId])
+  @@index([userId])
+  @@index([assignedBy])
+  @@map("game_moderators")
 }

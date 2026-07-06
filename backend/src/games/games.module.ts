@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CommonModule } from '../common/common.module';
 import { GamesController } from './games.controller';
 import { GamesRepository } from './games.repository';
 import { GamesService } from './games.service';
@@ -6,11 +7,11 @@ import { GamesService } from './games.service';
 /**
  * GamesModule groups all game-related backend logic.
  *
- * It exports GamesRepository and GamesService so other modules
- * such as GameCategoriesModule, PostsModule, BuildsModule, and TeamsModule
- * can reuse game lookup logic.
+ * It imports CommonModule so controller routes can use shared guards
+ * such as AdminGuard.
  */
 @Module({
+  imports: [CommonModule],
   controllers: [GamesController],
   providers: [GamesService, GamesRepository],
   exports: [GamesService, GamesRepository],
