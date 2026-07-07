@@ -8,6 +8,12 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import {
+  ApiCookieAuth,
+  ApiOperation,
+  ApiParam,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CreateGameCategoryDto } from './dto/create-game-category.dto';
@@ -21,6 +27,7 @@ import { GameCategoriesService } from './game-categories.service';
  * Categories belong to games, so public listing and creation routes
  * are nested under /games/:gameSlug/categories.
  */
+@ApiTags('Game Categories')
 @Controller()
 export class GameCategoriesController {
   constructor(private readonly gameCategoriesService: GameCategoriesService) {}
@@ -33,6 +40,11 @@ export class GameCategoriesController {
    */
   @Get('games/:gameSlug/categories')
   @Public()
+  @ApiOperation({ summary: 'List categories for a game' })
+  @ApiParam({
+    name: 'gameSlug',
+    example: 'wuthering-waves',
+  })
   findByGameSlug(
     @Param('gameSlug') gameSlug: string,
     @Query() query: QueryGameCategoriesDto,
@@ -49,6 +61,12 @@ export class GameCategoriesController {
    */
   @Post('games/:gameSlug/categories')
   @UseGuards(AdminGuard)
+  @ApiCookieAuth('better-auth.session_token')
+  @ApiOperation({ summary: 'Create a game category. Admin only.' })
+  @ApiParam({
+    name: 'gameSlug',
+    example: 'wuthering-waves',
+  })
   create(
     @Param('gameSlug') gameSlug: string,
     @Body() dto: CreateGameCategoryDto,
@@ -63,6 +81,12 @@ export class GameCategoriesController {
    */
   @Patch('game-categories/:id')
   @UseGuards(AdminGuard)
+  @ApiCookieAuth('better-auth.session_token')
+  @ApiOperation({ summary: 'Update a game category. Admin only.' })
+  @ApiParam({
+    name: 'id',
+    example: 'cm123abc456',
+  })
   update(@Param('id') id: string, @Body() dto: UpdateGameCategoryDto) {
     return this.gameCategoriesService.update(id, dto);
   }

@@ -8,6 +8,12 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import {
+  ApiCookieAuth,
+  ApiOperation,
+  ApiParam,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { AdminGuard } from '../common/guards/admin.guard';
@@ -25,6 +31,7 @@ import { GamesService } from './games.service';
  * - Call the service
  * - Do not contain business logic
  */
+@ApiTags('Games')
 @Controller('games')
 export class GamesController {
   constructor(private readonly gamesService: GamesService) {}
@@ -41,6 +48,7 @@ export class GamesController {
    */
   @Get()
   @Public()
+  @ApiOperation({ summary: 'List games' })
   findAll(@Query() query: QueryGamesDto) {
     return this.gamesService.findAll(query);
   }
@@ -53,6 +61,11 @@ export class GamesController {
    */
   @Get(':slug')
   @Public()
+  @ApiOperation({ summary: 'Get a game by slug' })
+  @ApiParam({
+    name: 'slug',
+    example: 'wuthering-waves',
+  })
   findBySlug(@Param('slug') slug: string) {
     return this.gamesService.findBySlug(slug);
   }
@@ -67,6 +80,8 @@ export class GamesController {
    */
   @Post()
   @UseGuards(AdminGuard)
+  @ApiCookieAuth('better-auth.session_token')
+  @ApiOperation({ summary: 'Create a game. Admin only.' })
   create(@Body() dto: CreateGameDto, @Session() session: UserSession) {
     return this.gamesService.create(dto, session.user.id);
   }
@@ -78,6 +93,12 @@ export class GamesController {
    */
   @Patch(':id')
   @UseGuards(AdminGuard)
+  @ApiCookieAuth('better-auth.session_token')
+  @ApiOperation({ summary: 'Update a game. Admin only.' })
+  @ApiParam({
+    name: 'id',
+    example: 'cm123abc456',
+  })
   update(@Param('id') id: string, @Body() dto: UpdateGameDto) {
     return this.gamesService.update(id, dto);
   }
