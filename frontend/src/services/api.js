@@ -4,14 +4,12 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:300
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "true";
 
 export const backendRoutes = {
-  // Routes that exist in the current NestJS backend.
+
   games: "/games",
   game: slug => `/games/${slug}`,
   gameCategories: gameSlug => `/games/${gameSlug}/categories`,
   currentUser: "/users/me",
 
-  // Planned routes for later backend work. The UI has polished fallback data
-  // until these backend modules exist.
   posts: gameSlug => `/games/${gameSlug}/posts`,
   builds: gameSlug => `/games/${gameSlug}/builds`,
   teams: gameSlug => `/games/${gameSlug}/teams`,
@@ -143,8 +141,6 @@ export const api = {
   getCategories,
   getProfile: () => request(backendRoutes.currentUser),
 
-  // Future-ready helpers. They are not required by the current backend yet,
-  // but your backend friend can add matching routes without changing components.
   getPosts: gameSlug => request(backendRoutes.posts(gameSlug)),
   getBuilds: gameSlug => request(backendRoutes.builds(gameSlug)),
   getTeams: gameSlug => request(backendRoutes.teams(gameSlug)),
