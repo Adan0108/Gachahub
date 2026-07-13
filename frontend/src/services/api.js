@@ -98,7 +98,7 @@ async function request(path, options = {}) {
 
   return response.status === 204 ? null : response.json();
 }
-
+/*ADUMA GITHUB HAY VAI CA LON*/ 
 async function getGames(query = {}) {
   const params = new URLSearchParams();
   Object.entries(query).forEach(([key, value]) => {
