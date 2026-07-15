@@ -1,0 +1,92 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gachahub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gachahub
+      POSTGRES_USER: gachahub
+      POSTGRES_PASSWORD: gachahub
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gachahub -d gachahub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: gachahub-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: gachahub-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: gachahub
+      MINIO_ROOT_PASSWORD: gachahub-local-password
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gachahub-backend
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "npx prisma generate && npx prisma migrate deploy && npm run start:dev"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://gachahub:gachahub@postgres:5432/gachahub?schema=public
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: gachahub
+      MINIO_SECRET_KEY: gachahub-local-password
+      MINIO_BUCKET: gachahub-local
+      BETTER_AUTH_SECRET: local-dev-change-me
+      BETTER_AUTH_URL: http://localhost:3000
+      FRONTEND_URL: http://localhost:5173
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    volumes:
+      - ./backend:/app
+      - backend_node_modules:/app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  backend_node_modules:
