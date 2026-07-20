@@ -12,9 +12,7 @@ import {
  */
 @Injectable()
 export class NoopChatDeliveryService implements ChatDeliveryPort {
-  async publishMessageCreated(
-    _event: ChatMessageCreatedEvent,
-  ): Promise<void> {
+  async publishMessageCreated(_event: ChatMessageCreatedEvent): Promise<void> {
     return;
   }
 }
