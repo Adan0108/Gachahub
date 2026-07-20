@@ -72,6 +72,17 @@ function Sidebar({ open, close }) {
 function Topbar({ onMenu }) {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
+  const [apiStatus, setApiStatus] = useState("checking");
+
+  useEffect(() => {
+    let mounted = true;
+    api.getHealth()
+      .then(() => { if (mounted) setApiStatus("connected"); })
+      .catch(() => { if (mounted) setApiStatus("offline"); });
+
+    return () => { mounted = false; };
+  }, []);
+
   const submit = event => {
     event.preventDefault();
     if (query.trim()) navigate(`/explore?q=${encodeURIComponent(query)}`);
@@ -85,6 +96,9 @@ function Topbar({ onMenu }) {
       <kbd>Ctrl K</kbd>
     </form>
     <div className="top-actions">
+      <span className={`api-status ${apiStatus}`} title={`Backend: ${api.baseUrl}`}>
+        <i /> {apiStatus === "connected" ? "Backend connected" : apiStatus === "offline" ? "Offline mode" : "Checking API"}
+      </span>
       <button className="outline-btn" onClick={() => navigate("/studio")}><FiPlus /> <span>Create</span></button>
       <button className="icon-btn" aria-label="Notifications"><FiBell /><i /></button>
       <button className="mini-avatar" onClick={() => navigate("/profile")}>R</button>
@@ -241,7 +255,7 @@ function ExplorePage() {
       <div>
         <span className="eyebrow">Discover</span>
         <h1>Explore new builds, theories, and creators.</h1>
-        <p>A cleaner discovery page your backend friend can later power with search results, filters, and recommendations.</p>
+        <p>Find new communities, trending posts, character guides, and recommendations in one place.</p>
       </div>
       <button className="soft-btn"><FiCompass /> Smart Explore</button>
     </section>
@@ -270,7 +284,7 @@ function SummariesPage() {
       <div>
         <span className="eyebrow">AI Summaries</span>
         <h1>Your fandom feed, compressed into signal.</h1>
-        <p>Mocked for now, but shaped so the backend can connect summary, source, and trend endpoints later.</p>
+        <p>Catch up on community trends, patch chatter, build ideas, and lore highlights at a glance.</p>
       </div>
       <button className="soft-btn"><FiLayers /> Generate Summary</button>
     </section>
@@ -335,9 +349,20 @@ function ProfilePage() {
   const [tab, setTab] = useState("Builds");
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("RoverX");
+  const [profile, setProfile] = useState(null);
+
+  useEffect(() => {
+    api.getProfile()
+      .then(user => {
+        if (!user) return;
+        setProfile(user);
+        if (user.name) setName(user.name);
+      })
+      .catch(() => {});
+  }, []);
 
   return <div className="page profile-page">
-    <section className="profile-hero"><Art tone="indigo">{glyph.sparkle}</Art><button className="edit-profile" onClick={() => setEditing(true)}><FiEdit3 /> Edit Profile</button><div className="profile-main"><div className="profile-avatar"><Art tone="blue">R</Art></div><div><h1>{name} <span className="verified">{glyph.check}</span></h1><p>UID: 9008420</p><blockquote>&quot;We ride the waves, chasing the unknown.&quot;</blockquote><div className="social"><FiShare2 /><FiMessageCircle /><FiCompass /></div></div></div></section>
+    <section className="profile-hero"><Art tone="indigo">{glyph.sparkle}</Art><button className="edit-profile" onClick={() => setEditing(true)}><FiEdit3 /> Edit Profile</button><div className="profile-main"><div className="profile-avatar"><Art tone="blue">{name.charAt(0).toUpperCase() || "R"}</Art></div><div><h1>{name} <span className="verified">{glyph.check}</span></h1><p>{profile?.email || "UID: 9008420"}</p><blockquote>&quot;We ride the waves, chasing the unknown.&quot;</blockquote><div className="social"><FiShare2 /><FiMessageCircle /><FiCompass /></div></div></div></section>
     <section className="profile-stats"><div><b>128</b><span>Posts</span></div><div><b>24.7K</b><span>Reputation</span></div><div><b>412</b><span>Followers</span></div><div><b>89</b><span>Following</span></div><aside className="reputation"><div><small>Reputation Level</small><strong>24</strong><b>Elder Voyager</b><div className="progress"><i /></div><small>8,250 / 12,000</small></div><div className="rank-gem">{glyph.sparkle}</div></aside></section>
     <div className="tabs wide">{["Overview", "Builds", "Posts", "Collections", "Achievements"].map(item => <button onClick={() => setTab(item)} className={tab === item ? "active" : ""} key={item}>{item}</button>)}</div>
     <div className="profile-body"><section><SectionTitle>Published {tab} (12)</SectionTitle><div className="build-grid">{builds.map((build, i) => <BuildCard build={build} index={i} key={build.name} />)}</div></section><aside className="panel leaderboard"><div className="panel-head"><h3>Top Performing Builds</h3><FiX /></div>{builds.slice(0, 3).map((build, i) => <div className="leader" key={build.name}><span className={`art-${build.tone}`}>{i + 1}</span><div><b>{build.name} {build.role}</b><small>{glyph.dot} {build.views}</small></div><strong>#{i + 1}</strong></div>)}</aside></div>

@@ -6,7 +6,6 @@
 @media(max-width:430px){.community-grid{grid-template-columns:1fr 1fr}.community-card>.art{height:70px}.build-grid{grid-template-columns:1fr 1fr}.build-card>.art{height:105px}.profile-main{align-items:end}.profile-avatar{width:64px;height:64px}.profile-main h1{font-size:17px}.profile-main blockquote{max-width:220px}.studio-tools{grid-template-columns:repeat(3,1fr)}}
 @media print{.studio-tools,.canvas-settings{display:none}.studio-page{display:grid;place-items:center}.build-canvas{width:100vw}}
 
-/* Final polish pass: removes the flat prototype feel and gives the pages a finished app surface. */
 body{overflow-x:hidden}
 .app-shell{background:
  radial-gradient(circle at 18% 8%,#34205f66 0,transparent 26%),
@@ -53,7 +52,6 @@ body{overflow-x:hidden}
 .modal{background:linear-gradient(145deg,#121832,#0c1022)}
 @media(max-width:760px){.hero-polish{display:block}.hero-polish .soft-btn{margin-top:16px}.community-card>.art{height:90px}.build-card>.art{height:125px}}
 
-/* Typography and route-polish pass */
 :root{--font-body:"Inter","Segoe UI",Arial,sans-serif;--font-display:"Space Grotesk","Orbitron","Segoe UI",sans-serif;--radius-xl:22px}
 html,body,#root{font-family:var(--font-body);font-size:15px;letter-spacing:-.01em}
 h1,h2,h3,.brand b,.hero-wordmark,.canvas-header h1{font-family:var(--font-display);letter-spacing:-.035em}
@@ -90,3 +88,4 @@ h1,h2,h3,.brand b,.hero-wordmark,.canvas-header h1{font-family:var(--font-displa
 .studio-tools,.canvas-settings{border-radius:18px}.studio-title{font-size:14px}.studio-tools>small,.studio-tools>button,.canvas-settings label,.toggle-row,.segmented button,.canvas-settings select{font-size:12px}.build-canvas{width:min(100%,980px)}
 @media(max-width:1050px){.explore-layout,.summary-grid{grid-template-columns:1fr}.lore-grid{grid-template-columns:1fr}.community-grid.compact{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:760px){.community-hero,.profile-hero{height:220px}.hero-wordmark{font-size:30px}.community-info{padding:88px 18px 18px}.community-avatar{top:-28px}.join-btn{position:static;margin-top:14px}.explore-layout{display:block}.community-grid.compact{grid-template-columns:1fr}.summary-grid,.lore-grid{display:grid;grid-template-columns:1fr}.lore-card{grid-template-columns:1fr}.lore-card>.art{min-height:140px}.post{grid-template-columns:24px 38px 1fr}.tag{display:none}}
+.api-status{display:inline-flex;align-items:center;gap:7px;border:1px solid #2f385f;background:#10152a;border-radius:999px;padding:7px 10px;font-size:10px;color:#aab3cd;white-space:nowrap}.api-status i{width:7px;height:7px;border-radius:50%;background:#f5c451;box-shadow:0 0 14px #f5c45188}.api-status.connected{border-color:#2d725b;color:#9ce7c3;background:#0d241d}.api-status.connected i{background:#46df9b;box-shadow:0 0 14px #46df9b99}.api-status.offline{border-color:#6e4c34;color:#ffbf8a;background:#24160d}.api-status.offline i{background:#ff9657;box-shadow:0 0 14px #ff965799}@media(max-width:760px){.api-status{display:none}}

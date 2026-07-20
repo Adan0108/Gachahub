@@ -4,11 +4,20 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:300
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "true";
 
 export const backendRoutes = {
-
+  health: "/health",
   games: "/games",
   game: slug => `/games/${slug}`,
   gameCategories: gameSlug => `/games/${gameSlug}/categories`,
   currentUser: "/users/me",
+  chatConversations: "/chat/conversations",
+  chatRequests: "/chat/requests",
+  chatDirect: "/chat/direct",
+  chatMessages: conversationId => `/chat/conversations/${conversationId}/messages`,
+  chatAcceptRequest: conversationId => `/chat/requests/${conversationId}/accept`,
+  chatDeclineRequest: conversationId => `/chat/requests/${conversationId}/decline`,
+  chatBlockConversation: conversationId => `/chat/conversations/${conversationId}/block`,
+  chatDelivered: "/chat/messages/delivered",
+  chatRead: conversationId => `/chat/conversations/${conversationId}/read`,
 
   posts: gameSlug => `/games/${gameSlug}/posts`,
   builds: gameSlug => `/games/${gameSlug}/builds`,
@@ -66,8 +75,13 @@ function normalizeMockCommunity(community) {
 }
 
 async function request(path, options = {}) {
+  const { skipJsonHeader = false, ...fetchOptions } = options;
+
   if (USE_MOCKS) {
     await new Promise(resolve => setTimeout(resolve, 120));
+    if (path === backendRoutes.health) return { status: "ok", mock: true };
+    if (path === backendRoutes.currentUser) return null;
+    if (path.startsWith("/chat")) return [];
     if (path.includes("/categories")) return [];
     if (path.startsWith("/games/")) {
       const slug = path.split("/")[2];
@@ -87,25 +101,38 @@ async function request(path, options = {}) {
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...options.headers },
-    ...options,
+    headers: {
+      ...(skipJsonHeader ? {} : { "Content-Type": "application/json" }),
+      ...fetchOptions.headers,
+    },
+    ...fetchOptions,
   });
 
   if (!response.ok) {
-    const message = await response.text().catch(() => "");
+    let message;
+    try {
+      const errorBody = await response.json();
+      message = errorBody.message || errorBody.error || JSON.stringify(errorBody);
+    } catch {
+      message = await response.text().catch(() => "");
+    }
     throw new Error(message || `API request failed: ${response.status}`);
   }
 
   return response.status === 204 ? null : response.json();
 }
-/*ADUMA GITHUB HAY VAI CA LON*/ 
-async function getGames(query = {}) {
+
+function withQuery(path, query = {}) {
   const params = new URLSearchParams();
   Object.entries(query).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") params.set(key, value);
   });
 
-  const response = await request(`${backendRoutes.games}${params.toString() ? `?${params}` : ""}`);
+  return `${path}${params.toString() ? `?${params}` : ""}`;
+}
+
+async function getGames(query = {}) {
+  const response = await request(withQuery(backendRoutes.games, query));
   const items = Array.isArray(response) ? response : response.items || [];
 
   return {
@@ -123,7 +150,27 @@ async function getCategories(gameSlug) {
   return request(backendRoutes.gameCategories(gameSlug));
 }
 
+function encryptedMessagePayload({
+  ciphertext,
+  encryptionMeta,
+  contentType = "TEXT",
+  clientMessageId,
+  replyToId,
+}) {
+  return {
+    ciphertext,
+    ...(encryptionMeta ? { encryptionMeta } : {}),
+    ...(contentType ? { contentType } : {}),
+    ...(clientMessageId ? { clientMessageId } : {}),
+    ...(replyToId ? { replyToId } : {}),
+  };
+}
+
 export const api = {
+  baseUrl: API_BASE_URL,
+  usingMocks: USE_MOCKS,
+  request,
+  getHealth: () => request(backendRoutes.health, { skipJsonHeader: true }),
   getHome: async () => {
     const games = await getGames({ status: "ACTIVE", limit: 20 }).catch(() => ({
       items: [],
@@ -148,5 +195,30 @@ export const api = {
   saveBuild: (gameSlug, build) => request(backendRoutes.builds(gameSlug), {
     method: "POST",
     body: JSON.stringify(build),
+  }),
+  getChatConversations: () => request(backendRoutes.chatConversations),
+  getChatRequests: () => request(backendRoutes.chatRequests),
+  getChatMessages: (conversationId, query = {}) => request(withQuery(backendRoutes.chatMessages(conversationId), query)),
+  createDirectMessage: ({ recipientUserId, message }) => request(backendRoutes.chatDirect, {
+    method: "POST",
+    body: JSON.stringify({
+      recipientUserId,
+      message: encryptedMessagePayload(message),
+    }),
+  }),
+  sendChatMessage: (conversationId, message) => request(backendRoutes.chatMessages(conversationId), {
+    method: "POST",
+    body: JSON.stringify({ message: encryptedMessagePayload(message) }),
+  }),
+  acceptChatRequest: conversationId => request(backendRoutes.chatAcceptRequest(conversationId), { method: "POST" }),
+  declineChatRequest: conversationId => request(backendRoutes.chatDeclineRequest(conversationId), { method: "POST" }),
+  blockChatConversation: conversationId => request(backendRoutes.chatBlockConversation(conversationId), { method: "POST" }),
+  markChatDelivered: messageIds => request(backendRoutes.chatDelivered, {
+    method: "POST",
+    body: JSON.stringify({ messageIds }),
+  }),
+  markChatRead: (conversationId, lastReadMessageId) => request(backendRoutes.chatRead(conversationId), {
+    method: "POST",
+    body: JSON.stringify(lastReadMessageId ? { lastReadMessageId } : {}),
   }),
 };
