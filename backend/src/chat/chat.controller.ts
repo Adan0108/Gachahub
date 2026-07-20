@@ -1,11 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  Post,
-  Query,
-} from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import {
   ApiCookieAuth,
   ApiOperation,
@@ -89,11 +82,7 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: SendMessageDto,
   ) {
-    return this.chatService.sendMessage(
-      session.user.id,
-      conversationId,
-      dto,
-    );
+    return this.chatService.sendMessage(session.user.id, conversationId, dto);
   }
 
   @Post('requests/:conversationId/accept')
