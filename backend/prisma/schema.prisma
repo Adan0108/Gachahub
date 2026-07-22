@@ -23,14 +23,15 @@ model User {
   sessions Session[]
   accounts Account[]
 
-  moderatedGames     GameModerator[] @relation("GameModeratorUser")
-  assignedModerators GameModerator[] @relation("GameModeratorAssigner")
-  createdChats       ChatConversation[] @relation("ChatConversationCreator")
-  chatParticipants   ChatParticipant[]
-  sentChatMessages   ChatMessage[]       @relation("ChatMessageSender")
-  chatMessageReceipts ChatMessageReceipt[]
-  directChatPairsAsA ChatDirectPair[] @relation("ChatDirectPairUserA")
-  directChatPairsAsB ChatDirectPair[] @relation("ChatDirectPairUserB")
+  moderatedGames       GameModerator[]       @relation("GameModeratorUser")
+  assignedModerators   GameModerator[]       @relation("GameModeratorAssigner")
+  createdChats         ChatConversation[]    @relation("ChatConversationCreator")
+  chatParticipants     ChatParticipant[]
+  sentChatMessages     ChatMessage[]         @relation("ChatMessageSender")
+  chatMessageReceipts  ChatMessageReceipt[]
+  directChatPairsAsA   ChatDirectPair[]      @relation("ChatDirectPairUserA")
+  directChatPairsAsB   ChatDirectPair[]      @relation("ChatDirectPairUserB")
+  chatMessageReactions ChatMessageReaction[]
 
   @@unique([email])
   @@map("user")
@@ -212,6 +213,15 @@ enum ChatMessageStatus {
   DELETED
 }
 
+enum ChatMessageReactionType {
+  LIKE
+  LOVE
+  LAUGH
+  WOW
+  SAD
+  ANGRY
+}
+
 model ChatConversation {
   id            String                 @id @default(cuid())
   type          ChatConversationType   @default(DIRECT)
@@ -292,11 +302,12 @@ model ChatMessage {
   editedAt  DateTime?
   deletedAt DateTime?
 
-  conversation ChatConversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender       User                @relation("ChatMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
-  replyTo      ChatMessage?        @relation("ChatMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies      ChatMessage[]       @relation("ChatMessageReplies")
+  conversation ChatConversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User                  @relation("ChatMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo      ChatMessage?          @relation("ChatMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies      ChatMessage[]         @relation("ChatMessageReplies")
   receipts     ChatMessageReceipt[]
+  reactions    ChatMessageReaction[]
 
   @@unique([senderId, clientMessageId])
   @@index([conversationId, createdAt])
@@ -307,7 +318,7 @@ model ChatMessage {
 }
 
 model ChatMessageReceipt {
-  id          String @id @default(cuid())
+  id          String    @id @default(cuid())
   messageId   String
   userId      String
   deliveredAt DateTime?
@@ -323,4 +334,22 @@ model ChatMessageReceipt {
   @@index([userId, deliveredAt])
   @@index([userId, readAt])
   @@map("chat_message_receipts")
+}
+
+model ChatMessageReaction {
+  id        String                  @id @default(cuid())
+  messageId String
+  userId    String
+  type      ChatMessageReactionType
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
+  @@map("chat_message_reactions")
 }

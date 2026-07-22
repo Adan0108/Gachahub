@@ -24,6 +24,7 @@ import {
   MESSAGE_ENCRYPTION_PORT,
 } from './ports/message-encryption.port';
 import type { MessageEncryptionPort } from './ports/message-encryption.port';
+import { ReactToMessageDto } from './dto/react-to-message.dto';
 
 @Injectable()
 export class ChatService {
@@ -265,6 +266,33 @@ export class ChatService {
     };
   }
 
+  async reactToMessage(
+    userId: string,
+    messageId: string,
+    dto: ReactToMessageDto,
+  ) {
+    await this.assertCanInteractWithMessage(userId, messageId);
+
+    return this.chatRepository.upsertMessageReaction({
+      messageId,
+      userId,
+      type: dto.type,
+    });
+  }
+
+  async removeReaction(userId: string, messageId: string) {
+    await this.assertCanInteractWithMessage(userId, messageId);
+
+    const result = await this.chatRepository.deleteMessageReaction(
+      messageId,
+      userId,
+    );
+
+    return {
+      removedCount: result.count,
+    };
+  }
+
   private async sendMessageToExistingConversation(
     senderId: string,
     conversationId: string,
@@ -372,6 +400,25 @@ export class ChatService {
     }
 
     return participant;
+  }
+
+  private async assertCanInteractWithMessage(userId: string, messageId: string) {
+    const message =
+      await this.chatRepository.findMessageWithParticipants(messageId);
+
+    if (!message || message.status !== 'SENT') {
+      throw new NotFoundException('Message not found');
+    }
+
+    const participant = message.conversation.participants.find(
+      (item) => item.userId === userId,
+    );
+
+    if (!participant || !this.canReadState(participant.state)) {
+      throw new ForbiddenException('You cannot react to this message');
+    }
+
+    return message;
   }
 
   private canReadState(state: ChatParticipantState) {

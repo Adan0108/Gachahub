@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -19,6 +20,7 @@ import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
 import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
 import { MarkMessagesDeliveredDto } from './dto/mark-messages-delivered.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
+import { ReactToMessageDto } from './dto/react-to-message.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 
 @ApiTags('Chat')
@@ -166,5 +168,36 @@ export class ChatController {
     @Body() dto: MarkConversationReadDto,
   ) {
     return this.chatService.markRead(session.user.id, conversationId, dto);
+  }
+
+  @Post('messages/:messageId/reactions')
+  @ApiOperation({
+    summary: 'React to a chat message',
+  })
+  @ApiParam({
+    name: 'messageId',
+    example: 'cm123message456',
+  })
+  reactToMessage(
+    @Session() session: UserSession,
+    @Param('messageId') messageId: string,
+    @Body() dto: ReactToMessageDto,
+  ) {
+    return this.chatService.reactToMessage(session.user.id, messageId, dto);
+  }
+
+  @Delete('messages/:messageId/reactions')
+  @ApiOperation({
+    summary: 'Remove current user reaction from a chat message',
+  })
+  @ApiParam({
+    name: 'messageId',
+    example: 'cm123message456',
+  })
+  removeReaction(
+    @Session() session: UserSession,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.chatService.removeReaction(session.user.id, messageId);
   }
 }

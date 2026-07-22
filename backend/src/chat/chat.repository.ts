@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   ChatMessageContentType,
   ChatParticipantState,
+  ChatMessageReactionType,
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -289,6 +290,7 @@ export class ChatRepository {
       },
       include: {
         receipts: true,
+        reactions: true,
       },
     });
   }
@@ -388,6 +390,47 @@ export class ChatRepository {
       });
 
       return result;
+    });
+  }
+
+  findMessageWithParticipants(messageId: string) {
+    return this.prisma.chatMessage.findUnique({
+      where: { id: messageId },
+      include: {
+        conversation: {
+          include: {
+            participants: true,
+          },
+        },
+      },
+    });
+  }
+
+  upsertMessageReaction(params: {
+    messageId: string;
+    userId: string;
+    type: ChatMessageReactionType;
+  }) {
+    return this.prisma.chatMessageReaction.upsert({
+      where: {
+        messageId_userId: {
+          messageId: params.messageId,
+          userId: params.userId,
+        },
+      },
+      create: params,
+      update: {
+        type: params.type,
+      },
+    });
+  }
+
+  deleteMessageReaction(messageId: string, userId: string) {
+    return this.prisma.chatMessageReaction.deleteMany({
+      where: {
+        messageId,
+        userId,
+      },
     });
   }
 }
