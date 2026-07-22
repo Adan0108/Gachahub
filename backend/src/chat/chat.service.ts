@@ -16,13 +16,9 @@ import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
 import { MarkMessagesDeliveredDto } from './dto/mark-messages-delivered.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
 import { SendMessageDto } from './dto/send-message.dto';
-import {
-  CHAT_DELIVERY_PORT,
-} from './ports/chat-delivery.port';
+import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import type { ChatDeliveryPort } from './ports/chat-delivery.port';
-import {
-  MESSAGE_ENCRYPTION_PORT,
-} from './ports/message-encryption.port';
+import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
 import type { MessageEncryptionPort } from './ports/message-encryption.port';
 import { ReactToMessageDto } from './dto/react-to-message.dto';
 

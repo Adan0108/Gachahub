@@ -1,5 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsString } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayNotEmpty,
+  IsArray,
+  IsString,
+} from 'class-validator';
 
 export class MarkMessagesDeliveredDto {
   @ApiProperty({

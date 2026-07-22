@@ -31,6 +31,183 @@
 $ npm install
 ```
 
+## Local infrastructure with Docker
+
+The backend uses Docker Compose to run local supporting services such as Redis.
+
+Redis is used for temporary application data such as caching, chat presence, typing indicators, rate limiting, and future background jobs. Permanent application data remains stored in PostgreSQL through Neon and Prisma.
+
+### Requirements
+
+Install Docker Desktop before starting the local infrastructure:
+
+* Windows and macOS: Docker Desktop
+* Linux: Docker Engine with Docker Compose
+
+Confirm Docker is running:
+
+```bash
+docker --version
+docker compose version
+```
+
+### First-time setup
+
+After cloning the repository, move into the backend directory:
+
+```bash
+cd backend
+```
+
+Install the backend dependencies:
+
+```bash
+npm install
+```
+
+Copy the example environment file:
+
+```bash
+# Windows PowerShell
+Copy-Item .env.example .env
+
+# macOS or Linux
+cp .env.example .env
+```
+
+Update `.env` with the required database, authentication, and Redis configuration.
+
+For local Redis, use:
+
+```env
+REDIS_URL="redis://localhost:6379"
+```
+
+Start the Docker services:
+
+```bash
+npm run docker:up
+```
+
+Check that the containers are running:
+
+```bash
+npm run docker:status
+```
+
+Redis should appear as running and healthy.
+
+Start the NestJS backend:
+
+```bash
+npm run start:dev
+```
+
+### Starting the project normally
+
+When Docker Desktop is already installed and the project has previously been set up, run:
+
+```bash
+cd backend
+npm run docker:up
+npm run start:dev
+```
+
+Running `docker:up` again is safe. Docker Compose will reuse the existing container and volume instead of creating duplicate services.
+
+### When the Docker container is already running
+
+You do not need to restart Redis every time.
+
+Check its current status:
+
+```bash
+npm run docker:status
+```
+
+If Redis is already running, start only the backend:
+
+```bash
+npm run start:dev
+```
+
+### Docker commands
+
+```bash
+# Start the local infrastructure in the background
+npm run docker:up
+
+# Show the running services
+npm run docker:status
+
+# Follow Docker service logs
+npm run docker:logs
+
+# Stop the services
+npm run docker:down
+
+# Stop the services and delete their local volumes
+npm run docker:reset
+```
+
+Use `docker:reset` only when you intentionally want to remove all locally stored Redis data.
+
+Normal shutdown should use:
+
+```bash
+npm run docker:down
+```
+
+The Redis Docker volume is preserved, so it can be reused the next time the service starts.
+
+### Running Docker Compose directly
+
+Because `docker-compose.yml` is located inside the `backend` directory, Docker Compose commands can also be run directly from that directory:
+
+```bash
+docker compose up -d
+docker compose ps
+docker compose logs -f
+docker compose down
+```
+
+### Troubleshooting
+
+If Redis does not start, make sure Docker Desktop is running and check the logs:
+
+```bash
+npm run docker:logs
+```
+
+If port `6379` is already being used, another Redis instance may already be running.
+
+Check the Redis container directly:
+
+```bash
+docker exec -it gachahub-redis redis-cli ping
+```
+
+A successful response is:
+
+```txt
+PONG
+```
+
+If the container configuration has changed and needs to be recreated:
+
+```bash
+npm run docker:down
+npm run docker:up
+```
+
+To completely recreate Redis and remove its local volume:
+
+```bash
+npm run docker:reset
+npm run docker:up
+```
+
+
 ## Compile and run the project
 
 ```bash

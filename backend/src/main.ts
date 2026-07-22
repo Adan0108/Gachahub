@@ -42,6 +42,8 @@ async function bootstrap() {
     },
   });
 
+  app.enableShutdownHooks();
+
   await app.listen(appConfig.port);
 }
 
