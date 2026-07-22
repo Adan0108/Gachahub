@@ -26,9 +26,23 @@ import { SendMessageDto } from './dto/send-message.dto';
 @ApiTags('Chat')
 @ApiCookieAuth('better-auth.session_token')
 @Controller('chat')
+/**
+ * Controller responsible for chat HTTP routes.
+ *
+ * Responsibility's:
+ * - Read route params, query params, request bodies, and current session user
+ * - Call ChatService
+ * - Keep chat business rules out of the HTTP layer
+ */
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
+  /**
+   * Creates or reuses a direct convo and sends the first message.
+   *
+   * This endpoint accepts encrypted client payloads only. The baclend stores
+   * ciphertext and metadata, but never receives plaintext message content.
+   */
   @Post('direct')
   @ApiOperation({
     summary: 'Create or reuse a direct conversation and send a message',
@@ -42,6 +56,12 @@ export class ChatController {
     return this.chatService.createDirectMessage(session.user.id, dto);
   }
 
+  /**
+   * Lists accepted conversations for the current user.
+   *
+   * Pending stranger messages are intentionally excluded from this inbox and
+   * exposed through GET /chat/requests instead.
+   */
   @Get('conversations')
   @ApiOperation({
     summary: 'List accepted chat conversations for the current user',
@@ -50,6 +70,12 @@ export class ChatController {
     return this.chatService.listConversations(session.user.id);
   }
 
+  /**
+   * Lists pending stranger message requests
+   *
+   * Users can preview pending encrypted messages here before accepting the
+   * conversation into their main inbox.
+   */
   @Get('requests')
   @ApiOperation({
     summary: 'List pending stranger message requests for the current user',
@@ -58,6 +84,12 @@ export class ChatController {
     return this.chatService.listMessageRequests(session.user.id);
   }
 
+  /**
+   * Lists encrypted messages in a convo.
+   *
+   * Pagination is cursor-based using beforeMessageId so clients can load older
+   * messages without requesting the entire convo history.
+   */
   @Get('conversations/:conversationId/messages')
   @ApiOperation({
     summary: 'List encrypted messages in a conversation',
@@ -78,6 +110,12 @@ export class ChatController {
     );
   }
 
+  /**
+   * Sends an encrypted message in an existing conversation
+   *
+   * Service logic validates that the sender is an active participant and that
+   * the recipient has not declined or blocked the conversation.
+   */
   @Post('conversations/:conversationId/messages')
   @ApiOperation({
     summary: 'Send an encrypted message in an existing conversation',
@@ -94,6 +132,12 @@ export class ChatController {
     return this.chatService.sendMessage(session.user.id, conversationId, dto);
   }
 
+  /**
+   * Accepts a pending stranger conversation.
+   *
+   * After this, future messages in the conversation can behave like normal
+   * inbox messages and and can get notification.
+   */
   @Post('requests/:conversationId/accept')
   @ApiOperation({
     summary: 'Accept a pending stranger message request',
@@ -109,6 +153,11 @@ export class ChatController {
     return this.chatService.acceptRequest(session.user.id, conversationId);
   }
 
+  /**
+   * Declines a pending stranger conversation.
+   *
+   * Declined conversations reject future sends from the other participant.
+   */
   @Post('requests/:conversationId/decline')
   @ApiOperation({
     summary: 'Decline a pending stranger message request',
@@ -124,6 +173,12 @@ export class ChatController {
     return this.chatService.declineRequest(session.user.id, conversationId);
   }
 
+  /**
+   * Blocks a conversation for current user.
+   *
+   * This stores participant-level state so future user safety behavior can be
+   * expanded without changing the message schema.
+   */
   @Post('conversations/:conversationId/block')
   @ApiOperation({
     summary: 'Block a chat conversation for the current user',
@@ -139,6 +194,12 @@ export class ChatController {
     return this.chatService.blockConversation(session.user.id, conversationId);
   }
 
+  /**
+   * Marks messages as delivered to the current user.
+   *
+   * Offline recipients keep messages as unread/undelivered until their client
+   * syncs and acknowledges receipt through this endpoint.
+   */
   @Post('messages/delivered')
   @ApiOperation({
     summary: 'Mark encrypted messages as delivered to the current user device',
@@ -150,6 +211,12 @@ export class ChatController {
     return this.chatService.markDelivered(session.user.id, dto);
   }
 
+  /**
+   * Marks messages in a conversation as read by the current user.
+   *
+   * Read state is stored per message recipient, which supports future group
+   * chat without changing this API shape.
+   */
   @Post('conversations/:conversationId/read')
   @ApiOperation({
     summary: 'Mark messages in a conversation as read by the current user',
@@ -166,6 +233,12 @@ export class ChatController {
     return this.chatService.markRead(session.user.id, conversationId, dto);
   }
 
+  /**
+   * Adds/changes the current user's reaction to a message.
+   *
+   * One user can have one reaction per message. Reacting again updates the
+   * existing reaction instead of creating dupe
+   */
   @Post('messages/:messageId/reactions')
   @ApiOperation({
     summary: 'React to a chat message',
@@ -182,6 +255,12 @@ export class ChatController {
     return this.chatService.reactToMessage(session.user.id, messageId, dto);
   }
 
+  /**
+   * Removes the current user's reaction from a message.
+   *
+   * Only remoevs the caller's reaction, never touches reactions from
+   * other users.
+   */
   @Delete('messages/:messageId/reactions')
   @ApiOperation({
     summary: 'Remove current user reaction from a chat message',

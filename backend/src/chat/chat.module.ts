@@ -8,6 +8,12 @@ import { OpaqueMessageEncryptionService } from './opaque-message-encryption.serv
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
 
+/**
+ * Chat feature module.
+ *
+ * This module wires the HTTP controller, business service, database repository,
+ * and replacaeble adapter ports used by the chat system.
+ */
 @Module({
   imports: [PrismaModule],
   controllers: [ChatController],

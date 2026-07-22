@@ -11,16 +11,34 @@ type PrismaTransaction = Parameters<
   Parameters<PrismaService['$transaction']>[0]
 >[0];
 
+/**
+ * Repository responsible for chat database queries.
+ *
+ * This layer should only contain Prisma/database logic. Business decisions,
+ * permission checks, and delivery behavior belong in ChatService.
+ */
 @Injectable()
 export class ChatRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Finds a user by id
+   *
+   * Used before creating a direct convo to ensure the
+   * user/recipient exists and can receive messages
+   */
   findUserById(userId: string) {
     return this.prisma.user.findUnique({
       where: { id: userId },
     });
   }
 
+  /**
+   * Finds the unique direct-pair record for two users.
+   *
+   * Direct pair ids are normalized before calling this method,
+   * A->B and B->A ==> point to the same conversation.
+   */
   findDirectPair(userIdA: string, userIdB: string) {
     return this.prisma.chatDirectPair.findUnique({
       where: {
@@ -39,6 +57,12 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * Finds a message by sender and client idempotency key.
+   *
+   * prevents dupe message when a client retries after a network
+   * timeout but the original request already succeeded.
+   */
   findMessageBySenderClientMessageId(
     senderId: string,
     clientMessageId?: string,
@@ -60,6 +84,11 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * Finds one participant row in a conversation.
+   *
+   * Participant state is main source of truth for read/send/block/request permissions.
+   */
   findParticipant(conversationId: string, userId: string) {
     return this.prisma.chatParticipant.findUnique({
       where: {
@@ -71,12 +100,24 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * List all participants in a convo
+   *
+   * Used when creating message receipts and
+   * deciding who should receive delivery events.
+   */
   findParticipants(conversationId: string) {
     return this.prisma.chatParticipant.findMany({
       where: { conversationId },
     });
   }
 
+  /**
+   * Creates new direct convo and its first message.
+   *
+   * This uses a transaction so conversation, direct pair, participants, message,
+   * receipts, and lastMessageId stay consistent.
+   */
   async createDirectConversationWithMessage(params: {
     senderId: string;
     recipientUserId: string;
@@ -145,6 +186,11 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * Creates an encrypted message inside an existing conversation.
+   *
+   * The transaction keeps the message and conversation lastMessageId update in sync.
+   */
   async createMessage(params: {
     conversationId: string;
     senderId: string;
@@ -169,6 +215,12 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * Shared transaction helper for inserting chat msg.
+   *
+   * Sender receipts are marked delivered/read immediately bc the sender's
+   * client created the message. Other participants start undelivered/unread.
+   */
   private createMessageInTransaction(
     tx: PrismaTransaction,
     params: {
@@ -207,6 +259,12 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * Finds convos for one inbox state.
+   *
+   * ACTIVE powers the normal inbox. PENDING powers the stranger request inbox.
+   * The latest encryted message is included for client-side preview.
+   */
   findInboxConversations(userId: string, state: ChatParticipantState) {
     return this.prisma.chatConversation.findMany({
       where: {
@@ -249,6 +307,12 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * Counts unread messages for a user in one convo.
+   *
+   * Sender's own messages are excluded bc users should not count their own
+   * messages as unread.
+   */
   countUnreadMessages(conversationId: string, userId: string) {
     return this.prisma.chatMessage.count({
       where: {
@@ -266,6 +330,12 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * Finds encrypted messages with cursor pagination.
+   *
+   * Results are queried newest-first for efficient pagination.
+   * ChatService reverses them before returning to the client.
+   */
   findMessages(params: {
     conversationId: string;
     beforeMessageId?: string;
@@ -295,6 +365,12 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * Updates a user's participant state in a conversation.
+   *
+   * State-specific timestamps are stored here so future safety/audit features-
+   * can tell when a user blocked or archived a chat.
+   */
   updateParticipantState(
     conversationId: string,
     userId: string,
@@ -317,6 +393,11 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * Marks selected message receipts as delivered for a user.
+   *
+   * Only empty deliveredAt values are updated so repeated sync calls are safe
+   */
   markMessagesDelivered(userId: string, messageIds: string[]) {
     return this.prisma.chatMessageReceipt.updateMany({
       where: {
@@ -332,6 +413,12 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * Marks all messages up to a point as read for a user
+   *
+   * If lastReadMessageId is omited, the latest current message is used
+   * The participant lastReadAt timestamp is updated in the same transaction
+   */
   markConversationRead(params: {
     conversationId: string;
     userId: string;
@@ -393,6 +480,12 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * Find message and its conversation participants
+   *
+   * Used by reaction logic because message-level actions still need
+   * conversation-level permission checks.
+   */
   findMessageWithParticipants(messageId: string) {
     return this.prisma.chatMessage.findUnique({
       where: { id: messageId },
@@ -406,6 +499,12 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * Creates or replaces a user's reaction on a message.
+   *
+   * The database unique key on messageId + userId enforces one reaction per user
+   * per message.
+   */
   upsertMessageReaction(params: {
     messageId: string;
     userId: string;
@@ -425,6 +524,12 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * Remove current user's reaction from a message.
+   *
+   * deleteMany keeps the operation idempotent: removing a missing reaction
+   * simply returns count 0 instead of throwing
+   */
   deleteMessageReaction(messageId: string, userId: string) {
     return this.prisma.chatMessageReaction.deleteMany({
       where: {

@@ -2,6 +2,12 @@ import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
+/**
+ * Query params for loading convo history.
+ *
+ * API uses cursor pagination instead of page numbers because chat history is-
+ * -appemd-only and users normally load older messages from a known message id.
+ */
 export class QueryChatMessagesDto {
   @ApiPropertyOptional({
     example: 'cm123message456',

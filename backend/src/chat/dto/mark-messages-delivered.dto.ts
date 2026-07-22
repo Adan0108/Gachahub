@@ -6,6 +6,12 @@ import {
   IsString,
 } from 'class-validator';
 
+/**
+ * Request body for acknowledging message delivery.
+ *
+ * Clients send this after syncing messages to a user device.
+ * This is separate from read state bc a message can be delivered but not opened yet.
+ */
 export class MarkMessagesDeliveredDto {
   @ApiProperty({
     example: ['cm123message456', 'cm789message012'],

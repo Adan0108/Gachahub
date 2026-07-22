@@ -22,6 +22,14 @@ import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
 import type { MessageEncryptionPort } from './ports/message-encryption.port';
 import { ReactToMessageDto } from './dto/react-to-message.dto';
 
+/**
+ * Service responsible for chat business logic.
+ *
+ * This layer decides who can send, read, accept, decline, block, and react.
+ *
+ * Database details stay in ChatRepository, while delivery/encryption behavior
+ * is accessed through ports so it can be replaced later.
+ */
 @Injectable()
 export class ChatService {
   constructor(
@@ -32,6 +40,16 @@ export class ChatService {
     private readonly chatDelivery: ChatDeliveryPort,
   ) {}
 
+  /**
+   * Creates or reuses a direct convo and sends a first encrypted message.
+   *
+   * Business behavior:
+   * - Users cannot mesage themselves.
+   * - Recipient must exist and be active.
+   * - clientMessageId prevents duplicate sends when clients retry.
+   * - A new direct convo starts with the recipient in PENDING state.
+   * - Pending stranger messages are stored but should not notify the receiver.
+   */
   async createDirectMessage(senderId: string, dto: CreateDirectMessageDto) {
     if (senderId === dto.recipientUserId) {
       throw new BadRequestException('You cannot message yourself');
@@ -115,6 +133,12 @@ export class ChatService {
     };
   }
 
+  /**
+   * Lists normal inbox conversations for a user.
+   *
+   * Only ACTIVE participant records are returned here.
+   * Pending stranger messages are listed separately.
+   */
   async listConversations(userId: string) {
     const conversations = await this.chatRepository.findInboxConversations(
       userId,
@@ -128,6 +152,12 @@ export class ChatService {
     );
   }
 
+  /**
+   * Lists pending stranger message requests for a user.
+   *
+   * The receiver can preview encrypted message payloads from this list before
+   * choosing to accept or decline the convo
+   */
   async listMessageRequests(userId: string) {
     const conversations = await this.chatRepository.findInboxConversations(
       userId,
@@ -141,6 +171,14 @@ export class ChatService {
     );
   }
 
+  /**
+   * Lists encrypted messages in a convo
+   *
+   * Business behavior:
+   * - User must be allowed to read the convo
+   * - Messages are loaded newest-fisrt from the database for pagination
+   * - The response reverses them back into chronological order for clients
+   */
   async findMessages(
     userId: string,
     conversationId: string,
@@ -164,6 +202,12 @@ export class ChatService {
     };
   }
 
+  /**
+   * Send an encrypted message to an existing convo
+   *
+   * The encryption port keeps message handling opaque to the backend
+   * Service logic only validates chat rules and passes ciphertext to the repository.
+   */
   async sendMessage(
     senderId: string,
     conversationId: string,
@@ -181,6 +225,12 @@ export class ChatService {
     );
   }
 
+  /**
+   * Accepts a pending stranger convo.
+   *
+   * Only the pending recipient can accept. After acceptance, the patricipant is
+   * moved into ACTIVE state and future messages can behave like normal inbox messages.
+   */
   async acceptRequest(userId: string, conversationId: string) {
     const participant = await this.chatRepository.findParticipant(
       conversationId,
@@ -202,6 +252,12 @@ export class ChatService {
     );
   }
 
+  /**
+   * Declines a pending convo.
+   *
+   * Declining keeps the conversation record for audit/history behavior, but
+   * marks the participant as DECLINED so future sends are rejected.
+   */
   async declineRequest(userId: string, conversationId: string) {
     const participant = await this.chatRepository.findParticipant(
       conversationId,
@@ -223,6 +279,12 @@ export class ChatService {
     );
   }
 
+  /**
+   * Blocks a convo for the current user.
+   *
+   * Blocking is stored on the participant row because chat safety state is
+   * user-specific, not global to the convo.
+   */
   async blockConversation(userId: string, conversationId: string) {
     await this.assertReadableParticipant(conversationId, userId);
 
@@ -233,6 +295,12 @@ export class ChatService {
     );
   }
 
+  /**
+   * Marks messages as delivered to the current user's device.
+   *
+   * This supports offline users: messages can be SENT in the database before
+   * the recipient comes online and acklnwedge delivery.
+   */
   async markDelivered(userId: string, dto: MarkMessagesDeliveredDto) {
     const result = await this.chatRepository.markMessagesDelivered(
       userId,
@@ -244,6 +312,12 @@ export class ChatService {
     };
   }
 
+  /**
+   * Marks messages as read by the current user.
+   *
+   * Read state is stored per recipient. This works for direct messages now and
+   * still works if the convo later grows into group/admin chat.
+   */
   async markRead(
     userId: string,
     conversationId: string,
@@ -262,6 +336,14 @@ export class ChatService {
     };
   }
 
+  /**
+   * Adds or updates the current user's reaction on a message.
+   *
+   * Business behavior:
+   * - User must be able to read the message's convoi.
+   * - Deleted messages cannot be reacted to.
+   * - One user gets one reaction per message; another reaction replaces it.
+   */
   async reactToMessage(
     userId: string,
     messageId: string,
@@ -276,6 +358,12 @@ export class ChatService {
     });
   }
 
+  /**
+   * Removes the current user's reaction from a message.
+   *
+   * The permission check matches reactToMessage so users cannot reveal or
+   * modify reaction state for messages outside conversations they can access.
+   */
   async removeReaction(userId: string, messageId: string) {
     await this.assertCanInteractWithMessage(userId, messageId);
 
@@ -289,6 +377,13 @@ export class ChatService {
     };
   }
 
+  /**
+   * Shared implementation for sending into an existing convo.
+   *
+   * This keeps the duplicate-send, participant-state, blocked/declined, message
+   * creation, and delivery hook behavior in one place for both first-message and
+   * follow-up-message flows.
+   */
   private async sendMessageToExistingConversation(
     senderId: string,
     conversationId: string,
@@ -378,6 +473,12 @@ export class ChatService {
     };
   }
 
+  /**
+   * Verifies the user can read a conversation.
+   *
+   * PENDING is readable so users can preview stranger requests. BLOCKED and
+   * DECLINED are not readable through normal chat endpoints.
+   */
   private async assertReadableParticipant(
     conversationId: string,
     userId: string,
@@ -398,6 +499,12 @@ export class ChatService {
     return participant;
   }
 
+  /**
+   * Verifies the user can interact with a specific message.
+   *
+   * Reactions are message-level action, but permision is based on whether the
+   * user can read the message's parent convo
+   */
   private async assertCanInteractWithMessage(userId: string, messageId: string) {
     const message =
       await this.chatRepository.findMessageWithParticipants(messageId);
@@ -417,14 +524,32 @@ export class ChatService {
     return message;
   }
 
+  /**
+   * Central list of participant states that can read messages.
+   *
+   * Keep this helper small so future states, such as MUTED or LIMITED, can be
+   * added without hunting through every chat operation.
+   */
   private canReadState(state: ChatParticipantState) {
     return ['ACTIVE', 'PENDING', 'ARCHIVED'].includes(state);
   }
 
+  /**
+   * Sorts user ids before storing a direct chat pair.
+   *
+   * A->B and B->A resolve to the same unique database pair,
+   * ==> prevents duplicate direct conversations between the same users.
+   */
   private normalizeDirectPair(userIdOne: string, userIdTwo: string) {
     return [userIdOne, userIdTwo].sort() as [string, string];
   }
 
+  /**
+   * Converts a convo record into an inbox/request list item.
+   *
+   * The summary includes participant info, latest encrypted message payload,
+   * unread count, and timestamps needed by the frontend inbox UI.
+   */
   private async toConversationSummary(
     conversation: Awaited<
       ReturnType<ChatRepository['findInboxConversations']>
