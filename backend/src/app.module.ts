@@ -10,6 +10,7 @@ import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { UsersModule } from './users/users.module';
+import { PostsModule } from './posts/posts.module';
 import { GameModeratorsModule } from './game-moderators/game-moderators.module';
 
 /**
@@ -28,6 +29,7 @@ import { GameModeratorsModule } from './game-moderators/game-moderators.module';
     GameCategoriesModule,
     GameModeratorsModule,
     ChatModule,
+    PostsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
