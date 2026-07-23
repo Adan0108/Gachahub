@@ -63,5 +63,6 @@ export class EncryptedMessagePayloadDto {
   })
   @IsOptional()
   @IsString()
+  @MaxLength(120)
   replyToId?: string;
 }

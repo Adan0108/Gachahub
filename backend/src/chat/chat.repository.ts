@@ -80,6 +80,7 @@ export class ChatRepository {
       },
       include: {
         receipts: true,
+        replyTo: true,
       },
     });
   }
@@ -255,6 +256,7 @@ export class ChatRepository {
       },
       include: {
         receipts: true,
+        replyTo: true,
       },
     });
   }
@@ -361,6 +363,17 @@ export class ChatRepository {
       include: {
         receipts: true,
         reactions: true,
+        replyTo: true,
+      },
+    });
+  }
+
+  findSentMessageInConversation(messageId: string, conversationId: string) {
+    return this.prisma.chatMessage.findFirst({
+      where: {
+        id: messageId,
+        conversationId,
+        status: 'SENT',
       },
     });
   }

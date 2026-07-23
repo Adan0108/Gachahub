@@ -103,6 +103,10 @@ export class ChatService {
       );
     }
 
+    if (dto.message.replyToId) {
+      throw new BadRequestException('Reply target is not in this conversation');
+    }
+
     const result =
       await this.chatRepository.createDirectConversationWithMessage({
         senderId,
@@ -471,6 +475,8 @@ export class ChatService {
       throw new ForbiddenException('Recipient is not accepting messages');
     }
 
+    await this.assertValidReplyTarget(conversationId, dto.message.replyToId);
+
     const payload =
       preparedPayload ??
       (await this.messageEncryption.preparePayload(dto.message));
@@ -509,6 +515,24 @@ export class ChatService {
       message,
       duplicate: false,
     };
+  }
+
+  private async assertValidReplyTarget(
+    conversationId: string,
+    replyToId?: string,
+  ) {
+    if (!replyToId) {
+      return;
+    }
+
+    const replyTarget = await this.chatRepository.findSentMessageInConversation(
+      replyToId,
+      conversationId,
+    );
+
+    if (!replyTarget) {
+      throw new BadRequestException('Reply target message was not found');
+    }
   }
 
   /**
