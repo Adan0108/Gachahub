@@ -301,6 +301,37 @@ export class ChatService {
   }
 
   /**
+   * Mutes a conversation for the current user.
+   *
+   * Mute is stored per participant, so one user can mute a convo without
+   * affecting other participants.
+   */
+  async muteConversation(userId: string, conversationId: string) {
+    await this.assertReadableParticipant(conversationId, userId);
+
+    return this.chatRepository.updateParticipantMutedAt(
+      conversationId,
+      userId,
+      new Date(),
+    );
+  }
+
+  /**
+   * Unmutes a conversation for the current user.
+   *
+   * Clearing mutedAt makes future notification logic treat this convo normally.
+   */
+  async unmuteConversation(userId: string, conversationId: string) {
+    await this.assertReadableParticipant(conversationId, userId);
+
+    return this.chatRepository.updateParticipantMutedAt(
+      conversationId,
+      userId,
+      null,
+    );
+  }
+
+  /**
    * Marks messages as delivered to the current user's device.
    *
    * This supports offline users: messages can be SENT in the database before
@@ -396,9 +427,7 @@ export class ChatService {
     return this.chatRepository.updateMessage({
       messageId,
       ciphertext: dto.ciphertext,
-      encryptionMeta: dto.encryptionMeta as
-        | Prisma.InputJsonValue
-        | undefined,
+      encryptionMeta: dto.encryptionMeta as Prisma.InputJsonValue | undefined,
       contentType: dto.contentType ?? ChatMessageContentType.TEXT,
     });
   }
@@ -567,7 +596,10 @@ export class ChatService {
    * Reactions are message-level action, but permission is based on whether the
    * user can read the message's parent convo
    */
-  private async assertCanInteractWithMessage(userId: string, messageId: string) {
+  private async assertCanInteractWithMessage(
+    userId: string,
+    messageId: string,
+  ) {
     const message =
       await this.chatRepository.findMessageWithParticipants(messageId);
 

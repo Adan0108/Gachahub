@@ -600,4 +600,27 @@ export class ChatRepository {
       },
     });
   }
+
+  /**
+   * Updates the current user's mute timestamp for a conversation.
+   *
+   * This is per participant so mute/unmute does not affect the other user.
+   */
+  updateParticipantMutedAt(
+    conversationId: string,
+    userId: string,
+    mutedAt: Date | null,
+  ) {
+    return this.prisma.chatParticipant.update({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId,
+        },
+      },
+      data: {
+        mutedAt,
+      },
+    });
+  }
 }

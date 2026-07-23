@@ -197,6 +197,47 @@ export class ChatController {
   }
 
   /**
+   * Mutes a conversation for the current user.
+   *
+   * Muted chats still receive messages, but notification delivery can skip
+   * this user later by checking participant mutedAt.
+   */
+  @Post('conversations/:conversationId/mute')
+  @ApiOperation({
+    summary: 'Mute a conversation for the current user',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'cm123conversation456',
+  })
+  muteConversation(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.chatService.muteConversation(session.user.id, conversationId);
+  }
+
+  /**
+   * Unmutes a conversation for the current user.
+   *
+   * This clears mutedAt on the caller's participant row.
+   */
+  @Delete('conversations/:conversationId/mute')
+  @ApiOperation({
+    summary: 'Unmute a conversation for the current user',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'cm123conversation456',
+  })
+  unmuteConversation(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.chatService.unmuteConversation(session.user.id, conversationId);
+  }
+
+  /**
    * Marks messages as delivered to the current user.
    *
    * Offline recipients keep messages as unread/undelivered until their client
