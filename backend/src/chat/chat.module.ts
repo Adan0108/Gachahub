@@ -12,7 +12,7 @@ import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
  * Chat feature module.
  *
  * This module wires the HTTP controller, business service, database repository,
- * and replacaeble adapter ports used by the chat system.
+ * and replaceable adapter ports used by the chat system.
  */
 @Module({
   imports: [PrismaModule],

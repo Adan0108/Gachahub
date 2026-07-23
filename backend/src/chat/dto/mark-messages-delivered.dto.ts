@@ -21,5 +21,5 @@ export class MarkMessagesDeliveredDto {
   @ArrayNotEmpty()
   @ArrayMaxSize(100)
   @IsString({ each: true })
-  messageIds: string[];
+  messageIds!: string[];
 }

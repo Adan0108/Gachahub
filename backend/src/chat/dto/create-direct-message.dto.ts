@@ -15,7 +15,7 @@ export class CreateDirectMessageDto {
     description: 'User receiving the direct message.',
   })
   @IsString()
-  recipientUserId: string;
+  recipientUserId!: string;
 
   @ApiProperty({
     type: EncryptedMessagePayloadDto,
@@ -23,5 +23,5 @@ export class CreateDirectMessageDto {
   })
   @ValidateNested()
   @Type(() => EncryptedMessagePayloadDto)
-  message: EncryptedMessagePayloadDto;
+  message!: EncryptedMessagePayloadDto;
 }

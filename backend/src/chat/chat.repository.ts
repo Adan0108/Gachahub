@@ -265,7 +265,7 @@ export class ChatRepository {
    * Finds convos for one inbox state.
    *
    * ACTIVE powers the normal inbox. PENDING powers the stranger request inbox.
-   * The latest encryted message is included for client-side preview.
+   * The latest encrypted message is included for client-side preview.
    */
   findInboxConversations(userId: string, state: ChatParticipantState) {
     return this.prisma.chatConversation.findMany({
@@ -429,7 +429,7 @@ export class ChatRepository {
   /**
    * Marks all messages up to a point as read for a user
    *
-   * If lastReadMessageId is omited, the latest current message is used
+   * If lastReadMessageId is omitted, the latest current message is used
    * The participant lastReadAt timestamp is updated in the same transaction
    */
   markConversationRead(params: {

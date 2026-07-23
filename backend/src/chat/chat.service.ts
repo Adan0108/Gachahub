@@ -45,7 +45,7 @@ export class ChatService {
    * Creates or reuses a direct convo and sends a first encrypted message.
    *
    * Business behavior:
-   * - Users cannot mesage themselves.
+   * - Users cannot message themselves.
    * - Recipient must exist and be active.
    * - clientMessageId prevents duplicate sends when clients retry.
    * - A new direct convo starts with the recipient in PENDING state.
@@ -181,7 +181,7 @@ export class ChatService {
    *
    * Business behavior:
    * - User must be allowed to read the convo
-   * - Messages are loaded newest-fisrt from the database for pagination
+   * - Messages are loaded newest-first from the database for pagination
    * - The response reverses them back into chronological order for clients
    */
   async findMessages(
@@ -233,7 +233,7 @@ export class ChatService {
   /**
    * Accepts a pending stranger convo.
    *
-   * Only the pending recipient can accept. After acceptance, the patricipant is
+   * Only the pending recipient can accept. After acceptance, the participant is
    * moved into ACTIVE state and future messages can behave like normal inbox messages.
    */
   async acceptRequest(userId: string, conversationId: string) {
@@ -304,7 +304,7 @@ export class ChatService {
    * Marks messages as delivered to the current user's device.
    *
    * This supports offline users: messages can be SENT in the database before
-   * the recipient comes online and acklnwedge delivery.
+   * the recipient comes online and acknowledge delivery.
    */
   async markDelivered(userId: string, dto: MarkMessagesDeliveredDto) {
     const result = await this.chatRepository.markMessagesDelivered(
@@ -345,7 +345,7 @@ export class ChatService {
    * Adds or updates the current user's reaction on a message.
    *
    * Business behavior:
-   * - User must be able to read the message's convoi.
+   * - User must be able to read the message's convo.
    * - Deleted messages cannot be reacted to.
    * - One user gets one reaction per message; another reaction replaces it.
    */
@@ -564,7 +564,7 @@ export class ChatService {
   /**
    * Verifies the user can interact with a specific message.
    *
-   * Reactions are message-level action, but permision is based on whether the
+   * Reactions are message-level action, but permission is based on whether the
    * user can read the message's parent convo
    */
   private async assertCanInteractWithMessage(userId: string, messageId: string) {

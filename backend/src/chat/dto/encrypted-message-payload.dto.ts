@@ -23,7 +23,7 @@ export class EncryptedMessagePayloadDto {
   @IsString()
   @MinLength(1)
   @MaxLength(20000)
-  ciphertext: string;
+  ciphertext!: string;
 
   @ApiPropertyOptional({
     example: {

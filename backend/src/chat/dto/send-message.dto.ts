@@ -16,5 +16,5 @@ export class SendMessageDto {
   })
   @ValidateNested()
   @Type(() => EncryptedMessagePayloadDto)
-  message: EncryptedMessagePayloadDto;
+  message!: EncryptedMessagePayloadDto;
 }

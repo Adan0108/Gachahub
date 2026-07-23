@@ -14,5 +14,5 @@ export class ReactToMessageDto {
     example: ChatMessageReactionType.LOVE,
   })
   @IsEnum(ChatMessageReactionType)
-  type: ChatMessageReactionType;
+  type!: ChatMessageReactionType;
 }

@@ -260,7 +260,7 @@ export class ChatController {
   /**
    * Removes the current user's reaction from a message.
    *
-   * Only remoevs the caller's reaction, never touches reactions from
+   * Only removes the caller's reaction, never touches reactions from
    * other users.
    */
   @Delete('messages/:messageId/reactions')
