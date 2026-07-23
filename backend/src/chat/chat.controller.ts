@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -17,6 +18,7 @@ import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { ChatService } from './chat.service';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
+import { EditMessageDto } from './dto/edit-message.dto';
 import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
 import { MarkMessagesDeliveredDto } from './dto/mark-messages-delivered.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
@@ -274,5 +276,48 @@ export class ChatController {
     @Param('messageId') messageId: string,
   ) {
     return this.chatService.removeReaction(session.user.id, messageId);
+  }
+
+  /**
+   * Edits the current user's own encrypted message.
+   *
+   * The frontend must send a newly encrypted ciphertext payload. The backend
+   * replaces the stored ciphertext and marks editedAt.
+   */
+  @Patch('messages/:messageId')
+  @ApiOperation({
+    summary: 'Edit current user chat message',
+  })
+  @ApiParam({
+    name: 'messageId',
+    example: 'cm123message456',
+  })
+  editMessage(
+    @Session() session: UserSession,
+    @Param('messageId') messageId: string,
+    @Body() dto: EditMessageDto,
+  ) {
+    return this.chatService.editMessage(session.user.id, messageId, dto);
+  }
+
+  /**
+   * Soft deletes the current user's own message.
+   *
+   * The message record remains for history consistency, but encrypted content
+   * is cleared and status becomes DELETED.
+   */
+  @Delete('messages/:messageId')
+  @ApiOperation({
+    summary: 'Delete current user chat message',
+  })
+  @ApiParam({
+    name: 'messageId',
+    example: 'cm123message456',
+  })
+  deleteMessage(
+    @Session() session: UserSession,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.chatService.deleteMessage(session.user.id, messageId);
   }
 }

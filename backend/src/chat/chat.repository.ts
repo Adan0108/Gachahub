@@ -500,6 +500,55 @@ export class ChatRepository {
   }
 
   /**
+   * Updates an existing encrypted message payload.
+   *
+   * Used for message edit. The service checks ownership and permissions before
+   * calling this database method.
+   */
+  updateMessage(params: {
+    messageId: string;
+    ciphertext: string;
+    encryptionMeta?: Prisma.InputJsonValue;
+    contentType?: ChatMessageContentType;
+  }) {
+    return this.prisma.chatMessage.update({
+      where: {
+        id: params.messageId,
+      },
+      data: {
+        ciphertext: params.ciphertext,
+        encryptionMeta: params.encryptionMeta,
+        contentType: params.contentType,
+        editedAt: new Date(),
+      },
+      include: {
+        receipts: true,
+        reactions: true,
+      },
+    });
+  }
+
+  /**
+   * Soft deletes a message.
+   *
+   * The row is kept for audit/reply/history consistency, but ciphertext is
+   * cleared so deleted encrypted content is no longer retained.
+   */
+  softDeleteMessage(messageId: string) {
+    return this.prisma.chatMessage.update({
+      where: {
+        id: messageId,
+      },
+      data: {
+        ciphertext: '',
+        encryptionMeta: Prisma.JsonNull,
+        status: 'DELETED',
+        deletedAt: new Date(),
+      },
+    });
+  }
+
+  /**
    * Creates or replaces a user's reaction on a message.
    *
    * The database unique key on messageId + userId enforces one reaction per user

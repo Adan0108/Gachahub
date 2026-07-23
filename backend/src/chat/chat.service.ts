@@ -12,6 +12,7 @@ import {
 } from '../generated/prisma/client';
 import { ChatRepository } from './chat.repository';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
+import { EditMessageDto } from './dto/edit-message.dto';
 import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
 import { MarkMessagesDeliveredDto } from './dto/mark-messages-delivered.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
@@ -378,6 +379,43 @@ export class ChatService {
   }
 
   /**
+   * Edits the current user's own encrypted message.
+   *
+   * Business behavior:
+   * - Only the original sender can edit.
+   * - Deleted messages cannot be edited.
+   * - Edited message gets a new encrypted payload and editedAt timestamp.
+   */
+  async editMessage(userId: string, messageId: string, dto: EditMessageDto) {
+    await this.assertCanModifyOwnMessage(userId, messageId);
+
+    return this.chatRepository.updateMessage({
+      messageId,
+      ciphertext: dto.ciphertext,
+      encryptionMeta: dto.encryptionMeta as
+        | Prisma.InputJsonValue
+        | undefined,
+      contentType: dto.contentType ?? ChatMessageContentType.TEXT,
+    });
+  }
+
+  /**
+   * Soft deletes the current user's own message.
+   *
+   * The message row remains, but encrypted content is cleared and status becomes
+   * DELETED.
+   */
+  async deleteMessage(userId: string, messageId: string) {
+    await this.assertCanModifyOwnMessage(userId, messageId);
+
+    await this.chatRepository.softDeleteMessage(messageId);
+
+    return {
+      message: 'Message deleted successfully',
+    };
+  }
+
+  /**
    * Shared implementation for sending into an existing convo.
    *
    * This keeps the duplicate-send, participant-state, blocked/declined, message
@@ -519,6 +557,35 @@ export class ChatService {
 
     if (!participant || !this.canReadState(participant.state)) {
       throw new ForbiddenException('You cannot react to this message');
+    }
+
+    return message;
+  }
+
+  /**
+   * Verifies the current user can edit/delete a message.
+   *
+   * Message modification is stricter than reacting: users can react to messages
+   * they can read, but they can only edit/delete messages they sent.
+   */
+  private async assertCanModifyOwnMessage(userId: string, messageId: string) {
+    const message =
+      await this.chatRepository.findMessageWithParticipants(messageId);
+
+    if (!message || message.status !== 'SENT') {
+      throw new NotFoundException('Message not found');
+    }
+
+    if (message.senderId !== userId) {
+      throw new ForbiddenException('You can only modify your own messages');
+    }
+
+    const participant = message.conversation.participants.find(
+      (item) => item.userId === userId,
+    );
+
+    if (!participant || !this.canReadState(participant.state)) {
+      throw new ForbiddenException('You cannot modify this message');
     }
 
     return message;
