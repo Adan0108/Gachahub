@@ -372,6 +372,38 @@ export class ChatService {
   }
 
   /**
+   * Archives a conversation for the current user.
+   *
+   * This hides the convo from the normal ACTIVE inbox but keeps all encrypted
+   * messages and receipts stored.
+   */
+  async archiveConversation(userId: string, conversationId: string) {
+    await this.assertReadableParticipant(conversationId, userId);
+
+    return this.chatRepository.updateParticipantArchivedState(
+      conversationId,
+      userId,
+      true,
+    );
+  }
+
+  /**
+   * Unarchives a conversation for the current user.
+   *
+   * This moves the participant back to ACTIVE so the convo appears in the normal
+   * inbox again.
+   */
+  async unarchiveConversation(userId: string, conversationId: string) {
+    await this.assertReadableParticipant(conversationId, userId);
+
+    return this.chatRepository.updateParticipantArchivedState(
+      conversationId,
+      userId,
+      false,
+    );
+  }
+
+  /**
    * Marks messages as delivered to the current user's device.
    *
    * This supports offline users: messages can be SENT in the database before
@@ -534,6 +566,11 @@ export class ChatService {
     const participants =
       await this.chatRepository.findParticipants(conversationId);
 
+    await this.unarchiveRecipientsOnNewMessage(
+      conversationId,
+      senderId,
+      participants,
+    );
     await this.assertConversationUsersNotGloballyBlocked(
       senderId,
       participants.map((participant) => participant.userId),
@@ -625,6 +662,33 @@ export class ChatService {
     await Promise.all(
       recipientUserIds.map((recipientUserId) =>
         this.assertUsersNotGloballyBlocked(senderId, recipientUserId),
+      ),
+    );
+  }
+
+  /**
+   * Brings archived recipient conversations back to ACTIVE when new messages arrive.
+   *
+   * This matches normal chat behavior: archived chats return to the inbox on new
+   * activity, while the sender's own archive state is not touched here.
+   */
+  private async unarchiveRecipientsOnNewMessage(
+    conversationId: string,
+    senderId: string,
+    participants: Awaited<ReturnType<ChatRepository['findParticipants']>>,
+  ) {
+    const archivedRecipients = participants.filter(
+      (participant) =>
+        participant.userId !== senderId && participant.state === 'ARCHIVED',
+    );
+
+    await Promise.all(
+      archivedRecipients.map((participant) =>
+        this.chatRepository.updateParticipantArchivedState(
+          conversationId,
+          participant.userId,
+          false,
+        ),
       ),
     );
   }

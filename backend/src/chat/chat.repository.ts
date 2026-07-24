@@ -680,4 +680,29 @@ export class ChatRepository {
       },
     });
   }
+
+  /**
+   * Archives or unarchives one user's participant row.
+   *
+   * Archive is per-user. It hides the convo for this user without deleting
+   * messages or affecting the other participant.
+   */
+  updateParticipantArchivedState(
+    conversationId: string,
+    userId: string,
+    archived: boolean,
+  ) {
+    return this.prisma.chatParticipant.update({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId,
+        },
+      },
+      data: {
+        state: archived ? 'ARCHIVED' : 'ACTIVE',
+        archivedAt: archived ? new Date() : null,
+      },
+    });
+  }
 }

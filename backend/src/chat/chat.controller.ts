@@ -275,6 +275,52 @@ export class ChatController {
   }
 
   /**
+   * Archives a conversation for the current user.
+   *
+   * Archived conversations are hidden from the normal inbox but messages remain.
+   */
+  @Post('conversations/:conversationId/archive')
+  @ApiOperation({
+    summary: 'Archive a conversation for the current user',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'cm123conversation456',
+  })
+  archiveConversation(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.chatService.archiveConversation(
+      session.user.id,
+      conversationId,
+    );
+  }
+
+  /**
+   * Unarchives a conversation for the current user.
+   *
+   * This moves the conversation back to the normal accepted inbox.
+   */
+  @Delete('conversations/:conversationId/archive')
+  @ApiOperation({
+    summary: 'Unarchive a conversation for the current user',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'cm123conversation456',
+  })
+  unarchiveConversation(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.chatService.unarchiveConversation(
+      session.user.id,
+      conversationId,
+    );
+  }
+
+  /**
    * Marks messages as delivered to the current user.
    *
    * Offline recipients keep messages as unread/undelivered until their client
