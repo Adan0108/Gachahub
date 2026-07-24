@@ -22,6 +22,7 @@ model User {
 
   sessions Session[]
   accounts Account[]
+  posts    Post[]
 
   moderatedGames       GameModerator[]       @relation("GameModeratorUser")
   assignedModerators   GameModerator[]       @relation("GameModeratorAssigner")
@@ -32,6 +33,8 @@ model User {
   directChatPairsAsA   ChatDirectPair[]      @relation("ChatDirectPairUserA")
   directChatPairsAsB   ChatDirectPair[]      @relation("ChatDirectPairUserB")
   chatMessageReactions ChatMessageReaction[]
+  blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
+  blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
 
   @@unique([email])
   @@map("user")
@@ -123,6 +126,7 @@ model Game {
 
   categories GameCategory[]
   moderators GameModerator[]
+  posts      Post[]
 
   @@index([status])
   @@index([createdAt])
@@ -142,6 +146,8 @@ model GameCategory {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  posts Post[]
 
   game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
 
@@ -352,4 +358,129 @@ model ChatMessageReaction {
   @@index([messageId])
   @@index([userId])
   @@map("chat_message_reactions")
+}
+
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+  HIDDEN
+  DELETED
+}
+
+enum PostType {
+  GENERAL
+  GUIDE
+  BUILD
+  TEAM
+  LORE
+  THEORY
+  QUESTION
+  NEWS
+  MEME
+}
+
+enum PostVisibility {
+  PUBLIC
+  FOLLOWERS_ONLY
+  PRIVATE
+}
+
+enum PostMediaType {
+  IMAGE
+  GIF
+  VIDEO
+}
+
+model Post {
+  id         String  @id @default(cuid())
+  authorId   String
+  gameId     String
+  categoryId String?
+
+  title   String
+  content String
+
+  type       PostType       @default(GENERAL)
+  status     PostStatus     @default(PUBLISHED)
+  visibility PostVisibility @default(PUBLIC)
+  isSpoiler  Boolean        @default(false)
+
+  viewCount     Int @default(0)
+  commentCount  Int @default(0)
+  reactionCount Int @default(0)
+  saveCount     Int @default(0)
+  shareCount    Int @default(0)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  author   User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  game     Game          @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  category GameCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  media PostMedia[]
+  tags  PostTag[]
+
+  @@index([gameId, status, createdAt])
+  @@index([categoryId, status, createdAt])
+  @@index([authorId, status, createdAt])
+  @@index([type, status, createdAt])
+  @@map("posts")
+}
+
+model PostMedia {
+  id     String @id @default(cuid())
+  postId String
+
+  url       String
+  publicId  String?
+  mediaType PostMediaType
+  altText   String?
+  sortOrder Int           @default(0)
+
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, sortOrder])
+  @@map("post_media")
+}
+
+model Tag {
+  id   String @id @default(cuid())
+  name String
+  slug String @unique
+
+  createdAt DateTime @default(now())
+
+  posts PostTag[]
+
+  @@map("tags")
+}
+
+model PostTag {
+  postId String
+  tagId  String
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+  @@index([tagId])
+  @@map("post_tags")
+}
+
+model ChatUserBlock {
+  id        String   @id @default(cuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("ChatUserBlockBlocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("ChatUserBlockBlocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+  @@map("chat_user_blocks")
 }

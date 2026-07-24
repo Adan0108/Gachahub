@@ -42,7 +42,7 @@ export class ChatController {
   /**
    * Creates or reuses a direct convo and sends the first message.
    *
-   * This endpoint accepts encrypted client payloads only. The baclend stores
+   * This endpoint accepts encrypted client payloads only. The backend stores
    * ciphertext and metadata, but never receives plaintext message content.
    */
   @Post('direct')
@@ -194,6 +194,43 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
   ) {
     return this.chatService.blockConversation(session.user.id, conversationId);
+  }
+
+  /**
+   * Blocks another user globally for chat.
+   *
+   * The blocked user cannot start or continue direct chat with the caller.
+   */
+  @Post('users/:userId/block')
+  @ApiOperation({
+    summary: 'Block a user globally for chat',
+  })
+  @ApiParam({
+    name: 'userId',
+    example: 'target-user-id',
+  })
+  blockUser(@Session() session: UserSession, @Param('userId') userId: string) {
+    return this.chatService.blockUser(session.user.id, userId);
+  }
+
+  /**
+   * Unblocks another user globally for chat.
+   *
+   * After this, normal direct chat rules apply again.
+   */
+  @Delete('users/:userId/block')
+  @ApiOperation({
+    summary: 'Unblock a user globally for chat',
+  })
+  @ApiParam({
+    name: 'userId',
+    example: 'target-user-id',
+  })
+  unblockUser(
+    @Session() session: UserSession,
+    @Param('userId') userId: string,
+  ) {
+    return this.chatService.unblockUser(session.user.id, userId);
   }
 
   /**

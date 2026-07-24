@@ -64,6 +64,8 @@ export class ChatService {
       throw new NotFoundException('Recipient not found');
     }
 
+    await this.assertUsersNotGloballyBlocked(senderId, dto.recipientUserId);
+
     const existingMessage =
       await this.chatRepository.findMessageBySenderClientMessageId(
         senderId,
@@ -301,6 +303,44 @@ export class ChatService {
   }
 
   /**
+   * Blocks another user globally for chat.
+   *
+   * Global blocks stop both new direct conversations and messages in existing
+   * direct conversations between these users.
+   */
+  async blockUser(blockerId: string, blockedId: string) {
+    if (blockerId === blockedId) {
+      throw new BadRequestException('You cannot block yourself');
+    }
+
+    const blockedUser = await this.chatRepository.findUserById(blockedId);
+
+    if (!blockedUser || blockedUser.status !== 'ACTIVE') {
+      throw new NotFoundException('User not found');
+    }
+
+    return this.chatRepository.blockUser(blockerId, blockedId);
+  }
+
+  /**
+   * Removes the caller's global chat block for another user.
+   *
+   * This only removes the caller's block row; if the other user blocked back,
+   * messaging still stays blocked by the send-time check.
+   */
+  async unblockUser(blockerId: string, blockedId: string) {
+    if (blockerId === blockedId) {
+      throw new BadRequestException('You cannot unblock yourself');
+    }
+
+    const result = await this.chatRepository.unblockUser(blockerId, blockedId);
+
+    return {
+      unblockedCount: result.count,
+    };
+  }
+
+  /**
    * Mutes a conversation for the current user.
    *
    * Mute is stored per participant, so one user can mute a convo without
@@ -494,6 +534,11 @@ export class ChatService {
     const participants =
       await this.chatRepository.findParticipants(conversationId);
 
+    await this.assertConversationUsersNotGloballyBlocked(
+      senderId,
+      participants.map((participant) => participant.userId),
+    );
+
     const blockedOrDeclinedRecipient = participants.find(
       (participant) =>
         participant.userId !== senderId &&
@@ -544,6 +589,44 @@ export class ChatService {
       message,
       duplicate: false,
     };
+  }
+
+  /**
+   * Verifies neither user globally blocked the other.
+   *
+   * The block table is direction-aware, but direct messaging should stop if
+   * either side created a block.
+   */
+  private async assertUsersNotGloballyBlocked(
+    userIdA: string,
+    userIdB: string,
+  ) {
+    const block = await this.chatRepository.findAnyUserBlock(userIdA, userIdB);
+
+    if (block) {
+      throw new ForbiddenException('Messaging is blocked between these users');
+    }
+  }
+
+  /**
+   * Checks global blocks between the sender and every recipient in a convo.
+   *
+   * This keeps the send path ready for future group/admin chat without changing
+   * the direct-message block behavior.
+   */
+  private async assertConversationUsersNotGloballyBlocked(
+    senderId: string,
+    participantUserIds: string[],
+  ) {
+    const recipientUserIds = participantUserIds.filter(
+      (userId) => userId !== senderId,
+    );
+
+    await Promise.all(
+      recipientUserIds.map((recipientUserId) =>
+        this.assertUsersNotGloballyBlocked(senderId, recipientUserId),
+      ),
+    );
   }
 
   private async assertValidReplyTarget(

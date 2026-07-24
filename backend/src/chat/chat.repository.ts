@@ -34,6 +34,63 @@ export class ChatRepository {
   }
 
   /**
+   * Finds any global chat block between two users.
+   *
+   * Used before sending so either user's block stops direct messaging.
+   */
+  findAnyUserBlock(userIdA: string, userIdB: string) {
+    return this.prisma.chatUserBlock.findFirst({
+      where: {
+        OR: [
+          {
+            blockerId: userIdA,
+            blockedId: userIdB,
+          },
+          {
+            blockerId: userIdB,
+            blockedId: userIdA,
+          },
+        ],
+      },
+    });
+  }
+
+  /**
+   * Creates a global user block for chat.
+   *
+   * Upsert makes blocking idempotent if the caller taps block more than once.
+   */
+  blockUser(blockerId: string, blockedId: string) {
+    return this.prisma.chatUserBlock.upsert({
+      where: {
+        blockerId_blockedId: {
+          blockerId,
+          blockedId,
+        },
+      },
+      create: {
+        blockerId,
+        blockedId,
+      },
+      update: {},
+    });
+  }
+
+  /**
+   * Removes a global user block created by the caller.
+   *
+   * deleteMany keeps unblock idempotent when no block row exists.
+   */
+  unblockUser(blockerId: string, blockedId: string) {
+    return this.prisma.chatUserBlock.deleteMany({
+      where: {
+        blockerId,
+        blockedId,
+      },
+    });
+  }
+
+  /**
    * Finds the unique direct-pair record for two users.
    *
    * Direct pair ids are normalized before calling this method,
