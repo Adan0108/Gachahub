@@ -276,6 +276,46 @@ export class ChatController {
   }
 
   /**
+   * Pins a conversation for the current user.
+   *
+   * Pinned chats stay at the top of this user's inbox only.
+   */
+  @Post('conversations/:conversationId/pin')
+  @ApiOperation({
+    summary: 'Pin a conversation for the current user',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'cm123conversation456',
+  })
+  pinConversation(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.chatService.pinConversation(session.user.id, conversationId);
+  }
+
+  /**
+   * Unpins a conversation for the current user.
+   *
+   * This clears pinnedAt on the caller's participant row.
+   */
+  @Delete('conversations/:conversationId/pin')
+  @ApiOperation({
+    summary: 'Unpin a conversation for the current user',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'cm123conversation456',
+  })
+  unpinConversation(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.chatService.unpinConversation(session.user.id, conversationId);
+  }
+
+  /**
    * Archives a conversation for the current user.
    *
    * Archived conversations are hidden from the normal inbox but messages remain.

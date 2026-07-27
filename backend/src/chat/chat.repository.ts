@@ -159,7 +159,7 @@ export class ChatRepository {
   /**
    * Finds a message by sender and client idempotency key.
    *
-   * prevents dupe message when a client retries after a network
+   * prevents duplicate messages when a client retries after a network
    * timeout but the original request already succeeded.
    */
   findMessageBySenderClientMessageId(
@@ -793,6 +793,30 @@ export class ChatRepository {
       },
       data: {
         mutedAt,
+      },
+    });
+  }
+
+  /**
+   * Updates pinnedAt for one user's participant row.
+   *
+   * Pinning is per-user inbox state. One user pinning a conversation does not
+   * change the other participant's inbox.
+   */
+  updateParticipantPinnedAt(
+    conversationId: string,
+    userId: string,
+    pinnedAt: Date | null,
+  ) {
+    return this.prisma.chatParticipant.update({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId,
+        },
+      },
+      data: {
+        pinnedAt,
       },
     });
   }

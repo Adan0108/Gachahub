@@ -154,11 +154,17 @@ export class ChatService {
       'ACTIVE',
     );
 
-    return Promise.all(
+    const summaries = await Promise.all(
       conversations.map((conversation) =>
         this.toConversationSummary(conversation, userId),
       ),
     );
+
+    return summaries.sort((a, b) => {
+      if (a.pinnedAt && !b.pinnedAt) return -1;
+      if (!a.pinnedAt && b.pinnedAt) return 1;
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    });
   }
 
   /**
@@ -402,6 +408,36 @@ export class ChatService {
       conversationId,
       userId,
       false,
+    );
+  }
+
+  /**
+   * Pins a conversation for the current user.
+   *
+   * Pinning is stored on ChatParticipant because it is personal inbox state.
+   */
+  async pinConversation(userId: string, conversationId: string) {
+    await this.assertReadableParticipant(conversationId, userId);
+
+    return this.chatRepository.updateParticipantPinnedAt(
+      conversationId,
+      userId,
+      new Date(),
+    );
+  }
+
+  /**
+   * Unpins a conversation for the current user.
+   *
+   * Clearing pinnedAt returns the conversation to normal inbox sorting.
+   */
+  async unpinConversation(userId: string, conversationId: string) {
+    await this.assertReadableParticipant(conversationId, userId);
+
+    return this.chatRepository.updateParticipantPinnedAt(
+      conversationId,
+      userId,
+      null,
     );
   }
 
@@ -919,10 +955,12 @@ export class ChatService {
       type: conversation.type,
       status: conversation.status,
       participantState: currentParticipant?.state ?? null,
+      pinnedAt: currentParticipant?.pinnedAt ?? null,
       participants: conversation.participants.map((participant) => ({
         userId: participant.userId,
         role: participant.role,
         state: participant.state,
+        pinnedAt: participant.pinnedAt,
         mutedAt: participant.mutedAt,
         user: participant.user,
       })),

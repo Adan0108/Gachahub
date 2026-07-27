@@ -284,6 +284,7 @@ model ChatParticipant {
   role           ChatParticipantRole  @default(MEMBER)
   state          ChatParticipantState @default(ACTIVE)
   lastReadAt     DateTime?
+  pinnedAt       DateTime?
   archivedAt     DateTime?
   mutedAt        DateTime?
   blockedAt      DateTime?
