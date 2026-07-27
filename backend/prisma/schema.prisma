@@ -27,12 +27,14 @@ model User {
   moderatedGames       GameModerator[]       @relation("GameModeratorUser")
   assignedModerators   GameModerator[]       @relation("GameModeratorAssigner")
   createdChats         ChatConversation[]    @relation("ChatConversationCreator")
+  gameMemberships      GameMember[]
   chatParticipants     ChatParticipant[]
   sentChatMessages     ChatMessage[]         @relation("ChatMessageSender")
   chatMessageReceipts  ChatMessageReceipt[]
   directChatPairsAsA   ChatDirectPair[]      @relation("ChatDirectPairUserA")
   directChatPairsAsB   ChatDirectPair[]      @relation("ChatDirectPairUserB")
   chatMessageReactions ChatMessageReaction[]
+  createdChatEmotes    ChatEmote[]           @relation("ChatEmoteCreator")
   blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
   blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
 
@@ -100,6 +102,12 @@ enum UserStatus {
   DELETED
 }
 
+enum GameMemberRole {
+  MEMBER
+  MODERATOR
+  ADMIN
+}
+
 enum GameStatus {
   ACTIVE
   ARCHIVED
@@ -127,6 +135,8 @@ model Game {
   categories GameCategory[]
   moderators GameModerator[]
   posts      Post[]
+  members    GameMember[]
+  chatEmotes ChatEmote[]
 
   @@index([status])
   @@index([createdAt])
@@ -178,6 +188,24 @@ model GameModerator {
   @@map("game_moderators")
 }
 
+model GameMember {
+  id     String @id @default(cuid())
+  gameId String
+  userId String
+
+  role GameMemberRole @default(MEMBER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, userId])
+  @@index([userId])
+  @@map("game_members")
+}
+
 enum ChatConversationType {
   DIRECT
   GROUP
@@ -208,6 +236,7 @@ enum ChatParticipantState {
 enum ChatMessageContentType {
   TEXT
   IMAGE
+  EMOTE
   FILE
   AUDIO
   VIDEO
@@ -219,13 +248,9 @@ enum ChatMessageStatus {
   DELETED
 }
 
-enum ChatMessageReactionType {
-  LIKE
-  LOVE
-  LAUGH
-  WOW
-  SAD
-  ANGRY
+enum ChatEmoteScope {
+  GLOBAL
+  GAME
 }
 
 model ChatConversation {
@@ -343,21 +368,54 @@ model ChatMessageReceipt {
 }
 
 model ChatMessageReaction {
-  id        String                  @id @default(cuid())
+  id        String  @id @default(cuid())
   messageId String
   userId    String
-  type      ChatMessageReactionType
+  emoteId   String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
   user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emote   ChatEmote?  @relation(fields: [emoteId], references: [id], onDelete: Restrict)
 
   @@unique([messageId, userId])
   @@index([messageId])
   @@index([userId])
+  @@index([emoteId])
   @@map("chat_message_reactions")
+}
+
+model ChatEmote {
+  id     String         @id @default(cuid())
+  scope  ChatEmoteScope
+  gameId String?
+
+  shortcode    String
+  unicode      String?
+  imageUrl     String?
+  animationUrl String?
+
+  width    Int?
+  height   Int?
+  fileSize Int?
+  mimeType String?
+
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  game      Game? @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("ChatEmoteCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  reactions ChatMessageReaction[]
+
+  @@unique([scope, gameId, shortcode])
+  @@index([gameId])
+  @@index([createdById])
+  @@map("chat_emotes")
 }
 
 enum PostStatus {

@@ -17,6 +17,7 @@ import {
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { ChatService } from './chat.service';
+import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
 import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
@@ -360,10 +361,32 @@ export class ChatController {
   }
 
   /**
+   * Creates a custom game emote.
+   *
+   * For now, only app admins and game moderators can create custom game emotes.
+   * Upload/crop/edit happens before this call; this stores final asset metadata.
+   */
+  @Post('games/:gameId/emotes')
+  @ApiOperation({
+    summary: 'Create custom game chat emote',
+  })
+  @ApiParam({
+    name: 'gameId',
+    example: 'cm123game456',
+  })
+  createGameEmote(
+    @Session() session: UserSession,
+    @Param('gameId') gameId: string,
+    @Body() dto: CreateChatEmoteDto,
+  ) {
+    return this.chatService.createGameEmote(session.user.id, gameId, dto);
+  }
+
+  /**
    * Adds/changes the current user's reaction to a message.
    *
    * One user can have one reaction per message. Reacting again updates the
-   * existing reaction instead of creating dupe
+   * existing reaction instead of creating a duplicate.
    */
   @Post('messages/:messageId/reactions')
   @ApiOperation({

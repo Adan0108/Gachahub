@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import {
   ChatMessageContentType,
   ChatParticipantState,
-  ChatMessageReactionType,
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -30,6 +29,49 @@ export class ChatRepository {
   findUserById(userId: string) {
     return this.prisma.user.findUnique({
       where: { id: userId },
+    });
+  }
+
+  /**
+   * Finds a game before creating game-scoped emotes.
+   *
+   * The service uses this to return a clear 404 before permission checks.
+   */
+  findGameById(gameId: string) {
+    return this.prisma.game.findUnique({
+      where: { id: gameId },
+    });
+  }
+
+  /**
+   * Finds the caller's membership in a game community.
+   *
+   * Game emotes are usable only by members of that game community.
+   */
+  findGameMember(gameId: string, userId: string) {
+    return this.prisma.gameMember.findUnique({
+      where: {
+        gameId_userId: {
+          gameId,
+          userId,
+        },
+      },
+    });
+  }
+
+  /**
+   * Finds game moderator assignment for emote management permission.
+   *
+   * App admins bypass this in the service; game moderators use this row.
+   */
+  findGameModerator(gameId: string, userId: string) {
+    return this.prisma.gameModerator.findUnique({
+      where: {
+        gameId_userId: {
+          gameId,
+          userId,
+        },
+      },
     });
   }
 
@@ -419,7 +461,11 @@ export class ChatRepository {
       },
       include: {
         receipts: true,
-        reactions: true,
+        reactions: {
+          include: {
+            emote: true,
+          },
+        },
         replyTo: true,
       },
     });
@@ -593,7 +639,11 @@ export class ChatRepository {
       },
       include: {
         receipts: true,
-        reactions: true,
+        reactions: {
+          include: {
+            emote: true,
+          },
+        },
       },
     });
   }
@@ -619,15 +669,78 @@ export class ChatRepository {
   }
 
   /**
+   * Creates a custom emote for a game community.
+   *
+   * Upload/crop/edit happens before this call; this stores the final asset
+   * metadata so the upload provider can be replaced later.
+   */
+  createGameChatEmote(params: {
+    gameId: string;
+    createdById: string;
+    shortcode: string;
+    unicode?: string;
+    imageUrl?: string;
+    animationUrl?: string;
+    width?: number;
+    height?: number;
+    fileSize?: number;
+    mimeType?: string;
+  }) {
+    return this.prisma.chatEmote.create({
+      data: {
+        scope: 'GAME',
+        gameId: params.gameId,
+        createdById: params.createdById,
+        shortcode: params.shortcode,
+        unicode: params.unicode,
+        imageUrl: params.imageUrl,
+        animationUrl: params.animationUrl,
+        width: params.width,
+        height: params.height,
+        fileSize: params.fileSize,
+        mimeType: params.mimeType,
+      },
+    });
+  }
+
+  /**
+   * Finds an emote the user is allowed to use.
+   *
+   * Global emotes are available to everyone. Game emotes require membership in
+   * the owning game community.
+   */
+  findUsableChatEmote(emoteId: string, userId: string) {
+    return this.prisma.chatEmote.findFirst({
+      where: {
+        id: emoteId,
+        deletedAt: null,
+        OR: [
+          { scope: 'GLOBAL' },
+          {
+            scope: 'GAME',
+            game: {
+              members: {
+                some: {
+                  userId,
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  /**
    * Creates or replaces a user's reaction on a message.
    *
-   * The database unique key on messageId + userId enforces one reaction per user
-   * per message.
+   * The reaction points to ChatEmote, so unicode/global/custom emotes all use
+   * the same database path.
    */
   upsertMessageReaction(params: {
     messageId: string;
     userId: string;
-    type: ChatMessageReactionType;
+    emoteId: string;
   }) {
     return this.prisma.chatMessageReaction.upsert({
       where: {
@@ -638,7 +751,10 @@ export class ChatRepository {
       },
       create: params,
       update: {
-        type: params.type,
+        emoteId: params.emoteId,
+      },
+      include: {
+        emote: true,
       },
     });
   }

@@ -1,18 +1,18 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum } from 'class-validator';
-import { ChatMessageReactionType } from '../../generated/prisma/client';
+import { IsString, MaxLength } from 'class-validator';
 
 /**
  * Request body for adding or changing a message reaction.
  *
- * Reaction types are fixed to a backend enum so clients cannot store arbitrary
- * reaction strings
+ * Reactions point to ChatEmote so global unicode emotes and custom game emotes
+ * can share the same reaction system.
  */
 export class ReactToMessageDto {
   @ApiProperty({
-    enum: ChatMessageReactionType,
-    example: ChatMessageReactionType.LOVE,
+    example: 'cm123emote456',
+    description: 'Emote id used for this message reaction.',
   })
-  @IsEnum(ChatMessageReactionType)
-  type!: ChatMessageReactionType;
+  @IsString()
+  @MaxLength(120)
+  emoteId!: string;
 }

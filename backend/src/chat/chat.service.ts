@@ -9,8 +9,10 @@ import {
   ChatMessageContentType,
   ChatParticipantState,
   Prisma,
+  UserRole,
 } from '../generated/prisma/client';
 import { ChatRepository } from './chat.repository';
+import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
 import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
@@ -445,6 +447,40 @@ export class ChatService {
   }
 
   /**
+   * Creates a custom emote for one game community.
+   *
+   * This endpoint stores final asset metadata only. Upload/crop/rotate/resize
+   * can later be implemented by a dedicated media service without changing
+   * reaction storage.
+   */
+  async createGameEmote(
+    userId: string,
+    gameId: string,
+    dto: CreateChatEmoteDto,
+  ) {
+    const game = await this.chatRepository.findGameById(gameId);
+
+    if (!game) {
+      throw new NotFoundException('Game not found');
+    }
+
+    await this.assertCanManageGameEmotes(userId, gameId);
+
+    return this.chatRepository.createGameChatEmote({
+      gameId,
+      createdById: userId,
+      shortcode: dto.shortcode,
+      unicode: dto.unicode,
+      imageUrl: dto.imageUrl,
+      animationUrl: dto.animationUrl,
+      width: dto.width,
+      height: dto.height,
+      fileSize: dto.fileSize,
+      mimeType: dto.mimeType,
+    });
+  }
+
+  /**
    * Adds or updates the current user's reaction on a message.
    *
    * Business behavior:
@@ -458,11 +494,12 @@ export class ChatService {
     dto: ReactToMessageDto,
   ) {
     await this.assertCanInteractWithMessage(userId, messageId);
+    await this.assertCanUseEmote(userId, dto.emoteId);
 
     return this.chatRepository.upsertMessageReaction({
       messageId,
       userId,
-      type: dto.type,
+      emoteId: dto.emoteId,
     });
   }
 
@@ -626,6 +663,48 @@ export class ChatService {
       message,
       duplicate: false,
     };
+  }
+
+  /**
+   * Verifies the user can use an emote.
+   *
+   * Global emotes are open to everyone, while game emotes require membership in
+   * the owning game community.
+   */
+  private async assertCanUseEmote(userId: string, emoteId: string) {
+    const emote = await this.chatRepository.findUsableChatEmote(
+      emoteId,
+      userId,
+    );
+
+    if (!emote) {
+      throw new ForbiddenException('You cannot use this emote');
+    }
+
+    return emote;
+  }
+
+  /**
+   * Verifies the caller can create custom emotes for a game.
+   *
+   * App admins can manage every game. Game moderators can manage only their
+   * assigned game.
+   */
+  private async assertCanManageGameEmotes(userId: string, gameId: string) {
+    const user = await this.chatRepository.findUserById(userId);
+
+    if (user?.role === UserRole.ADMIN) {
+      return;
+    }
+
+    const moderator = await this.chatRepository.findGameModerator(
+      gameId,
+      userId,
+    );
+
+    if (!moderator) {
+      throw new ForbiddenException('You cannot manage emotes for this game');
+    }
   }
 
   /**
