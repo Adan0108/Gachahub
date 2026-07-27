@@ -734,13 +734,14 @@ export class ChatRepository {
   /**
    * Creates or replaces a user's reaction on a message.
    *
-   * The reaction points to ChatEmote, so unicode/global/custom emotes all use
-   * the same database path.
+   * Unicode emoji reactions store raw emoji text. Custom image/gif emotes point
+   * to ChatEmote through emoteId. Updating one clears the other.
    */
   upsertMessageReaction(params: {
     messageId: string;
     userId: string;
-    emoteId: string;
+    emoji: string | null;
+    emoteId: string | null;
   }) {
     return this.prisma.chatMessageReaction.upsert({
       where: {
@@ -749,8 +750,14 @@ export class ChatRepository {
           userId: params.userId,
         },
       },
-      create: params,
+      create: {
+        messageId: params.messageId,
+        userId: params.userId,
+        emoji: params.emoji,
+        emoteId: params.emoteId,
+      },
       update: {
+        emoji: params.emoji,
         emoteId: params.emoteId,
       },
       include: {

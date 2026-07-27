@@ -1,18 +1,28 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsString, MaxLength } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
 
 /**
  * Request body for adding or changing a message reaction.
  *
- * Reactions point to ChatEmote so global unicode emotes and custom game emotes
- * can share the same reaction system.
+ * Use emoji for normal Unicode emoji from a keyboard. Use emoteId for custom
+ * image/gif emotes stored in ChatEmote.
  */
 export class ReactToMessageDto {
-  @ApiProperty({
-    example: 'cm123emote456',
-    description: 'Emote id used for this message reaction.',
+  @ApiPropertyOptional({
+    example: '😋',
+    description: 'Raw Unicode emoji reaction, such as 😋, 🔟, or 👵🏽.',
   })
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  emoji?: string;
+
+  @ApiPropertyOptional({
+    example: 'cm123emote456',
+    description: 'Custom ChatEmote id used for image/gif emote reactions.',
+  })
+  @IsOptional()
   @IsString()
   @MaxLength(120)
-  emoteId!: string;
+  emoteId?: string;
 }

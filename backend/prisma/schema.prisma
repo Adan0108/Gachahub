@@ -373,6 +373,7 @@ model ChatMessageReaction {
   messageId String
   userId    String
   emoteId   String?
+  emoji     String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

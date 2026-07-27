@@ -530,12 +530,36 @@ export class ChatService {
     dto: ReactToMessageDto,
   ) {
     await this.assertCanInteractWithMessage(userId, messageId);
-    await this.assertCanUseEmote(userId, dto.emoteId);
+
+    const emoji = dto.emoji?.trim();
+    const emoteId = dto.emoteId?.trim();
+
+    if (!emoji && !emoteId) {
+      throw new BadRequestException('Reaction requires emoji or emoteId');
+    }
+
+    if (emoji && emoteId) {
+      throw new BadRequestException('Reaction can only use emoji or emoteId');
+    }
+
+    if (emoji) {
+      return this.chatRepository.upsertMessageReaction({
+        messageId,
+        userId,
+        emoji,
+        emoteId: null,
+      });
+    }
+
+    const customEmoteId = emoteId as string;
+
+    await this.assertCanUseEmote(userId, customEmoteId);
 
     return this.chatRepository.upsertMessageReaction({
       messageId,
       userId,
-      emoteId: dto.emoteId,
+      emoji: null,
+      emoteId: customEmoteId,
     });
   }
 
