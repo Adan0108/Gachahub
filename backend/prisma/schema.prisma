@@ -20,18 +20,24 @@ model User {
   role   UserRole   @default(USER)
   status UserStatus @default(ACTIVE)
 
-  sessions Session[]
-  accounts Account[]
-  posts    Post[]
+  sessions     Session[]
+  accounts     Account[]
+  posts        Post[]
+  mediaUploads MediaUpload[]
 
-  moderatedGames      GameModerator[]      @relation("GameModeratorUser")
-  assignedModerators  GameModerator[]      @relation("GameModeratorAssigner")
-  createdChats        ChatConversation[]   @relation("ChatConversationCreator")
-  chatParticipants    ChatParticipant[]
-  sentChatMessages    ChatMessage[]        @relation("ChatMessageSender")
-  chatMessageReceipts ChatMessageReceipt[]
-  directChatPairsAsA  ChatDirectPair[]     @relation("ChatDirectPairUserA")
-  directChatPairsAsB  ChatDirectPair[]     @relation("ChatDirectPairUserB")
+  moderatedGames       GameModerator[]       @relation("GameModeratorUser")
+  assignedModerators   GameModerator[]       @relation("GameModeratorAssigner")
+  createdChats         ChatConversation[]    @relation("ChatConversationCreator")
+  gameMemberships      GameMember[]
+  chatParticipants     ChatParticipant[]
+  sentChatMessages     ChatMessage[]         @relation("ChatMessageSender")
+  chatMessageReceipts  ChatMessageReceipt[]
+  directChatPairsAsA   ChatDirectPair[]      @relation("ChatDirectPairUserA")
+  directChatPairsAsB   ChatDirectPair[]      @relation("ChatDirectPairUserB")
+  chatMessageReactions ChatMessageReaction[]
+  createdChatEmotes    ChatEmote[]           @relation("ChatEmoteCreator")
+  blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
+  blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
 
   @@unique([email])
   @@map("user")
@@ -97,6 +103,12 @@ enum UserStatus {
   DELETED
 }
 
+enum GameMemberRole {
+  MEMBER
+  MODERATOR
+  ADMIN
+}
+
 enum GameStatus {
   ACTIVE
   ARCHIVED
@@ -124,6 +136,8 @@ model Game {
   categories GameCategory[]
   moderators GameModerator[]
   posts      Post[]
+  members    GameMember[]
+  chatEmotes ChatEmote[]
 
   @@index([status])
   @@index([createdAt])
@@ -175,6 +189,24 @@ model GameModerator {
   @@map("game_moderators")
 }
 
+model GameMember {
+  id     String @id @default(cuid())
+  gameId String
+  userId String
+
+  role GameMemberRole @default(MEMBER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, userId])
+  @@index([userId])
+  @@map("game_members")
+}
+
 enum ChatConversationType {
   DIRECT
   GROUP
@@ -205,6 +237,7 @@ enum ChatParticipantState {
 enum ChatMessageContentType {
   TEXT
   IMAGE
+  EMOTE
   FILE
   AUDIO
   VIDEO
@@ -214,6 +247,11 @@ enum ChatMessageContentType {
 enum ChatMessageStatus {
   SENT
   DELETED
+}
+
+enum ChatEmoteScope {
+  GLOBAL
+  GAME
 }
 
 model ChatConversation {
@@ -247,6 +285,7 @@ model ChatParticipant {
   role           ChatParticipantRole  @default(MEMBER)
   state          ChatParticipantState @default(ACTIVE)
   lastReadAt     DateTime?
+  pinnedAt       DateTime?
   archivedAt     DateTime?
   mutedAt        DateTime?
   blockedAt      DateTime?
@@ -296,11 +335,12 @@ model ChatMessage {
   editedAt  DateTime?
   deletedAt DateTime?
 
-  conversation ChatConversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender       User                 @relation("ChatMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
-  replyTo      ChatMessage?         @relation("ChatMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies      ChatMessage[]        @relation("ChatMessageReplies")
+  conversation ChatConversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User                  @relation("ChatMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo      ChatMessage?          @relation("ChatMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies      ChatMessage[]         @relation("ChatMessageReplies")
   receipts     ChatMessageReceipt[]
+  reactions    ChatMessageReaction[]
 
   @@unique([senderId, clientMessageId])
   @@index([conversationId, createdAt])
@@ -327,6 +367,58 @@ model ChatMessageReceipt {
   @@index([userId, deliveredAt])
   @@index([userId, readAt])
   @@map("chat_message_receipts")
+}
+
+model ChatMessageReaction {
+  id        String  @id @default(cuid())
+  messageId String
+  userId    String
+  emoteId   String?
+  emoji     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emote   ChatEmote?  @relation(fields: [emoteId], references: [id], onDelete: Restrict)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
+  @@index([emoteId])
+  @@map("chat_message_reactions")
+}
+
+model ChatEmote {
+  id     String         @id @default(cuid())
+  scope  ChatEmoteScope
+  gameId String?
+
+  shortcode    String
+  unicode      String?
+  imageUrl     String?
+  animationUrl String?
+
+  width    Int?
+  height   Int?
+  fileSize Int?
+  mimeType String?
+
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  game      Game? @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("ChatEmoteCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  reactions ChatMessageReaction[]
+
+  @@unique([scope, gameId, shortcode])
+  @@index([gameId])
+  @@index([createdById])
+  @@map("chat_emotes")
 }
 
 enum PostStatus {
@@ -399,18 +491,28 @@ model Post {
 }
 
 model PostMedia {
-  id     String @id @default(cuid())
-  postId String
+  id            String @id @default(cuid())
+  postId        String
+  mediaUploadId String @unique
 
-  url       String
-  publicId  String?
+  assetId  String
+  publicId String
+  url      String
+
   mediaType PostMediaType
   altText   String?
   sortOrder Int           @default(0)
 
+  width    Int?
+  height   Int?
+  duration Float?
+  bytes    Int?
+  format   String?
+
   createdAt DateTime @default(now())
 
-  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  post        Post        @relation(fields: [postId], references: [id], onDelete: Cascade)
+  mediaUpload MediaUpload @relation(fields: [mediaUploadId], references: [id], onDelete: Restrict)
 
   @@index([postId, sortOrder])
   @@map("post_media")
@@ -438,4 +540,88 @@ model PostTag {
   @@id([postId, tagId])
   @@index([tagId])
   @@map("post_tags")
+}
+
+enum MediaPurpose {
+  POST
+  COMMENT
+  CHAT
+  AVATAR
+  BANNER
+}
+
+enum MediaResourceType {
+  IMAGE
+  VIDEO
+}
+
+enum MediaUploadStatus {
+  INITIATED
+  UPLOADED
+  ATTACHED
+  DELETED
+  FAILED
+}
+
+model MediaUpload {
+  id     String @id @default(cuid())
+  userId String
+
+  purpose      MediaPurpose
+  resourceType MediaResourceType
+  status       MediaUploadStatus @default(INITIATED)
+
+  /**
+   * Cloudinary immutable asset identifier
+   * Useful for asset ownership and furture asset management
+   */
+  assetId String? @unique
+
+  /**
+   * Cloudinary public ID including the GachaHub-controlled folder.
+   * This is generated by the backend, never by the frontend.
+   */
+  publicId String @unique
+
+  secureUrl String?
+  version   Int?
+  format    String?
+
+  bytes    Int?
+  width    Int?
+  height   Int?
+  duration Float?
+
+  /**
+   * Signature returned by Cloudinary after upload.
+   * It is optional to persist; retaining it helps debugging/auditing.
+   */
+  responseSignature String?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime?
+  attachedAt DateTime?
+  deletedAt  DateTime?
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postMedia PostMedia?
+
+  @@index([userId, status, createdAt])
+  @@index([status, createdAt])
+  @@index([purpose, status])
+  @@map("media_uploads")
+}
+
+model ChatUserBlock {
+  id        String   @id @default(cuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("ChatUserBlockBlocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("ChatUserBlockBlocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+  @@map("chat_user_blocks")
 }
