@@ -168,6 +168,24 @@ export class ChatService {
   }
 
   /**
+   * Gets unread counts for chat badges.
+   *
+   * This endpoint is intentionally lighter than the inbox list so clients can
+   * refresh badge state without loading message previews.
+   */
+  async getUnreadSummary(userId: string) {
+    const [unreadMessageCount, unreadConversationCount] = await Promise.all([
+      this.chatRepository.countUnreadMessagesForUser(userId),
+      this.chatRepository.countUnreadConversationsForUser(userId),
+    ]);
+
+    return {
+      unreadMessageCount,
+      unreadConversationCount,
+    };
+  }
+
+  /**
    * Lists pending stranger message requests for a user.
    *
    * The receiver can preview encrypted message payloads from this list before

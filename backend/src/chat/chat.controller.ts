@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiCookieAuth,
@@ -16,6 +17,7 @@ import {
 } from '@nestjs/swagger';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
+import { GameModeratorGuard } from '../common/guards/game-moderator.guard';
 import { ChatService } from './chat.service';
 import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
@@ -111,6 +113,19 @@ export class ChatController {
       conversationId,
       query,
     );
+  }
+
+  /**
+   * Returns unread chat counts for the current user.
+   *
+   * Used by frontend badges without loading the full conversation list.
+   */
+  @Get('unread-summary')
+  @ApiOperation({
+    summary: 'Get current user chat unread summary',
+  })
+  getUnreadSummary(@Session() session: UserSession) {
+    return this.chatService.getUnreadSummary(session.user.id);
   }
 
   /**
@@ -403,12 +418,14 @@ export class ChatController {
   /**
    * Creates a custom game emote.
    *
-   * For now, only app admins and game moderators can create custom game emotes.
-   * Upload/crop/edit happens before this call; this stores final asset metadata.
+   * GameModeratorGuard allows app admins and moderators assigned to this game.
+   * The service keeps the same permission check as a second safety layer.
    */
   @Post('games/:gameId/emotes')
+  @UseGuards(GameModeratorGuard)
+  @ApiCookieAuth('better-auth.session_token')
   @ApiOperation({
-    summary: 'Create custom game chat emote',
+    summary: 'Create custom game chat emote. Admin or game moderator only.',
   })
   @ApiParam({
     name: 'gameId',

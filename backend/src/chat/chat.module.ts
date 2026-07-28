@@ -7,6 +7,7 @@ import { NoopChatDeliveryService } from './noop-chat-delivery.service';
 import { OpaqueMessageEncryptionService } from './opaque-message-encryption.service';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
+import { CommonModule } from '../common/common.module';
 
 /**
  * Chat feature module.
@@ -15,7 +16,7 @@ import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
  * and replaceable adapter ports used by the chat system.
  */
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, CommonModule],
   controllers: [ChatController],
   providers: [
     ChatRepository,

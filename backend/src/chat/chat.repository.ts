@@ -432,6 +432,68 @@ export class ChatRepository {
   }
 
   /**
+   * Counts all unread messages for one user's accepted inbox.
+   *
+   * Sender messages are excluded, and pending stranger requests are ignored so
+   * the normal chat badge only counts accepted conversations.
+   */
+  countUnreadMessagesForUser(userId: string) {
+    return this.prisma.chatMessageReceipt.count({
+      where: {
+        userId,
+        readAt: null,
+        message: {
+          status: 'SENT',
+          senderId: {
+            not: userId,
+          },
+          conversation: {
+            participants: {
+              some: {
+                userId,
+                state: 'ACTIVE',
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Counts accepted conversations with at least one unread message.
+   *
+   * This lets the frontend show "how many chats are unread" without loading
+   * the full inbox list.
+   */
+  countUnreadConversationsForUser(userId: string) {
+    return this.prisma.chatConversation.count({
+      where: {
+        participants: {
+          some: {
+            userId,
+            state: 'ACTIVE',
+          },
+        },
+        messages: {
+          some: {
+            status: 'SENT',
+            senderId: {
+              not: userId,
+            },
+            receipts: {
+              some: {
+                userId,
+                readAt: null,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  /**
    * Finds encrypted messages with cursor pagination.
    *
    * Results are queried newest-first for efficient pagination.
