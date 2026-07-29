@@ -1,16 +1,19 @@
-# React + Vite
+Refactored the frontend :L Duma cang nao qua
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Changed:
+- Moved frontend from Vite to Next.js.
+- Added TanStack Query for API fetching and loading/error states.
+- Split the big App.jsx file into smaller pages and components.
+- Changed community pages to use slugs like /community/wuthering-waves.
+- Made Explore search read from the URL, like /explore?q=wuthering.
+- Made community tabs read from the URL, like ?tab=Builds.
+- Updated mock data 
+- Moved backend API calls into frontend/lib/api.js.
+- Added query setup in frontend/lib/queries.js.
+- Removed old unused Vite files and unused prototype components.
+- Updated env vars from VITE_* to NEXT_PUBLIC_*.
+- Backend was not changed.
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Validation:
+- npm run lint passed.
+- npm run build passed.
