@@ -24,6 +24,9 @@ import type { ChatDeliveryPort } from './ports/chat-delivery.port';
 import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
 import type { MessageEncryptionPort } from './ports/message-encryption.port';
 import { ReactToMessageDto } from './dto/react-to-message.dto';
+import { CreateGroupChatDto } from './dto/create-group-chat.dto';
+import { UpdateGroupChatDto } from './dto/update-group-chat.dto';
+import { UpdateGroupMembersDto } from './dto/update-group-members.dto';
 
 /**
  * Service responsible for chat business logic.
@@ -140,6 +143,132 @@ export class ChatService {
       message: result.message,
       recipientState: 'PENDING',
     };
+  }
+
+  /**
+   * Creates a group chat with the caller as OWNER.
+   *
+   * The group starts with ACTIVE participants and can use the existing encrypted
+   * send-message endpoint for messages.
+   */
+  async createGroupChat(userId: string, dto: CreateGroupChatDto) {
+    const memberIds = Array.from(new Set(dto.memberUserIds)).filter(
+      (memberId) => memberId !== userId,
+    );
+
+    if (memberIds.length < 1) {
+      throw new BadRequestException('Group chat requires at least one member');
+    }
+
+    const users = await this.chatRepository.findActiveUsersByIds(memberIds);
+
+    if (users.length !== memberIds.length) {
+      throw new BadRequestException('One or more group members are invalid');
+    }
+
+    return this.chatRepository.createGroupConversation({
+      creatorId: userId,
+      title: dto.title,
+      photoUrl: dto.photoUrl,
+      memberUserIds: memberIds,
+    });
+  }
+
+  async updateGroupChat(
+    userId: string,
+    conversationId: string,
+    dto: UpdateGroupChatDto,
+  ) {
+    await this.assertCanManageGroup(userId, conversationId);
+
+    return this.chatRepository.updateGroupConversation({
+      conversationId,
+      title: dto.title,
+      photoUrl: dto.photoUrl,
+    });
+  }
+
+  /**
+   * Adds members to a group chat.
+   *
+   * Only OWNER and ADMIN participants can add members.
+   */
+  async addGroupMembers(
+    userId: string,
+    conversationId: string,
+    dto: UpdateGroupMembersDto,
+  ) {
+    await this.assertCanManageGroup(userId, conversationId);
+
+    const memberIds = Array.from(new Set(dto.userIds)).filter(
+      (memberId) => memberId !== userId,
+    );
+
+    if (memberIds.length < 1) {
+      throw new BadRequestException('At least one member is required');
+    }
+
+    const users = await this.chatRepository.findActiveUsersByIds(memberIds);
+
+    if (users.length !== memberIds.length) {
+      throw new BadRequestException('One or more group members are invalid');
+    }
+
+    return this.chatRepository.addGroupMembers(conversationId, memberIds);
+  }
+
+  /**
+   * Removes members from a group chat.
+   *
+   * Removed members are marked DECLINED so message history can remain intact.
+   */
+  async removeGroupMembers(
+    userId: string,
+    conversationId: string,
+    dto: UpdateGroupMembersDto,
+  ) {
+    await this.assertCanManageGroup(userId, conversationId);
+
+    if (dto.userIds.includes(userId)) {
+      throw new BadRequestException('Use leave group instead');
+    }
+
+    return this.chatRepository.removeGroupMembers(
+      conversationId,
+      Array.from(new Set(dto.userIds)),
+    );
+  }
+
+  /**
+   * Lets a normal group member leave.
+   *
+   * Owners must transfer ownership before leaving so the group always has an owner.
+   */
+  async leaveGroup(userId: string, conversationId: string) {
+    const conversation =
+      await this.chatRepository.findConversationWithParticipants(
+        conversationId,
+      );
+
+    if (!conversation || conversation.type !== 'GROUP') {
+      throw new NotFoundException('Group conversation not found');
+    }
+
+    const participant = conversation.participants.find(
+      (item) => item.userId === userId,
+    );
+
+    if (!participant || participant.state !== 'ACTIVE') {
+      throw new ForbiddenException('You are not in this group');
+    }
+
+    if (participant.role === 'OWNER') {
+      throw new BadRequestException(
+        'Owner cannot leave before transferring ownership',
+      );
+    }
+
+    return this.chatRepository.removeGroupMembers(conversationId, [userId]);
   }
 
   /**
@@ -680,22 +809,40 @@ export class ChatService {
 
     const participants =
       await this.chatRepository.findParticipants(conversationId);
+    const conversation =
+      await this.chatRepository.findConversationWithParticipants(
+        conversationId,
+      );
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    const deliverableParticipants =
+      conversation.type === 'GROUP'
+        ? participants.filter((participant) =>
+            ['ACTIVE', 'ARCHIVED'].includes(participant.state),
+          )
+        : participants;
 
     await this.unarchiveRecipientsOnNewMessage(
       conversationId,
       senderId,
-      participants,
+      deliverableParticipants,
     );
     await this.assertConversationUsersNotGloballyBlocked(
       senderId,
-      participants.map((participant) => participant.userId),
+      deliverableParticipants.map((participant) => participant.userId),
     );
 
-    const blockedOrDeclinedRecipient = participants.find(
-      (participant) =>
-        participant.userId !== senderId &&
-        ['BLOCKED', 'DECLINED'].includes(participant.state),
-    );
+    const blockedOrDeclinedRecipient =
+      conversation.type === 'DIRECT'
+        ? participants.find(
+            (participant) =>
+              participant.userId !== senderId &&
+              ['BLOCKED', 'DECLINED'].includes(participant.state),
+          )
+        : null;
 
     if (blockedOrDeclinedRecipient) {
       throw new ForbiddenException('Recipient is not accepting messages');
@@ -710,7 +857,9 @@ export class ChatService {
     const message = await this.chatRepository.createMessage({
       conversationId,
       senderId,
-      participantUserIds: participants.map((participant) => participant.userId),
+      participantUserIds: deliverableParticipants.map(
+        (participant) => participant.userId,
+      ),
       ciphertext: payload.ciphertext,
       encryptionMeta: payload.encryptionMeta as
         | Prisma.InputJsonValue
@@ -720,7 +869,7 @@ export class ChatService {
       replyToId: dto.message.replyToId,
     });
 
-    const recipientParticipants = participants.filter(
+    const recipientParticipants = deliverableParticipants.filter(
       (participant) => participant.userId !== senderId,
     );
 
@@ -741,6 +890,36 @@ export class ChatService {
       message,
       duplicate: false,
     };
+  }
+
+  /**
+   * Verifies the caller can manage a group conversation.
+   *
+   * Group management is scoped to active OWNER and ADMIN participants.
+   */
+  private async assertCanManageGroup(userId: string, conversationId: string) {
+    const conversation =
+      await this.chatRepository.findConversationWithParticipants(
+        conversationId,
+      );
+
+    if (!conversation || conversation.type !== 'GROUP') {
+      throw new NotFoundException('Group conversation not found');
+    }
+
+    const participant = conversation.participants.find(
+      (item) => item.userId === userId,
+    );
+
+    if (!participant || participant.state !== 'ACTIVE') {
+      throw new ForbiddenException('You are not in this group');
+    }
+
+    if (!['OWNER', 'ADMIN'].includes(participant.role)) {
+      throw new ForbiddenException('Group admin permission required');
+    }
+
+    return participant;
   }
 
   /**

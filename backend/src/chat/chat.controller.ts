@@ -21,12 +21,15 @@ import { GameModeratorGuard } from '../common/guards/game-moderator.guard';
 import { ChatService } from './chat.service';
 import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
+import { CreateGroupChatDto } from './dto/create-group-chat.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
 import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
 import { MarkMessagesDeliveredDto } from './dto/mark-messages-delivered.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
 import { ReactToMessageDto } from './dto/react-to-message.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { UpdateGroupChatDto } from './dto/update-group-chat.dto';
+import { UpdateGroupMembersDto } from './dto/update-group-members.dto';
 
 @ApiTags('Chat')
 @ApiCookieAuth('better-auth.session_token')
@@ -34,7 +37,7 @@ import { SendMessageDto } from './dto/send-message.dto';
 /**
  * Controller responsible for chat HTTP routes.
  *
- * Responsibility's:
+ * Responsibilities:
  * - Read route params, query params, request bodies, and current session user
  * - Call ChatService
  * - Keep chat business rules out of the HTTP layer
@@ -129,10 +132,122 @@ export class ChatController {
   }
 
   /**
+   * Creates a group conversation with the caller as owner.
+   *
+   * Group messages still use encrypted payloads later through the normal send
+   * message endpoint.
+   */
+  @Post('groups')
+  @ApiOperation({
+    summary: 'Create a group chat',
+  })
+  createGroupChat(
+    @Session() session: UserSession,
+    @Body() dto: CreateGroupChatDto,
+  ) {
+    return this.chatService.createGroupChat(session.user.id, dto);
+  }
+
+  /**
+   * Updates group title/photo.
+   *
+   * Only group OWNER and ADMIN participants can update group details.
+   */
+  @Patch('groups/:conversationId')
+  @ApiOperation({
+    summary: 'Update group chat details',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'cm123conversation456',
+  })
+  updateGroupChat(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: UpdateGroupChatDto,
+  ) {
+    return this.chatService.updateGroupChat(
+      session.user.id,
+      conversationId,
+      dto,
+    );
+  }
+
+  /**
+   * Adds users to an existing group chat.
+   *
+   * Only group OWNER and ADMIN participants can add members.
+   */
+  @Post('groups/:conversationId/members')
+  @ApiOperation({
+    summary: 'Add group chat members',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'cm123conversation456',
+  })
+  addGroupMembers(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: UpdateGroupMembersDto,
+  ) {
+    return this.chatService.addGroupMembers(
+      session.user.id,
+      conversationId,
+      dto,
+    );
+  }
+
+  /**
+   * Removes users from an existing group chat.
+   *
+   * Owner cannot be removed through this endpoint.
+   */
+  @Delete('groups/:conversationId/members')
+  @ApiOperation({
+    summary: 'Remove group chat members',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'cm123conversation456',
+  })
+  removeGroupMembers(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: UpdateGroupMembersDto,
+  ) {
+    return this.chatService.removeGroupMembers(
+      session.user.id,
+      conversationId,
+      dto,
+    );
+  }
+
+  /**
+   * Leaves a group chat as the current user.
+   *
+   * Owners must transfer ownership before leaving.
+   */
+  @Post('groups/:conversationId/leave')
+  @ApiOperation({
+    summary: 'Leave a group chat',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'cm123conversation456',
+  })
+  leaveGroup(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.chatService.leaveGroup(session.user.id, conversationId);
+  }
+
+  /**
    * Sends an encrypted message in an existing conversation
    *
    * Service logic validates that the sender is an active participant and that
-   * the recipient has not declined or blocked the conversation.
+   * the target conversation can still accept messages from the sender.
    */
   @Post('conversations/:conversationId/messages')
   @ApiOperation({
