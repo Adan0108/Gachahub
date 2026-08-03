@@ -109,11 +109,18 @@ export class PostsRepository {
     visibility?: Prisma.PostCreateInput['visibility'];
     isSpoiler?: boolean;
     media?: Array<{
+      mediaUploadId: string;
+      assetId: string;
+      publicId: string;
       url: string;
-      publicId?: string;
       mediaType: 'IMAGE' | 'GIF' | 'VIDEO';
       altText?: string;
       sortOrder: number;
+      width: number | null;
+      height: number | null;
+      duration: number | null;
+      bytes: number | null;
+      format: string | null;
     }>;
     tags?: Array<{
       name: string;
@@ -148,11 +155,6 @@ export class PostsRepository {
           status: params.status,
           visibility: params.visibility,
           isSpoiler: params.isSpoiler,
-          media: params.media?.length
-            ? {
-                create: params.media,
-              }
-            : undefined,
           tags: params.tags?.length
             ? {
                 create: params.tags.map((tag) => ({
@@ -168,8 +170,53 @@ export class PostsRepository {
               }
             : undefined,
         },
-        include: postInclude,
       });
+
+      if (params.media?.length) {
+        /*
+         * updateMany ensures the upload is still UPLOADED at the exact time
+         * it is attached. This protects against two simultaneous Post requests
+         * attempting to reuse the same mediaUploadId.
+         */
+        for (const media of params.media) {
+          const claimed = await tx.mediaUpload.updateMany({
+            where: {
+              id: media.mediaUploadId,
+              userId: params.authorId,
+              purpose: 'POST',
+              status: 'UPLOADED',
+            },
+            data: {
+              status: 'ATTACHED',
+              attachedAt: new Date(),
+            },
+          });
+
+          if (claimed.count !== 1) {
+            throw new Error(
+              `Media upload ${media.mediaUploadId} could not be claimed`,
+            );
+          }
+        }
+
+        await tx.postMedia.createMany({
+          data: params.media.map((media) => ({
+            postId: post.id,
+            mediaUploadId: media.mediaUploadId,
+            assetId: media.assetId,
+            publicId: media.publicId,
+            url: media.url,
+            mediaType: media.mediaType,
+            altText: media.altText,
+            sortOrder: media.sortOrder,
+            width: media.width,
+            height: media.height,
+            duration: media.duration,
+            bytes: media.bytes,
+            format: media.format,
+          })),
+        });
+      }
 
       if (post.status === 'PUBLISHED') {
         await tx.game.update({
@@ -184,7 +231,12 @@ export class PostsRepository {
         });
       }
 
-      return post;
+      return tx.post.findUniqueOrThrow({
+        where: {
+          id: post.id,
+        },
+        include: postInclude,
+      });
     });
   }
 

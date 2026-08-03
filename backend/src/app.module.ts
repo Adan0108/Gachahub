@@ -12,6 +12,9 @@ import { RedisModule } from './redis/redis.module';
 import { UsersModule } from './users/users.module';
 import { PostsModule } from './posts/posts.module';
 import { GameModeratorsModule } from './game-moderators/game-moderators.module';
+import { ScheduleModule } from '@nestjs/schedule';
+import { CloudinaryModule } from './cloudinary/cloudinary.module';
+import { MediaModule } from './media/media.module';
 
 /**
  * Root application module.
@@ -20,6 +23,11 @@ import { GameModeratorsModule } from './game-moderators/game-moderators.module';
  */
 @Module({
   imports: [
+    /*
+     * Provides scheduled cleanup jobs for orphaned Cloudinary uploads.
+     */
+    ScheduleModule.forRoot(),
+    CloudinaryModule,
     PrismaModule,
     RedisModule,
     AuthModule.forRoot({ auth }),
@@ -29,6 +37,7 @@ import { GameModeratorsModule } from './game-moderators/game-moderators.module';
     GameCategoriesModule,
     GameModeratorsModule,
     ChatModule,
+    MediaModule,
     PostsModule,
   ],
   controllers: [AppController],

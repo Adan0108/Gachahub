@@ -16,6 +16,23 @@ interface VerifyUploadResponseParams {
   signature: string;
 }
 
+interface CloudinaryDeleteResult {
+  result: string;
+}
+
+interface CloudinaryAssetResult {
+  asset_id: string;
+  public_id: string;
+  resource_type: string;
+  type: string;
+  format?: string;
+  bytes?: number;
+  width?: number;
+  height?: number;
+  duration?: number;
+  secure_url?: string;
+}
+
 @Injectable()
 export class CloudinaryService {
   constructor(
@@ -89,11 +106,16 @@ export class CloudinaryService {
    * invalidate=true requests CDN invalidation for already-cached derived
    * URLs. Asset deletion remains server-side because it requires signing.
    */
-  async deleteAsset(publicId: string, resourceType: ResourceType) {
-    return this.cloudinary.uploader.destroy(publicId, {
+  async deleteAsset(
+    publicId: string,
+    resourceType: ResourceType,
+  ): Promise<CloudinaryDeleteResult> {
+    const result: unknown = await this.cloudinary.uploader.destroy(publicId, {
       resource_type: resourceType,
       invalidate: true,
     });
+
+    return result as CloudinaryDeleteResult;
   }
 
   /**
@@ -103,9 +125,14 @@ export class CloudinaryService {
    * for every successful upload when response signatures are verified.
    * It can be used for auditing or suspicious uploads.
    */
-  async getAsset(publicId: string, resourceType: ResourceType) {
-    return this.cloudinary.api.resource(publicId, {
+  async getAsset(
+    publicId: string,
+    resourceType: ResourceType,
+  ): Promise<CloudinaryAssetResult> {
+    const result: unknown = await this.cloudinary.api.resource(publicId, {
       resource_type: resourceType,
     });
+
+    return result as CloudinaryAssetResult;
   }
 }

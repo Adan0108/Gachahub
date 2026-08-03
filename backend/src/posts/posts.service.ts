@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -9,10 +10,14 @@ import { CreatePostDto } from './dto/create-post.dto';
 import { PostSortDto, QueryPostsDto } from './dto/query-posts.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { PostsRepository } from './posts.repository';
+import { MediaService } from '../media/media.service';
 
 @Injectable()
 export class PostsService {
-  constructor(private readonly postsRepository: PostsRepository) {}
+  constructor(
+    private readonly postsRepository: PostsRepository,
+    private readonly mediaService: MediaService,
+  ) {}
 
   async findAll(query: QueryPostsDto) {
     const page = query.page ?? 1;
@@ -164,6 +169,76 @@ export class PostsService {
       }
     }
 
+    const mediaReferences = dto.media ?? [];
+
+    const uploads = await this.mediaService.getAttachableUploads({
+      ids: mediaReferences.map((item) => item.mediaUploadId),
+      userId: authorId,
+      purpose: 'POST',
+    });
+
+    /*
+     * MVP policy:
+     * - 0–10 images, or
+     * - exactly one video
+     * - images and video cannot be mixed
+     */
+    const imageCount = uploads.filter(
+      (upload) => upload.resourceType === 'IMAGE',
+    ).length;
+
+    const videoCount = uploads.filter(
+      (upload) => upload.resourceType === 'VIDEO',
+    ).length;
+
+    if (imageCount > 10) {
+      throw new BadRequestException('A post supports at most 10 images');
+    }
+
+    if (videoCount > 1) {
+      throw new BadRequestException('A post supports at most one video');
+    }
+
+    if (imageCount > 0 && videoCount > 0) {
+      throw new BadRequestException(
+        'A post cannot mix images and video in the MVP',
+      );
+    }
+
+    const referenceMap = new Map(
+      mediaReferences.map((item, index) => [
+        item.mediaUploadId,
+        {
+          altText: item.altText,
+          sortOrder: item.sortOrder ?? index,
+        },
+      ]),
+    );
+
+    const media = uploads.map((upload) => {
+      const reference = referenceMap.get(upload.id);
+
+      return {
+        mediaUploadId: upload.id,
+        assetId: upload.assetId!,
+        publicId: upload.publicId,
+        url: upload.secureUrl!,
+        mediaType:
+          upload.resourceType === 'IMAGE'
+            ? upload.format === 'gif'
+              ? ('GIF' as const)
+              : ('IMAGE' as const)
+            : ('VIDEO' as const),
+        altText: reference?.altText,
+        sortOrder: reference?.sortOrder ?? 0,
+        width: upload.width,
+        height: upload.height,
+        duration: upload.duration,
+        bytes: upload.bytes,
+        format: upload.format,
+      };
+    });
+
     const post = await this.postsRepository.create({
       authorId,
       gameId: dto.gameId,
@@ -174,15 +249,7 @@ export class PostsService {
       status: dto.status,
       visibility: dto.visibility,
       isSpoiler: dto.isSpoiler,
-
-      media: dto.media?.map((item, index) => ({
-        url: item.url,
-        publicId: item.publicId,
-        mediaType: item.mediaType,
-        altText: item.altText,
-        sortOrder: item.sortOrder ?? index,
-      })),
-
+      media,
       tags: this.normalizeTags(dto.tags),
     });
 

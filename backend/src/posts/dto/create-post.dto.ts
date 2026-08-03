@@ -8,12 +8,12 @@ import {
   IsInt,
   IsOptional,
   IsString,
-  IsUrl,
   MaxLength,
   Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import { PostMediaReferenceDto } from '../../media/dto/post-media-reference.dto';
 
 export enum PostTypeDto {
   GENERAL = 'GENERAL',
@@ -45,27 +45,6 @@ export enum PostMediaTypeDto {
 }
 
 export class CreatePostMediaDto {
-  @ApiProperty({
-    example: 'https://res.cloudinary.com/example/image/upload/post-image.png',
-  })
-  @IsUrl()
-  url!: string;
-
-  @ApiPropertyOptional({
-    example: 'gachahub/posts/abc123',
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  publicId?: string;
-
-  @ApiProperty({
-    enum: PostMediaTypeDto,
-    example: PostMediaTypeDto.IMAGE,
-  })
-  @IsEnum(PostMediaTypeDto)
-  mediaType!: PostMediaTypeDto;
-
   @ApiPropertyOptional({
     example: 'Jinhsi build statistics',
   })
@@ -148,15 +127,15 @@ export class CreatePostDto {
   isSpoiler?: boolean;
 
   @ApiPropertyOptional({
-    type: [CreatePostMediaDto],
+    type: [PostMediaReferenceDto],
     maxItems: 10,
   })
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(10)
   @ValidateNested({ each: true })
-  @Type(() => CreatePostMediaDto)
-  media?: CreatePostMediaDto[];
+  @Type(() => PostMediaReferenceDto)
+  media?: PostMediaReferenceDto[];
 
   @ApiPropertyOptional({
     type: [String],
