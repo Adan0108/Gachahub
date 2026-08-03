@@ -127,61 +127,67 @@ export class PostsRepository {
       slug: string;
     }>;
   }) {
-    return this.prisma.$transaction(async (tx) => {
-      const post = await tx.post.create({
-        data: {
-          author: {
-            connect: {
-              id: params.authorId,
+    return this.prisma.$transaction(
+      async (tx) => {
+        const post = await tx.post.create({
+          data: {
+            author: {
+              connect: {
+                id: params.authorId,
+              },
             },
-          },
-          game: {
-            connect: {
-              id: params.gameId,
+            game: {
+              connect: {
+                id: params.gameId,
+              },
             },
-          },
-          ...(params.categoryId
-            ? {
-                category: {
-                  connect: {
-                    id: params.categoryId,
-                  },
-                },
-              }
-            : {}),
-          title: params.title,
-          content: params.content,
-          type: params.type,
-          status: params.status,
-          visibility: params.visibility,
-          isSpoiler: params.isSpoiler,
-          tags: params.tags?.length
-            ? {
-                create: params.tags.map((tag) => ({
-                  tag: {
-                    connectOrCreate: {
-                      where: {
-                        slug: tag.slug,
-                      },
-                      create: tag,
+            ...(params.categoryId
+              ? {
+                  category: {
+                    connect: {
+                      id: params.categoryId,
                     },
                   },
-                })),
-              }
-            : undefined,
-        },
-      });
+                }
+              : {}),
+            title: params.title,
+            content: params.content,
+            type: params.type,
+            status: params.status,
+            visibility: params.visibility,
+            isSpoiler: params.isSpoiler,
+            tags: params.tags?.length
+              ? {
+                  create: params.tags.map((tag) => ({
+                    tag: {
+                      connectOrCreate: {
+                        where: {
+                          slug: tag.slug,
+                        },
+                        create: tag,
+                      },
+                    },
+                  })),
+                }
+              : undefined,
+          },
+        });
 
-      if (params.media?.length) {
-        /*
-         * updateMany ensures the upload is still UPLOADED at the exact time
-         * it is attached. This protects against two simultaneous Post requests
-         * attempting to reuse the same mediaUploadId.
-         */
-        for (const media of params.media) {
+        if (params.media?.length) {
+          /*
+           * updateMany ensures the uploads are still UPLOADED at the exact time
+           * they are attached. This protects against two simultaneous Post
+           * requests attempting to reuse the same mediaUploadId.
+           */
+          const mediaUploadIds = params.media.map(
+            (media) => media.mediaUploadId,
+          );
+
           const claimed = await tx.mediaUpload.updateMany({
             where: {
-              id: media.mediaUploadId,
+              id: {
+                in: mediaUploadIds,
+              },
               userId: params.authorId,
               purpose: 'POST',
               status: 'UPLOADED',
@@ -192,52 +198,54 @@ export class PostsRepository {
             },
           });
 
-          if (claimed.count !== 1) {
-            throw new Error(
-              `Media upload ${media.mediaUploadId} could not be claimed`,
-            );
+          if (claimed.count !== mediaUploadIds.length) {
+            throw new Error('One or more media uploads could not be claimed');
           }
+
+          await tx.postMedia.createMany({
+            data: params.media.map((media) => ({
+              postId: post.id,
+              mediaUploadId: media.mediaUploadId,
+              assetId: media.assetId,
+              publicId: media.publicId,
+              url: media.url,
+              mediaType: media.mediaType,
+              altText: media.altText,
+              sortOrder: media.sortOrder,
+              width: media.width,
+              height: media.height,
+              duration: media.duration,
+              bytes: media.bytes,
+              format: media.format,
+            })),
+          });
         }
 
-        await tx.postMedia.createMany({
-          data: params.media.map((media) => ({
-            postId: post.id,
-            mediaUploadId: media.mediaUploadId,
-            assetId: media.assetId,
-            publicId: media.publicId,
-            url: media.url,
-            mediaType: media.mediaType,
-            altText: media.altText,
-            sortOrder: media.sortOrder,
-            width: media.width,
-            height: media.height,
-            duration: media.duration,
-            bytes: media.bytes,
-            format: media.format,
-          })),
-        });
-      }
-
-      if (post.status === 'PUBLISHED') {
-        await tx.game.update({
-          where: {
-            id: params.gameId,
-          },
-          data: {
-            postCount: {
-              increment: 1,
+        if (post.status === 'PUBLISHED') {
+          await tx.game.update({
+            where: {
+              id: params.gameId,
             },
-          },
-        });
-      }
+            data: {
+              postCount: {
+                increment: 1,
+              },
+            },
+          });
+        }
 
-      return tx.post.findUniqueOrThrow({
-        where: {
-          id: post.id,
-        },
-        include: postInclude,
-      });
-    });
+        return tx.post.findUniqueOrThrow({
+          where: {
+            id: post.id,
+          },
+          include: postInclude,
+        });
+      },
+      {
+        maxWait: 5_000,
+        timeout: 15_000,
+      },
+    );
   }
 
   update(params: {
