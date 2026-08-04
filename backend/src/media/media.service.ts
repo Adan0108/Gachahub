@@ -19,6 +19,7 @@ import {
   MediaPurposeDto,
   MediaResourceTypeDto,
 } from './dto/create-upload-signatures.dto';
+import { ConfirmMediaUploadsDto } from './dto/confirm-media-uploads.dto';
 import { ConfirmMediaUploadDto } from './dto/confirm-media-upload.dto';
 import { MediaRepository } from './media.repository';
 
@@ -109,7 +110,75 @@ export class MediaService {
     return { items };
   }
 
-  async confirmUpload(dto: ConfirmMediaUploadDto, userId: string) {
+  async confirmUploads(dto: ConfirmMediaUploadsDto, userId: string) {
+    const uploadIds = dto.items.map((item) => item.uploadId);
+
+    if (new Set(uploadIds).size !== uploadIds.length) {
+      throw new BadRequestException(
+        'Duplicate uploadId values are not allowed',
+      );
+    }
+
+    const successful: Array<{
+      uploadId: string;
+      result: ReturnType<MediaService['formatUpload']>;
+    }> = [];
+
+    const failed: Array<{
+      uploadId: string;
+      statusCode: number;
+      error: string;
+    }> = [];
+
+    /*
+     * Process confirmations sequentially.
+     *
+     * This keeps database operations predictable and avoids issuing multiple
+     * Prisma operations against the same adapter at the same time.
+     * A maximum batch size of 10 keeps sequential processing reasonable.
+     */
+    for (const item of dto.items) {
+      try {
+        const result = await this.confirmUpload(item, userId);
+
+        successful.push({
+          uploadId: item.uploadId,
+          result,
+        });
+      } catch (error: unknown) {
+        if (error instanceof HttpException) {
+          const response = error.getResponse();
+
+          failed.push({
+            uploadId: item.uploadId,
+            statusCode: error.getStatus(),
+            error:
+              typeof response === 'string'
+                ? response
+                : this.getHttpExceptionMessage(response),
+          });
+
+          continue;
+        }
+
+        failed.push({
+          uploadId: item.uploadId,
+          statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+          error: 'Media upload confirmation failed',
+        });
+      }
+    }
+
+    return {
+      total: dto.items.length,
+      successfulCount: successful.length,
+      failedCount: failed.length,
+      successful,
+      failed,
+    };
+  }
+
+  private async confirmUpload(dto: ConfirmMediaUploadDto, userId: string) {
     const upload = await this.mediaRepository.findById(dto.uploadId);
 
     if (!upload) {
@@ -407,6 +476,18 @@ export class MediaService {
     } catch {
       return false;
     }
+  }
+
+  private getHttpExceptionMessage(response: object): string {
+    if ('message' in response && typeof response.message === 'string') {
+      return response.message;
+    }
+
+    if ('message' in response && Array.isArray(response.message)) {
+      return response.message.join(', ');
+    }
+
+    return 'Media upload confirmation failed';
   }
 
   private formatUpload(upload: {

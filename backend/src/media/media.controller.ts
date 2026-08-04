@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Param, Post } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
-import { ConfirmMediaUploadDto } from './dto/confirm-media-upload.dto';
+import { ConfirmMediaUploadsDto } from './dto/confirm-media-uploads.dto';
 import { CreateUploadSignaturesDto } from './dto/create-upload-signatures.dto';
 import { MediaService } from './media.service';
 
@@ -25,13 +25,13 @@ export class MediaController {
 
   @Post('confirm')
   @ApiOperation({
-    summary: 'Confirm and register a successful Cloudinary upload',
+    summary: 'Confirm and register one or more successful Cloudinary uploads',
   })
-  confirmUpload(
-    @Body() dto: ConfirmMediaUploadDto,
+  confirmUploads(
+    @Body() dto: ConfirmMediaUploadsDto,
     @Session() session: UserSession,
   ) {
-    return this.mediaService.confirmUpload(dto, session.user.id);
+    return this.mediaService.confirmUploads(dto, session.user.id);
   }
 
   @Delete(':id')
