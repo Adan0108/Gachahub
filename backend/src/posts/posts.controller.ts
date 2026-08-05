@@ -20,6 +20,7 @@ import { CreatePostDto } from './dto/create-post.dto';
 import { QueryPostsDto } from './dto/query-posts.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { PostsService } from './posts.service';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 @ApiTags('Posts')
 @Controller('posts')
@@ -33,6 +34,18 @@ export class PostsController {
   })
   findAll(@Query() query: QueryPostsDto) {
     return this.postsService.findAll(query);
+  }
+
+  @Get('mine')
+  @ApiCookieAuth('better-auth.session_token')
+  @ApiOperation({
+    summary: 'Find all posts owned by current user',
+  })
+  findMyPosts(
+    @Query() query: PaginationQueryDto,
+    @Session() session: UserSession,
+  ) {
+    return this.postsService.findByAuthor(query, session.user.id);
   }
 
   @Get(':id')

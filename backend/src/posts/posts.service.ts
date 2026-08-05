@@ -11,6 +11,7 @@ import { PostSortDto, QueryPostsDto } from './dto/query-posts.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { PostsRepository } from './posts.repository';
 import { MediaService } from '../media/media.service';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 @Injectable()
 export class PostsService {
@@ -148,6 +149,48 @@ export class PostsService {
     }
 
     return this.formatPost(post);
+  }
+
+  async findByAuthor(query: PaginationQueryDto, authorId: string) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const result = await this.postsRepository.findByAuthorId(authorId, {
+      page,
+      limit,
+    });
+
+    return {
+      items: result.items.map((post) => this.formatPost(post)),
+      meta: {
+        page,
+        limit,
+        total: result.total,
+        totalPages: Math.ceil(result.total / limit),
+      },
+    };
+  }
+
+  async findByAuthorPublic(query: PaginationQueryDto, authorId: string) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const result = await this.postsRepository.findByAuthorId(authorId, {
+      page,
+      limit,
+      visibility: 'PUBLIC',
+      status: 'PUBLISHED',
+    });
+
+    return {
+      items: result.items.map((post) => this.formatPost(post)),
+      meta: {
+        page,
+        limit,
+        total: result.total,
+        totalPage: Math.ceil(result.total / limit),
+      },
+    };
   }
 
   async create(dto: CreatePostDto, authorId: string) {

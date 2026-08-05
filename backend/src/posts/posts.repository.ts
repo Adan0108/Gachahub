@@ -55,6 +55,61 @@ export class PostsRepository {
     });
   }
 
+  async findByAuthorId(
+    authorId: string,
+    params: {
+      page: number;
+      limit: number;
+      visibility?: Prisma.PostWhereInput['visibility'];
+      status?: Prisma.PostWhereInput['status'];
+    },
+  ) {
+    const skip = (params.page - 1) * params.limit;
+
+    const where: Prisma.PostWhereInput = {
+      authorId,
+      deletedAt: null,
+
+      ...(params.visibility
+        ? {
+            visibility: params.visibility,
+          }
+        : {}),
+
+      ...(params.status
+        ? {
+            status: params.status,
+          }
+        : {}),
+    };
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.post.findMany({
+        where,
+        include: postInclude,
+        orderBy: [
+          {
+            createdAt: 'desc',
+          },
+          {
+            id: 'desc',
+          },
+        ],
+        skip,
+        take: params.limit,
+      }),
+
+      this.prisma.post.count({
+        where,
+      }),
+    ]);
+
+    return {
+      items,
+      total,
+    };
+  }
+
   count(where: Prisma.PostWhereInput) {
     return this.prisma.post.count({
       where,
