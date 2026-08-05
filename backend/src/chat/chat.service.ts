@@ -828,12 +828,6 @@ export class ChatService {
           )
         : participants;
 
-    await this.unarchiveRecipientsOnNewMessage(
-      conversationId,
-      senderId,
-      deliverableParticipants,
-    );
-
     if (conversation.type === 'DIRECT') {
       const recipient = deliverableParticipants.find(
         (participant) => participant.userId !== senderId,
@@ -859,6 +853,12 @@ export class ChatService {
     if (blockedOrDeclinedRecipient) {
       throw new ForbiddenException('Recipient is not accepting messages');
     }
+
+    await this.unarchiveRecipientsOnNewMessage(
+      conversationId,
+      senderId,
+      deliverableParticipants,
+    );
 
     await this.assertValidReplyTarget(conversationId, dto.message.replyToId);
 
