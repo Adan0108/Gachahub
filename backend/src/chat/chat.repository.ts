@@ -1043,21 +1043,35 @@ export class ChatRepository {
    * Archive is per-user. It hides the convo for this user without deleting
    * messages or affecting the other participant.
    */
-  updateParticipantArchivedState(
+  async updateParticipantArchivedState(
     conversationId: string,
     userId: string,
     archived: boolean,
   ) {
-    return this.prisma.chatParticipant.update({
+    // Both directions are scoped to the state they are allowed to leave: only ACTIVE
+    // rows archive, only ARCHIVED rows unarchive. That keeps PENDING out of the archive
+    // cycle entirely, so a pending message request cannot be laundered into ACTIVE by
+    // archiving and then unarchiving. Accepting a request stays a separate transition.
+    // Scoping the write rather than filtering in the caller keeps a rejected or repeated
+    // call a harmless no-op instead of an error.
+    await this.prisma.chatParticipant.updateMany({
+      where: {
+        conversationId,
+        userId,
+        state: archived ? 'ACTIVE' : 'ARCHIVED',
+      },
+      data: {
+        state: archived ? 'ARCHIVED' : 'ACTIVE',
+        archivedAt: archived ? new Date() : null,
+      },
+    });
+
+    return this.prisma.chatParticipant.findUniqueOrThrow({
       where: {
         conversationId_userId: {
           conversationId,
           userId,
         },
-      },
-      data: {
-        state: archived ? 'ARCHIVED' : 'ACTIVE',
-        archivedAt: archived ? new Date() : null,
       },
     });
   }
