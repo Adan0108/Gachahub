@@ -747,7 +747,7 @@ export class ChatService {
       messageId,
       ciphertext: dto.ciphertext,
       encryptionMeta: dto.encryptionMeta as Prisma.InputJsonValue | undefined,
-      contentType: dto.contentType ?? ChatMessageContentType.TEXT,
+      contentType: dto.contentType,
     });
   }
 
