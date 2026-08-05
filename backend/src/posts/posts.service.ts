@@ -188,7 +188,7 @@ export class PostsService {
         page,
         limit,
         total: result.total,
-        totalPage: Math.ceil(result.total / limit),
+        totalPages: Math.ceil(result.total / limit),
       },
     };
   }
