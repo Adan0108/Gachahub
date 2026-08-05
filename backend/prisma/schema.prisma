@@ -414,6 +414,12 @@ model ChatEmote {
 
   reactions ChatMessageReaction[]
 
+  // Only constrains game-scoped emotes: global emotes have a NULL `gameId`, and PostgreSQL
+  // treats NULLs as distinct, so this never fires for scope = GLOBAL. Global shortcode
+  // uniqueness is enforced by the partial unique index "chat_emotes_global_shortcode_key"
+  // (chat_emotes(shortcode) WHERE "gameId" IS NULL), added by hand in migration
+  // 20260805093000_add_global_emote_shortcode_unique because Prisma cannot express
+  // partial indexes. Keep that migration when regenerating this model.
   @@unique([scope, gameId, shortcode])
   @@index([gameId])
   @@index([createdById])
