@@ -96,23 +96,20 @@ export class ChatRepository {
   }
 
   /**
-   * Finds any global chat block between two users.
+   * Finds a specific directional block: did blockerId block blockedId.
    *
-   * Used before sending so either user's block stops direct messaging.
+   * Unlike findAnyUserBlock (which checks either direction), this is used
+   * where the two directions now mean different things: blocker cant send
+   * to the blocked user, but the blocked user can still send to the blocker
+   * (silently, with no notification)
    */
-  findAnyUserBlock(userIdA: string, userIdB: string) {
-    return this.prisma.chatUserBlock.findFirst({
+  findUserBlock(blockerId: string, blockedId: string) {
+    return this.prisma.chatUserBlock.findUnique({
       where: {
-        OR: [
-          {
-            blockerId: userIdA,
-            blockedId: userIdB,
-          },
-          {
-            blockerId: userIdB,
-            blockedId: userIdA,
-          },
-        ],
+        blockerId_blockedId: {
+          blockerId,
+          blockedId,
+        },
       },
     });
   }

@@ -69,7 +69,10 @@ export class ChatService {
       throw new NotFoundException('Recipient not found');
     }
 
-    await this.assertUsersNotGloballyBlocked(senderId, dto.recipientUserId);
+    await this.assertSenderHasNotBlockedRecipient(
+      senderId,
+      dto.recipientUserId,
+    );
 
     const existingMessage =
       await this.chatRepository.findMessageBySenderClientMessageId(
@@ -830,10 +833,19 @@ export class ChatService {
       senderId,
       deliverableParticipants,
     );
-    await this.assertConversationUsersNotGloballyBlocked(
-      senderId,
-      deliverableParticipants.map((participant) => participant.userId),
-    );
+
+    if (conversation.type === 'DIRECT') {
+      const recipient = deliverableParticipants.find(
+        (participant) => participant.userId !== senderId,
+      );
+
+      if (recipient) {
+        await this.assertSenderHasNotBlockedRecipient(
+          senderId,
+          recipient.userId,
+        );
+      }
+    }
 
     const blockedOrDeclinedRecipient =
       conversation.type === 'DIRECT'
@@ -873,6 +885,12 @@ export class ChatService {
       (participant) => participant.userId !== senderId,
     );
 
+    const shouldNotify = await this.shouldNotifyRecipients(
+      conversation.type,
+      senderId,
+      recipientParticipants,
+    );
+
     await this.chatDelivery.publishMessageCreated({
       conversationId,
       messageId: message.id,
@@ -880,9 +898,7 @@ export class ChatService {
       recipientUserIds: recipientParticipants.map(
         (participant) => participant.userId,
       ),
-      shouldNotify: recipientParticipants.every(
-        (participant) => participant.state === 'ACTIVE' && !participant.mutedAt,
-      ),
+      shouldNotify,
     });
 
     return {
@@ -965,41 +981,61 @@ export class ChatService {
   }
 
   /**
-   * Verifies neither user globally blocked the other.
+   * Verifies the sender has not blocked the recipient.
    *
-   * The block table is direction-aware, but direct messaging should stop if
-   * either side created a block.
+   * Block is now asymmetric: the blocker cannot send to the blocked users,
+   * but the blocked user can still send to the blocker (silently, with no notification)
    */
-  private async assertUsersNotGloballyBlocked(
-    userIdA: string,
-    userIdB: string,
+  private async assertSenderHasNotBlockedRecipient(
+    senderId: string,
+    recipientId: string,
   ) {
-    const block = await this.chatRepository.findAnyUserBlock(userIdA, userIdB);
+    const block = await this.chatRepository.findUserBlock(
+      senderId,
+      recipientId,
+    );
 
     if (block) {
-      throw new ForbiddenException('Messaging is blocked between these users');
+      throw new ForbiddenException('You have blocked this user');
     }
   }
 
   /**
-   * Checks global blocks between the sender and every recipient in a convo.
+   * Decides whether recipients should be notified about a new message.
    *
-   * This keeps the send path ready for future group/admin chat without changing
-   * the direct-message block behavior.
+   * Direct conversation additionally suppress notification for a recipient
+   * who has blocked the sender: the message still sends and stores normally,
+   * the recipient just never finds about it unless they open the convo.
    */
-  private async assertConversationUsersNotGloballyBlocked(
+  private async shouldNotifyRecipients(
+    conversationType: string,
     senderId: string,
-    participantUserIds: string[],
+    recipientParticipants: Array<{
+      userId: string;
+      state: string;
+      mutedAt: Date | null;
+    }>,
   ) {
-    const recipientUserIds = participantUserIds.filter(
-      (userId) => userId !== senderId,
+    const baseShouldNotify = recipientParticipants.every(
+      (participant) => participant.state === 'ACTIVE' && !participant.mutedAt,
     );
 
-    await Promise.all(
-      recipientUserIds.map((recipientUserId) =>
-        this.assertUsersNotGloballyBlocked(senderId, recipientUserId),
-      ),
+    if (!baseShouldNotify || conversationType !== 'DIRECT') {
+      return baseShouldNotify;
+    }
+
+    const recipient = recipientParticipants[0];
+
+    if (!recipient) {
+      return baseShouldNotify;
+    }
+
+    const recipientBlockedSender = await this.chatRepository.findUserBlock(
+      recipient.userId,
+      senderId,
     );
+
+    return !recipientBlockedSender;
   }
 
   /**
