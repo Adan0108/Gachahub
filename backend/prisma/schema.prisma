@@ -380,7 +380,13 @@ model ChatMessageReaction {
 
   message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
   user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emote   ChatEmote?  @relation(fields: [emoteId], references: [id], onDelete: Restrict)
+  // Cascade, not Restrict: deleting a Game cascades to its ChatEmotes, and a Restrict here
+  // would abort that whole delete with an opaque FK violation. Not SetNull either, because
+  // a reaction must carry exactly one of `emoji` / `emoteId` (see ChatService.reactToMessage)
+  // and nulling `emoteId` would leave a reaction with no content. Routine emote removal is
+  // the soft delete via ChatEmote.deletedAt; a hard delete means the emote is really gone,
+  // so its reactions should go with it.
+  emote   ChatEmote?  @relation(fields: [emoteId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId])
   @@index([messageId])
