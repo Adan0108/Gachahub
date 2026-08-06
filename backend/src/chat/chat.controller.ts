@@ -93,6 +93,20 @@ export class ChatController {
   }
 
   /**
+   * Lists archived conversations for the current user.
+   *
+   * Archived conversations are hidden from the normal inbox,
+   * this is where become visible again.
+   */
+  @Get('conversations/archived')
+  @ApiOperation({
+    summary: 'List archived conversations for the current user',
+  })
+  listArchivedConversations(@Session() session: UserSession) {
+    return this.chatService.listArchivedConversations(session.user.id);
+  }
+
+  /**
    * Lists encrypted messages in a convo.
    *
    * Pagination is cursor-based using beforeMessageId so clients can load older

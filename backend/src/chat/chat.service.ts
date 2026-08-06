@@ -337,6 +337,25 @@ export class ChatService {
   }
 
   /**
+   * Lists archived conversations for a user.
+   *
+   * Archive/unarchive already move a conversation state
+   * this just the missing way to see what's currently archived
+   */
+  async listArchivedConversations(userId: string) {
+    const conversations = await this.chatRepository.findInboxConversations(
+        userId,
+        'ARCHIVED',
+    );
+
+    return Promise.all(
+        conversations.map((conversation) =>
+            this.toConversationSummary(conversation, userId)
+        ),
+    );
+  }
+
+  /**
    * Lists encrypted messages in a convo
    *
    * Business behavior:
