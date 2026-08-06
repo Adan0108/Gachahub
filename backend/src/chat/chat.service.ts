@@ -860,13 +860,13 @@ export class ChatService {
       throw new ForbiddenException('Recipient is not accepting messages');
     }
 
+    await this.assertValidReplyTarget(conversationId, dto.message.replyToId);
+
     await this.unarchiveRecipientsOnNewMessage(
       conversationId,
       senderId,
       deliverableParticipants,
     );
-
-    await this.assertValidReplyTarget(conversationId, dto.message.replyToId);
 
     const payload =
       preparedPayload ??
