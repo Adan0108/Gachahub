@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsString, ValidateNested } from 'class-validator';
+import { IsDefined, IsString, ValidateNested } from 'class-validator';
 import { EncryptedMessagePayloadDto } from './encrypted-message-payload.dto';
 
 /**
@@ -21,6 +21,7 @@ export class CreateDirectMessageDto {
     type: EncryptedMessagePayloadDto,
     description: 'Encrypted first message payload.',
   })
+  @IsDefined()
   @ValidateNested()
   @Type(() => EncryptedMessagePayloadDto)
   message!: EncryptedMessagePayloadDto;

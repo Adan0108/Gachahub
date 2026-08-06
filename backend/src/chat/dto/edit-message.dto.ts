@@ -6,6 +6,7 @@ import {
   IsString,
   MaxLength,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { ChatMessageContentType } from '../../generated/prisma/client';
 
@@ -35,7 +36,7 @@ export class EditMessageDto {
     description:
       'Client-managed encryption metadata for the updated ciphertext.',
   })
-  @IsOptional()
+  @ValidateIf((object) => object.encryptionMeta !== undefined)
   @IsObject()
   encryptionMeta?: Record<string, unknown>;
 

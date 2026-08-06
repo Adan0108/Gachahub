@@ -5,6 +5,7 @@ import {
   IsArray,
   IsOptional,
   IsString,
+  IsUrl,
   MaxLength,
 } from 'class-validator';
 
@@ -20,7 +21,7 @@ export class CreateGroupChatDto {
     example: 'https://cdn.gachahub.com/chat/groups/team-build.png',
   })
   @IsOptional()
-  @IsString()
+  @IsUrl()
   @MaxLength(500)
   photoUrl?: string;
 

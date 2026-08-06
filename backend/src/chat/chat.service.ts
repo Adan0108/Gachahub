@@ -652,6 +652,12 @@ export class ChatService {
 
     await this.assertCanManageGameEmotes(userId, gameId);
 
+    if (!dto.unicode && !dto.imageUrl && !dto.animationUrl) {
+      throw new BadRequestException(
+        'Emote requires unicode, imageUrl, or animationUrl',
+      );
+    }
+
     return this.chatRepository.createGameChatEmote({
       gameId,
       createdById: userId,
@@ -885,21 +891,39 @@ export class ChatService {
       (participant) => participant.userId !== senderId,
     );
 
-    const shouldNotify = await this.shouldNotifyRecipients(
-      conversation.type,
-      senderId,
-      recipientParticipants,
+    const notifiableFlags = await Promise.all(
+      recipientParticipants.map((participant) =>
+        this.isRecipientNotifiable(conversation.type, senderId, participant),
+      ),
     );
 
-    await this.chatDelivery.publishMessageCreated({
-      conversationId,
-      messageId: message.id,
-      senderId,
-      recipientUserIds: recipientParticipants.map(
-        (participant) => participant.userId,
-      ),
-      shouldNotify,
-    });
+    const notifiableRecipientIds = recipientParticipants
+      .filter((_, index) => notifiableFlags[index])
+      .map((participant) => participant.userId);
+
+    const silentRecipientIds = recipientParticipants
+      .filter((_, index) => !notifiableFlags[index])
+      .map((participant) => participant.userId);
+
+    if (notifiableRecipientIds.length > 0) {
+      await this.chatDelivery.publishMessageCreated({
+        conversationId,
+        messageId: message.id,
+        senderId,
+        recipientUserIds: notifiableRecipientIds,
+        shouldNotify: true,
+      });
+    }
+
+    if (silentRecipientIds.length > 0) {
+      await this.chatDelivery.publishMessageCreated({
+        conversationId,
+        messageId: message.id,
+        senderId,
+        recipientUserIds: silentRecipientIds,
+        shouldNotify: false,
+      });
+    }
 
     return {
       conversationId,
@@ -1001,33 +1025,25 @@ export class ChatService {
   }
 
   /**
-   * Decides whether recipients should be notified about a new message.
+   * Decides whether one recipient should be notified about a new message.
    *
-   * Direct conversation additionally suppress notification for a recipient
-   * who has blocked the sender: the message still sends and stores normally,
-   * the recipient just never finds about it unless they open the convo.
+   * Checked per recipient so one muted/archived/blocking group member can't
+   * suppress notifications for everyone else. Direct conversations
+   * additionally suppress notification for a recipient who has blocked the
+   * sender: the message still sends and stores normally, the recipient just
+   * never finds out about it unless they open the convo.
    */
-  private async shouldNotifyRecipients(
+  private async isRecipientNotifiable(
     conversationType: string,
     senderId: string,
-    recipientParticipants: Array<{
-      userId: string;
-      state: string;
-      mutedAt: Date | null;
-    }>,
+    recipient: { userId: string; state: string; mutedAt: Date | null },
   ) {
-    const baseShouldNotify = recipientParticipants.every(
-      (participant) => participant.state === 'ACTIVE' && !participant.mutedAt,
-    );
-
-    if (!baseShouldNotify || conversationType !== 'DIRECT') {
-      return baseShouldNotify;
+    if (recipient.state !== 'ACTIVE' || recipient.mutedAt) {
+      return false;
     }
 
-    const recipient = recipientParticipants[0];
-
-    if (!recipient) {
-      return baseShouldNotify;
+    if (conversationType !== 'DIRECT') {
+      return true;
     }
 
     const recipientBlockedSender = await this.chatRepository.findUserBlock(
