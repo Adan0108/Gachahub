@@ -13,7 +13,7 @@ jest.mock('../generated/prisma/client', () => ({
 
 import { ChatService } from './chat.service';
 
-describe('ChatService - group chat', () => {
+describe('ChatService', () => {
   const repository = {
     findActiveUsersByIds: jest.fn(),
     createGroupConversation: jest.fn(),
@@ -24,6 +24,15 @@ describe('ChatService - group chat', () => {
     findParticipant: jest.fn(),
     transferGroupOwnership: jest.fn(),
     updateParticipantRole: jest.fn(),
+    findUserById: jest.fn(),
+    findDirectPair: jest.fn(),
+    createDirectConversationWithMessage: jest.fn(),
+    findMessageBySenderClientMessageId: jest.fn(),
+    findParticipants: jest.fn(),
+    findUserBlock: jest.fn(),
+    findSentMessageInConversation: jest.fn(),
+    createMessage: jest.fn(),
+    updateParticipantArchivedState: jest.fn(),
   };
 
   const messageEncryption = {
@@ -50,6 +59,18 @@ describe('ChatService - group chat', () => {
   ) => ({
     id: 'conversation-1',
     type: 'GROUP',
+    participants,
+  });
+
+  const directConversation = (
+    participants: Array<{
+      userId: string;
+      state: string;
+      mutedAt?: Date | null;
+    }>,
+  ) => ({
+    id: 'conversation-1',
+    type: 'DIRECT',
     participants,
   });
 
@@ -410,7 +431,7 @@ describe('ChatService - group chat', () => {
 
       await service.transferGroupOwnership('user-1', 'conversation-1', {
         newOwnerUserId: 'user-2',
-      } as any);
+      });
 
       expect(repository.transferGroupOwnership).toHaveBeenCalledWith(
         'conversation-1',
@@ -494,14 +515,454 @@ describe('ChatService - group chat', () => {
         role: 'ADMIN',
       });
 
-      await service.updateGroupMemberRole('user-1', 'conversation-1', 'user-2', {
-        role: 'ADMIN',
-      } as any);
+      await service.updateGroupMemberRole(
+        'user-1',
+        'conversation-1',
+        'user-2',
+        {
+          role: 'ADMIN',
+        } as any,
+      );
 
       expect(repository.updateParticipantRole).toHaveBeenCalledWith(
         'conversation-1',
         'user-2',
         'ADMIN',
+      );
+    });
+  });
+
+  describe('createDirectMessage', () => {
+    beforeEach(() => {
+      messageEncryption.preparePayload.mockResolvedValue({
+        ciphertext: 'cipher',
+        encryptionMeta: undefined,
+      });
+    });
+
+    it('rejects messaging yourself', async () => {
+      await expect(
+        service.createDirectMessage('user-1', {
+          recipientUserId: 'user-1',
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects when the recipient does not exist', async () => {
+      repository.findUserById.mockResolvedValue(null);
+
+      await expect(
+        service.createDirectMessage('user-1', {
+          recipientUserId: 'user-2',
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects when the recipient is not active', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'SUSPENDED',
+      });
+
+      await expect(
+        service.createDirectMessage('user-1', {
+          recipientUserId: 'user-2',
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects when the sender has blocked the recipient', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+      });
+      repository.findUserBlock.mockResolvedValue({
+        blockerId: 'user-1',
+        blockedId: 'user-2',
+      });
+
+      await expect(
+        service.createDirectMessage('user-1', {
+          recipientUserId: 'user-2',
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('returns duplicate when a message with the same clientMessageId exists', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+      });
+      repository.findUserBlock.mockResolvedValue(null);
+      repository.findMessageBySenderClientMessageId.mockResolvedValue({
+        id: 'message-1',
+        conversationId: 'conversation-1',
+      });
+
+      const result = await service.createDirectMessage('user-1', {
+        recipientUserId: 'user-2',
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(result).toEqual({
+        conversationId: 'conversation-1',
+        message: { id: 'message-1', conversationId: 'conversation-1' },
+        duplicate: true,
+      });
+      expect(repository.findDirectPair).not.toHaveBeenCalled();
+    });
+
+    it('rejects a reply target when there is no existing conversation', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+      });
+      repository.findUserBlock.mockResolvedValue(null);
+      repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+      repository.findDirectPair.mockResolvedValue(null);
+
+      await expect(
+        service.createDirectMessage('user-1', {
+          recipientUserId: 'user-2',
+          message: { clientMessageId: 'client-1', replyToId: 'message-x' },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(
+        repository.createDirectConversationWithMessage,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('creates a new pending conversation when no direct pair exists', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+      });
+      repository.findUserBlock.mockResolvedValue(null);
+      repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+      repository.findDirectPair.mockResolvedValue(null);
+      repository.createDirectConversationWithMessage.mockResolvedValue({
+        conversation: { id: 'conversation-1' },
+        message: { id: 'message-1' },
+      });
+
+      const result = await service.createDirectMessage('user-1', {
+        recipientUserId: 'user-2',
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(
+        repository.createDirectConversationWithMessage,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          senderId: 'user-1',
+          recipientUserId: 'user-2',
+          recipientState: 'PENDING',
+        }),
+      );
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserIds: ['user-2'],
+          shouldNotify: false,
+        }),
+      );
+      expect(result).toEqual({
+        conversationId: 'conversation-1',
+        message: { id: 'message-1' },
+        recipientState: 'PENDING',
+      });
+    });
+
+    it('delegates to the existing conversation when a direct pair already exists', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+      });
+      repository.findUserBlock.mockResolvedValue(null);
+      repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+      repository.findDirectPair.mockResolvedValue({
+        conversation: { id: 'conversation-1' },
+      });
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
+        { userId: 'user-2', state: 'ACTIVE', mutedAt: null },
+      ]);
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE' },
+        ]),
+      );
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.createDirectMessage('user-1', {
+        recipientUserId: 'user-2',
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(
+        repository.createDirectConversationWithMessage,
+      ).not.toHaveBeenCalled();
+      expect(repository.createMessage).toHaveBeenCalled();
+    });
+  });
+
+  describe('sendMessage (existing conversation)', () => {
+    beforeEach(() => {
+      messageEncryption.preparePayload.mockResolvedValue({
+        ciphertext: 'cipher',
+        encryptionMeta: undefined,
+      });
+      repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+      repository.findUserBlock.mockResolvedValue(null);
+    });
+
+    it('returns duplicate immediately without checking the sender', async () => {
+      repository.findMessageBySenderClientMessageId.mockResolvedValue({
+        id: 'message-1',
+        conversationId: 'conversation-1',
+      });
+
+      const result = await service.sendMessage('user-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(result.duplicate).toBe(true);
+      expect(repository.findParticipant).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the sender is not a participant', async () => {
+      repository.findParticipant.mockResolvedValue(null);
+
+      await expect(
+        service.sendMessage('user-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects when the sender participant is not active', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'PENDING',
+      });
+
+      await expect(
+        service.sendMessage('user-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects when the conversation is not found', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
+      ]);
+      repository.findConversationWithParticipants.mockResolvedValue(null);
+
+      await expect(
+        service.sendMessage('user-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects when the sender has blocked the direct recipient', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
+        { userId: 'user-2', state: 'ACTIVE', mutedAt: null },
+      ]);
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE' },
+        ]),
+      );
+      repository.findUserBlock.mockResolvedValue({
+        blockerId: 'user-1',
+        blockedId: 'user-2',
+      });
+
+      await expect(
+        service.sendMessage('user-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(repository.createMessage).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the direct recipient blocked or declined the conversation', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
+        { userId: 'user-2', state: 'DECLINED', mutedAt: null },
+      ]);
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'DECLINED' },
+        ]),
+      );
+
+      await expect(
+        service.sendMessage('user-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects an invalid reply target', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
+        { userId: 'user-2', state: 'ACTIVE', mutedAt: null },
+      ]);
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE' },
+        ]),
+      );
+      repository.findSentMessageInConversation.mockResolvedValue(null);
+
+      await expect(
+        service.sendMessage('user-1', 'conversation-1', {
+          message: {
+            clientMessageId: 'client-1',
+            replyToId: 'missing-message',
+          },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(repository.createMessage).not.toHaveBeenCalled();
+    });
+
+    it('stores the message but skips notifying a direct recipient who blocked the sender', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
+        { userId: 'user-2', state: 'ACTIVE', mutedAt: null },
+      ]);
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE' },
+        ]),
+      );
+      repository.findUserBlock.mockImplementation((blockerId, blockedId) => {
+        if (blockerId === 'user-2' && blockedId === 'user-1') {
+          return Promise.resolve({ blockerId: 'user-2', blockedId: 'user-1' });
+        }
+        return Promise.resolve(null);
+      });
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(repository.createMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          participantUserIds: ['user-1', 'user-2'],
+        }),
+      );
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledTimes(1);
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserIds: ['user-2'],
+          shouldNotify: false,
+        }),
+      );
+    });
+
+    it('does not let one muted group member suppress notification for others', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
+        { userId: 'user-2', state: 'ACTIVE', mutedAt: new Date() },
+        { userId: 'user-3', state: 'ACTIVE', mutedAt: null },
+      ]);
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          { userId: 'user-1', role: 'OWNER', state: 'ACTIVE' },
+          { userId: 'user-2', role: 'MEMBER', state: 'ACTIVE' },
+          { userId: 'user-3', role: 'MEMBER', state: 'ACTIVE' },
+        ]),
+      );
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserIds: ['user-3'],
+          shouldNotify: true,
+        }),
+      );
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserIds: ['user-2'],
+          shouldNotify: false,
+        }),
+      );
+    });
+
+    it('unarchives an archived recipient when a new message arrives', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
+        { userId: 'user-2', state: 'ARCHIVED', mutedAt: null },
+      ]);
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ARCHIVED' },
+        ]),
+      );
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(repository.updateParticipantArchivedState).toHaveBeenCalledWith(
+        'conversation-1',
+        'user-2',
+        false,
       );
     });
   });

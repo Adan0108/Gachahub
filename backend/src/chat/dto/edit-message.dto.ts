@@ -36,7 +36,7 @@ export class EditMessageDto {
     description:
       'Client-managed encryption metadata for the updated ciphertext.',
   })
-  @ValidateIf((object) => object.encryptionMeta !== undefined)
+  @ValidateIf((object: EditMessageDto) => object.encryptionMeta !== undefined)
   @IsObject()
   encryptionMeta?: Record<string, unknown>;
 
