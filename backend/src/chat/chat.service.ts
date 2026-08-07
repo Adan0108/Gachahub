@@ -251,9 +251,9 @@ export class ChatService {
    * and can leave normally afterward.
    */
   async transferGroupOwnership(
-      userId: string,
-      conversationId: string,
-      dto: TransferGroupOwnershipDto,
+    userId: string,
+    conversationId: string,
+    dto: TransferGroupOwnershipDto,
   ) {
     await this.assertIsGroupOwner(userId, conversationId);
 
@@ -262,20 +262,18 @@ export class ChatService {
     }
 
     const newOwner = await this.chatRepository.findParticipant(
-        conversationId,
-        dto.newOwnerUserId,
+      conversationId,
+      dto.newOwnerUserId,
     );
 
     if (!newOwner || newOwner.state !== 'ACTIVE') {
-      throw new BadRequestException(
-          'New owner must be an active group member',
-      );
+      throw new BadRequestException('New owner must be an active group member');
     }
 
     return this.chatRepository.transferGroupOwnership(
-        conversationId,
-        userId,
-        dto.newOwnerUserId,
+      conversationId,
+      userId,
+      dto.newOwnerUserId,
     );
   }
 
@@ -286,26 +284,26 @@ export class ChatService {
    * change who owns the group instead.
    */
   async updateGroupMemberRole(
-      userId: string,
-      conversationId: string,
-      targetUserId: string,
-      dto: UpdateGroupMemberRoleDto,
+    userId: string,
+    conversationId: string,
+    targetUserId: string,
+    dto: UpdateGroupMemberRoleDto,
   ) {
     await this.assertIsGroupOwner(userId, conversationId);
 
     if (targetUserId === userId) {
       throw new BadRequestException(
-          'User transferGroupOwnership to change your own role',
+        'User transferGroupOwnership to change your own role',
       );
     }
 
     const target = await this.chatRepository.findParticipant(
-        conversationId,
-        targetUserId,
+      conversationId,
+      targetUserId,
     );
 
     if (!target || target.state !== 'ACTIVE') {
-      throw new NotFoundException('Group member not found')
+      throw new NotFoundException('Group member not found');
     }
 
     if (target.role === 'OWNER') {
@@ -313,10 +311,10 @@ export class ChatService {
     }
 
     return this.chatRepository.updateParticipantRole(
-        conversationId,
-        targetUserId,
-        dto.role,
-    )
+      conversationId,
+      targetUserId,
+      dto.role,
+    );
   }
 
   /**
@@ -421,14 +419,14 @@ export class ChatService {
    */
   async listArchivedConversations(userId: string) {
     const conversations = await this.chatRepository.findInboxConversations(
-        userId,
-        'ARCHIVED',
+      userId,
+      'ARCHIVED',
     );
 
     return Promise.all(
-        conversations.map((conversation) =>
-            this.toConversationSummary(conversation, userId)
-        ),
+      conversations.map((conversation) =>
+        this.toConversationSummary(conversation, userId),
+      ),
     );
   }
 
@@ -1065,10 +1063,7 @@ export class ChatService {
    * management (OWNER + ADMIN), only the owner can do these two things.
    */
   private async assertIsGroupOwner(userId: string, conversationId: string) {
-    const participant = await this.assertCanManageGroup(
-        userId,
-        conversationId,
-    );
+    const participant = await this.assertCanManageGroup(userId, conversationId);
 
     if (participant.role !== 'OWNER') {
       throw new ForbiddenException('Only the group owner can do this');

@@ -427,36 +427,36 @@ export class ChatRepository {
    * briefly ownerless or briefly has two owner
    */
   transferGroupOwnership(
-      conversationId: string,
-      currentOwnerUserId: string,
-      newOwnerUserId: string,
+    conversationId: string,
+    currentOwnerUserId: string,
+    newOwnerUserId: string,
   ) {
     return this.prisma.$transaction([
-        this.prisma.chatParticipant.update({
-          where: {
-            conversationId_userId: {
-              conversationId,
-              userId: currentOwnerUserId,
-            },
+      this.prisma.chatParticipant.update({
+        where: {
+          conversationId_userId: {
+            conversationId,
+            userId: currentOwnerUserId,
           },
-          data: { role: 'ADMIN' },
-        }),
-        this.prisma.chatParticipant.update({
-          where: {
-            conversationId_userId: {
-              conversationId,
-              userId: newOwnerUserId,
-            },
+        },
+        data: { role: 'ADMIN' },
+      }),
+      this.prisma.chatParticipant.update({
+        where: {
+          conversationId_userId: {
+            conversationId,
+            userId: newOwnerUserId,
           },
-          data: { role: 'OWNER' },
-        }),
+        },
+        data: { role: 'OWNER' },
+      }),
     ]);
   }
 
   updateParticipantRole(
-      conversationId: string,
-      userId: string,
-      role: ChatParticipantRole,
+    conversationId: string,
+    userId: string,
+    role: ChatParticipantRole,
   ) {
     return this.prisma.chatParticipant.update({
       where: {
@@ -465,7 +465,7 @@ export class ChatRepository {
           userId,
         },
       },
-      data: { role }
+      data: { role },
     });
   }
 

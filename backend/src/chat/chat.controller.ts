@@ -253,14 +253,14 @@ export class ChatController {
     example: 'cm123conversation456',
   })
   transferGroupOwnership(
-      @Session() session: UserSession,
-      @Param('conversationId') conversationId: string,
-      @Body() dto: TransferGroupOwnershipDto,
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: TransferGroupOwnershipDto,
   ) {
     return this.chatService.transferGroupOwnership(
-        session.user.id,
-        conversationId,
-        dto,
+      session.user.id,
+      conversationId,
+      dto,
     );
   }
 
@@ -282,16 +282,16 @@ export class ChatController {
     example: 'target-user-id',
   })
   updateGroupMemberRole(
-      @Session() session: UserSession,
-      @Param('conversationId') conversationId: string,
-      @Param('userId') userId: string,
-      @Body() dto: UpdateGroupMemberRoleDto,
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+    @Param('userId') userId: string,
+    @Body() dto: UpdateGroupMemberRoleDto,
   ) {
     return this.chatService.updateGroupMemberRole(
-        session.user.id,
-        conversationId,
-        userId,
-        dto,
+      session.user.id,
+      conversationId,
+      userId,
+      dto,
     );
   }
 
