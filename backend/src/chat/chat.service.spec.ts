@@ -49,6 +49,8 @@ describe('ChatService', () => {
     markConversationRead: jest.fn(),
     updateMessage: jest.fn(),
     softDeleteMessage: jest.fn(),
+    findInboxConversations: jest.fn(),
+    countUnreadMessages: jest.fn(),
   };
 
   const messageEncryption = {
@@ -1652,6 +1654,78 @@ describe('ChatService', () => {
 
       expect(repository.softDeleteMessage).toHaveBeenCalledWith('message-1');
       expect(result).toEqual({ message: 'Message deleted successfully' });
+    });
+  });
+
+  describe('listConversations', () => {
+    const buildConversation = (
+      id: string,
+      updatedAt: Date,
+      currentUserPinnedAt: Date | null,
+    ) => ({
+      id,
+      type: 'DIRECT',
+      status: 'ACTIVE',
+      updatedAt,
+      createdAt: updatedAt,
+      lastMessageId: null,
+      participants: [
+        {
+          userId: 'user-1',
+          role: 'MEMBER',
+          state: 'ACTIVE',
+          pinnedAt: currentUserPinnedAt,
+          mutedAt: null,
+          user: { id: 'user-1' },
+        },
+        {
+          userId: 'user-2',
+          role: 'MEMBER',
+          state: 'ACTIVE',
+          pinnedAt: null,
+          mutedAt: null,
+          user: { id: 'user-2' },
+        },
+      ],
+      messages: [],
+    });
+
+    it('sorts pinned conversations first, then by most recently updated', async () => {
+      repository.findInboxConversations.mockResolvedValue([
+        buildConversation('conv-old-unpinned', new Date('2024-01-01'), null),
+        buildConversation(
+          'conv-new-pinned',
+          new Date('2024-01-03'),
+          new Date('2024-01-02'),
+        ),
+        buildConversation('conv-new-unpinned', new Date('2024-01-04'), null),
+        buildConversation(
+          'conv-old-pinned',
+          new Date('2024-01-02'),
+          new Date('2024-01-01'),
+        ),
+      ]);
+      repository.countUnreadMessages.mockResolvedValue(0);
+
+      const result = await service.listConversations('user-1');
+
+      expect(result.map((conversation) => conversation.id)).toEqual([
+        'conv-new-pinned',
+        'conv-old-pinned',
+        'conv-new-unpinned',
+        'conv-old-unpinned',
+      ]);
+    });
+
+    it('fetches only ACTIVE inbox conversations', async () => {
+      repository.findInboxConversations.mockResolvedValue([]);
+
+      await service.listConversations('user-1');
+
+      expect(repository.findInboxConversations).toHaveBeenCalledWith(
+        'user-1',
+        'ACTIVE',
+      );
     });
   });
 });
