@@ -1423,4 +1423,66 @@ describe('ChatService', () => {
       expect(result).toEqual({ unblockedCount: 1 });
     });
   });
+
+  describe('acceptRequest / declineRequest', () => {
+    const requestMethods: Array<{
+      name: string;
+      call: (userId: string, conversationId: string) => Promise<unknown>;
+      targetState: string;
+    }> = [
+      {
+        name: 'acceptRequest',
+        call: (u, c) => service.acceptRequest(u, c),
+        targetState: 'ACTIVE',
+      },
+      {
+        name: 'declineRequest',
+        call: (u, c) => service.declineRequest(u, c),
+        targetState: 'DECLINED',
+      },
+    ];
+
+    it.each(requestMethods)(
+      '$name rejects when the conversation is not found',
+      async ({ call }) => {
+        repository.findParticipant.mockResolvedValue(null);
+
+        await expect(call('user-1', 'conversation-1')).rejects.toThrow(
+          NotFoundException,
+        );
+      },
+    );
+
+    it.each(requestMethods)(
+      '$name rejects when the conversation is not pending',
+      async ({ call }) => {
+        repository.findParticipant.mockResolvedValue({
+          userId: 'user-1',
+          state: 'ACTIVE',
+        });
+
+        await expect(call('user-1', 'conversation-1')).rejects.toThrow(
+          BadRequestException,
+        );
+      },
+    );
+
+    it.each(requestMethods)(
+      '$name moves a pending conversation to $targetState',
+      async ({ call, targetState }) => {
+        repository.findParticipant.mockResolvedValue({
+          userId: 'user-1',
+          state: 'PENDING',
+        });
+
+        await call('user-1', 'conversation-1');
+
+        expect(repository.updateParticipantState).toHaveBeenCalledWith(
+          'conversation-1',
+          'user-1',
+          targetState,
+        );
+      },
+    );
+  });
 });
