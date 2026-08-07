@@ -33,6 +33,13 @@ describe('ChatService', () => {
     findSentMessageInConversation: jest.fn(),
     createMessage: jest.fn(),
     updateParticipantArchivedState: jest.fn(),
+    findGameById: jest.fn(),
+    findGameModerator: jest.fn(),
+    createGameChatEmote: jest.fn(),
+    findMessageWithParticipants: jest.fn(),
+    upsertMessageReaction: jest.fn(),
+    findUsableChatEmote: jest.fn(),
+    deleteMessageReaction: jest.fn(),
   };
 
   const messageEncryption = {
@@ -964,6 +971,252 @@ describe('ChatService', () => {
         'user-2',
         false,
       );
+    });
+  });
+
+  describe('createGameEmote', () => {
+    it('rejects when the game does not exist', async () => {
+      repository.findGameById.mockResolvedValue(null);
+
+      await expect(
+        service.createGameEmote('user-1', 'game-1', {
+          shortcode: 'catcooking',
+          unicode: '\\u{1F639}',
+        } as any),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects a caller who is neither admin nor game moderator', async () => {
+      repository.findGameById.mockResolvedValue({ id: 'game-1' });
+      repository.findUserById.mockResolvedValue({ id: 'user-1', role: 'USER' });
+      repository.findGameModerator.mockResolvedValue(null);
+
+      await expect(
+        service.createGameEmote('user-1', 'game-1', {
+          shortcode: 'catcooking',
+          unicode: '\\u{1F639}',
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('allows an app admin regardless of moderator assignment', async () => {
+      repository.findGameById.mockResolvedValue({ id: 'game-1' });
+      repository.findUserById.mockResolvedValue({
+        id: 'user-1',
+        role: 'ADMIN',
+      });
+      repository.createGameChatEmote.mockResolvedValue({ id: 'emote-1' });
+
+      await service.createGameEmote('user-1', 'game-1', {
+        shortcode: 'catcooking',
+        unicode: '\\u{1F639}',
+      });
+
+      expect(repository.findGameModerator).not.toHaveBeenCalled();
+      expect(repository.createGameChatEmote).toHaveBeenCalled();
+    });
+
+    it('allows an assigned game moderator', async () => {
+      repository.findGameById.mockResolvedValue({ id: 'game-1' });
+      repository.findUserById.mockResolvedValue({ id: 'user-1', role: 'USER' });
+      repository.findGameModerator.mockResolvedValue({
+        gameId: 'game-1',
+        userId: 'user-1',
+      });
+      repository.createGameChatEmote.mockResolvedValue({ id: 'emote-1' });
+
+      await service.createGameEmote('user-1', 'game-1', {
+        shortcode: 'catcooking',
+        unicode: '\\u{1F639}',
+      });
+
+      expect(repository.createGameChatEmote).toHaveBeenCalled();
+    });
+
+    it('rejects an emote with no renderable value', async () => {
+      repository.findGameById.mockResolvedValue({ id: 'game-1' });
+      repository.findUserById.mockResolvedValue({
+        id: 'user-1',
+        role: 'ADMIN',
+      });
+
+      await expect(
+        service.createGameEmote('user-1', 'game-1', {
+          shortcode: 'catcooking',
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(repository.createGameChatEmote).not.toHaveBeenCalled();
+    });
+
+    it('creates the emote with the given fields on success', async () => {
+      repository.findGameById.mockResolvedValue({ id: 'game-1' });
+      repository.findUserById.mockResolvedValue({
+        id: 'user-1',
+        role: 'ADMIN',
+      });
+      repository.createGameChatEmote.mockResolvedValue({ id: 'emote-1' });
+
+      await service.createGameEmote('user-1', 'game-1', {
+        shortcode: 'catcooking',
+        imageUrl: 'https://cdn.example.com/catcooking.png',
+      });
+
+      expect(repository.createGameChatEmote).toHaveBeenCalledWith(
+        expect.objectContaining({
+          gameId: 'game-1',
+          createdById: 'user-1',
+          shortcode: 'catcooking',
+          imageUrl: 'https://cdn.example.com/catcooking.png',
+        }),
+      );
+    });
+  });
+
+  describe('reactToMessage', () => {
+    const sentMessage = (
+      participants: Array<{ userId: string; state: string }>,
+    ) => ({
+      id: 'message-1',
+      status: 'SENT',
+      conversation: { participants },
+    });
+
+    it('rejects when the message does not exist or is not sent', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue(null);
+
+      await expect(
+        service.reactToMessage('user-1', 'message-1', { emoji: '😋' } as any),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects a caller who is not a readable participant', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue(
+        sentMessage([{ userId: 'user-2', state: 'ACTIVE' }]),
+      );
+
+      await expect(
+        service.reactToMessage('user-1', 'message-1', { emoji: '😋' } as any),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects a reaction with neither emoji nor emoteId', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue(
+        sentMessage([{ userId: 'user-1', state: 'ACTIVE' }]),
+      );
+
+      await expect(
+        service.reactToMessage('user-1', 'message-1', {} as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects a reaction with both emoji and emoteId', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue(
+        sentMessage([{ userId: 'user-1', state: 'ACTIVE' }]),
+      );
+
+      await expect(
+        service.reactToMessage('user-1', 'message-1', {
+          emoji: '😋',
+          emoteId: 'emote-1',
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('upserts an emoji reaction without checking custom emote usability', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue(
+        sentMessage([{ userId: 'user-1', state: 'ACTIVE' }]),
+      );
+      repository.upsertMessageReaction.mockResolvedValue({ id: 'reaction-1' });
+
+      await service.reactToMessage('user-1', 'message-1', {
+        emoji: '😋',
+      });
+
+      expect(repository.findUsableChatEmote).not.toHaveBeenCalled();
+      expect(repository.upsertMessageReaction).toHaveBeenCalledWith({
+        messageId: 'message-1',
+        userId: 'user-1',
+        emoji: '😋',
+        emoteId: null,
+      });
+    });
+
+    it('rejects a custom emote the caller cannot use', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue(
+        sentMessage([{ userId: 'user-1', state: 'ACTIVE' }]),
+      );
+      repository.findUsableChatEmote.mockResolvedValue(null);
+
+      await expect(
+        service.reactToMessage('user-1', 'message-1', {
+          emoteId: 'emote-1',
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(repository.upsertMessageReaction).not.toHaveBeenCalled();
+    });
+
+    it('upserts a custom emote reaction on success', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue(
+        sentMessage([{ userId: 'user-1', state: 'ACTIVE' }]),
+      );
+      repository.findUsableChatEmote.mockResolvedValue({ id: 'emote-1' });
+      repository.upsertMessageReaction.mockResolvedValue({ id: 'reaction-1' });
+
+      await service.reactToMessage('user-1', 'message-1', {
+        emoteId: 'emote-1',
+      });
+
+      expect(repository.upsertMessageReaction).toHaveBeenCalledWith({
+        messageId: 'message-1',
+        userId: 'user-1',
+        emoji: null,
+        emoteId: 'emote-1',
+      });
+    });
+  });
+
+  describe('removeReaction', () => {
+    it('rejects when the message does not exist or is not sent', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue(null);
+
+      await expect(
+        service.removeReaction('user-1', 'message-1'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects a caller who is not a readable participant', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        status: 'SENT',
+        conversation: {
+          participants: [{ userId: 'user-2', state: 'ACTIVE' }],
+        },
+      });
+
+      await expect(
+        service.removeReaction('user-1', 'message-1'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('removes the reaction and returns the count on success', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        status: 'SENT',
+        conversation: {
+          participants: [{ userId: 'user-1', state: 'ACTIVE' }],
+        },
+      });
+      repository.deleteMessageReaction.mockResolvedValue({ count: 1 });
+
+      const result = await service.removeReaction('user-1', 'message-1');
+
+      expect(repository.deleteMessageReaction).toHaveBeenCalledWith(
+        'message-1',
+        'user-1',
+      );
+      expect(result).toEqual({ removedCount: 1 });
     });
   });
 });
