@@ -21,6 +21,9 @@ describe('ChatService - group chat', () => {
     addGroupMembers: jest.fn(),
     removeGroupMembers: jest.fn(),
     findConversationWithParticipants: jest.fn(),
+    findParticipant: jest.fn(),
+    transferGroupOwnership: jest.fn(),
+    updateParticipantRole: jest.fn(),
   };
 
   const messageEncryption = {
@@ -335,6 +338,170 @@ describe('ChatService - group chat', () => {
       expect(repository.removeGroupMembers).toHaveBeenCalledWith(
         'conversation-1',
         ['user-1'],
+      );
+    });
+  });
+  describe('transferGroupOwnership', () => {
+    beforeEach(() => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          { userId: 'user-1', role: 'OWNER', state: 'ACTIVE' },
+          { userId: 'user-2', role: 'MEMBER', state: 'ACTIVE' },
+        ]),
+      );
+    });
+
+    it('rejects a non-owner caller', async () => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          { userId: 'user-1', role: 'ADMIN', state: 'ACTIVE' },
+          { userId: 'user-2', role: 'MEMBER', state: 'ACTIVE' },
+        ]),
+      );
+
+      await expect(
+        service.transferGroupOwnership('user-1', 'conversation-1', {
+          newOwnerUserId: 'user-2',
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(repository.transferGroupOwnership).not.toHaveBeenCalled();
+    });
+
+    it('rejects transferring ownership to yourself', async () => {
+      await expect(
+        service.transferGroupOwnership('user-1', 'conversation-1', {
+          newOwnerUserId: 'user-1',
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects when the new owner is not an active participant', async () => {
+      repository.findParticipant.mockResolvedValue(null);
+
+      await expect(
+        service.transferGroupOwnership('user-1', 'conversation-1', {
+          newOwnerUserId: 'user-2',
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(repository.transferGroupOwnership).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the new owner participant is not active', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-2',
+        state: 'PENDING',
+      });
+
+      await expect(
+        service.transferGroupOwnership('user-1', 'conversation-1', {
+          newOwnerUserId: 'user-2',
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('transfers ownership on success', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-2',
+        state: 'ACTIVE',
+      });
+      repository.transferGroupOwnership.mockResolvedValue([{}, {}]);
+
+      await service.transferGroupOwnership('user-1', 'conversation-1', {
+        newOwnerUserId: 'user-2',
+      } as any);
+
+      expect(repository.transferGroupOwnership).toHaveBeenCalledWith(
+        'conversation-1',
+        'user-1',
+        'user-2',
+      );
+    });
+  });
+
+  describe('updateGroupMemberRole', () => {
+    beforeEach(() => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          { userId: 'user-1', role: 'OWNER', state: 'ACTIVE' },
+          { userId: 'user-2', role: 'MEMBER', state: 'ACTIVE' },
+        ]),
+      );
+    });
+
+    it('rejects a non-owner caller', async () => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          { userId: 'user-1', role: 'ADMIN', state: 'ACTIVE' },
+          { userId: 'user-2', role: 'MEMBER', state: 'ACTIVE' },
+        ]),
+      );
+
+      await expect(
+        service.updateGroupMemberRole('user-1', 'conversation-1', 'user-2', {
+          role: 'ADMIN',
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(repository.updateParticipantRole).not.toHaveBeenCalled();
+    });
+
+    it('rejects changing your own role', async () => {
+      await expect(
+        service.updateGroupMemberRole('user-1', 'conversation-1', 'user-1', {
+          role: 'ADMIN',
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects when the target is not an active participant', async () => {
+      repository.findParticipant.mockResolvedValue(null);
+
+      await expect(
+        service.updateGroupMemberRole('user-1', 'conversation-1', 'user-2', {
+          role: 'ADMIN',
+        } as any),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(repository.updateParticipantRole).not.toHaveBeenCalled();
+    });
+
+    it("rejects changing the owner's role", async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-2',
+        state: 'ACTIVE',
+        role: 'OWNER',
+      });
+
+      await expect(
+        service.updateGroupMemberRole('user-1', 'conversation-1', 'user-2', {
+          role: 'ADMIN',
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(repository.updateParticipantRole).not.toHaveBeenCalled();
+    });
+
+    it('updates the role on success', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-2',
+        state: 'ACTIVE',
+        role: 'MEMBER',
+      });
+      repository.updateParticipantRole.mockResolvedValue({
+        userId: 'user-2',
+        role: 'ADMIN',
+      });
+
+      await service.updateGroupMemberRole('user-1', 'conversation-1', 'user-2', {
+        role: 'ADMIN',
+      } as any);
+
+      expect(repository.updateParticipantRole).toHaveBeenCalledWith(
+        'conversation-1',
+        'user-2',
+        'ADMIN',
       );
     });
   });
