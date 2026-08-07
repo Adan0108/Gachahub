@@ -14,7 +14,7 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import { AllowAnonymous, Session } from '@thallesp/nestjs-better-auth';
+import { OptionalAuth, Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { CreatePostDto } from './dto/create-post.dto';
 import { QueryPostsDto } from './dto/query-posts.dto';
@@ -28,12 +28,12 @@ export class PostsController {
   constructor(private readonly postsService: PostsService) {}
 
   @Get()
-  @AllowAnonymous()
+  @OptionalAuth()
   @ApiOperation({
     summary: 'List published public posts',
   })
-  findAll(@Query() query: QueryPostsDto) {
-    return this.postsService.findAll(query);
+  findAll(@Query() query: QueryPostsDto, @Session() session?: UserSession) {
+    return this.postsService.findAll(query, session?.user.id);
   }
 
   @Get('mine')
@@ -49,7 +49,7 @@ export class PostsController {
   }
 
   @Get(':id')
-  @AllowAnonymous()
+  @OptionalAuth()
   @ApiOperation({
     summary: 'Get a published public post by ID',
   })
@@ -57,8 +57,8 @@ export class PostsController {
     name: 'id',
     example: 'cm123abc456',
   })
-  findOne(@Param('id') id: string) {
-    return this.postsService.findOne(id);
+  findOne(@Param('id') id: string, @Session() session?: UserSession) {
+    return this.postsService.findOne(id, session?.user.id);
   }
 
   @Post()
@@ -98,5 +98,31 @@ export class PostsController {
   })
   remove(@Param('id') id: string, @Session() session: UserSession) {
     return this.postsService.remove(id, session.user.id);
+  }
+
+  @Post(':id/like')
+  @ApiCookieAuth('better-auth.session_token')
+  @ApiOperation({
+    summary: 'Like a post',
+  })
+  @ApiParam({
+    name: 'id',
+    example: 'cmubqwequ123',
+  })
+  like(@Param('id') id: string, @Session() session: UserSession) {
+    return this.postsService.like(id, session.user.id);
+  }
+
+  @Delete(':id/like')
+  @ApiCookieAuth('better-auth.session_token')
+  @ApiOperation({
+    summary: 'Unlike a post',
+  })
+  @ApiParam({
+    name: 'id',
+    example: 'cmubqwequ123',
+  })
+  unlike(@Param('id') id: string, @Session() session: UserSession) {
+    return this.postsService.unlike(id, session.user.id);
   }
 }

@@ -48,10 +48,25 @@ export class PostsRepository {
     orderBy:
       | Prisma.PostOrderByWithRelationInput
       | Prisma.PostOrderByWithRelationInput[];
+    userId?: string;
   }) {
+    const { userId, ...query } = params;
+
     return this.prisma.post.findMany({
-      ...params,
-      include: postInclude,
+      ...query,
+      include: {
+        ...postInclude,
+        postLikes: userId
+          ? {
+              where: {
+                userId,
+              },
+              select: {
+                userId: true,
+              },
+            }
+          : false,
+      },
     });
   }
 
@@ -116,7 +131,7 @@ export class PostsRepository {
     });
   }
 
-  findPublishedById(id: string) {
+  findPublishedById(id: string, userId?: string) {
     return this.prisma.post.findFirst({
       where: {
         id,
@@ -124,7 +139,19 @@ export class PostsRepository {
         visibility: 'PUBLIC',
         deletedAt: null,
       },
-      include: postInclude,
+      include: {
+        ...postInclude,
+        postLikes: userId
+          ? {
+              where: {
+                userId,
+              },
+              select: {
+                userId: true,
+              },
+            }
+          : false,
+      },
     });
   }
 
@@ -374,6 +401,107 @@ export class PostsRepository {
       }
 
       return post;
+    });
+  }
+
+  async like(postId: string, userId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const existingLike = await tx.postLike.findUnique({
+        where: {
+          postId_userId: {
+            postId,
+            userId,
+          },
+        },
+      });
+
+      if (!existingLike) {
+        await tx.postLike.create({
+          data: {
+            postId,
+            userId,
+          },
+        });
+
+        const post = await tx.post.update({
+          where: {
+            id: postId,
+          },
+          data: {
+            reactionCount: {
+              increment: 1,
+            },
+          },
+          select: {
+            reactionCount: true,
+          },
+        });
+
+        return {
+          liked: true,
+          likeCount: post.reactionCount,
+        };
+      }
+
+      const post = await tx.post.findUniqueOrThrow({
+        where: {
+          id: postId,
+        },
+        select: {
+          reactionCount: true,
+        },
+      });
+
+      return {
+        liked: true,
+        likeCount: post.reactionCount,
+      };
+    });
+  }
+
+  async unlike(postId: string, userId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.postLike.deleteMany({
+        where: {
+          postId,
+          userId,
+        },
+      });
+
+      if (deleted.count > 0) {
+        const post = await tx.post.update({
+          where: {
+            id: postId,
+          },
+          data: {
+            reactionCount: {
+              decrement: 1,
+            },
+          },
+          select: {
+            reactionCount: true,
+          },
+        });
+
+        return {
+          liked: false,
+          likeCount: post.reactionCount,
+        };
+      }
+
+      const post = await tx.post.findUniqueOrThrow({
+        where: {
+          id: postId,
+        },
+        select: {
+          reactionCount: true,
+        },
+      });
+
+      return {
+        liked: false,
+        likeCount: post.reactionCount,
+      };
     });
   }
 }

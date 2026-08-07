@@ -20,7 +20,7 @@ export class PostsService {
     private readonly mediaService: MediaService,
   ) {}
 
-  async findAll(query: QueryPostsDto) {
+  async findAll(query: QueryPostsDto, userId?: string) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const skip = (page - 1) * limit;
@@ -126,6 +126,7 @@ export class PostsService {
         skip,
         take: limit,
         orderBy,
+        userId,
       }),
       this.postsRepository.count(where),
     ]);
@@ -141,8 +142,8 @@ export class PostsService {
     };
   }
 
-  async findOne(id: string) {
-    const post = await this.postsRepository.findPublishedById(id);
+  async findOne(id: string, userId?: string) {
+    const post = await this.postsRepository.findPublishedById(id, userId);
 
     if (!post) {
       throw new NotFoundException('Post not found');
@@ -411,6 +412,26 @@ export class PostsService {
     };
   }
 
+  async like(postId: string, userId: string) {
+    const post = await this.postsRepository.findById(postId);
+
+    if (!post) {
+      throw new NotFoundException('Post not found');
+    }
+
+    return this.postsRepository.like(postId, userId);
+  }
+
+  async unlike(postId: string, userId: string) {
+    const post = await this.postsRepository.findById(postId);
+
+    if (!post) {
+      throw new NotFoundException('Post not found');
+    }
+
+    return this.postsRepository.unlike(postId, userId);
+  }
+
   private normalizeTags(tags?: string[]) {
     if (tags === undefined) {
       return undefined;
@@ -439,10 +460,18 @@ export class PostsService {
     return [...uniqueTags.values()];
   }
 
-  private formatPost<T extends { tags: Array<{ tag: unknown }> }>(post: T) {
+  private formatPost<
+    T extends {
+      tags: Array<{ tag: unknown }>;
+      postLikes?: Array<{ userId: string }>;
+    },
+  >(post: T) {
+    const { tags, postLikes, ...rest } = post;
+
     return {
-      ...post,
-      tags: post.tags.map((postTag) => postTag.tag),
+      ...rest,
+      tags: tags.map((postTag) => postTag.tag),
+      likedByCurrentUser: (postLikes?.length ?? 0) > 0,
     };
   }
 }

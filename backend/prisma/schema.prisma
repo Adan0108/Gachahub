@@ -24,6 +24,7 @@ model User {
   accounts     Account[]
   posts        Post[]
   mediaUploads MediaUpload[]
+  postLikes    PostLike[]
 
   moderatedGames       GameModerator[]       @relation("GameModeratorUser")
   assignedModerators   GameModerator[]       @relation("GameModeratorAssigner")
@@ -480,8 +481,9 @@ model Post {
   game     Game          @relation(fields: [gameId], references: [id], onDelete: Cascade)
   category GameCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
-  media PostMedia[]
-  tags  PostTag[]
+  media     PostMedia[]
+  tags      PostTag[]
+  postLikes PostLike[]
 
   @@index([gameId, status, createdAt])
   @@index([categoryId, status, createdAt])
@@ -542,6 +544,18 @@ model PostTag {
   @@map("post_tags")
 }
 
+model PostLike {
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  @@index([userId, createdAt])
+}
+
 enum MediaPurpose {
   POST
   COMMENT
@@ -592,7 +606,7 @@ model MediaUpload {
   /// Retaining it is optional but useful for auditing and debugging.
   responseSignature String?
 
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
   uploadedAt DateTime?
   attachedAt DateTime?
   deletedAt  DateTime?
