@@ -51,6 +51,7 @@ describe('ChatService', () => {
     softDeleteMessage: jest.fn(),
     findInboxConversations: jest.fn(),
     countUnreadMessages: jest.fn(),
+    findMessages: jest.fn(),
   };
 
   const messageEncryption = {
@@ -1726,6 +1727,110 @@ describe('ChatService', () => {
         'user-1',
         'ACTIVE',
       );
+    });
+  });
+
+  describe('findMessages', () => {
+    it('rejects when the conversation is not found', async () => {
+      repository.findParticipant.mockResolvedValue(null);
+
+      await expect(
+        service.findMessages('user-1', 'conversation-1', {} as any),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects an unreadable participant state', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'BLOCKED',
+      });
+
+      await expect(
+        service.findMessages('user-1', 'conversation-1', {} as any),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('passes the query params through and defaults the limit to 30', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findMessages.mockResolvedValue([]);
+
+      await service.findMessages('user-1', 'conversation-1', {
+        beforeMessageId: 'message-5',
+      });
+
+      expect(repository.findMessages).toHaveBeenCalledWith({
+        conversationId: 'conversation-1',
+        beforeMessageId: 'message-5',
+        limit: 30,
+      });
+    });
+
+    it('honors an explicit limit instead of the default', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findMessages.mockResolvedValue([]);
+
+      await service.findMessages('user-1', 'conversation-1', {
+        limit: 10,
+      });
+
+      expect(repository.findMessages).toHaveBeenCalledWith(
+        expect.objectContaining({ limit: 10 }),
+      );
+    });
+
+    it('reverses the newest-first DB order into chronological order', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findMessages.mockResolvedValue([
+        { id: 'message-3' },
+        { id: 'message-2' },
+        { id: 'message-1' },
+      ]);
+
+      const result = await service.findMessages('user-1', 'conversation-1', {});
+
+      expect(result.items.map((message) => message.id)).toEqual([
+        'message-1',
+        'message-2',
+        'message-3',
+      ]);
+    });
+
+    it('uses the oldest message in the page as the next cursor', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findMessages.mockResolvedValue([
+        { id: 'message-3' },
+        { id: 'message-2' },
+        { id: 'message-1' },
+      ]);
+
+      const result = await service.findMessages('user-1', 'conversation-1', {});
+
+      expect(result.meta.nextBeforeMessageId).toBe('message-1');
+    });
+
+    it('returns a null cursor and empty items when there are no messages', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findMessages.mockResolvedValue([]);
+
+      const result = await service.findMessages('user-1', 'conversation-1', {});
+
+      expect(result.meta.nextBeforeMessageId).toBeNull();
+      expect(result.items).toEqual([]);
     });
   });
 });
