@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   ChatMessageContentType,
+  ChatParticipantRole,
   ChatParticipantState,
   Prisma,
 } from '../generated/prisma/client';
@@ -416,6 +417,55 @@ export class ChatRepository {
       data: {
         state: 'DECLINED',
       },
+    });
+  }
+
+  /**
+   * Swaps OWNER between two participants in one transaction.
+   *
+   * Both updates happen together so the group is never
+   * briefly ownerless or briefly has two owner
+   */
+  transferGroupOwnership(
+      conversationId: string,
+      currentOwnerUserId: string,
+      newOwnerUserId: string,
+  ) {
+    return this.prisma.$transaction([
+        this.prisma.chatParticipant.update({
+          where: {
+            conversationId_userId: {
+              conversationId,
+              userId: currentOwnerUserId,
+            },
+          },
+          data: { role: 'ADMIN' },
+        }),
+        this.prisma.chatParticipant.update({
+          where: {
+            conversationId_userId: {
+              conversationId,
+              userId: newOwnerUserId,
+            },
+          },
+          data: { role: 'OWNER' },
+        }),
+    ]);
+  }
+
+  updateParticipantRole(
+      conversationId: string,
+      userId: string,
+      role: ChatParticipantRole,
+  ) {
+    return this.prisma.chatParticipant.update({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId,
+        },
+      },
+      data: { role }
     });
   }
 

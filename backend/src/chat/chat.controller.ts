@@ -28,8 +28,10 @@ import { MarkMessagesDeliveredDto } from './dto/mark-messages-delivered.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
 import { ReactToMessageDto } from './dto/react-to-message.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { TransferGroupOwnershipDto } from './dto/transfer-group-ownership.dto';
 import { UpdateGroupChatDto } from './dto/update-group-chat.dto';
 import { UpdateGroupMembersDto } from './dto/update-group-members.dto';
+import { UpdateGroupMemberRoleDto } from './dto/update-group-member-role.dto';
 
 @ApiTags('Chat')
 @ApiCookieAuth('better-auth.session_token')
@@ -234,6 +236,62 @@ export class ChatController {
       session.user.id,
       conversationId,
       dto,
+    );
+  }
+
+  /**
+   * Transfser group ownership to another active member.
+   *
+   * Owner-only. Previous owner becomes ADMIN instead losing access.
+   */
+  @Post('groups/:conversationId/transfer-ownership')
+  @ApiOperation({
+    summary: 'Transfer group ownership to another member',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'cm123conversation456',
+  })
+  transferGroupOwnership(
+      @Session() session: UserSession,
+      @Param('conversationId') conversationId: string,
+      @Body() dto: TransferGroupOwnershipDto,
+  ) {
+    return this.chatService.transferGroupOwnership(
+        session.user.id,
+        conversationId,
+        dto,
+    );
+  }
+
+  /**
+   * Promote or demotes a group member's role.
+   *
+   * Owner only, cannot be used to change owner's own role.
+   */
+  @Patch('groups/:conversationId/members/:userId/role')
+  @ApiOperation({
+    summary: 'Promote or demote a group member',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'cm123conversation456',
+  })
+  @ApiParam({
+    name: 'userId',
+    example: 'target-user-id',
+  })
+  updateGroupMemberRole(
+      @Session() session: UserSession,
+      @Param('conversationId') conversationId: string,
+      @Param('userId') userId: string,
+      @Body() dto: UpdateGroupMemberRoleDto,
+  ) {
+    return this.chatService.updateGroupMemberRole(
+        session.user.id,
+        conversationId,
+        userId,
+        dto,
     );
   }
 

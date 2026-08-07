@@ -11,6 +11,8 @@ import {
   Prisma,
   UserRole,
 } from '../generated/prisma/client';
+import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
+import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
 import { ChatRepository } from './chat.repository';
 import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
@@ -19,14 +21,14 @@ import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
 import { MarkMessagesDeliveredDto } from './dto/mark-messages-delivered.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
 import { SendMessageDto } from './dto/send-message.dto';
-import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
-import type { ChatDeliveryPort } from './ports/chat-delivery.port';
-import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
-import type { MessageEncryptionPort } from './ports/message-encryption.port';
 import { ReactToMessageDto } from './dto/react-to-message.dto';
 import { CreateGroupChatDto } from './dto/create-group-chat.dto';
+import { TransferGroupOwnershipDto } from './dto/transfer-group-ownership.dto';
 import { UpdateGroupChatDto } from './dto/update-group-chat.dto';
 import { UpdateGroupMembersDto } from './dto/update-group-members.dto';
+import { UpdateGroupMemberRoleDto } from './dto/update-group-member-role.dto';
+import type { MessageEncryptionPort } from './ports/message-encryption.port';
+import type { ChatDeliveryPort } from './ports/chat-delivery.port';
 
 /**
  * Service responsible for chat business logic.
@@ -240,6 +242,81 @@ export class ChatService {
       conversationId,
       Array.from(new Set(dto.userIds)),
     );
+  }
+
+  /**
+   * Transfer group ownership to another active member.
+   *
+   * The current owner becomes an ADMIN instead of losing group access,
+   * and can leave normally afterward.
+   */
+  async transferGroupOwnership(
+      userId: string,
+      conversationId: string,
+      dto: TransferGroupOwnershipDto,
+  ) {
+    await this.assertIsGroupOwner(userId, conversationId);
+
+    if (dto.newOwnerUserId === userId) {
+      throw new BadRequestException('You already own this group');
+    }
+
+    const newOwner = await this.chatRepository.findParticipant(
+        conversationId,
+        dto.newOwnerUserId,
+    );
+
+    if (!newOwner || newOwner.state !== 'ACTIVE') {
+      throw new BadRequestException(
+          'New owner must be an active group member',
+      );
+    }
+
+    return this.chatRepository.transferGroupOwnership(
+        conversationId,
+        userId,
+        dto.newOwnerUserId,
+    );
+  }
+
+  /**
+   * Promote or demotes a group member between MEMBER and ADMIN.
+   *
+   * Only the owner can change roles. Use transferGroupOwnership to
+   * change who owns the group instead.
+   */
+  async updateGroupMemberRole(
+      userId: string,
+      conversationId: string,
+      targetUserId: string,
+      dto: UpdateGroupMemberRoleDto,
+  ) {
+    await this.assertIsGroupOwner(userId, conversationId);
+
+    if (targetUserId === userId) {
+      throw new BadRequestException(
+          'User transferGroupOwnership to change your own role',
+      );
+    }
+
+    const target = await this.chatRepository.findParticipant(
+        conversationId,
+        targetUserId,
+    );
+
+    if (!target || target.state !== 'ACTIVE') {
+      throw new NotFoundException('Group member not found')
+    }
+
+    if (target.role === 'OWNER') {
+      throw new BadRequestException('Cannot change role of group owner');
+    }
+
+    return this.chatRepository.updateParticipantRole(
+        conversationId,
+        targetUserId,
+        dto.role,
+    )
   }
 
   /**
@@ -976,6 +1053,25 @@ export class ChatService {
 
     if (!['OWNER', 'ADMIN'].includes(participant.role)) {
       throw new ForbiddenException('Group admin permission required');
+    }
+
+    return participant;
+  }
+
+  /**
+   * Verifies the caller is the group's OWNER specifically.
+   *
+   * Ownership transfer and role changes are stricter than general group
+   * management (OWNER + ADMIN), only the owner can do these two things.
+   */
+  private async assertIsGroupOwner(userId: string, conversationId: string) {
+    const participant = await this.assertCanManageGroup(
+        userId,
+        conversationId,
+    );
+
+    if (participant.role !== 'OWNER') {
+      throw new ForbiddenException('Only the group owner can do this');
     }
 
     return participant;
