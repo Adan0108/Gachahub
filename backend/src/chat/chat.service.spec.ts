@@ -40,6 +40,11 @@ describe('ChatService', () => {
     upsertMessageReaction: jest.fn(),
     findUsableChatEmote: jest.fn(),
     deleteMessageReaction: jest.fn(),
+    updateParticipantState: jest.fn(),
+    updateParticipantMutedAt: jest.fn(),
+    updateParticipantPinnedAt: jest.fn(),
+    blockUser: jest.fn(),
+    unblockUser: jest.fn(),
   };
 
   const messageEncryption = {
@@ -1217,6 +1222,205 @@ describe('ChatService', () => {
         'user-1',
       );
       expect(result).toEqual({ removedCount: 1 });
+    });
+  });
+
+  describe('conversation participant toggles (permission)', () => {
+    const readableParticipantGatedMethods: Array<{
+      name: string;
+      call: (userId: string, conversationId: string) => Promise<unknown>;
+    }> = [
+      {
+        name: 'blockConversation',
+        call: (u, c) => service.blockConversation(u, c),
+      },
+      {
+        name: 'muteConversation',
+        call: (u, c) => service.muteConversation(u, c),
+      },
+      {
+        name: 'unmuteConversation',
+        call: (u, c) => service.unmuteConversation(u, c),
+      },
+      {
+        name: 'archiveConversation',
+        call: (u, c) => service.archiveConversation(u, c),
+      },
+      {
+        name: 'unarchiveConversation',
+        call: (u, c) => service.unarchiveConversation(u, c),
+      },
+      {
+        name: 'pinConversation',
+        call: (u, c) => service.pinConversation(u, c),
+      },
+      {
+        name: 'unpinConversation',
+        call: (u, c) => service.unpinConversation(u, c),
+      },
+    ];
+
+    it.each(readableParticipantGatedMethods)(
+      '$name rejects when the conversation is not found',
+      async ({ call }) => {
+        repository.findParticipant.mockResolvedValue(null);
+
+        await expect(call('user-1', 'conversation-1')).rejects.toThrow(
+          NotFoundException,
+        );
+      },
+    );
+
+    it.each(readableParticipantGatedMethods)(
+      '$name rejects an unreadable participant state',
+      async ({ call }) => {
+        repository.findParticipant.mockResolvedValue({
+          userId: 'user-1',
+          state: 'BLOCKED',
+        });
+
+        await expect(call('user-1', 'conversation-1')).rejects.toThrow(
+          ForbiddenException,
+        );
+      },
+    );
+  });
+
+  describe('conversation participant toggles (behavior)', () => {
+    beforeEach(() => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+    });
+
+    it('blockConversation sets the participant state to BLOCKED', async () => {
+      await service.blockConversation('user-1', 'conversation-1');
+
+      expect(repository.updateParticipantState).toHaveBeenCalledWith(
+        'conversation-1',
+        'user-1',
+        'BLOCKED',
+      );
+    });
+
+    it('muteConversation sets mutedAt to a timestamp', async () => {
+      await service.muteConversation('user-1', 'conversation-1');
+
+      expect(repository.updateParticipantMutedAt).toHaveBeenCalledWith(
+        'conversation-1',
+        'user-1',
+        expect.any(Date),
+      );
+    });
+
+    it('unmuteConversation clears mutedAt', async () => {
+      await service.unmuteConversation('user-1', 'conversation-1');
+
+      expect(repository.updateParticipantMutedAt).toHaveBeenCalledWith(
+        'conversation-1',
+        'user-1',
+        null,
+      );
+    });
+
+    it('archiveConversation sets archived to true', async () => {
+      await service.archiveConversation('user-1', 'conversation-1');
+
+      expect(repository.updateParticipantArchivedState).toHaveBeenCalledWith(
+        'conversation-1',
+        'user-1',
+        true,
+      );
+    });
+
+    it('unarchiveConversation sets archived to false', async () => {
+      await service.unarchiveConversation('user-1', 'conversation-1');
+
+      expect(repository.updateParticipantArchivedState).toHaveBeenCalledWith(
+        'conversation-1',
+        'user-1',
+        false,
+      );
+    });
+
+    it('pinConversation sets pinnedAt to a timestamp', async () => {
+      await service.pinConversation('user-1', 'conversation-1');
+
+      expect(repository.updateParticipantPinnedAt).toHaveBeenCalledWith(
+        'conversation-1',
+        'user-1',
+        expect.any(Date),
+      );
+    });
+
+    it('unpinConversation clears pinnedAt', async () => {
+      await service.unpinConversation('user-1', 'conversation-1');
+
+      expect(repository.updateParticipantPinnedAt).toHaveBeenCalledWith(
+        'conversation-1',
+        'user-1',
+        null,
+      );
+    });
+  });
+
+  describe('blockUser', () => {
+    it('rejects blocking yourself', async () => {
+      await expect(service.blockUser('user-1', 'user-1')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('rejects when the target user does not exist', async () => {
+      repository.findUserById.mockResolvedValue(null);
+
+      await expect(service.blockUser('user-1', 'user-2')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('rejects when the target user is not active', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'SUSPENDED',
+      });
+
+      await expect(service.blockUser('user-1', 'user-2')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('creates the block on success', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+      });
+      repository.blockUser.mockResolvedValue({
+        blockerId: 'user-1',
+        blockedId: 'user-2',
+      });
+
+      await service.blockUser('user-1', 'user-2');
+
+      expect(repository.blockUser).toHaveBeenCalledWith('user-1', 'user-2');
+    });
+  });
+
+  describe('unblockUser', () => {
+    it('rejects unblocking yourself', async () => {
+      await expect(service.unblockUser('user-1', 'user-1')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('removes the block and returns the count on success', async () => {
+      repository.unblockUser.mockResolvedValue({ count: 1 });
+
+      const result = await service.unblockUser('user-1', 'user-2');
+
+      expect(repository.unblockUser).toHaveBeenCalledWith('user-1', 'user-2');
+      expect(result).toEqual({ unblockedCount: 1 });
     });
   });
 });
