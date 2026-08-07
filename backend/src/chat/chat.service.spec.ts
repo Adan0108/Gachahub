@@ -45,6 +45,8 @@ describe('ChatService', () => {
     updateParticipantPinnedAt: jest.fn(),
     blockUser: jest.fn(),
     unblockUser: jest.fn(),
+    markMessagesDelivered: jest.fn(),
+    markConversationRead: jest.fn(),
   };
 
   const messageEncryption = {
@@ -1484,5 +1486,62 @@ describe('ChatService', () => {
         );
       },
     );
+  });
+
+  describe('markDelivered', () => {
+    it('marks the given message ids delivered and returns the count', async () => {
+      repository.markMessagesDelivered.mockResolvedValue({ count: 3 });
+
+      const result = await service.markDelivered('user-1', {
+        messageIds: ['message-1', 'message-2', 'message-3'],
+      });
+
+      expect(repository.markMessagesDelivered).toHaveBeenCalledWith('user-1', [
+        'message-1',
+        'message-2',
+        'message-3',
+      ]);
+      expect(result).toEqual({ deliveredCount: 3 });
+    });
+  });
+
+  describe('markRead', () => {
+    it('rejects when the conversation is not found', async () => {
+      repository.findParticipant.mockResolvedValue(null);
+
+      await expect(
+        service.markRead('user-1', 'conversation-1', {} as any),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects an unreadable participant state', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'BLOCKED',
+      });
+
+      await expect(
+        service.markRead('user-1', 'conversation-1', {} as any),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('marks the conversation read and returns the count', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.markConversationRead.mockResolvedValue({ count: 5 });
+
+      const result = await service.markRead('user-1', 'conversation-1', {
+        lastReadMessageId: 'message-5',
+      });
+
+      expect(repository.markConversationRead).toHaveBeenCalledWith({
+        conversationId: 'conversation-1',
+        userId: 'user-1',
+        lastReadMessageId: 'message-5',
+      });
+      expect(result).toEqual({ readCount: 5 });
+    });
   });
 });
