@@ -47,6 +47,8 @@ describe('ChatService', () => {
     unblockUser: jest.fn(),
     markMessagesDelivered: jest.fn(),
     markConversationRead: jest.fn(),
+    updateMessage: jest.fn(),
+    softDeleteMessage: jest.fn(),
   };
 
   const messageEncryption = {
@@ -1542,6 +1544,114 @@ describe('ChatService', () => {
         lastReadMessageId: 'message-5',
       });
       expect(result).toEqual({ readCount: 5 });
+    });
+  });
+
+  describe('editMessage / deleteMessage (permission)', () => {
+    const modifyMessageMethods: Array<{
+      name: string;
+      call: (userId: string, messageId: string) => Promise<unknown>;
+    }> = [
+      {
+        name: 'editMessage',
+        call: (u, m) => service.editMessage(u, m, { ciphertext: 'new-cipher' }),
+      },
+      { name: 'deleteMessage', call: (u, m) => service.deleteMessage(u, m) },
+    ];
+
+    it.each(modifyMessageMethods)(
+      '$name rejects when the message does not exist or is not sent',
+      async ({ call }) => {
+        repository.findMessageWithParticipants.mockResolvedValue(null);
+
+        await expect(call('user-1', 'message-1')).rejects.toThrow(
+          NotFoundException,
+        );
+      },
+    );
+
+    it.each(modifyMessageMethods)(
+      '$name rejects a caller who is not the sender',
+      async ({ call }) => {
+        repository.findMessageWithParticipants.mockResolvedValue({
+          id: 'message-1',
+          status: 'SENT',
+          senderId: 'user-2',
+          conversation: {
+            participants: [{ userId: 'user-1', state: 'ACTIVE' }],
+          },
+        });
+
+        await expect(call('user-1', 'message-1')).rejects.toThrow(
+          ForbiddenException,
+        );
+      },
+    );
+
+    it.each(modifyMessageMethods)(
+      '$name rejects a caller who cannot read the conversation',
+      async ({ call }) => {
+        repository.findMessageWithParticipants.mockResolvedValue({
+          id: 'message-1',
+          status: 'SENT',
+          senderId: 'user-1',
+          conversation: {
+            participants: [{ userId: 'user-1', state: 'BLOCKED' }],
+          },
+        });
+
+        await expect(call('user-1', 'message-1')).rejects.toThrow(
+          ForbiddenException,
+        );
+      },
+    );
+  });
+
+  describe('editMessage', () => {
+    it('updates the message on success', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        status: 'SENT',
+        senderId: 'user-1',
+        conversation: {
+          participants: [{ userId: 'user-1', state: 'ACTIVE' }],
+        },
+      });
+      repository.updateMessage.mockResolvedValue({
+        id: 'message-1',
+        ciphertext: 'new-cipher',
+      });
+
+      await service.editMessage('user-1', 'message-1', {
+        ciphertext: 'new-cipher',
+        contentType: 'IMAGE',
+      } as any);
+
+      expect(repository.updateMessage).toHaveBeenCalledWith({
+        messageId: 'message-1',
+        ciphertext: 'new-cipher',
+        encryptionMeta: undefined,
+        contentType: 'IMAGE',
+      });
+    });
+  });
+
+  describe('deleteMessage', () => {
+    it('soft deletes the message on success', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        status: 'SENT',
+        senderId: 'user-1',
+        conversation: {
+          participants: [{ userId: 'user-1', state: 'ACTIVE' }],
+        },
+      });
+      repository.softDeleteMessage.mockResolvedValue({ id: 'message-1' });
+
+      const result = await service.deleteMessage('user-1', 'message-1');
+
+      expect(repository.softDeleteMessage).toHaveBeenCalledWith('message-1');
+      expect(result).toEqual({ message: 'Message deleted successfully' });
     });
   });
 });
