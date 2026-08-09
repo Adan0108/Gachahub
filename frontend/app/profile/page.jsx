@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FiCompass, FiEdit3, FiMessageCircle, FiShare2, FiX } from "react-icons/fi";
 import { Art } from "../../components/Art";
@@ -14,22 +14,60 @@ export default function ProfilePage() {
   const [tab, setTab] = useState("Builds");
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
+  const [bio, setBio] = useState("We ride the waves, chasing the unknown.");
+  const [draftName, setDraftName] = useState("");
+  const [draftBio, setDraftBio] = useState("");
+  const [notice, setNotice] = useState("");
+  const nameInputRef = useRef(null);
+  const noticeTimerRef = useRef(null);
   const profile = useQuery(queries.profile());
   const displayName = name || profile.data?.name || "RoverX";
 
+  const openEditor = () => {
+    setDraftName(displayName);
+    setDraftBio(bio);
+    setEditing(true);
+  };
+
+  const closeEditor = () => setEditing(false);
+
+  const saveProfile = event => {
+    event.preventDefault();
+    setName(draftName.trim());
+    setBio(draftBio.trim() || "We ride the waves, chasing the unknown.");
+    setNotice("Profile saved locally");
+    setEditing(false);
+    window.clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
+  };
+
+  useEffect(() => {
+    if (!editing) return undefined;
+
+    nameInputRef.current?.focus();
+    const closeOnEscape = event => {
+      if (event.key === "Escape") closeEditor();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [editing]);
+
+  useEffect(() => () => window.clearTimeout(noticeTimerRef.current), []);
+
   return (
     <div className="page profile-page">
+      <div className="toast-slot" aria-live="polite">{notice}</div>
       <QueryNotice isLoading={profile.isLoading} isError={profile.isError} />
       <section className="profile-hero">
         <Art tone="indigo">{glyph.sparkle}</Art>
-        <button className="edit-profile" onClick={() => setEditing(true)} type="button"><FiEdit3 /> Edit Profile</button>
+        <button className="edit-profile" onClick={openEditor} type="button"><FiEdit3 /> Edit Profile</button>
         <div className="profile-main">
           <div className="profile-avatar"><Art tone="blue">{displayName.charAt(0).toUpperCase() || "R"}</Art></div>
           <div>
             <h1>{displayName} <span className="verified">{glyph.check}</span></h1>
             <p>{profile.data?.email || "UID: 9008420"}</p>
-            <blockquote>&quot;We ride the waves, chasing the unknown.&quot;</blockquote>
-            <div className="social"><FiShare2 /><FiMessageCircle /><FiCompass /></div>
+            <blockquote>&quot;{bio}&quot;</blockquote>
+            <div className="social" aria-label="Profile actions"><FiShare2 aria-hidden="true" /><FiMessageCircle aria-hidden="true" /><FiCompass aria-hidden="true" /></div>
           </div>
         </div>
       </section>
@@ -51,11 +89,11 @@ export default function ProfilePage() {
         </aside>
       </div>
       {editing && (
-        <div className="modal-backdrop" onClick={() => setEditing(false)}>
-          <form className="modal" onClick={event => event.stopPropagation()} onSubmit={event => { event.preventDefault(); setEditing(false); }}>
-            <div className="panel-head"><h2>Edit profile</h2><button type="button" onClick={() => setEditing(false)}><FiX /></button></div>
-            <label>Display name<input value={displayName} onChange={event => setName(event.target.value)} /></label>
-            <label>Bio<textarea defaultValue="We ride the waves, chasing the unknown." /></label>
+        <div className="modal-backdrop" onClick={closeEditor}>
+          <form aria-modal="true" className="modal" onClick={event => event.stopPropagation()} onSubmit={saveProfile} role="dialog">
+            <div className="panel-head"><h2>Edit profile</h2><button aria-label="Close edit profile" type="button" onClick={closeEditor}><FiX /></button></div>
+            <label>Display name<input ref={nameInputRef} value={draftName} onChange={event => setDraftName(event.target.value)} /></label>
+            <label>Bio<textarea value={draftBio} onChange={event => setDraftBio(event.target.value)} /></label>
             <button className="primary" type="submit">Save changes</button>
           </form>
         </div>

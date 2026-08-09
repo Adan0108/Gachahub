@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FiCompass, FiX } from "react-icons/fi";
 import { Art } from "../../components/Art";
 import { glyph, toolItems } from "../../components/constants";
@@ -9,7 +9,15 @@ function Toggle({ label, value, setValue }) {
   return (
     <div className="toggle-row">
       <span>{label}</span>
-      <button className={`toggle ${value ? "on" : ""}`} onClick={() => setValue(!value)} type="button"><i /></button>
+      <button
+        aria-label={label}
+        aria-pressed={value}
+        className={`toggle ${value ? "on" : ""}`}
+        onClick={() => setValue(!value)}
+        type="button"
+      >
+        <i />
+      </button>
     </div>
   );
 }
@@ -18,20 +26,39 @@ export default function StudioPage() {
   const [accent, setAccent] = useState("#8b5cf6");
   const [particles, setParticles] = useState(true);
   const [rarity, setRarity] = useState(true);
+  const [size, setSize] = useState("16:9");
+  const [font, setFont] = useState("Orbitron");
   const [saved, setSaved] = useState(false);
-  const save = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1600);
+  const [notice, setNotice] = useState("");
+  const timerRef = useRef(null);
+
+  const flash = message => {
+    window.clearTimeout(timerRef.current);
+    setNotice(message);
+    timerRef.current = window.setTimeout(() => setNotice(""), 1800);
   };
+
+  const save = () => {
+    window.clearTimeout(timerRef.current);
+    setSaved(true);
+    setNotice("Saved locally");
+    timerRef.current = window.setTimeout(() => {
+      setSaved(false);
+      setNotice("");
+    }, 1600);
+  };
+
+  useEffect(() => () => window.clearTimeout(timerRef.current), []);
 
   return (
     <div className="studio-page">
+      <div className="toast-slot" aria-live="polite">{notice}</div>
       <aside className="studio-tools">
         <div className="studio-title"><b>Build Canvas</b><button onClick={save} type="button">{saved ? "Saved!" : "Save"}</button></div>
         <small>Untitled Build</small>
         {toolItems.map(([Icon, item]) => <button key={item} type="button"><Icon />{item}</button>)}
         <div className="studio-spacer" />
-        <button type="button"><FiCompass /> Preview</button>
+        <button onClick={() => flash("Preview is not available yet")} type="button"><FiCompass /> Preview</button>
         <button className="export" onClick={() => window.print()} type="button">Export Image</button>
       </aside>
       <main className="canvas-wrap">
@@ -44,16 +71,18 @@ export default function StudioPage() {
         </div>
       </main>
       <aside className="canvas-settings">
-        <div className="panel-head"><b>Canvas Settings</b><FiX /></div>
+        <div className="panel-head"><b>Canvas Settings</b><FiX aria-hidden="true" /></div>
         <label>Theme</label>
-        <div className="color-row">{["#8b5cf6", "#56c7ff", "#ef62a6", "#f6b54a"].map(color => <button onClick={() => setAccent(color)} style={{ background: color }} className={accent === color ? "selected" : ""} key={color} type="button" />)}</div>
+        <div className="color-row">{["#8b5cf6", "#56c7ff", "#ef62a6", "#f6b54a"].map(color => <button aria-label={`Use color ${color}`} onClick={() => setAccent(color)} style={{ background: color }} className={accent === color ? "selected" : ""} key={color} type="button" />)}</div>
         <label>Size</label>
-        <div className="segmented"><button className="active" type="button">16:9</button><button type="button">4:3</button><button type="button">1:1</button></div>
+        <div className="segmented">
+          {["16:9", "4:3", "1:1"].map(item => <button aria-pressed={size === item} className={size === item ? "active" : ""} onClick={() => setSize(item)} key={item} type="button">{item}</button>)}
+        </div>
         <label>Font</label>
-        <select><option>Orbitron</option><option>Inter</option></select>
+        <select value={font} onChange={event => setFont(event.target.value)}><option>Orbitron</option><option>Inter</option></select>
         <Toggle label="Show Rarity" value={rarity} setValue={setRarity} />
         <Toggle label="Show Particles" value={particles} setValue={setParticles} />
-        <button className="reset" onClick={() => { setAccent("#8b5cf6"); setParticles(true); }} type="button">Reset All</button>
+        <button className="reset" onClick={() => { setAccent("#8b5cf6"); setParticles(true); setRarity(true); setSize("16:9"); setFont("Orbitron"); flash("Canvas settings reset"); }} type="button">Reset All</button>
       </aside>
     </div>
   );

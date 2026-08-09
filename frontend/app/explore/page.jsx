@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { FiCompass, FiSettings } from "react-icons/fi";
@@ -13,19 +13,30 @@ import { fallbacks, queries } from "../../lib/queries";
 function ExploreContent() {
   const searchParams = useSearchParams();
   const search = searchParams.get("q") || "";
+  const [notice, setNotice] = useState("");
+  const noticeTimerRef = useRef(null);
   const games = useQuery(queries.games(search));
   const gameData = games.data || fallbacks.games(search);
   const posts = fallbacks.posts({ search });
 
+  const showUnavailable = () => {
+    window.clearTimeout(noticeTimerRef.current);
+    setNotice("Smart Explore is not available yet");
+    noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
+  };
+
+  useEffect(() => () => window.clearTimeout(noticeTimerRef.current), []);
+
   return (
     <div className="page explore-page">
+      <div className="toast-slot" aria-live="polite">{notice}</div>
       <section className="welcome hero-polish explore-hero">
         <div>
           <span className="eyebrow">Discover</span>
           <h1>{search ? `Search results for "${search}"` : "Explore new builds, theories, and creators."}</h1>
           <p>Find new communities, trending posts, character guides, and recommendations in one place.</p>
         </div>
-        <button className="soft-btn" type="button"><FiCompass /> Smart Explore</button>
+        <button className="soft-btn" onClick={showUnavailable} type="button"><FiCompass /> Smart Explore</button>
       </section>
 
       <div className="explore-layout">

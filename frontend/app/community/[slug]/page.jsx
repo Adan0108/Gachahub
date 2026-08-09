@@ -15,7 +15,7 @@ import { fallbacks, queries } from "../../../lib/queries";
 function CommunityContent() {
   const params = useParams();
   const searchParams = useSearchParams();
-  const slug = params.slug;
+  const slug = Array.isArray(params.slug) ? params.slug[0] : params.slug;
   const selectedTab = searchParams.get("tab") || "Overview";
   const [joined, setJoined] = useState(true);
 
@@ -63,7 +63,7 @@ function CommunityContent() {
       </section>
       <div className="tabs wide">
         {categories.map(item => (
-          <Link className={selectedTab === item ? "active" : ""} href={`/community/${community.slug}?tab=${encodeURIComponent(item)}`} key={item}>{item}</Link>
+          <Link className={selectedTab === item ? "active" : ""} href={`/community/${encodeURIComponent(community.slug)}?tab=${encodeURIComponent(item)}`} key={item}>{item}</Link>
         ))}
       </div>
       <div className="community-body">

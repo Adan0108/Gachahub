@@ -6,19 +6,23 @@ export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
 export const backendRoutes = {
   health: "/health",
   games: "/games",
-  game: slug => `/games/${slug}`,
-  gameCategories: gameSlug => `/games/${gameSlug}/categories`,
+  game: slug => `/games/${encodePathParam(slug)}`,
+  gameCategories: gameSlug => `/games/${encodePathParam(gameSlug)}/categories`,
   currentUser: "/users/me",
   chatConversations: "/chat/conversations",
   chatRequests: "/chat/requests",
   chatDirect: "/chat/direct",
-  chatMessages: conversationId => `/chat/conversations/${conversationId}/messages`,
-  chatAcceptRequest: conversationId => `/chat/requests/${conversationId}/accept`,
-  chatDeclineRequest: conversationId => `/chat/requests/${conversationId}/decline`,
-  chatBlockConversation: conversationId => `/chat/conversations/${conversationId}/block`,
+  chatMessages: conversationId => `/chat/conversations/${encodePathParam(conversationId)}/messages`,
+  chatAcceptRequest: conversationId => `/chat/requests/${encodePathParam(conversationId)}/accept`,
+  chatDeclineRequest: conversationId => `/chat/requests/${encodePathParam(conversationId)}/decline`,
+  chatBlockConversation: conversationId => `/chat/conversations/${encodePathParam(conversationId)}/block`,
   chatDelivered: "/chat/messages/delivered",
-  chatRead: conversationId => `/chat/conversations/${conversationId}/read`,
+  chatRead: conversationId => `/chat/conversations/${encodePathParam(conversationId)}/read`,
 };
+
+function encodePathParam(value) {
+  return encodeURIComponent(String(value || ""));
+}
 
 export function communitySymbol(name = "") {
   const lower = name.toLowerCase();
@@ -95,16 +99,19 @@ function withQuery(path, query = {}) {
 }
 
 async function request(path, options = {}) {
-  const { skipJsonHeader = false, ...fetchOptions } = options;
+  const { headers, body, ...fetchOptions } = options;
 
   if (USE_MOCKS) return mockResponse(path);
+
+  const shouldSendJsonHeader = body !== undefined && !(body instanceof FormData);
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: "include",
     headers: {
-      ...(skipJsonHeader ? {} : { "Content-Type": "application/json" }),
-      ...fetchOptions.headers,
+      ...(shouldSendJsonHeader ? { "Content-Type": "application/json" } : {}),
+      ...headers,
     },
+    ...(body !== undefined ? { body } : {}),
     ...fetchOptions,
   });
 
@@ -120,6 +127,11 @@ async function request(path, options = {}) {
   }
 
   return response.status === 204 ? null : response.json();
+}
+
+function mutation(path, payload, options = {}) {
+  const body = payload === undefined ? undefined : JSON.stringify(payload);
+  return request(path, { ...options, method: options.method || "POST", body });
 }
 
 async function mockResponse(path) {
@@ -160,7 +172,7 @@ function encryptedMessagePayload({
 export const api = {
   baseUrl: API_BASE_URL,
   usingMocks: USE_MOCKS,
-  getHealth: () => request(backendRoutes.health, { skipJsonHeader: true }),
+  getHealth: () => request(backendRoutes.health),
   getGames: async (query = {}) => {
     const response = await request(withQuery(backendRoutes.games, query));
     const items = Array.isArray(response) ? response : response.items || [];
@@ -179,23 +191,11 @@ export const api = {
   getChatConversations: () => request(backendRoutes.chatConversations),
   getChatRequests: () => request(backendRoutes.chatRequests),
   getChatMessages: (conversationId, query = {}) => request(withQuery(backendRoutes.chatMessages(conversationId), query)),
-  createDirectMessage: ({ recipientUserId, message }) => request(backendRoutes.chatDirect, {
-    method: "POST",
-    body: JSON.stringify({ recipientUserId, message: encryptedMessagePayload(message) }),
-  }),
-  sendChatMessage: (conversationId, message) => request(backendRoutes.chatMessages(conversationId), {
-    method: "POST",
-    body: JSON.stringify({ message: encryptedMessagePayload(message) }),
-  }),
-  acceptChatRequest: conversationId => request(backendRoutes.chatAcceptRequest(conversationId), { method: "POST" }),
-  declineChatRequest: conversationId => request(backendRoutes.chatDeclineRequest(conversationId), { method: "POST" }),
-  blockChatConversation: conversationId => request(backendRoutes.chatBlockConversation(conversationId), { method: "POST" }),
-  markChatDelivered: messageIds => request(backendRoutes.chatDelivered, {
-    method: "POST",
-    body: JSON.stringify({ messageIds }),
-  }),
-  markChatRead: (conversationId, lastReadMessageId) => request(backendRoutes.chatRead(conversationId), {
-    method: "POST",
-    body: JSON.stringify(lastReadMessageId ? { lastReadMessageId } : {}),
-  }),
+  createDirectMessage: ({ recipientUserId, message }) => mutation(backendRoutes.chatDirect, { recipientUserId, message: encryptedMessagePayload(message) }),
+  sendChatMessage: (conversationId, message) => mutation(backendRoutes.chatMessages(conversationId), { message: encryptedMessagePayload(message) }),
+  acceptChatRequest: conversationId => mutation(backendRoutes.chatAcceptRequest(conversationId)),
+  declineChatRequest: conversationId => mutation(backendRoutes.chatDeclineRequest(conversationId)),
+  blockChatConversation: conversationId => mutation(backendRoutes.chatBlockConversation(conversationId)),
+  markChatDelivered: messageIds => mutation(backendRoutes.chatDelivered, { messageIds }),
+  markChatRead: (conversationId, lastReadMessageId) => mutation(backendRoutes.chatRead(conversationId), lastReadMessageId ? { lastReadMessageId } : {}),
 };

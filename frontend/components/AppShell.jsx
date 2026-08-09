@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   FiBell,
@@ -25,14 +25,14 @@ function Logo() {
   );
 }
 
-function Sidebar({ open, close }) {
+function Sidebar({ open, close, onNotice }) {
   const pathname = usePathname();
 
   return (
     <>
-      <div className={`scrim ${open ? "show" : ""}`} onClick={close} />
-      <aside className={`sidebar ${open ? "open" : ""}`}>
-        <button className="mobile-close" onClick={close} type="button"><FiX /></button>
+      <div aria-hidden="true" className={`scrim ${open ? "show" : ""}`} onClick={close} />
+      <aside aria-label="Primary navigation" className={`sidebar ${open ? "open" : ""}`}>
+        <button aria-label="Close menu" className="mobile-close" onClick={close} type="button"><FiX /></button>
         <Logo />
         <nav className="side-nav">
           {navItems.map(({ href, icon: Icon, label, exact, match }) => {
@@ -54,14 +54,14 @@ function Sidebar({ open, close }) {
           <div className="pro-gem">{glyph.diamond}</div>
           <b>GachaHub AI Pro</b>
           <p>Exclusive AI tools, premium build cards, and smarter summaries.</p>
-          <button type="button">Upgrade Now</button>
+          <button onClick={() => onNotice("Upgrade is not available yet")} type="button">Upgrade Now</button>
         </div>
       </aside>
     </>
   );
 }
 
-function Topbar({ onMenu }) {
+function Topbar({ onMenu, onNotice }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const health = useQuery(queries.health());
@@ -75,10 +75,10 @@ function Topbar({ onMenu }) {
 
   return (
     <header className="topbar">
-      <button className="menu-btn" onClick={onMenu} type="button"><FiMenu /></button>
+      <button aria-label="Open menu" className="menu-btn" onClick={onMenu} type="button"><FiMenu /></button>
       <form className="search" onSubmit={submit}>
         <FiSearch />
-        <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search games, characters, posts..." />
+        <input aria-label="Search GachaHub" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search games, characters, posts..." />
         <kbd>Ctrl K</kbd>
       </form>
       <div className="top-actions">
@@ -86,8 +86,8 @@ function Topbar({ onMenu }) {
           <i /> {apiStatus === "connected" ? "Backend connected" : apiStatus === "offline" ? "Offline mode" : "Checking API"}
         </span>
         <button className="outline-btn" onClick={() => router.push("/studio")} type="button"><FiPlus /> <span>Create</span></button>
-        <button className="icon-btn" aria-label="Notifications" type="button"><FiBell /><i /></button>
-        <button className="mini-avatar" onClick={() => router.push("/profile")} type="button">R</button>
+        <button className="icon-btn" aria-label="Notifications" onClick={() => onNotice("Notifications are not available yet")} type="button"><FiBell /><i /></button>
+        <button aria-label="Open profile" className="mini-avatar" onClick={() => router.push("/profile")} type="button">R</button>
       </div>
     </header>
   );
@@ -95,14 +95,25 @@ function Topbar({ onMenu }) {
 
 export function AppShell({ children }) {
   const [menu, setMenu] = useState(false);
+  const [notice, setNotice] = useState("");
+  const noticeTimerRef = useRef(null);
   const pathname = usePathname();
   const studio = pathname === "/studio";
 
+  const flashNotice = message => {
+    window.clearTimeout(noticeTimerRef.current);
+    setNotice(message);
+    noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
+  };
+
+  useEffect(() => () => window.clearTimeout(noticeTimerRef.current), []);
+
   return (
     <div className={`app-shell ${studio ? "studio-shell" : ""}`}>
-      <Sidebar open={menu} close={() => setMenu(false)} />
+      <div className="toast-slot" aria-live="polite">{notice}</div>
+      <Sidebar open={menu} close={() => setMenu(false)} onNotice={flashNotice} />
       <div className="main-column">
-        {!studio && <Topbar onMenu={() => setMenu(true)} />}
+        {!studio && <Topbar onMenu={() => setMenu(true)} onNotice={flashNotice} />}
         {children}
       </div>
     </div>
