@@ -52,6 +52,7 @@ describe('ChatService', () => {
     findInboxConversations: jest.fn(),
     countUnreadMessages: jest.fn(),
     findMessages: jest.fn(),
+    softDeleteConversationForParticipant: jest.fn(),
   };
 
   const messageEncryption = {
@@ -1832,5 +1833,45 @@ describe('ChatService', () => {
       expect(result.meta.nextBeforeMessageId).toBeNull();
       expect(result.items).toEqual([]);
     });
+  });
+
+  describe('deleteConversation', () => {
+    it('rejects when the caller is not a participant', async () => {
+      repository.findParticipant.mockResolvedValue(null);
+
+      await expect(
+        service.deleteConversation('user-1', 'conversation-1'),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(
+        repository.softDeleteConversationForParticipant,
+      ).not.toHaveBeenCalled();
+    });
+
+    it.each(['ACTIVE', 'PENDING', 'ARCHIVED', 'BLOCKED', 'DECLINED'])(
+      'deletes the conversation for a %s participant',
+      async (state) => {
+        repository.findParticipant.mockResolvedValue({
+          userId: 'user-1',
+          state,
+        });
+        repository.softDeleteConversationForParticipant.mockResolvedValue({
+          userId: 'user-1',
+          deletedAt: new Date(),
+        });
+
+        const result = await service.deleteConversation(
+          'user-1',
+          'conversation-1',
+        );
+
+        expect(
+          repository.softDeleteConversationForParticipant,
+        ).toHaveBeenCalledWith('conversation-1', 'user-1');
+        expect(result).toEqual({
+          message: 'Conversation deleted successfully',
+        });
+      },
+    );
   });
 });

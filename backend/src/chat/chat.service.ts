@@ -656,6 +656,34 @@ export class ChatService {
   }
 
   /**
+   * Deletes a conversation for the current user only.
+   *
+   * "Delete for me": any participant can delete any conversation they're in,
+   * regardless of state (including BLOCKED/DECLINED) — this intentionally
+   * does not reuse assertReadableParticipant, which would block those states.
+   * Does not touch the other participant's copy or the underlying messages.
+   */
+  async deleteConversation(userId: string, conversationId: string) {
+    const participant = await this.chatRepository.findParticipant(
+      conversationId,
+      userId,
+    );
+
+    if (!participant) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    await this.chatRepository.softDeleteConversationForParticipant(
+      conversationId,
+      userId,
+    );
+
+    return {
+      message: 'Conversation deleted successfully',
+    };
+  }
+
+  /**
    * Pins a conversation for the current user.
    *
    * Pinning is stored on ChatParticipant because it is personal inbox state.

@@ -564,6 +564,27 @@ export class ChatController {
   }
 
   /**
+   * Deletes a conversation for the current user only.
+   *
+   * Soft "delete for me", does not affect the other participant's copy or
+   * the underlying messages.
+   */
+  @Delete('conversations/:conversationId')
+  @ApiOperation({
+    summary: 'Delete a conversation for the current user',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'cm123conversation456',
+  })
+  deleteConversation(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.chatService.deleteConversation(session.user.id, conversationId);
+  }
+
+  /**
    * Marks messages as delivered to the current user.
    *
    * Offline recipients keep messages as unread/undelivered until their client

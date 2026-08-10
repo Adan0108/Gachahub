@@ -288,6 +288,7 @@ model ChatParticipant {
   archivedAt     DateTime?
   mutedAt        DateTime?
   blockedAt      DateTime?
+  deletedAt      DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -570,6 +570,7 @@ export class ChatRepository {
           some: {
             userId,
             state,
+            deletedAt: null,
           },
         },
       },
@@ -1122,6 +1123,27 @@ export class ChatRepository {
           conversationId,
           userId,
         },
+      },
+    });
+  }
+
+  /**
+   * Soft deletes a conversation for one participant only.
+   *
+   * "Delete for me": clears this participant's row from every inbox query,
+   * but leaves the other participant's copy and the underlying messages and
+   * receipts untouched.
+   */
+  softDeleteConversationForParticipant(conversationId: string, userId: string) {
+    return this.prisma.chatParticipant.update({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId,
+        },
+      },
+      data: {
+        deletedAt: new Date(),
       },
     });
   }
