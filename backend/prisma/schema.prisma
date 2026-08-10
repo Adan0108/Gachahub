@@ -25,6 +25,7 @@ model User {
   posts        Post[]
   mediaUploads MediaUpload[]
   postLikes    PostLike[]
+  comments     Comment[]
 
   moderatedGames       GameModerator[]       @relation("GameModeratorUser")
   assignedModerators   GameModerator[]       @relation("GameModeratorAssigner")
@@ -382,7 +383,7 @@ model ChatMessageReaction {
 
   message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
   user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emote   ChatEmote?  @relation(fields: [emoteId], references: [id], onDelete: Restrict)
+  emote   ChatEmote?  @relation(fields: [emoteId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId])
   @@index([messageId])
@@ -484,6 +485,7 @@ model Post {
   media     PostMedia[]
   tags      PostTag[]
   postLikes PostLike[]
+  comments  Comment[]
 
   @@index([gameId, status, createdAt])
   @@index([categoryId, status, createdAt])
@@ -632,4 +634,28 @@ model ChatUserBlock {
   @@unique([blockerId, blockedId])
   @@index([blockedId])
   @@map("chat_user_blocks")
+}
+
+model Comment {
+  id       String  @id @default(cuid())
+  postId   String
+  authorId String
+  parentId String?
+
+  content String
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  parent  Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies Comment[] @relation("CommentReplies")
+
+  @@index([postId, createdAt])
+  @@index([authorId])
+  @@index([parentId, createdAt])
+  @@map("comments")
 }
