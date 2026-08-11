@@ -169,7 +169,7 @@ export class CommentsRepository {
 
       await tx.post.update({
         where: {
-          id: params.authorId,
+          id: params.postId,
         },
         data: {
           commentCount: {
