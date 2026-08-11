@@ -130,7 +130,7 @@ export class ChatService {
         encryptionMeta: preparedPayload.encryptionMeta as
           | Prisma.InputJsonValue
           | undefined,
-        contentType: dto.message.contentType ?? ChatMessageContentType.TEXT,
+        contentType: this.resolveContentType(dto.message.contentType),
         clientMessageId: dto.message.clientMessageId,
         replyToId: dto.message.replyToId,
       });
@@ -445,10 +445,12 @@ export class ChatService {
   ) {
     await this.assertReadableParticipant(conversationId, userId);
 
+    const limit = query.limit ?? 30;
+
     const messages = await this.chatRepository.findMessages({
       conversationId,
       beforeMessageId: query.beforeMessageId,
-      limit: query.limit ?? 30,
+      limit,
     });
     const nextBeforeMessageId = messages.at(-1)?.id ?? null;
 
@@ -468,7 +470,7 @@ export class ChatService {
     return {
       items: messages.reverse(),
       meta: {
-        limit: query.limit ?? 30,
+        limit,
         nextBeforeMessageId,
         blockedSenderUserIds: Array.from(blockedUserIds),
       },
@@ -1018,7 +1020,7 @@ export class ChatService {
       encryptionMeta: payload.encryptionMeta as
         | Prisma.InputJsonValue
         | undefined,
-      contentType: dto.message.contentType ?? ChatMessageContentType.TEXT,
+      contentType: this.resolveContentType(dto.message.contentType),
       clientMessageId: dto.message.clientMessageId,
       replyToId: dto.message.replyToId,
     });
@@ -1352,6 +1354,16 @@ export class ChatService {
    */
   private normalizeDirectPair(userIdOne: string, userIdTwo: string) {
     return [userIdOne, userIdTwo].sort() as [string, string];
+  }
+
+  /**
+   * Resolves the stored content type for a message payload.
+   *
+   * Single source of truth for the TEXT default so createDirectMessage and
+   * sendMessageToExistingConversation can't drift from each other.
+   */
+  private resolveContentType(contentType?: ChatMessageContentType) {
+    return contentType ?? ChatMessageContentType.TEXT;
   }
 
   /**
