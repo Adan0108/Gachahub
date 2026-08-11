@@ -53,6 +53,7 @@ describe('ChatService', () => {
     countUnreadMessages: jest.fn(),
     findMessages: jest.fn(),
     softDeleteConversationForParticipant: jest.fn(),
+    findBlockedUserIds: jest.fn(),
   };
 
   const messageEncryption = {
@@ -72,6 +73,7 @@ describe('ChatService', () => {
       messageEncryption,
       chatDelivery,
     );
+    repository.findBlockedUserIds.mockResolvedValue(new Set());
   });
 
   const groupConversation = (

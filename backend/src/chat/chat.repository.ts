@@ -116,6 +116,32 @@ export class ChatRepository {
   }
 
   /**
+   * Finds which candidates the given user has blocked.
+   *
+   * One-directional: only exposes blocks the caller made themselves
+   * never whether someone else has blocked the caller, that would
+   * leak block status to the blocked person, which the asymmetric
+   * blocking keeps hidden from them.
+   */
+  async findBlockedUserIds(userId: string, candidateUserIds: string[]) {
+    if (candidateUserIds.length === 0) {
+      return new Set<string>();
+    }
+
+    const blocks = await this.prisma.chatUserBlock.findMany({
+      where: {
+        blockerId: userId,
+        blockedId: { in: candidateUserIds },
+      },
+      select: {
+        blockedId: true,
+      },
+    });
+
+    return new Set(blocks.map((block) => block.blockedId));
+  }
+
+  /**
    * Creates a global user block for chat.
    *
    * Upsert makes blocking idempotent if the caller taps block more than once.

@@ -452,11 +452,25 @@ export class ChatService {
     });
     const nextBeforeMessageId = messages.at(-1)?.id ?? null;
 
+    const senderIds = Array.from(
+      new Set(
+        messages
+          .map((message) => message.senderId)
+          .filter((senderId) => senderId !== userId),
+      ),
+    );
+
+    const blockedUserIds = await this.chatRepository.findBlockedUserIds(
+      userId,
+      senderIds,
+    );
+
     return {
       items: messages.reverse(),
       meta: {
         limit: query.limit ?? 30,
         nextBeforeMessageId,
+        blockedSenderUserIds: Array.from(blockedUserIds),
       },
     };
   }
@@ -1361,6 +1375,15 @@ export class ChatService {
       userId,
     );
 
+    const otherParticipantIds = conversation.participants
+      .map((participant) => participant.userId)
+      .filter((participantUserId) => participantUserId !== userId);
+
+    const blockedUserIds = await this.chatRepository.findBlockedUserIds(
+      userId,
+      otherParticipantIds,
+    );
+
     return {
       id: conversation.id,
       type: conversation.type,
@@ -1374,6 +1397,7 @@ export class ChatService {
         pinnedAt: participant.pinnedAt,
         mutedAt: participant.mutedAt,
         user: participant.user,
+        isBlockedByMe: blockedUserIds.has(participant.userId),
       })),
       lastMessage,
       unreadCount,
