@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString } from 'class-validator';
+import { IsString, MaxLength } from 'class-validator';
 
 export class TransferGroupOwnershipDto {
   @ApiProperty({
@@ -7,5 +7,6 @@ export class TransferGroupOwnershipDto {
     description: 'Active group member who will become the new owner.',
   })
   @IsString()
+  @MaxLength(120)
   newOwnerUserId!: string;
 }

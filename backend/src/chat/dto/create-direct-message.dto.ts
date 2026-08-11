@@ -1,6 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDefined, IsString, ValidateNested } from 'class-validator';
+import {
+  IsDefined,
+  IsString,
+  MaxLength,
+  ValidateNested,
+} from 'class-validator';
 import { EncryptedMessagePayloadDto } from './encrypted-message-payload.dto';
 
 /**
@@ -15,6 +20,7 @@ export class CreateDirectMessageDto {
     description: 'User receiving the direct message.',
   })
   @IsString()
+  @MaxLength(120)
   recipientUserId!: string;
 
   @ApiProperty({

@@ -1,5 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsString } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 export class UpdateGroupMembersDto {
   @ApiProperty({
@@ -9,5 +15,6 @@ export class UpdateGroupMembersDto {
   @ArrayMinSize(1)
   @ArrayMaxSize(99)
   @IsString({ each: true })
+  @MaxLength(120, { each: true })
   userIds!: string[];
 }

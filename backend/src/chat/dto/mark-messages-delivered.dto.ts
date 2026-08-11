@@ -4,6 +4,7 @@ import {
   ArrayNotEmpty,
   IsArray,
   IsString,
+  MaxLength,
 } from 'class-validator';
 
 /**
@@ -21,5 +22,6 @@ export class MarkMessagesDeliveredDto {
   @ArrayNotEmpty()
   @ArrayMaxSize(100)
   @IsString({ each: true })
+  @MaxLength(120, { each: true })
   messageIds!: string[];
 }

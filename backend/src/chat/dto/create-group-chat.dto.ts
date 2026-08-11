@@ -33,5 +33,6 @@ export class CreateGroupChatDto {
   @ArrayMinSize(1)
   @ArrayMaxSize(99)
   @IsString({ each: true })
+  @MaxLength(120, { each: true })
   memberUserIds!: string[];
 }
