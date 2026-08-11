@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, MaxLength, MinLength } from 'class-validator';
 
-export class CreateCommentDto {
+export class UpdateCommentDto {
   @ApiProperty({
     example: 'This build is really useful.',
   })

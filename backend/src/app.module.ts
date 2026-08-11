@@ -15,6 +15,7 @@ import { GameModeratorsModule } from './game-moderators/game-moderators.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { MediaModule } from './media/media.module';
+import { CommentsModule } from './comments/comments.module';
 
 /**
  * Root application module.
@@ -39,6 +40,7 @@ import { MediaModule } from './media/media.module';
     ChatModule,
     MediaModule,
     PostsModule,
+    CommentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
