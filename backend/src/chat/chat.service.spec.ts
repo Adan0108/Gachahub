@@ -54,6 +54,7 @@ describe('ChatService', () => {
     findMessages: jest.fn(),
     softDeleteConversationForParticipant: jest.fn(),
     findBlockedUserIds: jest.fn(),
+    areMutualFollowers: jest.fn(),
   };
 
   const messageEncryption = {
@@ -74,6 +75,7 @@ describe('ChatService', () => {
       chatDelivery,
     );
     repository.findBlockedUserIds.mockResolvedValue(new Set());
+    repository.areMutualFollowers.mockResolvedValue(false);
   });
 
   const groupConversation = (
@@ -697,6 +699,82 @@ describe('ChatService', () => {
         message: { id: 'message-1' },
         recipientState: 'PENDING',
       });
+    });
+
+    it('starts ACTIVE and notifies when sender and recipient mutually follow', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+      });
+      repository.findUserBlock.mockResolvedValue(null);
+      repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+      repository.findDirectPair.mockResolvedValue(null);
+      repository.areMutualFollowers.mockResolvedValue(true);
+      repository.createDirectConversationWithMessage.mockResolvedValue({
+        conversation: { id: 'conversation-1' },
+        message: { id: 'message-1' },
+      });
+
+      const result = await service.createDirectMessage('user-1', {
+        recipientUserId: 'user-2',
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(
+        repository.createDirectConversationWithMessage,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientState: 'ACTIVE',
+        }),
+      );
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          shouldNotify: true,
+        }),
+      );
+      expect(result).toEqual({
+        conversationId: 'conversation-1',
+        message: { id: 'message-1' },
+        recipientState: 'ACTIVE',
+      });
+    });
+
+    it('does not notify a mutual follower recipient who has blocked the sender', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+      });
+      repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+      repository.findDirectPair.mockResolvedValue(null);
+      repository.areMutualFollowers.mockResolvedValue(true);
+      repository.findUserBlock.mockImplementation((blockerId, blockedId) => {
+        if (blockerId === 'user-2' && blockedId === 'user-1') {
+          return Promise.resolve({ blockerId: 'user-2', blockedId: 'user-1' });
+        }
+        return Promise.resolve(null);
+      });
+      repository.createDirectConversationWithMessage.mockResolvedValue({
+        conversation: { id: 'conversation-1' },
+        message: { id: 'message-1' },
+      });
+
+      await service.createDirectMessage('user-1', {
+        recipientUserId: 'user-2',
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(
+        repository.createDirectConversationWithMessage,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientState: 'ACTIVE',
+        }),
+      );
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          shouldNotify: false,
+        }),
+      );
     });
 
     it('delegates to the existing conversation when a direct pair already exists', async () => {

@@ -34,6 +34,35 @@ export class ChatRepository {
   }
 
   /**
+   * Checks whether two users mutually follow each other.
+   *
+   * Used to skip the stranger-request flow: a mutual accepted follow starts
+   * a direct conversation ACTIVE instead of PENDING.
+   */
+  async areMutualFollowers(userIdA: string, userIdB: string) {
+    const [aFollowsB, bFollowsA] = await Promise.all([
+      this.prisma.follow.findUnique({
+        where: {
+          followerId_followingId: {
+            followerId: userIdA,
+            followingId: userIdB,
+          },
+        },
+      }),
+      this.prisma.follow.findUnique({
+        where: {
+          followerId_followingId: {
+            followerId: userIdB,
+            followingId: userIdA,
+          },
+        },
+      }),
+    ]);
+
+    return aFollowsB?.status === 'ACCEPTED' && bFollowsA?.status === 'ACCEPTED';
+  }
+
+  /**
    * Finds active users by id list.
    *
    * Used before adding group members so inactive or missing accounts are not

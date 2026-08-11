@@ -55,7 +55,9 @@ export class ChatService {
    * - Users cannot message themselves.
    * - Recipient must exist and be active.
    * - clientMessageId prevents duplicate sends when clients retry.
-   * - A new direct convo starts with the recipient in PENDING state.
+   * - A new direct convo starts with the recipient in PENDING state, unless
+   *   sender and recipient mutually follow each other, in which case it
+   *   starts ACTIVE for both — no stranger-request step needed.
    * - Pending stranger messages are stored but should not notify the receiver.
    */
   async createDirectMessage(senderId: string, dto: CreateDirectMessageDto) {
@@ -119,13 +121,25 @@ export class ChatService {
       throw new BadRequestException('Reply target is not in this conversation');
     }
 
+    const areMutualFollowers = await this.chatRepository.areMutualFollowers(
+      senderId,
+      dto.recipientUserId,
+    );
+    const recipientState = areMutualFollowers ? 'ACTIVE' : 'PENDING';
+
+    const shouldNotify = await this.isRecipientNotifiable('DIRECT', senderId, {
+      userId: dto.recipientUserId,
+      state: recipientState,
+      mutedAt: null,
+    });
+
     const result =
       await this.chatRepository.createDirectConversationWithMessage({
         senderId,
         recipientUserId: dto.recipientUserId,
         userIdA,
         userIdB,
-        recipientState: 'PENDING',
+        recipientState,
         ciphertext: preparedPayload.ciphertext,
         encryptionMeta: preparedPayload.encryptionMeta as
           | Prisma.InputJsonValue
@@ -140,13 +154,13 @@ export class ChatService {
       messageId: result.message.id,
       senderId,
       recipientUserIds: [dto.recipientUserId],
-      shouldNotify: false,
+      shouldNotify,
     });
 
     return {
       conversationId: result.conversation.id,
       message: result.message,
-      recipientState: 'PENDING',
+      recipientState,
     };
   }
 
