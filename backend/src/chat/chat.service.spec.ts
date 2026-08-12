@@ -144,8 +144,38 @@ describe('ChatService', () => {
         creatorId: 'user-1',
         title: 'Team Chat',
         photoUrl: 'https://cdn.example.com/photo.png',
+        members: [
+          { userId: 'user-2', state: 'PENDING' },
+          { userId: 'user-3', state: 'PENDING' },
+        ],
+      });
+    });
+
+    it('resolves mutual followers to ACTIVE and others to PENDING', async () => {
+      repository.findActiveUsersByIds.mockResolvedValue([
+        { id: 'user-2' },
+        { id: 'user-3' },
+      ]);
+      repository.areMutualFollowers.mockImplementation((userId, otherUserId) =>
+        Promise.resolve(otherUserId === 'user-2'),
+      );
+      repository.createGroupConversation.mockResolvedValue({
+        id: 'conversation-1',
+      });
+
+      await service.createGroupChat('user-1', {
+        title: 'Team Chat',
         memberUserIds: ['user-2', 'user-3'],
       });
+
+      expect(repository.createGroupConversation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          members: [
+            { userId: 'user-2', state: 'ACTIVE' },
+            { userId: 'user-3', state: 'PENDING' },
+          ],
+        }),
+      );
     });
   });
 
@@ -271,7 +301,33 @@ describe('ChatService', () => {
 
       expect(repository.addGroupMembers).toHaveBeenCalledWith(
         'conversation-1',
-        ['user-2', 'user-3'],
+        [
+          { userId: 'user-2', state: 'PENDING' },
+          { userId: 'user-3', state: 'PENDING' },
+        ],
+      );
+    });
+
+    it('resolves mutual followers to ACTIVE and others to PENDING', async () => {
+      repository.findActiveUsersByIds.mockResolvedValue([
+        { id: 'user-2' },
+        { id: 'user-3' },
+      ]);
+      repository.areMutualFollowers.mockImplementation((userId, otherUserId) =>
+        Promise.resolve(otherUserId === 'user-3'),
+      );
+      repository.addGroupMembers.mockResolvedValue({ count: 2 });
+
+      await service.addGroupMembers('user-1', 'conversation-1', {
+        userIds: ['user-2', 'user-3'],
+      });
+
+      expect(repository.addGroupMembers).toHaveBeenCalledWith(
+        'conversation-1',
+        [
+          { userId: 'user-2', state: 'PENDING' },
+          { userId: 'user-3', state: 'ACTIVE' },
+        ],
       );
     });
   });

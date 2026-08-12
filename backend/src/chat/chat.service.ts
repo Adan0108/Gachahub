@@ -167,8 +167,9 @@ export class ChatService {
   /**
    * Creates a group chat with the caller as OWNER.
    *
-   * The group starts with ACTIVE participants and can use the existing encrypted
-   * send-message endpoint for messages.
+   * Members who mutually follow the creator join ACTIVE immediately; everyone
+   * else starts PENDING and must accept the invite first, same consent gate
+   * as adding members to an existing group.
    */
   async createGroupChat(userId: string, dto: CreateGroupChatDto) {
     const memberIds = Array.from(new Set(dto.memberUserIds)).filter(
@@ -185,11 +186,13 @@ export class ChatService {
       throw new BadRequestException('One or more group members are invalid');
     }
 
+    const members = await this.resolveGroupMemberStates(userId, memberIds);
+
     return this.chatRepository.createGroupConversation({
       creatorId: userId,
       title: dto.title,
       photoUrl: dto.photoUrl,
-      memberUserIds: memberIds,
+      members,
     });
   }
 
@@ -210,7 +213,9 @@ export class ChatService {
   /**
    * Adds members to a group chat.
    *
-   * Only OWNER and ADMIN participants can add members.
+   * Only OWNER and ADMIN participants can add members. A member who mutually
+   * follows the adder joins ACTIVE immediately; everyone else start PENDING
+   * and must accept the invite via the existing request accept/decline flow.
    */
   async addGroupMembers(
     userId: string,
@@ -233,7 +238,9 @@ export class ChatService {
       throw new BadRequestException('One or more group members are invalid');
     }
 
-    return this.chatRepository.addGroupMembers(conversationId, memberIds);
+    const members = await this.resolveGroupMemberStates(userId, memberIds);
+
+    return this.chatRepository.addGroupMembers(conversationId, members);
   }
 
   /**
@@ -1082,6 +1089,24 @@ export class ChatService {
       message,
       duplicate: false,
     };
+  }
+
+  /**
+   * Resolves each candidate group member to ACTIVE or PENDING.
+   *
+   * Shared by createGroupChat and addGroupMembers so both apply
+   * the exact same consent rule: mutual follower join instantly,
+   * everyone else need to accept an invite first
+   */
+  private async resolveGroupMemberStates(userId: string, memberIds: string[]) {
+    return Promise.all(
+      memberIds.map(async (memberId) => ({
+        userId: memberId,
+        state: (await this.chatRepository.areMutualFollowers(userId, memberId))
+          ? ('ACTIVE' as const)
+          : ('PENDING' as const),
+      })),
+    );
   }
 
   /**

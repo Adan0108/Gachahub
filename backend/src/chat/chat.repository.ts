@@ -362,18 +362,17 @@ export class ChatRepository {
   /**
    * Creates a group conversation and participant rows.
    *
-   * The creator becomes OWNER. Other users start as ACTIVE MEMBER participants.
+   * The creator becomes OWNER and is always ACTIVE. Other
+   * member's state is resolved by the called (ChatService)
+   * based on mutual follow-mutual followers start ACTIVE,
+   * everyone else starts PENDING pending their accept.
    */
   createGroupConversation(params: {
     creatorId: string;
     title: string;
     photoUrl?: string;
-    memberUserIds: string[];
+    members: Array<{ userId: string; state: 'ACTIVE' | 'PENDING' }>;
   }) {
-    const uniqueMemberIds = Array.from(
-      new Set([params.creatorId, ...params.memberUserIds]),
-    );
-
     return this.prisma.chatConversation.create({
       data: {
         type: 'GROUP',
@@ -381,11 +380,18 @@ export class ChatRepository {
         photoUrl: params.photoUrl,
         createdBy: params.creatorId,
         participants: {
-          create: uniqueMemberIds.map((userId) => ({
-            userId,
-            role: userId === params.creatorId ? 'OWNER' : 'MEMBER',
-            state: 'ACTIVE',
-          })),
+          create: [
+            {
+              userId: params.creatorId,
+              role: 'OWNER',
+              state: 'ACTIVE',
+            },
+            ...params.members.map((member) => ({
+              userId: member.userId,
+              role: 'MEMBER' as const,
+              state: member.state,
+            })),
+          ],
         },
       },
       include: {
@@ -421,32 +427,40 @@ export class ChatRepository {
   /**
    * Adds or reactivates member rows for a group.
    *
-   * A removed member already has a participant row, so updateMany restores those
-   * rows before createMany inserts only brand-new members.
+   * A removed member already has a participant row, so updateMany
+   * restores those rows before createMany inserts only brand-new members.
+   * Each member's state (ACTIVE or PENDING) is resolved by the caller
+   * based on mutual follow, same as a brand-new invite - a rejoin after
+   * removal isn't exempt from consent.
    */
-  async addGroupMembers(conversationId: string, userIds: string[]) {
+  async addGroupMembers(
+    conversationId: string,
+    members: Array<{ userId: string; state: 'ACTIVE' | 'PENDING' }>,
+  ) {
     return this.prisma.$transaction(async (tx) => {
-      await tx.chatParticipant.updateMany({
-        where: {
-          conversationId,
-          userId: {
-            in: userIds,
-          },
-          role: {
-            not: 'OWNER',
-          },
-        },
-        data: {
-          state: 'ACTIVE',
-        },
-      });
+      await Promise.all(
+        members.map((member) =>
+          tx.chatParticipant.updateMany({
+            where: {
+              conversationId,
+              userId: member.userId,
+              role: {
+                not: 'OWNER',
+              },
+            },
+            data: {
+              state: member.state,
+            },
+          }),
+        ),
+      );
 
       return tx.chatParticipant.createMany({
-        data: userIds.map((userId) => ({
+        data: members.map((member) => ({
           conversationId,
-          userId,
+          userId: member.userId,
           role: 'MEMBER',
-          state: 'ACTIVE',
+          state: member.state,
         })),
         skipDuplicates: true,
       });
