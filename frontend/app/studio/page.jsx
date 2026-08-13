@@ -22,6 +22,17 @@ function Toggle({ label, value, setValue }) {
   );
 }
 
+const canvasSizes = {
+  "16:9": "16 / 9",
+  "4:3": "4 / 3",
+  "1:1": "1 / 1",
+};
+
+const canvasFonts = {
+  Orbitron: '"Orbitron", "Space Grotesk", sans-serif',
+  Inter: '"Inter", "Segoe UI", sans-serif',
+};
+
 export default function StudioPage() {
   const [accent, setAccent] = useState("#8b5cf6");
   const [particles, setParticles] = useState(true);
@@ -62,8 +73,22 @@ export default function StudioPage() {
         <button className="export" onClick={() => window.print()} type="button">Export Image</button>
       </aside>
       <main className="canvas-wrap">
-        <div className={`build-canvas ${particles ? "particles-on" : ""}`} style={{ "--accent": accent }}>
-          <div className="canvas-header"><div className="char-badge">{glyph.sparkle}</div><div><h1>Sanhua</h1><p>Lv. 90 / 90</p><div className="stars">{glyph.star}{glyph.star}{glyph.star}{glyph.star}{glyph.star}</div></div></div>
+        <div
+          className={`build-canvas ${particles ? "particles-on" : ""}`}
+          style={{
+            "--accent": accent,
+            "--canvas-aspect-ratio": canvasSizes[size],
+            "--canvas-font": canvasFonts[font],
+          }}
+        >
+          <div className="canvas-header">
+            <div className="char-badge">{glyph.sparkle}</div>
+            <div>
+              <h1>Sanhua</h1>
+              <p>Lv. 90 / 90</p>
+              {rarity && <div className="stars" aria-label="5 star rarity">{glyph.star}{glyph.star}{glyph.star}{glyph.star}{glyph.star}</div>}
+            </div>
+          </div>
           <div className="stats">{[["HP", "15420"], ["ATK", "2456"], ["DEF", "1357"], ["Crit. Rate", "72.4%"], ["Crit. DMG", "248.6%"], ["Energy Regen", "127.6%"], ["Resonance Skill DMG", "22.3%"]].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}</div>
           <Art tone="violet" className="canvas-character">{glyph.snow}</Art>
           <div className="equipment"><b>Equipment</b><div className="weapon">{glyph.sword} <span>Emerald of Genesis<br /><small>Lv. 90</small></span></div><b>Echoes <small>12/12</small></b><div className="echo-grid">{[1, 2, 3, 4, 5, 6].map(item => <span key={item}>{glyph.diamond}</span>)}</div></div>
