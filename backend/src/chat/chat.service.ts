@@ -1442,19 +1442,15 @@ export class ChatService {
       (participant) => participant.userId === userId,
     );
     const lastMessage = conversation.messages[0] ?? null;
-    const unreadCount = await this.chatRepository.countUnreadMessages(
-      conversation.id,
-      userId,
-    );
 
     const otherParticipantIds = conversation.participants
       .map((participant) => participant.userId)
       .filter((participantUserId) => participantUserId !== userId);
 
-    const blockedUserIds = await this.chatRepository.findBlockedUserIds(
-      userId,
-      otherParticipantIds,
-    );
+    const [unreadCount, blockedUserIds] = await Promise.all([
+      this.chatRepository.countUnreadMessages(conversation.id, userId),
+      this.chatRepository.findBlockedUserIds(userId, otherParticipantIds),
+    ]);
 
     return {
       id: conversation.id,
@@ -1462,19 +1458,54 @@ export class ChatService {
       status: conversation.status,
       participantState: currentParticipant?.state ?? null,
       pinnedAt: currentParticipant?.pinnedAt ?? null,
-      participants: conversation.participants.map((participant) => ({
-        userId: participant.userId,
-        role: participant.role,
-        state: participant.state,
-        pinnedAt: participant.pinnedAt,
-        mutedAt: participant.mutedAt,
-        user: participant.user,
-        isBlockedByMe: blockedUserIds.has(participant.userId),
-      })),
+      participants: conversation.participants.map((participant) =>
+        this.buildParticipantSummary(participant, userId, blockedUserIds),
+      ),
       lastMessage,
       unreadCount,
       updatedAt: conversation.updatedAt,
       createdAt: conversation.createdAt,
     };
+  }
+
+  /**
+   * Shapes one participant row for a conversation summary.
+   *
+   * Own method so masking and block-flag logic aren't buried inside
+   * the bigger toConversationSummary assembly.
+   */
+  private buildParticipantSummary(
+    participant: Awaited<
+      ReturnType<ChatRepository['findInboxConversations']>
+    >[number]['participants'][number],
+    viewerId: string,
+    blockedUserIds: Set<string>,
+  ) {
+    return {
+      userId: participant.userId,
+      role: participant.role,
+      state: this.maskParticipantStateForViewer(participant, viewerId),
+      pinnedAt: participant.pinnedAt,
+      mutedAt: participant.mutedAt,
+      user: participant.user,
+      isBlockedByMe: blockedUserIds.has(participant.userId),
+    };
+  }
+
+  /**
+   * Masks BLOCKED state from other participants.
+   *
+   * Blocked is a private per-user action, showing it leaks "this person
+   * blocked me". Same issue as hasBlockedMe, just for per convo block now.
+   */
+  private maskParticipantStateForViewer(
+    participant: { userId: string; state: string },
+    viewerId: string,
+  ) {
+    if (participant.userId === viewerId) {
+      return participant.state;
+    }
+
+    return participant.state === 'BLOCKED' ? 'ACTIVE' : participant.state;
   }
 }
