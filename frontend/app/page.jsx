@@ -14,6 +14,7 @@ export default function HomePage() {
   const [tab, setTab] = useState("Hot");
   const home = useQuery(queries.home(""));
   const data = home.data || fallbacks.home("");
+  const forYouPosts = data.forYouPosts || data.posts || [];
 
   return (
     <div className="page home-page">
@@ -29,6 +30,19 @@ export default function HomePage() {
       <SectionTitle action="View All">Game Communities</SectionTitle>
       <QueryNotice isLoading={home.isLoading} isError={home.isError} isEmpty={!data.communities.length} emptyText="No communities match your feed yet." />
       <CommunityGrid communities={data.communities} />
+
+      <section className="panel for-you-panel">
+        <div className="panel-head">
+          <div>
+            <span className="eyebrow">For You</span>
+            <h3>Across your games</h3>
+          </div>
+          <button className="text-btn" type="button">Tune Feed <FiChevronRight /></button>
+        </div>
+        <p className="feed-copy">A mixed feed from every active game community, ready to connect to personalized backend recommendations later.</p>
+        <QueryNotice isEmpty={!forYouPosts.length} emptyText="No For You posts are available yet." />
+        <PostList posts={forYouPosts} />
+      </section>
 
       <div className="dashboard-grid">
         <section className="panel trending">

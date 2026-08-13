@@ -57,7 +57,13 @@ export const queries = {
 export const fallbacks = {
   home: search => {
     const games = fallbackGames(search);
-    return { communities: games.items, posts: fallbackPosts({ search }), meta: games.meta };
+    const forYouPosts = fallbackPosts({ search });
+    return {
+      communities: games.items,
+      forYouPosts,
+      posts: forYouPosts,
+      meta: games.meta,
+    };
   },
   games: fallbackGames,
   community: fallbackGame,

@@ -127,6 +127,10 @@ button{cursor:pointer}
 /* Home dashboard */
 .dashboard-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:12px;margin-top:14px}
 
+.for-you-panel{margin-top:22px}
+
+.feed-copy{color:var(--muted);font-size:12px;line-height:1.55;margin:8px 0 12px}
+
 .panel{background:linear-gradient(145deg,#10152a,#0b0f20);border:1px solid #262d4c;border-radius:8px;padding:14px}
 
 .panel-head{display:flex;justify-content:space-between;align-items:center}

@@ -109,4 +109,28 @@ export const posts = [
     time: "1d ago",
     tag: "Teams",
   },
+  {
+    id: "post-genshin-natlan",
+    gameSlug: "genshin-impact",
+    title: "Natlan exploration checklist for returning players",
+    author: "LeylineLog",
+    time: "1d ago",
+    tag: "Guide",
+  },
+  {
+    id: "post-zzz-disc",
+    gameSlug: "zenless-zone-zero",
+    title: "Disc Drive farming path for new Ether agents",
+    author: "ProxyNotes",
+    time: "2d ago",
+    tag: "Build",
+  },
+  {
+    id: "post-pgr-boss",
+    gameSlug: "punishing-gray-raven",
+    title: "War Zone boss rotation notes for physical teams",
+    author: "GrayRavenLab",
+    time: "2d ago",
+    tag: "Strategy",
+  },
 ];

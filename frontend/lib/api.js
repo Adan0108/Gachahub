@@ -88,8 +88,16 @@ export function fallbackPosts({ gameSlug, search = "" } = {}) {
   const query = search.trim().toLowerCase();
   return posts.filter(post => {
     const matchesGame = gameSlug ? post.gameSlug === gameSlug : true;
-    const matchesSearch = query ? `${post.title} ${post.author} ${post.tag}`.toLowerCase().includes(query) : true;
+    const game = mockGames.find(item => item.slug === post.gameSlug);
+    const matchesSearch = query ? `${post.title} ${post.author} ${post.tag} ${game?.name || ""}`.toLowerCase().includes(query) : true;
     return matchesGame && matchesSearch;
+  }).map(post => {
+    const game = mockGames.find(item => item.slug === post.gameSlug);
+    return {
+      ...post,
+      gameName: game?.name || post.gameSlug,
+      gameSymbol: game ? communitySymbol(game.name) : communitySymbol(post.gameSlug),
+    };
   });
 }
 
@@ -207,7 +215,13 @@ export const api = {
   getProfile: () => request(backendRoutes.currentUser),
   getHome: async ({ search = "" } = {}) => {
     const games = await api.getGames({ status: "ACTIVE", search, limit: 20 });
-    return { communities: games.items, posts: fallbackPosts({ search }), meta: games.meta };
+    const forYouPosts = fallbackPosts({ search });
+    return {
+      communities: games.items,
+      forYouPosts,
+      posts: forYouPosts,
+      meta: games.meta,
+    };
   },
   getChatConversations: () => request(backendRoutes.chatConversations),
   getChatRequests: () => request(backendRoutes.chatRequests),
