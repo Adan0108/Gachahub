@@ -16,6 +16,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { MediaModule } from './media/media.module';
 import { CommentsModule } from './comments/comments.module';
+import { FollowsModule } from './follows/follows.module';
 
 /**
  * Root application module.
@@ -41,6 +42,7 @@ import { CommentsModule } from './comments/comments.module';
     MediaModule,
     PostsModule,
     CommentsModule,
+    FollowsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
