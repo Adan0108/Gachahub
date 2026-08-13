@@ -11,6 +11,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { UsersModule } from './users/users.module';
 import { GameModeratorsModule } from './game-moderators/game-moderators.module';
+import { FollowsModule } from './follows/follows.module';
 
 /**
  * Root application module.
@@ -28,6 +29,7 @@ import { GameModeratorsModule } from './game-moderators/game-moderators.module';
     GameCategoriesModule,
     GameModeratorsModule,
     ChatModule,
+    FollowsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
