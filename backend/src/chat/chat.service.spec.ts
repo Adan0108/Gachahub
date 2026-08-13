@@ -55,6 +55,7 @@ describe('ChatService', () => {
     softDeleteConversationForParticipant: jest.fn(),
     findBlockedUserIds: jest.fn(),
     areMutualFollowers: jest.fn(),
+    isFollowing: jest.fn(),
   };
 
   const messageEncryption = {
@@ -755,6 +756,109 @@ describe('ChatService', () => {
         message: { id: 'message-1' },
         recipientState: 'PENDING',
       });
+    });
+
+    it('rejects a new conversation when the recipient accepts no messages', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+        messageRequestSetting: 'NO_ONE',
+      });
+      repository.findUserBlock.mockResolvedValue(null);
+      repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+      repository.findDirectPair.mockResolvedValue(null);
+
+      await expect(
+        service.createDirectMessage('user-1', {
+          recipientUserId: 'user-2',
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(
+        repository.createDirectConversationWithMessage,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-follower when the recipient only accepts messages from people they follow', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+        messageRequestSetting: 'FOLLOWERS',
+      });
+      repository.findUserBlock.mockResolvedValue(null);
+      repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+      repository.findDirectPair.mockResolvedValue(null);
+      repository.areMutualFollowers.mockResolvedValue(false);
+      repository.isFollowing.mockResolvedValue(false);
+
+      await expect(
+        service.createDirectMessage('user-1', {
+          recipientUserId: 'user-2',
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(repository.isFollowing).toHaveBeenCalledWith('user-2', 'user-1');
+      expect(
+        repository.createDirectConversationWithMessage,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('allows a message under FOLLOWERS when the recipient follows the sender', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+        messageRequestSetting: 'FOLLOWERS',
+      });
+      repository.findUserBlock.mockResolvedValue(null);
+      repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+      repository.findDirectPair.mockResolvedValue(null);
+      repository.areMutualFollowers.mockResolvedValue(false);
+      repository.isFollowing.mockResolvedValue(true);
+      repository.createDirectConversationWithMessage.mockResolvedValue({
+        conversation: { id: 'conversation-1' },
+        message: { id: 'message-1' },
+      });
+
+      await service.createDirectMessage('user-1', {
+        recipientUserId: 'user-2',
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(
+        repository.createDirectConversationWithMessage,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({ recipientState: 'PENDING' }),
+      );
+    });
+
+    it('allows a message under FOLLOWERS without an extra lookup when mutual followers', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+        messageRequestSetting: 'FOLLOWERS',
+      });
+      repository.findUserBlock.mockResolvedValue(null);
+      repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+      repository.findDirectPair.mockResolvedValue(null);
+      repository.areMutualFollowers.mockResolvedValue(true);
+      repository.createDirectConversationWithMessage.mockResolvedValue({
+        conversation: { id: 'conversation-1' },
+        message: { id: 'message-1' },
+      });
+
+      await service.createDirectMessage('user-1', {
+        recipientUserId: 'user-2',
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(repository.isFollowing).not.toHaveBeenCalled();
+      expect(
+        repository.createDirectConversationWithMessage,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({ recipientState: 'ACTIVE' }),
+      );
     });
 
     it('starts ACTIVE and notifies when sender and recipient mutually follow', async () => {

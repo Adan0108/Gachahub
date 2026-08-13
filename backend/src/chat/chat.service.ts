@@ -121,10 +121,31 @@ export class ChatService {
       throw new BadRequestException('Reply target is not in this conversation');
     }
 
+    if (recipient.messageRequestSetting === 'NO_ONE') {
+      throw new ForbiddenException('This user is not accepting new messages');
+    }
+
     const areMutualFollowers = await this.chatRepository.areMutualFollowers(
       senderId,
       dto.recipientUserId,
     );
+
+    if (
+      recipient.messageRequestSetting === 'FOLLOWERS' &&
+      !areMutualFollowers
+    ) {
+      const recipientFollowsSender = await this.chatRepository.isFollowing(
+        dto.recipientUserId,
+        senderId,
+      );
+
+      if (!recipientFollowsSender) {
+        throw new ForbiddenException(
+          'This user only accepts messages from people they follow',
+        );
+      }
+    }
+
     const recipientState = areMutualFollowers ? 'ACTIVE' : 'PENDING';
 
     const shouldNotify = await this.isRecipientNotifiable('DIRECT', senderId, {

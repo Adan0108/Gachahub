@@ -34,6 +34,23 @@ export class ChatRepository {
   }
 
   /**
+   * Checks whether followerId follows followingId (accepted).
+   */
+
+  async isFollowing(followerId: string, followingId: string) {
+    const follow = await this.prisma.follow.findUnique({
+      where: {
+        followerId_followingId: {
+          followerId,
+          followingId,
+        },
+      },
+    });
+
+    return follow?.status === 'ACCEPTED';
+  }
+
+  /**
    * Checks whether two users mutually follow each other.
    *
    * Used to skip the stranger-request flow: a mutual accepted follow starts
@@ -41,25 +58,11 @@ export class ChatRepository {
    */
   async areMutualFollowers(userIdA: string, userIdB: string) {
     const [aFollowsB, bFollowsA] = await Promise.all([
-      this.prisma.follow.findUnique({
-        where: {
-          followerId_followingId: {
-            followerId: userIdA,
-            followingId: userIdB,
-          },
-        },
-      }),
-      this.prisma.follow.findUnique({
-        where: {
-          followerId_followingId: {
-            followerId: userIdB,
-            followingId: userIdA,
-          },
-        },
-      }),
+      this.isFollowing(userIdA, userIdB),
+      this.isFollowing(userIdB, userIdA),
     ]);
 
-    return aFollowsB?.status === 'ACCEPTED' && bFollowsA?.status === 'ACCEPTED';
+    return aFollowsB && bFollowsA;
   }
 
   /**
