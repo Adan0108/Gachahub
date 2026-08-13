@@ -138,8 +138,21 @@ async function request(path, options = {}) {
 }
 
 function mutation(path, payload, options = {}) {
+  const { authHeaders, headers, ...fetchOptions } = options;
   const body = payload === undefined ? undefined : JSON.stringify(payload);
-  return request(path, { ...options, method: options.method || "POST", body });
+  return request(path, {
+    ...fetchOptions,
+    method: fetchOptions.method || "POST",
+    headers: {
+      ...mutationAuthHeaders(authHeaders),
+      ...headers,
+    },
+    body,
+  });
+}
+
+function mutationAuthHeaders(headers) {
+  return headers || {};
 }
 
 async function mockResponse(path) {
