@@ -24,6 +24,14 @@ function encodePathParam(value) {
   return encodeURIComponent(String(value || ""));
 }
 
+function decodePathParam(value) {
+  try {
+    return decodeURIComponent(String(value || ""));
+  } catch {
+    return String(value || "");
+  }
+}
+
 export function communitySymbol(name = "") {
   const lower = name.toLowerCase();
   if (lower.includes("wuthering")) return "\u263e";
@@ -144,7 +152,7 @@ async function mockResponse(path) {
   if (pathname === backendRoutes.games) return fallbackGames(params.get("search") || "");
   if (pathname.startsWith("/games/") && pathname.endsWith("/categories")) return fallbackCategories();
   if (pathname.startsWith("/games/")) {
-    const slug = pathname.split("/")[2];
+    const slug = decodePathParam(pathname.split("/")[2]);
     const game = mockGames.find(item => item.slug === slug || item.id === slug);
     if (!game) throw new Error("Game not found");
     return game;
