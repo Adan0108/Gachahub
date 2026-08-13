@@ -25,6 +25,8 @@ model User {
   accounts Account[]
   posts    Post[]
 
+  followers            UserFollow[]          @relation("UserFollowers")
+  following            UserFollow[]          @relation("UserFollowing")
   moderatedGames       GameModerator[]       @relation("GameModeratorUser")
   assignedModerators   GameModerator[]       @relation("GameModeratorAssigner")
   createdChats         ChatConversation[]    @relation("ChatConversationCreator")
@@ -91,6 +93,22 @@ model Verification {
 
   @@index([identifier])
   @@map("verification")
+}
+
+model UserFollow {
+  followerId  String
+  followingId String
+
+  createdAt DateTime @default(now())
+
+  follower User @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
+
+  following User @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@id([followerId, followingId])
+  // Useful when looking up the followers of one author.
+  @@index([followingId, followerId])
+  @@map("user_follows")
 }
 
 enum UserRole {
