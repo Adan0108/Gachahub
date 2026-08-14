@@ -122,26 +122,10 @@ export class ChatService {
       throw new BadRequestException('Reply target is not in this conversation');
     }
 
-    if (recipient.messageRequestSetting === 'NO_ONE') {
-      throw new ForbiddenException('This user is not accepting new messages');
-    }
-
-    const [senderFollowsRecipient, recipientFollowsSender] = await Promise.all([
-      this.chatRepository.isFollowing(senderId, dto.recipientUserId),
-      this.chatRepository.isFollowing(dto.recipientUserId, senderId),
-    ]);
-
-    const areMutualFollowers = senderFollowsRecipient && recipientFollowsSender;
-
-    if (
-      recipient.messageRequestSetting === 'FOLLOWERS' &&
-      !areMutualFollowers &&
-      !recipientFollowsSender
-    ) {
-      throw new ForbiddenException(
-        'This user only accepts messages from people they follow',
-      );
-    }
+    const areMutualFollowers = await this.assertMessageRequestAllowed(
+      senderId,
+      recipient,
+    );
 
     const recipientState = areMutualFollowers ? 'ACTIVE' : 'PENDING';
 
@@ -1139,27 +1123,10 @@ export class ChatService {
   ) {
     return Promise.all(
       members.map(async (member) => {
-        if (member.messageRequestSetting === 'NO_ONE') {
-          throw new ForbiddenException(
-            `User ${member.id} is not accepting new messages`,
-          );
-        }
-
-        const [adderFollowsMember, memberFollowsAdder] = await Promise.all([
-          this.chatRepository.isFollowing(userId, member.id),
-          this.chatRepository.isFollowing(member.id, userId),
-        ]);
-        const areMutualFollowers = adderFollowsMember && memberFollowsAdder;
-
-        if (
-          member.messageRequestSetting === 'FOLLOWERS' &&
-          !areMutualFollowers &&
-          !memberFollowsAdder
-        ) {
-          throw new ForbiddenException(
-            `User ${member.id} only accepts messages from people they follow`,
-          );
-        }
+        const areMutualFollowers = await this.assertMessageRequestAllowed(
+          userId,
+          member,
+        );
 
         return {
           userId: member.id,
@@ -1277,6 +1244,37 @@ export class ChatService {
     if (block) {
       throw new ForbiddenException('You have blocked this user');
     }
+  }
+
+  /**
+   * Enforces a target user's messageRequestSetting against a would-be sender.
+   *
+   * NO_ONE always rejects. FOLLOWERS rejects unless the target follows the
+   * actor back. Returns whether the two mutually follow each other, since
+   * callers use that to decide ACTIVE vs PENDING state.
+   */
+  private async assertMessageRequestAllowed(
+    actorId: string,
+    target: { id: string; messageRequestSetting: MessageRequestSetting },
+  ) {
+    if (target.messageRequestSetting === 'NO_ONE') {
+      throw new ForbiddenException(
+        `User ${target.id} is not accepting new messages`,
+      );
+    }
+
+    const [actorFollowsTarget, targetFollowsActor] = await Promise.all([
+      this.chatRepository.isFollowing(actorId, target.id),
+      this.chatRepository.isFollowing(target.id, actorId),
+    ]);
+
+    if (target.messageRequestSetting === 'FOLLOWERS' && !targetFollowsActor) {
+      throw new ForbiddenException(
+        `User ${target.id} only accepts messages from people they follow`,
+      );
+    }
+
+    return actorFollowsTarget && targetFollowsActor;
   }
 
   /**
