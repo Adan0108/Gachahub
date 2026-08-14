@@ -158,8 +158,11 @@ describe('ChatService', () => {
         { id: 'user-2' },
         { id: 'user-3' },
       ]);
-      repository.areMutualFollowers.mockImplementation((userId, otherUserId) =>
-        Promise.resolve(otherUserId === 'user-2'),
+      repository.isFollowing.mockImplementation((followerId, followingId) =>
+        Promise.resolve(
+          (followerId === 'user-1' && followingId === 'user-2') ||
+            (followerId === 'user-2' && followingId === 'user-1'),
+        ),
       );
       repository.createGroupConversation.mockResolvedValue({
         id: 'conversation-1',
@@ -371,8 +374,11 @@ describe('ChatService', () => {
         { id: 'user-2' },
         { id: 'user-3' },
       ]);
-      repository.areMutualFollowers.mockImplementation((userId, otherUserId) =>
-        Promise.resolve(otherUserId === 'user-3'),
+      repository.isFollowing.mockImplementation((followerId, followingId) =>
+        Promise.resolve(
+          (followerId === 'user-1' && followingId === 'user-3') ||
+            (followerId === 'user-3' && followingId === 'user-1'),
+        ),
       );
       repository.addGroupMembers.mockResolvedValue({ count: 2 });
 

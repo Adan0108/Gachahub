@@ -1148,25 +1148,21 @@ export class ChatService {
             `User ${member.id} is not accepting new messages`,
           );
         }
-        const areMutualFollowers = await this.chatRepository.areMutualFollowers(
-          userId,
-          member.id,
-        );
+
+        const [adderFollowsMember, memberFollowsAdder] = await Promise.all([
+          this.chatRepository.isFollowing(userId, member.id),
+          this.chatRepository.isFollowing(member.id, userId),
+        ]);
+        const areMutualFollowers = adderFollowsMember && memberFollowsAdder;
 
         if (
           member.messageRequestSetting === 'FOLLOWERS' &&
-          !areMutualFollowers
+          !areMutualFollowers &&
+          !memberFollowsAdder
         ) {
-          const memberFollowsAdder = await this.chatRepository.isFollowing(
-            member.id,
-            userId,
+          throw new ForbiddenException(
+            `User ${member.id} only accepts messages from people they follow`,
           );
-
-          if (!memberFollowsAdder) {
-            throw new ForbiddenException(
-              `User ${member.id} only accepts messages from people they follow`,
-            );
-          }
         }
 
         return {
