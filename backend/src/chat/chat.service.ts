@@ -1042,12 +1042,6 @@ export class ChatService {
 
     await this.assertValidReplyTarget(conversationId, dto.message.replyToId);
 
-    await this.unarchiveRecipientsOnNewMessage(
-      conversationId,
-      senderId,
-      deliverableParticipants,
-    );
-
     if (senderParticipant.deletedAt) {
       await this.chatRepository.restoreDeletedParticipants(
         conversationId,
@@ -1273,33 +1267,6 @@ export class ChatService {
     );
 
     return !recipientBlockedSender;
-  }
-
-  /**
-   * Brings archived recipient conversations back to ACTIVE when new messages arrive.
-   *
-   * This matches normal chat behavior: archived chats return to the inbox on new
-   * activity, while the sender's own archive state is not touched here.
-   */
-  private async unarchiveRecipientsOnNewMessage(
-    conversationId: string,
-    senderId: string,
-    participants: Awaited<ReturnType<ChatRepository['findParticipants']>>,
-  ) {
-    const archivedRecipients = participants.filter(
-      (participant) =>
-        participant.userId !== senderId && participant.state === 'ARCHIVED',
-    );
-
-    await Promise.all(
-      archivedRecipients.map((participant) =>
-        this.chatRepository.updateParticipantArchivedState(
-          conversationId,
-          participant.userId,
-          false,
-        ),
-      ),
-    );
   }
 
   private async assertValidReplyTarget(

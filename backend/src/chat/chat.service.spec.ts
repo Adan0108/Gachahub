@@ -1199,7 +1199,7 @@ describe('ChatService', () => {
       );
     });
 
-    it('unarchives an archived recipient when a new message arrives', async () => {
+    it('does not unarchive a recipient just because a new message arrives', async () => {
       repository.findParticipant.mockResolvedValue({
         userId: 'user-1',
         state: 'ACTIVE',
@@ -1220,11 +1220,7 @@ describe('ChatService', () => {
         message: { clientMessageId: 'client-1' },
       } as any);
 
-      expect(repository.updateParticipantArchivedState).toHaveBeenCalledWith(
-        'conversation-1',
-        'user-2',
-        false,
-      );
+      expect(repository.updateParticipantArchivedState).not.toHaveBeenCalled();
     });
   });
 
