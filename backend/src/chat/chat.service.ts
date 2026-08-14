@@ -384,11 +384,7 @@ export class ChatService {
       'ACTIVE',
     );
 
-    const summaries = await Promise.all(
-      conversations.map((conversation) =>
-        this.toConversationSummary(conversation, userId),
-      ),
-    );
+    const summaries = await this.toConversationSummaries(conversations, userId);
 
     return summaries.sort((a, b) => {
       if (a.pinnedAt && !b.pinnedAt) return -1;
@@ -427,11 +423,7 @@ export class ChatService {
       'PENDING',
     );
 
-    return Promise.all(
-      conversations.map((conversation) =>
-        this.toConversationSummary(conversation, userId),
-      ),
-    );
+    return this.toConversationSummaries(conversations, userId);
   }
 
   /**
@@ -446,11 +438,7 @@ export class ChatService {
       'ARCHIVED',
     );
 
-    return Promise.all(
-      conversations.map((conversation) =>
-        this.toConversationSummary(conversation, userId),
-      ),
-    );
+    return this.toConversationSummaries(conversations, userId);
   }
 
   /**
@@ -1447,6 +1435,40 @@ export class ChatService {
   }
 
   /**
+   * One block list query for the whole batch, not one per convo.
+   *
+   * collects every other participant across all convos first, one lookup
+   * toConversationSummary just takes the result now, no query of its own
+   */
+  private async toConversationSummaries(
+    conversations: Awaited<
+      ReturnType<ChatRepository['findInboxConversations']>
+    >,
+    userId: string,
+  ) {
+    const otherParticipantIds = Array.from(
+      new Set(
+        conversations.flatMap((conversation) =>
+          conversation.participants
+            .map((participant) => participant.userId)
+            .filter((participantUserId) => participantUserId !== userId),
+        ),
+      ),
+    );
+
+    const blockedUserIds = await this.chatRepository.findBlockedUserIds(
+      userId,
+      otherParticipantIds,
+    );
+
+    return Promise.all(
+      conversations.map((conversation) =>
+        this.toConversationSummary(conversation, userId, blockedUserIds),
+      ),
+    );
+  }
+
+  /**
    * Converts a convo record into an inbox/request list item.
    *
    * The summary includes participant info, latest encrypted message payload,
@@ -1457,20 +1479,17 @@ export class ChatService {
       ReturnType<ChatRepository['findInboxConversations']>
     >[number],
     userId: string,
+    blockedUserIds: Set<string>,
   ) {
     const currentParticipant = conversation.participants.find(
       (participant) => participant.userId === userId,
     );
     const lastMessage = conversation.messages[0] ?? null;
 
-    const otherParticipantIds = conversation.participants
-      .map((participant) => participant.userId)
-      .filter((participantUserId) => participantUserId !== userId);
-
-    const [unreadCount, blockedUserIds] = await Promise.all([
-      this.chatRepository.countUnreadMessages(conversation.id, userId),
-      this.chatRepository.findBlockedUserIds(userId, otherParticipantIds),
-    ]);
+    const unreadCount = await this.chatRepository.countUnreadMessages(
+      conversation.id,
+      userId,
+    );
 
     return {
       id: conversation.id,
