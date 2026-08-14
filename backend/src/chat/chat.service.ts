@@ -485,7 +485,21 @@ export class ChatService {
     conversationId: string,
     query: QueryChatMessagesDto,
   ) {
-    await this.assertReadableParticipant(conversationId, userId);
+    const participant = await this.assertReadableParticipant(
+      conversationId,
+      userId,
+    );
+
+    if (participant.state === 'PENDING') {
+      const conversation =
+        await this.chatRepository.findConversationType(conversationId);
+
+      if (conversation?.type === 'GROUP') {
+        throw new ForbiddenException(
+          'Accept the group invite before viewing message history',
+        );
+      }
+    }
 
     const limit = query.limit ?? 30;
 

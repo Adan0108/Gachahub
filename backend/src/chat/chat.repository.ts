@@ -556,6 +556,18 @@ export class ChatRepository {
   }
 
   /**
+   * Finds a conversation's type only.
+   *
+   * Used to gate group invite previews away from full message history.
+   */
+  findConversationType(conversationId: string) {
+    return this.prisma.chatConversation.findUnique({
+      where: { id: conversationId },
+      select: { type: true },
+    });
+  }
+
+  /**
    * Creates an encrypted message inside an existing conversation.
    *
    * The transaction keeps the message and conversation lastMessageId update in sync.
