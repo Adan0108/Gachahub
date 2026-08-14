@@ -53,6 +53,7 @@ describe('ChatService', () => {
     countUnreadMessages: jest.fn(),
     findMessages: jest.fn(),
     softDeleteConversationForParticipant: jest.fn(),
+    restoreDeletedParticipants: jest.fn(),
     findBlockedUserIds: jest.fn(),
     areMutualFollowers: jest.fn(),
     isFollowing: jest.fn(),

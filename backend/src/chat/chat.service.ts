@@ -554,7 +554,7 @@ export class ChatService {
       userId,
     );
 
-    if (!participant) {
+    if (!participant || participant.deletedAt) {
       throw new NotFoundException('Conversation not found');
     }
 
@@ -581,7 +581,7 @@ export class ChatService {
       userId,
     );
 
-    if (!participant) {
+    if (!participant || participant.deletedAt) {
       throw new NotFoundException('Conversation not found');
     }
 
@@ -1048,6 +1048,13 @@ export class ChatService {
       deliverableParticipants,
     );
 
+    if (senderParticipant.deletedAt) {
+      await this.chatRepository.restoreDeletedParticipants(
+        conversationId,
+        senderId,
+      );
+    }
+
     const payload =
       preparedPayload ??
       (await this.messageEncryption.preparePayload(dto.message));
@@ -1328,7 +1335,7 @@ export class ChatService {
       userId,
     );
 
-    if (!participant) {
+    if (!participant || participant.deletedAt) {
       throw new NotFoundException('Conversation not found');
     }
 
@@ -1360,7 +1367,11 @@ export class ChatService {
       (item) => item.userId === userId,
     );
 
-    if (!participant || !this.canReadState(participant.state)) {
+    if (
+      !participant ||
+      participant.deletedAt ||
+      !this.canReadState(participant.state)
+    ) {
       throw new ForbiddenException('You cannot react to this message');
     }
 
@@ -1389,7 +1400,11 @@ export class ChatService {
       (item) => item.userId === userId,
     );
 
-    if (!participant || !this.canReadState(participant.state)) {
+    if (
+      !participant ||
+      participant.deletedAt ||
+      !this.canReadState(participant.state)
+    ) {
       throw new ForbiddenException('You cannot modify this message');
     }
 
