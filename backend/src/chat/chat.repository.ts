@@ -441,23 +441,29 @@ export class ChatRepository {
     conversationId: string,
     members: Array<{ userId: string; state: 'ACTIVE' | 'PENDING' }>,
   ) {
+    const memberIdsByState = new Map<'ACTIVE' | 'PENDING', string[]>();
+
+    for (const member of members) {
+      const userIds = memberIdsByState.get(member.state) ?? [];
+      userIds.push(member.userId);
+      memberIdsByState.set(member.state, userIds);
+    }
+
     return this.prisma.$transaction(async (tx) => {
-      await Promise.all(
-        members.map((member) =>
-          tx.chatParticipant.updateMany({
-            where: {
-              conversationId,
-              userId: member.userId,
-              role: {
-                not: 'OWNER',
-              },
+      for (const [state, userIds] of memberIdsByState) {
+        await tx.chatParticipant.updateMany({
+          where: {
+            conversationId,
+            userId: { in: userIds },
+            role: {
+              not: 'OWNER',
             },
-            data: {
-              state: member.state,
-            },
-          }),
-        ),
-      );
+          },
+          data: {
+            state,
+          },
+        });
+      }
 
       return tx.chatParticipant.createMany({
         data: members.map((member) => ({
