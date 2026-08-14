@@ -179,6 +179,62 @@ describe('ChatService', () => {
         }),
       );
     });
+
+    it('rejects when a member is not accepting new messages (NO_ONE)', async () => {
+      repository.findActiveUsersByIds.mockResolvedValue([
+        { id: 'user-2', messageRequestSetting: 'NO_ONE' },
+      ]);
+
+      await expect(
+        service.createGroupChat('user-1', {
+          title: 'Team Chat',
+          memberUserIds: ['user-2'],
+        }),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(repository.createGroupConversation).not.toHaveBeenCalled();
+    });
+
+    it('rejects a FOLLOWERS-only member who does not follow the adder back', async () => {
+      repository.findActiveUsersByIds.mockResolvedValue([
+        { id: 'user-2', messageRequestSetting: 'FOLLOWERS' },
+      ]);
+      repository.areMutualFollowers.mockResolvedValue(false);
+      repository.isFollowing.mockResolvedValue(false);
+
+      await expect(
+        service.createGroupChat('user-1', {
+          title: 'Team Chat',
+          memberUserIds: ['user-2'],
+        }),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(repository.createGroupConversation).not.toHaveBeenCalled();
+    });
+
+    it('allows a FOLLOWERS-only member who follows the adder, joining as PENDING', async () => {
+      repository.findActiveUsersByIds.mockResolvedValue([
+        { id: 'user-2', messageRequestSetting: 'FOLLOWERS' },
+      ]);
+      repository.areMutualFollowers.mockResolvedValue(false);
+      repository.isFollowing.mockImplementation((followerId, followingId) =>
+        Promise.resolve(followerId === 'user-2' && followingId === 'user-1'),
+      );
+      repository.createGroupConversation.mockResolvedValue({
+        id: 'conversation-1',
+      });
+
+      await service.createGroupChat('user-1', {
+        title: 'Team Chat',
+        memberUserIds: ['user-2'],
+      });
+
+      expect(repository.createGroupConversation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          members: [{ userId: 'user-2', state: 'PENDING' }],
+        }),
+      );
+    });
   });
 
   describe('group management permission (updateGroupChat)', () => {
@@ -331,6 +387,20 @@ describe('ChatService', () => {
           { userId: 'user-3', state: 'ACTIVE' },
         ],
       );
+    });
+
+    it('rejects adding a member who is not accepting new messages (NO_ONE)', async () => {
+      repository.findActiveUsersByIds.mockResolvedValue([
+        { id: 'user-2', messageRequestSetting: 'NO_ONE' },
+      ]);
+
+      await expect(
+        service.addGroupMembers('user-1', 'conversation-1', {
+          userIds: ['user-2'],
+        }),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(repository.addGroupMembers).not.toHaveBeenCalled();
     });
   });
 

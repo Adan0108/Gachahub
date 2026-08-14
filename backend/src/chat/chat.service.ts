@@ -10,6 +10,7 @@ import {
   ChatParticipantState,
   Prisma,
   UserRole,
+  MessageRequestSetting,
 } from '../generated/prisma/client';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
@@ -207,7 +208,7 @@ export class ChatService {
       throw new BadRequestException('One or more group members are invalid');
     }
 
-    const members = await this.resolveGroupMemberStates(userId, memberIds);
+    const members = await this.resolveGroupMemberStates(userId, users);
 
     return this.chatRepository.createGroupConversation({
       creatorId: userId,
@@ -259,7 +260,7 @@ export class ChatService {
       throw new BadRequestException('One or more group members are invalid');
     }
 
-    const members = await this.resolveGroupMemberStates(userId, memberIds);
+    const members = await this.resolveGroupMemberStates(userId, users);
 
     return this.chatRepository.addGroupMembers(conversationId, members);
   }
@@ -1130,18 +1131,51 @@ export class ChatService {
   /**
    * Resolves each candidate group member to ACTIVE or PENDING.
    *
-   * Shared by createGroupChat and addGroupMembers so both apply
-   * the exact same consent rule: mutual follower join instantly,
-   * everyone else need to accept an invite first
+   * Shared by createGroupChat and addGroupMembers — applies the same
+   * message-request gate as createDirectMessage, per member.
    */
-  private async resolveGroupMemberStates(userId: string, memberIds: string[]) {
+  private async resolveGroupMemberStates(
+    userId: string,
+    members: Array<{
+      id: string;
+      messageRequestSetting: MessageRequestSetting;
+    }>,
+  ) {
     return Promise.all(
-      memberIds.map(async (memberId) => ({
-        userId: memberId,
-        state: (await this.chatRepository.areMutualFollowers(userId, memberId))
-          ? ('ACTIVE' as const)
-          : ('PENDING' as const),
-      })),
+      members.map(async (member) => {
+        if (member.messageRequestSetting === 'NO_ONE') {
+          throw new ForbiddenException(
+            `User ${member.id} is not accepting new messages`,
+          );
+        }
+        const areMutualFollowers = await this.chatRepository.areMutualFollowers(
+          userId,
+          member.id,
+        );
+
+        if (
+          member.messageRequestSetting === 'FOLLOWERS' &&
+          !areMutualFollowers
+        ) {
+          const memberFollowsAdder = await this.chatRepository.isFollowing(
+            member.id,
+            userId,
+          );
+
+          if (!memberFollowsAdder) {
+            throw new ForbiddenException(
+              `User ${member.id} only accepts messages from people they follow`,
+            );
+          }
+        }
+
+        return {
+          userId: member.id,
+          state: areMutualFollowers
+            ? ('ACTIVE' as const)
+            : ('PENDING' as const),
+        };
+      }),
     );
   }
 

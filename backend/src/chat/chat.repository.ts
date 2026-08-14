@@ -81,6 +81,7 @@ export class ChatRepository {
       },
       select: {
         id: true,
+        messageRequestSetting: true,
       },
     });
   }
