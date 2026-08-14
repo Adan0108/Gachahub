@@ -126,25 +126,21 @@ export class ChatService {
       throw new ForbiddenException('This user is not accepting new messages');
     }
 
-    const areMutualFollowers = await this.chatRepository.areMutualFollowers(
-      senderId,
-      dto.recipientUserId,
-    );
+    const [senderFollowsRecipient, recipientFollowsSender] = await Promise.all([
+      this.chatRepository.isFollowing(senderId, dto.recipientUserId),
+      this.chatRepository.isFollowing(dto.recipientUserId, senderId),
+    ]);
+
+    const areMutualFollowers = senderFollowsRecipient && recipientFollowsSender;
 
     if (
       recipient.messageRequestSetting === 'FOLLOWERS' &&
-      !areMutualFollowers
+      !areMutualFollowers &&
+      !recipientFollowsSender
     ) {
-      const recipientFollowsSender = await this.chatRepository.isFollowing(
-        dto.recipientUserId,
-        senderId,
+      throw new ForbiddenException(
+        'This user only accepts messages from people they follow',
       );
-
-      if (!recipientFollowsSender) {
-        throw new ForbiddenException(
-          'This user only accepts messages from people they follow',
-        );
-      }
     }
 
     const recipientState = areMutualFollowers ? 'ACTIVE' : 'PENDING';

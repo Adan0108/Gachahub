@@ -891,8 +891,9 @@ describe('ChatService', () => {
       repository.findUserBlock.mockResolvedValue(null);
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
-      repository.areMutualFollowers.mockResolvedValue(false);
-      repository.isFollowing.mockResolvedValue(true);
+      repository.isFollowing.mockImplementation((followerId, followingId) =>
+        Promise.resolve(followerId === 'user-2' && followingId === 'user-1'),
+      );
       repository.createDirectConversationWithMessage.mockResolvedValue({
         conversation: { id: 'conversation-1' },
         message: { id: 'message-1' },
@@ -910,7 +911,7 @@ describe('ChatService', () => {
       );
     });
 
-    it('allows a message under FOLLOWERS without an extra lookup when mutual followers', async () => {
+    it('resolves ACTIVE from two isFollowing calls instead of areMutualFollowers when mutual', async () => {
       repository.findUserById.mockResolvedValue({
         id: 'user-2',
         status: 'ACTIVE',
@@ -919,7 +920,7 @@ describe('ChatService', () => {
       repository.findUserBlock.mockResolvedValue(null);
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
-      repository.areMutualFollowers.mockResolvedValue(true);
+      repository.isFollowing.mockResolvedValue(true);
       repository.createDirectConversationWithMessage.mockResolvedValue({
         conversation: { id: 'conversation-1' },
         message: { id: 'message-1' },
@@ -930,7 +931,10 @@ describe('ChatService', () => {
         message: { clientMessageId: 'client-1' },
       } as any);
 
-      expect(repository.isFollowing).not.toHaveBeenCalled();
+      expect(repository.areMutualFollowers).not.toHaveBeenCalled();
+      expect(repository.isFollowing).toHaveBeenCalledTimes(2);
+      expect(repository.isFollowing).toHaveBeenCalledWith('user-1', 'user-2');
+      expect(repository.isFollowing).toHaveBeenCalledWith('user-2', 'user-1');
       expect(
         repository.createDirectConversationWithMessage,
       ).toHaveBeenCalledWith(
