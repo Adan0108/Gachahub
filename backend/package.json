@@ -22,7 +22,8 @@
     "docker:down": "docker compose down",
     "docker:status": "docker compose ps",
     "docker:logs": "docker compose logs -f",
-    "docker:reset": "docker compose down -v"
+    "docker:reset": "docker compose down -v",
+    "seed:feed": "tsx prisma/seed-feed.ts"
   },
   "dependencies": {
     "@better-auth/prisma-adapter": "^1.6.20",

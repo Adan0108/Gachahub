@@ -17,6 +17,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { MediaModule } from './media/media.module';
 import { CommentsModule } from './comments/comments.module';
 import { FollowsModule } from './follows/follows.module';
+import { FeedModule } from './feed/feed.module';
 
 /**
  * Root application module.
@@ -43,6 +44,7 @@ import { FollowsModule } from './follows/follows.module';
     PostsModule,
     CommentsModule,
     FollowsModule,
+    FeedModule,
   ],
   controllers: [AppController],
   providers: [AppService],
