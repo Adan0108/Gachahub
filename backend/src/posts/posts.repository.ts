@@ -504,4 +504,23 @@ export class PostsRepository {
       };
     });
   }
+
+  findManyByIds(ids: string[]) {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    return this.prisma.post.findMany({
+      where: {
+        id: {
+          in: ids,
+        },
+
+        status: 'PUBLISHED',
+        deletedAt: null,
+      },
+
+      include: postInclude,
+    });
+  }
 }

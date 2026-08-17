@@ -12,6 +12,7 @@ import { UpdatePostDto } from './dto/update-post.dto';
 import { PostsRepository } from './posts.repository';
 import { MediaService } from '../media/media.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { formatPost } from './post.mapper';
 
 @Injectable()
 export class PostsService {
@@ -132,7 +133,7 @@ export class PostsService {
     ]);
 
     return {
-      items: items.map((post) => this.formatPost(post)),
+      items: items.map((post) => formatPost(post)),
       meta: {
         page,
         limit,
@@ -149,7 +150,7 @@ export class PostsService {
       throw new NotFoundException('Post not found');
     }
 
-    return this.formatPost(post);
+    return formatPost(post);
   }
 
   async findByAuthor(query: PaginationQueryDto, authorId: string) {
@@ -162,7 +163,7 @@ export class PostsService {
     });
 
     return {
-      items: result.items.map((post) => this.formatPost(post)),
+      items: result.items.map((post) => formatPost(post)),
       meta: {
         page,
         limit,
@@ -184,7 +185,7 @@ export class PostsService {
     });
 
     return {
-      items: result.items.map((post) => this.formatPost(post)),
+      items: result.items.map((post) => formatPost(post)),
       meta: {
         page,
         limit,
@@ -297,7 +298,7 @@ export class PostsService {
       tags: this.normalizeTags(dto.tags),
     });
 
-    return this.formatPost(post);
+    return formatPost(post);
   }
 
   async update(id: string, dto: UpdatePostDto, userId: string) {
@@ -387,7 +388,7 @@ export class PostsService {
       tags: dto.tags !== undefined ? this.normalizeTags(dto.tags) : undefined,
     });
 
-    return this.formatPost(post);
+    return formatPost(post);
   }
 
   async remove(id: string, userId: string) {
@@ -458,20 +459,5 @@ export class PostsService {
     }
 
     return [...uniqueTags.values()];
-  }
-
-  private formatPost<
-    T extends {
-      tags: Array<{ tag: unknown }>;
-      postLikes?: Array<{ userId: string }>;
-    },
-  >(post: T) {
-    const { tags, postLikes, ...rest } = post;
-
-    return {
-      ...rest,
-      tags: tags.map((postTag) => postTag.tag),
-      likedByCurrentUser: (postLikes?.length ?? 0) > 0,
-    };
   }
 }
