@@ -470,7 +470,7 @@ export class ChatService {
       }
     }
 
-    const limit = query.limit ?? 30;
+    const limit = query.limit;
 
     const messages = await this.chatRepository.findMessages({
       conversationId,

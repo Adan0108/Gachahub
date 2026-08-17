@@ -2068,7 +2068,7 @@ describe('ChatService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('passes the query params through and defaults the limit to 30', async () => {
+    it("passes the query params through as given, limit default is the DTO's job", async () => {
       repository.findParticipant.mockResolvedValue({
         userId: 'user-1',
         state: 'ACTIVE',
@@ -2077,6 +2077,7 @@ describe('ChatService', () => {
 
       await service.findMessages('user-1', 'conversation-1', {
         beforeMessageId: 'message-5',
+        limit: 30,
       });
 
       expect(repository.findMessages).toHaveBeenCalledWith({
@@ -2113,7 +2114,9 @@ describe('ChatService', () => {
         { id: 'message-1' },
       ]);
 
-      const result = await service.findMessages('user-1', 'conversation-1', {});
+      const result = await service.findMessages('user-1', 'conversation-1', {
+        limit: 30,
+      });
 
       expect(result.items.map((message) => message.id)).toEqual([
         'message-1',
@@ -2133,7 +2136,9 @@ describe('ChatService', () => {
         { id: 'message-1' },
       ]);
 
-      const result = await service.findMessages('user-1', 'conversation-1', {});
+      const result = await service.findMessages('user-1', 'conversation-1', {
+        limit: 30,
+      });
 
       expect(result.meta.nextBeforeMessageId).toBe('message-1');
     });
@@ -2145,7 +2150,9 @@ describe('ChatService', () => {
       });
       repository.findMessages.mockResolvedValue([]);
 
-      const result = await service.findMessages('user-1', 'conversation-1', {});
+      const result = await service.findMessages('user-1', 'conversation-1', {
+        limit: 30,
+      });
 
       expect(result.meta.nextBeforeMessageId).toBeNull();
       expect(result.items).toEqual([]);
