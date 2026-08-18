@@ -27,6 +27,7 @@ export class CommentsRepository {
       },
       select: {
         id: true,
+        authorId: true,
         status: true,
         visibility: true,
         deletedAt: true,
@@ -200,14 +201,19 @@ export class CommentsRepository {
    */
   softDelete(id: string, postId: string) {
     return this.prisma.$transaction(async (tx) => {
-      const comment = await tx.comment.update({
+      const deleted = await tx.comment.updateMany({
         where: {
           id,
+          deletedAt: null,
         },
         data: {
           deletedAt: new Date(),
         },
       });
+
+      if (deleted.count === 0) {
+        return null;
+      }
 
       await tx.post.update({
         where: {
@@ -219,7 +225,27 @@ export class CommentsRepository {
           },
         },
       });
-      return comment;
+
+      return tx.comment.findUnique({
+        where: {
+          id,
+        },
+        include: commentInclude,
+      });
+    });
+  }
+
+  isFollowing(followerId: string, followingId: string) {
+    return this.prisma.userFollow.findUnique({
+      where: {
+        followerId_followingId: {
+          followerId,
+          followingId,
+        },
+      },
+      select: {
+        followerId: true,
+      },
     });
   }
 }

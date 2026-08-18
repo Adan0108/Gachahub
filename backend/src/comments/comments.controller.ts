@@ -61,7 +61,7 @@ export class CommentsController {
   }
 
   @Get('comments/:commentId/replies')
-  @ApiCookieAuth('better-auth.session_token')
+  @Public()
   @ApiOperation({
     summary: 'List all replies to a comment',
   })

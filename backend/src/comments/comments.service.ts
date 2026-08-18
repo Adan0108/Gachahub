@@ -43,8 +43,10 @@ export class CommentsService {
 
     // Currently only root comment can own replies in current design
     if (parent.parentId !== null) {
-      throw new NotFoundException('Cannot reply to comment that not root');
+      throw new NotFoundException('Comment is not a root comment');
     }
+
+    await this.ensurePostCanBeViewed(parent.postId);
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
@@ -60,13 +62,13 @@ export class CommentsService {
         page,
         limit,
         total: result.total,
-        totalPage: Math.ceil(result.total / limit),
+        totalPages: Math.ceil(result.total / limit),
       },
     };
   }
 
   async create(postId: string, dto: CreateCommentDto, userId: string) {
-    await this.ensurePostCanBeCommentedOn(postId);
+    await this.ensurePostCanBeCommentedOn(postId, userId);
 
     const comment = await this.commentsRepository.create({
       postId,
@@ -95,7 +97,7 @@ export class CommentsService {
       throw new ForbiddenException('Replies to replies are not supported');
     }
 
-    await this.ensurePostCanBeCommentedOn(parent.postId);
+    await this.ensurePostCanBeCommentedOn(parent.postId, parent.authorId);
 
     const reply = await this.commentsRepository.create({
       postId: parent.postId,
@@ -167,8 +169,33 @@ export class CommentsService {
    * Later this can also check locked posts, moderation,
    * follower-only visibility, blocked users, etc.
    */
-  private async ensurePostCanBeCommentedOn(postId: string) {
-    return this.ensurePostCanBeViewed(postId);
+  private async ensurePostCanBeCommentedOn(postId: string, userId: string) {
+    const post = await this.commentsRepository.findPostById(postId);
+
+    if (!post || post.deletedAt || post.status !== 'PUBLISHED') {
+      throw new NotFoundException('Post not found');
+    }
+
+    if (post.visibility === 'PUBLIC') {
+      return post;
+    }
+
+    if (post.visibility === 'FOLLOWERS_ONLY') {
+      if (post.authorId === userId) {
+        return post;
+      }
+
+      const follow = await this.commentsRepository.isFollowing(
+        userId,
+        post.authorId,
+      );
+
+      if (follow) {
+        return post;
+      }
+    }
+
+    throw new NotFoundException('Post not found');
   }
 
   private formatComment<
