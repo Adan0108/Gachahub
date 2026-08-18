@@ -97,7 +97,7 @@ export class CommentsService {
       throw new ForbiddenException('Replies to replies are not supported');
     }
 
-    await this.ensurePostCanBeCommentedOn(parent.postId, parent.authorId);
+    await this.ensurePostCanBeCommentedOn(parent.postId, userId);
 
     const reply = await this.commentsRepository.create({
       postId: parent.postId,
