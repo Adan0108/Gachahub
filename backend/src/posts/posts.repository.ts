@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -281,7 +281,9 @@ export class PostsRepository {
           });
 
           if (claimed.count !== mediaUploadIds.length) {
-            throw new Error('One or more media uploads could not be claimed');
+            throw new ConflictException(
+              'One or more media uploads could not be attached',
+            );
           }
 
           await tx.postMedia.createMany({
