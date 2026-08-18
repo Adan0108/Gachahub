@@ -472,23 +472,17 @@ export class PostsRepository {
 
   async like(postId: string, userId: string) {
     return this.prisma.$transaction(async (tx) => {
-      const existingLike = await tx.postLike.findUnique({
-        where: {
-          postId_userId: {
+      const created = await tx.postLike.createMany({
+        data: [
+          {
             postId,
             userId,
           },
-        },
+        ],
+        skipDuplicates: true,
       });
 
-      if (!existingLike) {
-        await tx.postLike.create({
-          data: {
-            postId,
-            userId,
-          },
-        });
-
+      if (created.count > 0) {
         const post = await tx.post.update({
           where: {
             id: postId,
