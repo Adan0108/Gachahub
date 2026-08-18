@@ -6,6 +6,9 @@ import {
 jest.mock('./chat.repository', () => ({
   ChatRepository: class {},
 }));
+jest.mock('../follows/follows.service', () => ({
+  FollowsService: class {},
+}));
 jest.mock('../generated/prisma/client', () => ({
   ChatMessageContentType: { TEXT: 'TEXT' },
   UserRole: { ADMIN: 'ADMIN' },
@@ -55,8 +58,11 @@ describe('ChatService', () => {
     softDeleteConversationForParticipant: jest.fn(),
     restoreDeletedParticipants: jest.fn(),
     findBlockedUserIds: jest.fn(),
-    areMutualFollowers: jest.fn(),
+  };
+
+  const followsService = {
     isFollowing: jest.fn(),
+    areMutualFollowers: jest.fn(),
   };
 
   const messageEncryption = {
@@ -73,11 +79,12 @@ describe('ChatService', () => {
     jest.clearAllMocks();
     service = new ChatService(
       repository as any,
+      followsService as any,
       messageEncryption,
       chatDelivery,
     );
     repository.findBlockedUserIds.mockResolvedValue(new Set());
-    repository.areMutualFollowers.mockResolvedValue(false);
+    followsService.isFollowing.mockResolvedValue({ following: false });
   });
 
   const groupConversation = (
@@ -158,11 +165,12 @@ describe('ChatService', () => {
         { id: 'user-2' },
         { id: 'user-3' },
       ]);
-      repository.isFollowing.mockImplementation((followerId, followingId) =>
-        Promise.resolve(
-          (followerId === 'user-1' && followingId === 'user-2') ||
+      followsService.isFollowing.mockImplementation((followerId, followingId) =>
+        Promise.resolve({
+          following:
+            (followerId === 'user-1' && followingId === 'user-2') ||
             (followerId === 'user-2' && followingId === 'user-1'),
-        ),
+        }),
       );
       repository.createGroupConversation.mockResolvedValue({
         id: 'conversation-1',
@@ -202,8 +210,7 @@ describe('ChatService', () => {
       repository.findActiveUsersByIds.mockResolvedValue([
         { id: 'user-2', messageRequestSetting: 'FOLLOWERS' },
       ]);
-      repository.areMutualFollowers.mockResolvedValue(false);
-      repository.isFollowing.mockResolvedValue(false);
+      followsService.isFollowing.mockResolvedValue({ following: false });
 
       await expect(
         service.createGroupChat('user-1', {
@@ -219,9 +226,10 @@ describe('ChatService', () => {
       repository.findActiveUsersByIds.mockResolvedValue([
         { id: 'user-2', messageRequestSetting: 'FOLLOWERS' },
       ]);
-      repository.areMutualFollowers.mockResolvedValue(false);
-      repository.isFollowing.mockImplementation((followerId, followingId) =>
-        Promise.resolve(followerId === 'user-2' && followingId === 'user-1'),
+      followsService.isFollowing.mockImplementation((followerId, followingId) =>
+        Promise.resolve({
+          following: followerId === 'user-2' && followingId === 'user-1',
+        }),
       );
       repository.createGroupConversation.mockResolvedValue({
         id: 'conversation-1',
@@ -374,11 +382,12 @@ describe('ChatService', () => {
         { id: 'user-2' },
         { id: 'user-3' },
       ]);
-      repository.isFollowing.mockImplementation((followerId, followingId) =>
-        Promise.resolve(
-          (followerId === 'user-1' && followingId === 'user-3') ||
+      followsService.isFollowing.mockImplementation((followerId, followingId) =>
+        Promise.resolve({
+          following:
+            (followerId === 'user-1' && followingId === 'user-3') ||
             (followerId === 'user-3' && followingId === 'user-1'),
-        ),
+        }),
       );
       repository.addGroupMembers.mockResolvedValue({ count: 2 });
 
@@ -866,8 +875,7 @@ describe('ChatService', () => {
       repository.findUserBlock.mockResolvedValue(null);
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
-      repository.areMutualFollowers.mockResolvedValue(false);
-      repository.isFollowing.mockResolvedValue(false);
+      followsService.isFollowing.mockResolvedValue({ following: false });
 
       await expect(
         service.createDirectMessage('user-1', {
@@ -876,7 +884,10 @@ describe('ChatService', () => {
         } as any),
       ).rejects.toThrow(ForbiddenException);
 
-      expect(repository.isFollowing).toHaveBeenCalledWith('user-2', 'user-1');
+      expect(followsService.isFollowing).toHaveBeenCalledWith(
+        'user-2',
+        'user-1',
+      );
       expect(
         repository.createDirectConversationWithMessage,
       ).not.toHaveBeenCalled();
@@ -891,8 +902,10 @@ describe('ChatService', () => {
       repository.findUserBlock.mockResolvedValue(null);
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
-      repository.isFollowing.mockImplementation((followerId, followingId) =>
-        Promise.resolve(followerId === 'user-2' && followingId === 'user-1'),
+      followsService.isFollowing.mockImplementation((followerId, followingId) =>
+        Promise.resolve({
+          following: followerId === 'user-2' && followingId === 'user-1',
+        }),
       );
       repository.createDirectConversationWithMessage.mockResolvedValue({
         conversation: { id: 'conversation-1' },
@@ -920,7 +933,7 @@ describe('ChatService', () => {
       repository.findUserBlock.mockResolvedValue(null);
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
-      repository.isFollowing.mockResolvedValue(true);
+      followsService.isFollowing.mockResolvedValue({ following: true });
       repository.createDirectConversationWithMessage.mockResolvedValue({
         conversation: { id: 'conversation-1' },
         message: { id: 'message-1' },
@@ -931,10 +944,16 @@ describe('ChatService', () => {
         message: { clientMessageId: 'client-1' },
       } as any);
 
-      expect(repository.areMutualFollowers).not.toHaveBeenCalled();
-      expect(repository.isFollowing).toHaveBeenCalledTimes(2);
-      expect(repository.isFollowing).toHaveBeenCalledWith('user-1', 'user-2');
-      expect(repository.isFollowing).toHaveBeenCalledWith('user-2', 'user-1');
+      expect(followsService.areMutualFollowers).not.toHaveBeenCalled();
+      expect(followsService.isFollowing).toHaveBeenCalledTimes(2);
+      expect(followsService.isFollowing).toHaveBeenCalledWith(
+        'user-1',
+        'user-2',
+      );
+      expect(followsService.isFollowing).toHaveBeenCalledWith(
+        'user-2',
+        'user-1',
+      );
       expect(
         repository.createDirectConversationWithMessage,
       ).toHaveBeenCalledWith(
@@ -950,7 +969,7 @@ describe('ChatService', () => {
       repository.findUserBlock.mockResolvedValue(null);
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
-      repository.areMutualFollowers.mockResolvedValue(true);
+      followsService.isFollowing.mockResolvedValue({ following: true });
       repository.createDirectConversationWithMessage.mockResolvedValue({
         conversation: { id: 'conversation-1' },
         message: { id: 'message-1' },
@@ -987,7 +1006,7 @@ describe('ChatService', () => {
       });
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
-      repository.areMutualFollowers.mockResolvedValue(true);
+      followsService.isFollowing.mockResolvedValue({ following: true });
       repository.findUserBlock.mockImplementation((blockerId, blockedId) => {
         if (blockerId === 'user-2' && blockedId === 'user-1') {
           return Promise.resolve({ blockerId: 'user-2', blockedId: 'user-1' });

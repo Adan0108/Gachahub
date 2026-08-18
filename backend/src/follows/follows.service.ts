@@ -53,6 +53,15 @@ export class FollowsService {
     };
   }
 
+  async areMutualFollowers(userIdA: string, userIdB: string): Promise<boolean> {
+    const [aFollowsB, bFollowsA] = await Promise.all([
+      this.followsRepository.find(userIdA, userIdB),
+      this.followsRepository.find(userIdB, userIdA),
+    ]);
+
+    return aFollowsB !== null && bFollowsA !== null;
+  }
+
   /**
    * Feed helper.
    *

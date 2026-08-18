@@ -8,6 +8,7 @@ import { OpaqueMessageEncryptionService } from './opaque-message-encryption.serv
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
 import { CommonModule } from '../common/common.module';
+import { FollowsModule } from '../follows/follows.module';
 
 /**
  * Chat feature module.
@@ -16,7 +17,7 @@ import { CommonModule } from '../common/common.module';
  * and replaceable adapter ports used by the chat system.
  */
 @Module({
-  imports: [PrismaModule, CommonModule],
+  imports: [PrismaModule, CommonModule, FollowsModule],
   controllers: [ChatController],
   providers: [
     ChatRepository,

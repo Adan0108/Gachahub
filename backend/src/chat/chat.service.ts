@@ -15,6 +15,7 @@ import {
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
 import { ChatRepository } from './chat.repository';
+import { FollowsService } from '../follows/follows.service';
 import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
@@ -43,6 +44,7 @@ import type { ChatDeliveryPort } from './ports/chat-delivery.port';
 export class ChatService {
   constructor(
     private readonly chatRepository: ChatRepository,
+    private readonly followsService: FollowsService,
     @Inject(MESSAGE_ENCRYPTION_PORT)
     private readonly messageEncryption: MessageEncryptionPort,
     @Inject(CHAT_DELIVERY_PORT)
@@ -1251,10 +1253,13 @@ export class ChatService {
       );
     }
 
-    const [actorFollowsTarget, targetFollowsActor] = await Promise.all([
-      this.chatRepository.isFollowing(actorId, target.id),
-      this.chatRepository.isFollowing(target.id, actorId),
-    ]);
+    const [actorFollowsTargetResult, targetFollowsActorResult] =
+      await Promise.all([
+        this.followsService.isFollowing(actorId, target.id),
+        this.followsService.isFollowing(target.id, actorId),
+      ]);
+    const actorFollowsTarget = actorFollowsTargetResult.following;
+    const targetFollowsActor = targetFollowsActorResult.following;
 
     if (target.messageRequestSetting === 'FOLLOWERS' && !targetFollowsActor) {
       throw new ForbiddenException(
