@@ -34,11 +34,13 @@ export class ChatRepository {
   }
 
   /**
-   * Checks whether followerId follows followingId (accepted).
+   * Checks whether followerId follows followingId.
+   *
+   * Backed by the shared UserFollow table (owned by the follows module) —
+   * follows here are instant, no pending/accepted state to check.
    */
-
   async isFollowing(followerId: string, followingId: string) {
-    const follow = await this.prisma.follow.findUnique({
+    const follow = await this.prisma.userFollow.findUnique({
       where: {
         followerId_followingId: {
           followerId,
@@ -47,7 +49,7 @@ export class ChatRepository {
       },
     });
 
-    return follow?.status === 'ACCEPTED';
+    return follow !== null;
   }
 
   /**
