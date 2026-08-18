@@ -412,25 +412,13 @@ export class PostsService {
   }
 
   async like(postId: string, userId: string) {
-    const post = await this.postsRepository.findById(postId);
-
     await this.ensurePostCanBeInteractedWith(postId, userId);
-
-    if (!post) {
-      throw new NotFoundException('Post not found');
-    }
 
     return this.postsRepository.like(postId, userId);
   }
 
   async unlike(postId: string, userId: string) {
-    const post = await this.postsRepository.findById(postId);
-
     await this.ensurePostCanBeInteractedWith(postId, userId);
-
-    if (!post) {
-      throw new NotFoundException('Post not found');
-    }
 
     return this.postsRepository.unlike(postId, userId);
   }
