@@ -339,6 +339,16 @@ export class PostsRepository {
     }>;
   }) {
     return this.prisma.$transaction(async (tx) => {
+      const before = await tx.post.findUniqueOrThrow({
+        where: {
+          id: params.id,
+        },
+        select: {
+          status: true,
+          gameId: true,
+        },
+      });
+
       if (params.tags !== undefined) {
         await tx.postTag.deleteMany({
           where: {
@@ -347,7 +357,7 @@ export class PostsRepository {
         });
       }
 
-      return tx.post.update({
+      const updated = await tx.post.update({
         where: {
           id: params.id,
         },
@@ -372,6 +382,30 @@ export class PostsRepository {
         },
         include: postInclude,
       });
+
+      if (before.status !== updated.status) {
+        const delta =
+          updated.status === 'PUBLISHED'
+            ? 1
+            : before.status === 'PUBLISHED'
+              ? -1
+              : 0;
+
+        if (delta !== 0) {
+          await tx.game.update({
+            where: {
+              id: before.gameId,
+            },
+            data: {
+              postCount: {
+                increment: delta,
+              },
+            },
+          });
+        }
+      }
+
+      return updated;
     });
   }
 
