@@ -13,12 +13,14 @@ import { PostsRepository } from './posts.repository';
 import { MediaService } from '../media/media.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { formatPost } from './post.mapper';
+import { FollowsService } from '../follows/follows.service';
 
 @Injectable()
 export class PostsService {
   constructor(
     private readonly postsRepository: PostsRepository,
     private readonly mediaService: MediaService,
+    private readonly followsService: FollowsService,
   ) {}
 
   async findAll(query: QueryPostsDto, userId?: string) {
@@ -416,6 +418,8 @@ export class PostsService {
   async like(postId: string, userId: string) {
     const post = await this.postsRepository.findById(postId);
 
+    await this.ensurePostCanBeInteractedWith(postId, userId);
+
     if (!post) {
       throw new NotFoundException('Post not found');
     }
@@ -425,6 +429,8 @@ export class PostsService {
 
   async unlike(postId: string, userId: string) {
     const post = await this.postsRepository.findById(postId);
+
+    await this.ensurePostCanBeInteractedWith(postId, userId);
 
     if (!post) {
       throw new NotFoundException('Post not found');
@@ -459,5 +465,45 @@ export class PostsService {
     }
 
     return [...uniqueTags.values()];
+  }
+
+  /**
+   * Checks whether the current user is allowed to interact with a post.
+   *
+   * Shared interactions such as like/unlike are allowed for:
+   * - PUBLIC published posts
+   * - FOLLOWERS_ONLY published posts when the user is the author
+   *   or follows the author
+   *
+   * PRIVATE, non-published and deleted posts are treated as not found
+   * so callers cannot use the interaction endpoint to discover hidden posts.
+   */
+  private async ensurePostCanBeInteractedWith(postId: string, userId: string) {
+    const post = await this.postsRepository.findPostForInteraction(postId);
+
+    if (!post || post.deletedAt || post.status !== 'PUBLISHED') {
+      throw new NotFoundException('Post not found');
+    }
+
+    if (post.visibility === 'PUBLIC') {
+      return post;
+    }
+
+    if (post.visibility === 'FOLLOWERS_ONLY') {
+      if (post.authorId === userId) {
+        return post;
+      }
+
+      const followStatus = await this.followsService.isFollowing(
+        userId,
+        post.authorId,
+      );
+
+      if (followStatus.following) {
+        return post;
+      }
+    }
+
+    throw new NotFoundException('Post not found');
   }
 }

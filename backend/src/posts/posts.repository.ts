@@ -523,4 +523,19 @@ export class PostsRepository {
       include: postInclude,
     });
   }
+
+  findPostForInteraction(postId: string) {
+    return this.prisma.post.findUnique({
+      where: {
+        id: postId,
+      },
+      select: {
+        id: true,
+        authorId: true,
+        status: true,
+        visibility: true,
+        deletedAt: true,
+      },
+    });
+  }
 }
