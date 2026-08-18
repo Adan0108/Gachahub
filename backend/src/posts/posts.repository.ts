@@ -409,11 +409,31 @@ export class PostsRepository {
     });
   }
 
-  softDelete(id: string, gameId: string, wasPublished: boolean) {
+  softDelete(id: string) {
     return this.prisma.$transaction(async (tx) => {
-      const post = await tx.post.update({
+      const before = await tx.post.findUniqueOrThrow({
         where: {
           id,
+        },
+        select: {
+          status: true,
+          gameId: true,
+          deletedAt: true,
+        },
+      });
+
+      if (before.deletedAt || before.status === 'DELETED') {
+        return tx.post.findUniqueOrThrow({
+          where: {
+            id,
+          },
+        });
+      }
+
+      const deleted = await tx.post.updateMany({
+        where: {
+          id,
+          deletedAt: null,
         },
         data: {
           status: 'DELETED',
@@ -421,10 +441,18 @@ export class PostsRepository {
         },
       });
 
-      if (wasPublished) {
+      if (deleted.count === 0) {
+        return tx.post.findUniqueOrThrow({
+          where: {
+            id,
+          },
+        });
+      }
+
+      if (before.status === 'PUBLISHED') {
         await tx.game.update({
           where: {
-            id: gameId,
+            id: before.gameId,
           },
           data: {
             postCount: {
@@ -434,7 +462,11 @@ export class PostsRepository {
         });
       }
 
-      return post;
+      return tx.post.findUniqueOrThrow({
+        where: {
+          id,
+        },
+      });
     });
   }
 

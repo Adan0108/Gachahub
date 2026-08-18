@@ -404,11 +404,7 @@ export class PostsService {
       throw new ForbiddenException('You can only delete your own post');
     }
 
-    await this.postsRepository.softDelete(
-      id,
-      post.gameId,
-      post.status === 'PUBLISHED',
-    );
+    await this.postsRepository.softDelete(id);
 
     return {
       message: 'Post deleted successfully',
