@@ -1,10 +1,6 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import {
-  AllowAnonymous,
-  OptionalAuth,
-  Session,
-} from '@thallesp/nestjs-better-auth';
+import { OptionalAuth, Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { QueryFeedDto, QueryGameFeedDto } from './dto/query-feed.dto';
 import { FeedService } from './feed.service';
@@ -30,15 +26,12 @@ export class FeedController {
   }
 
   @Get('trending')
-  @AllowAnonymous()
+  @OptionalAuth()
   @ApiOperation({
     summary: 'Get global trending posts',
   })
-  trending(
-    @Query()
-    query: QueryFeedDto,
-  ) {
-    return this.feedService.trending(query);
+  trending(@Query() query: QueryFeedDto, @Session() session?: UserSession) {
+    return this.feedService.trending(query, session?.user.id);
   }
 }
 

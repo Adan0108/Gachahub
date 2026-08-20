@@ -567,7 +567,7 @@ export class PostsRepository {
     });
   }
 
-  findManyByIds(ids: string[]) {
+  findManyByIds(ids: string[], userId?: string) {
     if (ids.length === 0) {
       return [];
     }
@@ -577,12 +577,23 @@ export class PostsRepository {
         id: {
           in: ids,
         },
-
         status: 'PUBLISHED',
         deletedAt: null,
       },
 
-      include: postInclude,
+      include: {
+        ...postInclude,
+        postLikes: userId
+          ? {
+              where: {
+                userId,
+              },
+              select: {
+                userId: true,
+              },
+            }
+          : false,
+      },
     });
   }
 

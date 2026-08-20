@@ -48,9 +48,10 @@ export class FeedService {
    * This intentionally stays global instead
    * of using follow relationships.
    */
-  trending(query: QueryFeedDto) {
+  trending(query: QueryFeedDto, userId?: string) {
     return this.trendingInternal({
       query,
+      userId,
     });
   }
 
@@ -69,6 +70,7 @@ export class FeedService {
     if (sort === GameFeedSortDto.TRENDING) {
       return this.trendingInternal({
         query,
+        userId,
         gameSlug,
         categorySlug: query.categorySlug,
       });
@@ -141,6 +143,7 @@ export class FeedService {
             id: 'desc',
           },
         ],
+        userId,
       }),
 
       this.postsRepository.count(where),
@@ -175,10 +178,11 @@ export class FeedService {
 
   private async trendingInternal(params: {
     query: QueryFeedDto;
+    userId?: string;
     gameSlug?: string;
     categorySlug?: string;
   }) {
-    const { query, gameSlug, categorySlug } = params;
+    const { query, userId, gameSlug, categorySlug } = params;
 
     const page = query.page ?? 1;
 
@@ -239,7 +243,7 @@ export class FeedService {
       .slice(start, start + limit)
       .map((candidate) => candidate.id);
 
-    const posts = await this.postsRepository.findManyByIds(selectedIds);
+    const posts = await this.postsRepository.findManyByIds(selectedIds, userId);
 
     return {
       items: this.orderPostsByIds(posts, selectedIds).map((post) =>
