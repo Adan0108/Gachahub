@@ -101,27 +101,14 @@ export class PostsService {
     const orderBy: Prisma.PostOrderByWithRelationInput[] =
       query.sort === PostSortDto.POPULAR
         ? [
-            {
-              saveCount: 'desc',
-            },
-            {
-              commentCount: 'desc',
-            },
-            {
-              reactionCount: 'desc',
-            },
-            {
-              shareCount: 'desc',
-            },
-            {
-              createdAt: 'desc',
-            },
+            { saveCount: 'desc' },
+            { commentCount: 'desc' },
+            { reactionCount: 'desc' },
+            { shareCount: 'desc' },
+            { createdAt: 'desc' },
+            { id: 'desc' },
           ]
-        : [
-            {
-              createdAt: 'desc',
-            },
-          ];
+        : [{ createdAt: 'desc' }, { id: 'desc' }];
 
     const [items, total] = await Promise.all([
       this.postsRepository.findMany({
