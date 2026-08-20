@@ -441,12 +441,22 @@ export class MediaService {
       process.env.MEDIA_SIGNATURE_RATE_WINDOW_SECONDS ?? 600,
     );
 
-    const key = `media:signature-rate:${userId}`;
-    const count = await this.redisService.increment(key);
-
-    if (count === 1) {
-      await this.redisService.expire(key, windowSeconds);
+    if (!Number.isFinite(limit) || limit <= 0) {
+      throw new Error('MEDIA_SIGNATURE_RATE_LIMIT must be a positive number');
     }
+
+    if (!Number.isFinite(windowSeconds) || windowSeconds <= 0) {
+      throw new Error(
+        'MEDIA_SIGNATURE_RATE_WINDOW_SECONDS must be a positive number',
+      );
+    }
+
+    const key = `media:signature-rate:${userId}`;
+
+    const count = await this.redisService.incrementWithExpiry(
+      key,
+      windowSeconds,
+    );
 
     if (count > limit) {
       throw new HttpException(
