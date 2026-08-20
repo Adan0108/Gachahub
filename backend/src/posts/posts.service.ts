@@ -142,13 +142,18 @@ export class PostsService {
     return formatPost(post);
   }
 
-  async findByAuthor(query: PaginationQueryDto, authorId: string) {
+  async findByAuthor(
+    query: PaginationQueryDto,
+    authorId: string,
+    userId?: string,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
 
     const result = await this.postsRepository.findByAuthorId(authorId, {
       page,
       limit,
+      userId,
     });
 
     return {
@@ -162,7 +167,11 @@ export class PostsService {
     };
   }
 
-  async findByAuthorPublic(query: PaginationQueryDto, authorId: string) {
+  async findByAuthorPublic(
+    query: PaginationQueryDto,
+    authorId: string,
+    userId?: string,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
 
@@ -171,6 +180,7 @@ export class PostsService {
       limit,
       visibility: 'PUBLIC',
       status: 'PUBLISHED',
+      userId,
     });
 
     return {

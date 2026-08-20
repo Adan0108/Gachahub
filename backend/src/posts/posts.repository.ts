@@ -77,6 +77,7 @@ export class PostsRepository {
       limit: number;
       visibility?: Prisma.PostWhereInput['visibility'];
       status?: Prisma.PostWhereInput['status'];
+      userId?: string;
     },
   ) {
     const skip = (params.page - 1) * params.limit;
@@ -101,7 +102,19 @@ export class PostsRepository {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.post.findMany({
         where,
-        include: postInclude,
+        include: {
+          ...postInclude,
+          postLikes: params.userId
+            ? {
+                where: {
+                  userId: params.userId,
+                },
+                select: {
+                  userId: true,
+                },
+              }
+            : false,
+        },
         orderBy: [
           {
             createdAt: 'desc',

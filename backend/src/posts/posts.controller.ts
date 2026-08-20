@@ -45,7 +45,11 @@ export class PostsController {
     @Query() query: PaginationQueryDto,
     @Session() session: UserSession,
   ) {
-    return this.postsService.findByAuthor(query, session.user.id);
+    return this.postsService.findByAuthor(
+      query,
+      session.user.id, // authorId
+      session.user.id, // current user → hydrate postLikes
+    );
   }
 
   @Get(':id')
