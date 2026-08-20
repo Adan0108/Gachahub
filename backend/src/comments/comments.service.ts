@@ -7,13 +7,17 @@ import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { CommentsRepository } from './comments.repository';
+import { FollowsService } from '../follows/follows.service';
 
 @Injectable()
 export class CommentsService {
-  constructor(private readonly commentsRepository: CommentsRepository) {}
+  constructor(
+    private readonly commentsRepository: CommentsRepository,
+    private readonly followsService: FollowsService,
+  ) {}
 
-  async findByPost(postId: string, query: PaginationQueryDto) {
-    await this.ensurePostCanBeViewed(postId);
+  async findByPost(postId: string, query: PaginationQueryDto, userId?: string) {
+    await this.ensurePostCanBeViewed(postId, userId);
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
@@ -34,7 +38,11 @@ export class CommentsService {
     };
   }
 
-  async findReplies(commentId: string, query: PaginationQueryDto) {
+  async findReplies(
+    commentId: string,
+    query: PaginationQueryDto,
+    userId?: string,
+  ) {
     const parent = await this.commentsRepository.findById(commentId);
 
     if (!parent) {
@@ -46,7 +54,7 @@ export class CommentsService {
       throw new NotFoundException('Comment is not a root comment');
     }
 
-    await this.ensurePostCanBeViewed(parent.postId);
+    await this.ensurePostCanBeViewed(parent.postId, userId);
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
@@ -147,21 +155,41 @@ export class CommentsService {
   }
 
   /**
-   * Used for public comment reads.
+   * Checks whether the current user can view comments for a post.
+   *
+   * PUBLIC posts are readable by everyone.
+   * FOLLOWERS_ONLY posts are readable by the author or followers.
    */
-  private async ensurePostCanBeViewed(postId: string) {
+  private async ensurePostCanBeViewed(postId: string, userId?: string) {
     const post = await this.commentsRepository.findPostById(postId);
 
-    if (
-      !post ||
-      post.deletedAt ||
-      post.status !== 'PUBLISHED' ||
-      post.visibility !== 'PUBLIC'
-    ) {
+    if (!post || post.deletedAt || post.status !== 'PUBLISHED') {
       throw new NotFoundException('Post not found');
     }
 
-    return post;
+    // Anonymous và logged-in đều đọc PUBLIC được.
+    if (post.visibility === 'PUBLIC') {
+      return post;
+    }
+
+    // FOLLOWERS_ONLY cần đăng nhập.
+    if (post.visibility === 'FOLLOWERS_ONLY' && userId) {
+      // Author luôn đọc được post của mình.
+      if (post.authorId === userId) {
+        return post;
+      }
+
+      const followStatus = await this.followsService.isFollowing(
+        userId,
+        post.authorId,
+      );
+
+      if (followStatus.following) {
+        return post;
+      }
+    }
+
+    throw new NotFoundException('Post not found');
   }
 
   /**
@@ -170,32 +198,7 @@ export class CommentsService {
    * follower-only visibility, blocked users, etc.
    */
   private async ensurePostCanBeCommentedOn(postId: string, userId: string) {
-    const post = await this.commentsRepository.findPostById(postId);
-
-    if (!post || post.deletedAt || post.status !== 'PUBLISHED') {
-      throw new NotFoundException('Post not found');
-    }
-
-    if (post.visibility === 'PUBLIC') {
-      return post;
-    }
-
-    if (post.visibility === 'FOLLOWERS_ONLY') {
-      if (post.authorId === userId) {
-        return post;
-      }
-
-      const follow = await this.commentsRepository.isFollowing(
-        userId,
-        post.authorId,
-      );
-
-      if (follow) {
-        return post;
-      }
-    }
-
-    throw new NotFoundException('Post not found');
+    return this.ensurePostCanBeViewed(postId, userId);
   }
 
   private formatComment<

@@ -234,18 +234,4 @@ export class CommentsRepository {
       });
     });
   }
-
-  isFollowing(followerId: string, followingId: string) {
-    return this.prisma.userFollow.findUnique({
-      where: {
-        followerId_followingId: {
-          followerId,
-          followingId,
-        },
-      },
-      select: {
-        followerId: true,
-      },
-    });
-  }
 }

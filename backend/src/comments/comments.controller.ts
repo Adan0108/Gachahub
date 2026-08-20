@@ -14,13 +14,12 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import { Session } from '@thallesp/nestjs-better-auth';
+import { OptionalAuth, Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
-import { Public } from '../common/decorators/public.decorator';
 
 @ApiTags('Comments')
 @Controller()
@@ -28,7 +27,7 @@ export class CommentsController {
   constructor(private readonly commentsService: CommentsService) {}
 
   @Get('posts/:postId/comments')
-  @Public()
+  @OptionalAuth()
   @ApiOperation({
     summary: 'List all comments for a post',
   })
@@ -39,8 +38,9 @@ export class CommentsController {
   findByPost(
     @Param('postId') postId: string,
     @Query() query: PaginationQueryDto,
+    @Session() session?: UserSession,
   ) {
-    return this.commentsService.findByPost(postId, query);
+    return this.commentsService.findByPost(postId, query, session?.user.id);
   }
 
   @Post('posts/:postId/comments')
@@ -61,7 +61,7 @@ export class CommentsController {
   }
 
   @Get('comments/:commentId/replies')
-  @Public()
+  @OptionalAuth()
   @ApiOperation({
     summary: 'List all replies to a comment',
   })
@@ -72,8 +72,9 @@ export class CommentsController {
   findReplies(
     @Param('commentId') commentId: string,
     @Query() query: PaginationQueryDto,
+    @Session() session?: UserSession,
   ) {
-    return this.commentsService.findReplies(commentId, query);
+    return this.commentsService.findReplies(commentId, query, session?.user.id);
   }
 
   @Post('comments/:commentId/replies')
