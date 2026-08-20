@@ -109,6 +109,19 @@ export class MediaRepository {
       take,
     });
   }
+  claimForCleanup(id: string) {
+    return this.prisma.mediaUpload.updateMany({
+      where: {
+        id,
+        status: {
+          in: ['INITIATED', 'UPLOADED'],
+        },
+      },
+      data: {
+        status: 'CLEANING',
+      },
+    });
+  }
 
   /**
    * Helper for feature repositories that need to attach uploads in their

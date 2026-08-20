@@ -595,6 +595,7 @@ enum MediaResourceType {
 enum MediaUploadStatus {
   INITIATED
   UPLOADED
+  CLEANING
   ATTACHED
   DELETED
   FAILED

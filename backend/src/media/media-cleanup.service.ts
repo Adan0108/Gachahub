@@ -23,12 +23,21 @@ export class MediaCleanupService {
   async cleanupExpiredUploads(): Promise<void> {
     const expiryHours = Number(process.env.MEDIA_UPLOAD_EXPIRES_HOURS ?? 24);
 
+    if (!Number.isFinite(expiryHours) || expiryHours <= 0) {
+      throw new Error('MEDIA_UPLOAD_EXPIRES_HOURS must be a positive number');
+    }
+
     const cutoff = new Date(Date.now() - expiryHours * 60 * 60 * 1000);
 
     const uploads = await this.mediaRepository.findExpiredUploads(cutoff, 100);
 
     for (const upload of uploads) {
       try {
+        const claimed = await this.mediaRepository.claimForCleanup(upload.id);
+
+        if (claimed.count === 0) {
+          continue;
+        }
         if (upload.status === 'UPLOADED') {
           await this.cloudinaryService.deleteAsset(
             upload.publicId,
