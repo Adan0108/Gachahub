@@ -9,7 +9,9 @@ export function BuildCard({ build, index = 0 }) {
       <div>
         <b>{build.name}</b>
         <span>{build.role}</span>
-        <small><FiHeart /> {build.likes} - <FiCompass /> {build.views}</small>
+        <small>
+          <FiHeart /> {build.likes} - <FiCompass /> {build.views}
+        </small>
       </div>
     </article>
   );

@@ -43,7 +43,7 @@ export default function ProfilePage() {
 
   const closeEditor = () => setEditing(false);
 
-  const saveProfile = event => {
+  const saveProfile = (event) => {
     event.preventDefault();
     setName(draftName.trim());
     setBio(draftBio.trim() || "We ride the waves, chasing the unknown.");
@@ -57,7 +57,7 @@ export default function ProfilePage() {
     if (!editing) return undefined;
 
     nameInputRef.current?.focus();
-    const handleModalKeyDown = event => {
+    const handleModalKeyDown = (event) => {
       if (event.key === "Escape") {
         closeEditor();
         return;
@@ -65,8 +65,9 @@ export default function ProfilePage() {
 
       if (event.key !== "Tab") return;
 
-      const focusableItems = Array.from(modalRef.current?.querySelectorAll(focusableSelector) || [])
-        .filter(element => element.offsetParent !== null);
+      const focusableItems = Array.from(
+        modalRef.current?.querySelectorAll(focusableSelector) || [],
+      ).filter((element) => element.offsetParent !== null);
       const firstItem = focusableItems[0];
       const lastItem = focusableItems.at(-1);
 
@@ -104,47 +105,138 @@ export default function ProfilePage() {
 
   return (
     <div className="page profile-page">
-      <div className="toast-slot" aria-live="polite">{notice}</div>
+      <div className="toast-slot" aria-live="polite">
+        {notice}
+      </div>
       <QueryNotice isLoading={profile.isLoading} isError={profile.isError} />
       <div aria-hidden={editing ? "true" : undefined}>
         <section className="profile-hero">
           <Art tone="indigo">{glyph.sparkle}</Art>
-          <button ref={editButtonRef} className="edit-profile" onClick={openEditor} type="button"><FiEdit3 /> Edit Profile</button>
+          <button ref={editButtonRef} className="edit-profile" onClick={openEditor} type="button">
+            <FiEdit3 /> Edit Profile
+          </button>
           <div className="profile-main">
-            <div className="profile-avatar"><Art tone="blue">{displayName.charAt(0).toUpperCase() || "R"}</Art></div>
+            <div className="profile-avatar">
+              <Art tone="blue">{displayName.charAt(0).toUpperCase() || "R"}</Art>
+            </div>
             <div>
-              <h1>{displayName} <span className="verified">{glyph.check}</span></h1>
+              <h1>
+                {displayName} <span className="verified">{glyph.check}</span>
+              </h1>
               <p>{profile.data?.email || "UID: 9008420"}</p>
               <blockquote>&quot;{bio}&quot;</blockquote>
-              <div className="social" aria-label="Profile actions"><FiShare2 aria-hidden="true" /><FiMessageCircle aria-hidden="true" /><FiCompass aria-hidden="true" /></div>
+              <div className="social" aria-label="Profile actions">
+                <FiShare2 aria-hidden="true" />
+                <FiMessageCircle aria-hidden="true" />
+                <FiCompass aria-hidden="true" />
+              </div>
             </div>
           </div>
         </section>
         <section className="profile-stats">
-          <div><b>128</b><span>Posts</span></div>
-          <div><b>24.7K</b><span>Reputation</span></div>
-          <div><b>412</b><span>Followers</span></div>
-          <div><b>89</b><span>Following</span></div>
-          <aside className="reputation"><div><small>Reputation Level</small><strong>24</strong><b>Elder Voyager</b><div className="progress"><i /></div><small>8,250 / 12,000</small></div><div className="rank-gem">{glyph.sparkle}</div></aside>
+          <div>
+            <b>128</b>
+            <span>Posts</span>
+          </div>
+          <div>
+            <b>24.7K</b>
+            <span>Reputation</span>
+          </div>
+          <div>
+            <b>412</b>
+            <span>Followers</span>
+          </div>
+          <div>
+            <b>89</b>
+            <span>Following</span>
+          </div>
+          <aside className="reputation">
+            <div>
+              <small>Reputation Level</small>
+              <strong>24</strong>
+              <b>Elder Voyager</b>
+              <div className="progress">
+                <i />
+              </div>
+              <small>8,250 / 12,000</small>
+            </div>
+            <div className="rank-gem">{glyph.sparkle}</div>
+          </aside>
         </section>
         <div className="tabs wide">
-          {["Overview", "Builds", "Posts", "Collections", "Achievements"].map(item => <button onClick={() => setTab(item)} className={tab === item ? "active" : ""} key={item} type="button">{item}</button>)}
+          {["Overview", "Builds", "Posts", "Collections", "Achievements"].map((item) => (
+            <button
+              onClick={() => setTab(item)}
+              className={tab === item ? "active" : ""}
+              key={item}
+              type="button"
+            >
+              {item}
+            </button>
+          ))}
         </div>
         <div className="profile-body">
-          <section><SectionTitle>Published {tab} (12)</SectionTitle><div className="build-grid">{builds.map((build, index) => <BuildCard build={build} index={index} key={build.name} />)}</div></section>
+          <section>
+            <SectionTitle>Published {tab} (12)</SectionTitle>
+            <div className="build-grid">
+              {builds.map((build, index) => (
+                <BuildCard build={build} index={index} key={build.name} />
+              ))}
+            </div>
+          </section>
           <aside className="panel leaderboard">
-            <div className="panel-head"><h3>Top Performing Builds</h3><FiX /></div>
-            {builds.slice(0, 3).map((build, index) => <div className="leader" key={build.name}><span className={`art-${build.tone}`}>{index + 1}</span><div><b>{build.name} {build.role}</b><small>{glyph.dot} {build.views}</small></div><strong>#{index + 1}</strong></div>)}
+            <div className="panel-head">
+              <h3>Top Performing Builds</h3>
+              <FiX />
+            </div>
+            {builds.slice(0, 3).map((build, index) => (
+              <div className="leader" key={build.name}>
+                <span className={`art-${build.tone}`}>{index + 1}</span>
+                <div>
+                  <b>
+                    {build.name} {build.role}
+                  </b>
+                  <small>
+                    {glyph.dot} {build.views}
+                  </small>
+                </div>
+                <strong>#{index + 1}</strong>
+              </div>
+            ))}
           </aside>
         </div>
       </div>
       {editing && (
         <div className="modal-backdrop" onClick={closeEditor}>
-          <form aria-modal="true" className="modal" onClick={event => event.stopPropagation()} onSubmit={saveProfile} ref={modalRef} role="dialog">
-            <div className="panel-head"><h2>Edit profile</h2><button aria-label="Close edit profile" type="button" onClick={closeEditor}><FiX /></button></div>
-            <label>Display name<input ref={nameInputRef} value={draftName} onChange={event => setDraftName(event.target.value)} /></label>
-            <label>Bio<textarea value={draftBio} onChange={event => setDraftBio(event.target.value)} /></label>
-            <button className="primary" type="submit">Save changes</button>
+          <form
+            aria-modal="true"
+            className="modal"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={saveProfile}
+            ref={modalRef}
+            role="dialog"
+          >
+            <div className="panel-head">
+              <h2>Edit profile</h2>
+              <button aria-label="Close edit profile" type="button" onClick={closeEditor}>
+                <FiX />
+              </button>
+            </div>
+            <label>
+              Display name
+              <input
+                ref={nameInputRef}
+                value={draftName}
+                onChange={(event) => setDraftName(event.target.value)}
+              />
+            </label>
+            <label>
+              Bio
+              <textarea value={draftBio} onChange={(event) => setDraftBio(event.target.value)} />
+            </label>
+            <button className="primary" type="submit">
+              Save changes
+            </button>
           </form>
         </div>
       )}

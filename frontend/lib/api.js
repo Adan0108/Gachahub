@@ -1,23 +1,28 @@
 import { mockCategories, mockGames, posts } from "./mockData";
 
-export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
+export const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000"
+).replace(/\/$/, "");
 export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
 
 export const backendRoutes = {
   health: "/health",
   games: "/games",
-  game: slug => `/games/${encodePathParam(slug)}`,
-  gameCategories: gameSlug => `/games/${encodePathParam(gameSlug)}/categories`,
+  game: (slug) => `/games/${encodePathParam(slug)}`,
+  gameCategories: (gameSlug) => `/games/${encodePathParam(gameSlug)}/categories`,
   currentUser: "/users/me",
   chatConversations: "/chat/conversations",
   chatRequests: "/chat/requests",
   chatDirect: "/chat/direct",
-  chatMessages: conversationId => `/chat/conversations/${encodePathParam(conversationId)}/messages`,
-  chatAcceptRequest: conversationId => `/chat/requests/${encodePathParam(conversationId)}/accept`,
-  chatDeclineRequest: conversationId => `/chat/requests/${encodePathParam(conversationId)}/decline`,
-  chatBlockConversation: conversationId => `/chat/conversations/${encodePathParam(conversationId)}/block`,
+  chatMessages: (conversationId) =>
+    `/chat/conversations/${encodePathParam(conversationId)}/messages`,
+  chatAcceptRequest: (conversationId) => `/chat/requests/${encodePathParam(conversationId)}/accept`,
+  chatDeclineRequest: (conversationId) =>
+    `/chat/requests/${encodePathParam(conversationId)}/decline`,
+  chatBlockConversation: (conversationId) =>
+    `/chat/conversations/${encodePathParam(conversationId)}/block`,
   chatDelivered: "/chat/messages/delivered",
-  chatRead: conversationId => `/chat/conversations/${encodePathParam(conversationId)}/read`,
+  chatRead: (conversationId) => `/chat/conversations/${encodePathParam(conversationId)}/read`,
 };
 
 function encodePathParam(value) {
@@ -70,7 +75,9 @@ export function normalizeGame(game) {
 export function fallbackGames(search = "") {
   const query = search.trim().toLowerCase();
   const items = query
-    ? mockGames.filter(game => `${game.name} ${game.slug} ${game.description}`.toLowerCase().includes(query))
+    ? mockGames.filter((game) =>
+        `${game.name} ${game.slug} ${game.description}`.toLowerCase().includes(query),
+      )
     : mockGames;
 
   return {
@@ -80,25 +87,31 @@ export function fallbackGames(search = "") {
 }
 
 export function fallbackGame(slug) {
-  const game = mockGames.find(item => item.slug === slug || item.id === slug);
+  const game = mockGames.find((item) => item.slug === slug || item.id === slug);
   return game ? normalizeGame(game) : null;
 }
 
 export function fallbackPosts({ gameSlug, search = "" } = {}) {
   const query = search.trim().toLowerCase();
-  return posts.filter(post => {
-    const matchesGame = gameSlug ? post.gameSlug === gameSlug : true;
-    const game = mockGames.find(item => item.slug === post.gameSlug);
-    const matchesSearch = query ? `${post.title} ${post.author} ${post.tag} ${game?.name || ""}`.toLowerCase().includes(query) : true;
-    return matchesGame && matchesSearch;
-  }).map(post => {
-    const game = mockGames.find(item => item.slug === post.gameSlug);
-    return {
-      ...post,
-      gameName: game?.name || post.gameSlug,
-      gameSymbol: game ? communitySymbol(game.name) : communitySymbol(post.gameSlug),
-    };
-  });
+  return posts
+    .filter((post) => {
+      const matchesGame = gameSlug ? post.gameSlug === gameSlug : true;
+      const game = mockGames.find((item) => item.slug === post.gameSlug);
+      const matchesSearch = query
+        ? `${post.title} ${post.author} ${post.tag} ${game?.name || ""}`
+            .toLowerCase()
+            .includes(query)
+        : true;
+      return matchesGame && matchesSearch;
+    })
+    .map((post) => {
+      const game = mockGames.find((item) => item.slug === post.gameSlug);
+      return {
+        ...post,
+        gameName: game?.name || post.gameSlug,
+        gameSymbol: game ? communitySymbol(game.name) : communitySymbol(post.gameSlug),
+      };
+    });
 }
 
 export function fallbackCategories() {
@@ -164,17 +177,18 @@ function mutationAuthHeaders(headers) {
 }
 
 async function mockResponse(path) {
-  await new Promise(resolve => setTimeout(resolve, 120));
+  await new Promise((resolve) => setTimeout(resolve, 120));
   const [pathname, queryString] = path.split("?");
   const params = new URLSearchParams(queryString || "");
 
   if (pathname === backendRoutes.health) return { status: "ok" };
   if (pathname === backendRoutes.currentUser) return null;
   if (pathname === backendRoutes.games) return fallbackGames(params.get("search") || "");
-  if (pathname.startsWith("/games/") && pathname.endsWith("/categories")) return fallbackCategories();
+  if (pathname.startsWith("/games/") && pathname.endsWith("/categories"))
+    return fallbackCategories();
   if (pathname.startsWith("/games/")) {
     const slug = decodePathParam(pathname.split("/")[2]);
-    const game = mockGames.find(item => item.slug === slug || item.id === slug);
+    const game = mockGames.find((item) => item.slug === slug || item.id === slug);
     if (!game) throw new Error("Game not found");
     return game;
   }
@@ -210,8 +224,8 @@ export const api = {
       meta: response.meta || { total: items.length },
     };
   },
-  getCommunity: async slug => normalizeGame(await request(backendRoutes.game(slug))),
-  getCategories: gameSlug => request(backendRoutes.gameCategories(gameSlug)),
+  getCommunity: async (slug) => normalizeGame(await request(backendRoutes.game(slug))),
+  getCategories: (gameSlug) => request(backendRoutes.gameCategories(gameSlug)),
   getProfile: () => request(backendRoutes.currentUser),
   getHome: async ({ search = "" } = {}) => {
     const games = await api.getGames({ status: "ACTIVE", search, limit: 20 });
@@ -225,12 +239,26 @@ export const api = {
   },
   getChatConversations: () => request(backendRoutes.chatConversations),
   getChatRequests: () => request(backendRoutes.chatRequests),
-  getChatMessages: (conversationId, query = {}) => request(withQuery(backendRoutes.chatMessages(conversationId), query)),
-  createDirectMessage: ({ recipientUserId, message }) => mutation(backendRoutes.chatDirect, { recipientUserId, message: encryptedMessagePayload(message) }),
-  sendChatMessage: (conversationId, message) => mutation(backendRoutes.chatMessages(conversationId), { message: encryptedMessagePayload(message) }),
-  acceptChatRequest: conversationId => mutation(backendRoutes.chatAcceptRequest(conversationId)),
-  declineChatRequest: conversationId => mutation(backendRoutes.chatDeclineRequest(conversationId)),
-  blockChatConversation: conversationId => mutation(backendRoutes.chatBlockConversation(conversationId)),
-  markChatDelivered: messageIds => mutation(backendRoutes.chatDelivered, { messageIds }),
-  markChatRead: (conversationId, lastReadMessageId) => mutation(backendRoutes.chatRead(conversationId), lastReadMessageId ? { lastReadMessageId } : {}),
+  getChatMessages: (conversationId, query = {}) =>
+    request(withQuery(backendRoutes.chatMessages(conversationId), query)),
+  createDirectMessage: ({ recipientUserId, message }) =>
+    mutation(backendRoutes.chatDirect, {
+      recipientUserId,
+      message: encryptedMessagePayload(message),
+    }),
+  sendChatMessage: (conversationId, message) =>
+    mutation(backendRoutes.chatMessages(conversationId), {
+      message: encryptedMessagePayload(message),
+    }),
+  acceptChatRequest: (conversationId) => mutation(backendRoutes.chatAcceptRequest(conversationId)),
+  declineChatRequest: (conversationId) =>
+    mutation(backendRoutes.chatDeclineRequest(conversationId)),
+  blockChatConversation: (conversationId) =>
+    mutation(backendRoutes.chatBlockConversation(conversationId)),
+  markChatDelivered: (messageIds) => mutation(backendRoutes.chatDelivered, { messageIds }),
+  markChatRead: (conversationId, lastReadMessageId) =>
+    mutation(
+      backendRoutes.chatRead(conversationId),
+      lastReadMessageId ? { lastReadMessageId } : {},
+    ),
 };

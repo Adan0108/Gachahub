@@ -16,9 +16,14 @@ export default function LorePage() {
         <div>
           <span className="eyebrow">Lore Library</span>
           <h1>Track the mysteries behind the waves.</h1>
-          <p>Browse tags, saved theories, and story threads in a page that feels distinct from the community feed.</p>
+          <p>
+            Browse tags, saved theories, and story threads in a page that feels distinct from the
+            community feed.
+          </p>
         </div>
-        <button className="soft-btn" type="button"><FiBookOpen /> Open Archive</button>
+        <button className="soft-btn" type="button">
+          <FiBookOpen /> Open Archive
+        </button>
       </section>
       <div className="lore-grid">
         {loreTopics.map(([topic, description], index) => (

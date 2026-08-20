@@ -3,7 +3,8 @@ export const mockGames = [
     id: "wuwa",
     slug: "wuthering-waves",
     name: "Wuthering Waves",
-    description: "A community for Rovers to share builds, theories, lore and everything Wuthering Waves.",
+    description:
+      "A community for Rovers to share builds, theories, lore and everything Wuthering Waves.",
     iconUrl: null,
     bannerUrl: null,
     developer: "Kuro Games",

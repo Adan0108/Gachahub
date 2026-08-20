@@ -27,10 +27,38 @@ export const glyph = {
 export const artTones = ["violet", "blue", "amber", "rose", "cyan", "indigo"];
 
 export const builds = [
-  { name: "Sanhua", role: "Main DPS", tone: "violet", likes: "97%", views: "2.3K", icon: glyph.snow },
-  { name: "Jiyan", role: "Hypercarry", tone: "cyan", likes: "95%", views: "1.8K", icon: glyph.sword },
-  { name: "Changli", role: "Fusion Burst", tone: "rose", likes: "93%", views: "1.6K", icon: glyph.sparkle },
-  { name: "Calcharo", role: "Lightning DPS", tone: "indigo", likes: "94%", views: "1.2K", icon: "\u03df" },
+  {
+    name: "Sanhua",
+    role: "Main DPS",
+    tone: "violet",
+    likes: "97%",
+    views: "2.3K",
+    icon: glyph.snow,
+  },
+  {
+    name: "Jiyan",
+    role: "Hypercarry",
+    tone: "cyan",
+    likes: "95%",
+    views: "1.8K",
+    icon: glyph.sword,
+  },
+  {
+    name: "Changli",
+    role: "Fusion Burst",
+    tone: "rose",
+    likes: "93%",
+    views: "1.6K",
+    icon: glyph.sparkle,
+  },
+  {
+    name: "Calcharo",
+    role: "Lightning DPS",
+    tone: "indigo",
+    likes: "94%",
+    views: "1.2K",
+    icon: "\u03df",
+  },
 ];
 
 export const navItems = [
