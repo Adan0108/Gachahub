@@ -509,6 +509,9 @@ model Post {
   @@index([categoryId, status, createdAt])
   @@index([authorId, status, createdAt])
   @@index([type, status, createdAt])
+  // Supports global feed reads:
+  // PUBLISHED + visibility + undeleted + newest first
+  @@index([status, visibility, deletedAt, createdAt, id])
   @@map("posts")
 }
 
