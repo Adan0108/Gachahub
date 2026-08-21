@@ -17,8 +17,8 @@ model User {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  role   UserRole   @default(USER)
-  status UserStatus @default(ACTIVE)
+  role                  UserRole              @default(USER)
+  status                UserStatus            @default(ACTIVE)
   messageRequestSetting MessageRequestSetting @default(EVERYONE)
 
   sessions Session[]
@@ -258,6 +258,11 @@ enum ChatParticipantState {
   ARCHIVED
 }
 
+enum ChatNotificationLevel {
+  ALL
+  NOTHING
+}
+
 enum ChatMessageContentType {
   TEXT
   IMAGE
@@ -303,17 +308,18 @@ model ChatConversation {
 }
 
 model ChatParticipant {
-  id             String               @id @default(cuid())
-  conversationId String
-  userId         String
-  role           ChatParticipantRole  @default(MEMBER)
-  state          ChatParticipantState @default(ACTIVE)
-  lastReadAt     DateTime?
-  pinnedAt       DateTime?
-  archivedAt     DateTime?
-  mutedAt        DateTime?
-  blockedAt      DateTime?
-  deletedAt      DateTime?
+  id                String                @id @default(cuid())
+  conversationId    String
+  userId            String
+  role              ChatParticipantRole   @default(MEMBER)
+  state             ChatParticipantState  @default(ACTIVE)
+  lastReadAt        DateTime?
+  pinnedAt          DateTime?
+  archivedAt        DateTime?
+  notificationLevel ChatNotificationLevel @default(ALL)
+  mutedUntil        DateTime?
+  blockedAt         DateTime?
+  deletedAt         DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -582,4 +588,3 @@ model ChatUserBlock {
   @@index([blockedId])
   @@map("chat_user_blocks")
 }
-
