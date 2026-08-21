@@ -631,6 +631,7 @@ model MediaUpload {
   responseSignature String?
 
   createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
   uploadedAt DateTime?
   attachedAt DateTime?
   deletedAt  DateTime?
