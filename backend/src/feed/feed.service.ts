@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import { FollowsService } from '../follows/follows.service';
 import { formatPost } from '../posts/post.mapper';
@@ -192,7 +192,12 @@ export class FeedService {
      * We rank a bounded pool rather than
      * reading every post from the database.
      */
-    const candidateLimit = Math.min(500, Math.max(100, page * limit * 5));
+    const maxCandidates = 500;
+
+    const candidateLimit = Math.min(
+      maxCandidates,
+      Math.max(100, page * limit * 5),
+    );
 
     const where: Prisma.PostWhereInput = {
       status: 'PUBLISHED',
@@ -238,6 +243,10 @@ export class FeedService {
     const ranked = this.feedRanker.rankTrending(candidates);
 
     const start = (page - 1) * limit;
+
+    if (start >= maxCandidates) {
+      throw new BadRequestException('Trending feed pagination limit exceeded');
+    }
 
     const selectedIds = ranked
       .slice(start, start + limit)
