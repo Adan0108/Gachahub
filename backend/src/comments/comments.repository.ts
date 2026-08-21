@@ -58,9 +58,27 @@ export class CommentsRepository {
   ) {
     const skip = (params.page - 1) * params.limit;
 
+    /*
+     * Root comment is returned when:
+     * - it has not been deleted, or
+     * - it was deleted but still has visible replies that need the
+     *   parent placeholder to preserve the conversation thread.
+     */
     const where = {
       postId,
       parentId: null,
+      OR: [
+        {
+          deletedAt: null,
+        },
+        {
+          replies: {
+            some: {
+              deletedAt: null,
+            },
+          },
+        },
+      ],
     };
 
     const [items, total] = await this.prisma.$transaction([
@@ -69,7 +87,7 @@ export class CommentsRepository {
         include: {
           ...commentInclude,
 
-          //Count only visible replies.
+          // Count only replies that are still visible.
           _count: {
             select: {
               replies: {
