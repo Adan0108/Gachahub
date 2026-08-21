@@ -93,15 +93,25 @@ export class MediaRepository {
     });
   }
 
-  findExpiredUploads(cutoff: Date, take = 100) {
+  findExpiredUploads(normalCutoff: Date, cleaningCutoff: Date, take = 100) {
     return this.prisma.mediaUpload.findMany({
       where: {
-        status: {
-          in: ['INITIATED', 'UPLOADED'],
-        },
-        createdAt: {
-          lt: cutoff,
-        },
+        OR: [
+          {
+            status: {
+              in: ['INITIATED', 'UPLOADED'],
+            },
+            createdAt: {
+              lt: normalCutoff,
+            },
+          },
+          {
+            status: 'CLEANING',
+            updatedAt: {
+              lt: cleaningCutoff,
+            },
+          },
+        ],
       },
       orderBy: {
         createdAt: 'asc',
@@ -115,6 +125,21 @@ export class MediaRepository {
         id,
         status: {
           in: ['INITIATED', 'UPLOADED'],
+        },
+      },
+      data: {
+        status: 'CLEANING',
+      },
+    });
+  }
+
+  reclaimStaleCleanup(id: string, cleaningCutoff: Date) {
+    return this.prisma.mediaUpload.updateMany({
+      where: {
+        id,
+        status: 'CLEANING',
+        updatedAt: {
+          lt: cleaningCutoff,
         },
       },
       data: {
