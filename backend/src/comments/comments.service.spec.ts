@@ -1,8 +1,13 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { CommentsRepository } from './comments.repository';
+import type { FollowsService } from '../follows/follows.service';
 
 jest.mock('./comments.repository', () => ({
   CommentsRepository: class {},
+}));
+
+jest.mock('../follows/follows.service', () => ({
+  FollowsService: class {},
 }));
 
 import { CommentsService } from './comments.service';
@@ -18,6 +23,10 @@ describe('CommentsService', () => {
     softDelete: jest.fn(),
   };
 
+  const followsService = {
+    isFollowing: jest.fn(),
+  };
+
   let service: CommentsService;
 
   beforeEach(() => {
@@ -25,6 +34,7 @@ describe('CommentsService', () => {
 
     service = new CommentsService(
       commentsRepository as unknown as CommentsRepository,
+      followsService as unknown as FollowsService,
     );
   });
 
@@ -274,6 +284,14 @@ describe('CommentsService', () => {
 
   describe('findReplies', () => {
     it('lists replies with default pagination', async () => {
+      commentsRepository.findPostById.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'user-1',
+        status: 'PUBLISHED',
+        visibility: 'PUBLIC',
+        deletedAt: null,
+      });
+
       commentsRepository.findById.mockResolvedValue({
         id: 'comment-1',
         postId: 'post-1',

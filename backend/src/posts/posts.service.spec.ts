@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import type { MediaService } from '../media/media.service';
 import type { PostsRepository } from './posts.repository';
+import type { FollowsService } from '../follows/follows.service';
 import { PostTypeDto } from './dto/create-post.dto';
 import { PostSortDto } from './dto/query-posts.dto';
 
@@ -14,6 +15,10 @@ jest.mock('./posts.repository', () => ({
 
 jest.mock('../media/media.service', () => ({
   MediaService: class {},
+}));
+
+jest.mock('../follows/follows.service', () => ({
+  FollowsService: class {},
 }));
 
 import { PostsService } from './posts.service';
@@ -30,12 +35,17 @@ describe('PostsService', () => {
     create: jest.fn(),
     update: jest.fn(),
     softDelete: jest.fn(),
+    findPostForInteraction: jest.fn(),
     like: jest.fn(),
     unlike: jest.fn(),
   };
 
   const mediaService = {
     getAttachableUploads: jest.fn(),
+  };
+
+  const followsService = {
+    isFollowing: jest.fn(),
   };
 
   let service: PostsService;
@@ -68,6 +78,7 @@ describe('PostsService', () => {
     service = new PostsService(
       postsRepository as unknown as PostsRepository,
       mediaService as unknown as MediaService,
+      followsService as unknown as FollowsService,
     );
   });
 
@@ -89,6 +100,9 @@ describe('PostsService', () => {
         orderBy: [
           {
             createdAt: 'desc',
+          },
+          {
+            id: 'desc',
           },
         ],
         userId: undefined,
@@ -129,6 +143,9 @@ describe('PostsService', () => {
           {
             createdAt: 'desc',
           },
+          {
+            id: 'desc',
+          },
         ],
         userId: undefined,
       });
@@ -165,6 +182,9 @@ describe('PostsService', () => {
           {
             createdAt: 'desc',
           },
+          {
+            id: 'desc',
+          },
         ],
         userId: undefined,
       });
@@ -194,6 +214,9 @@ describe('PostsService', () => {
           {
             createdAt: 'desc',
           },
+          {
+            id: 'desc',
+          },
         ],
         userId: undefined,
       });
@@ -219,6 +242,9 @@ describe('PostsService', () => {
         orderBy: [
           {
             createdAt: 'desc',
+          },
+          {
+            id: 'desc',
           },
         ],
         userId: undefined,
@@ -271,6 +297,9 @@ describe('PostsService', () => {
           {
             createdAt: 'desc',
           },
+          {
+            id: 'desc',
+          },
         ],
         userId: undefined,
       });
@@ -308,6 +337,9 @@ describe('PostsService', () => {
           {
             createdAt: 'desc',
           },
+          {
+            id: 'desc',
+          },
         ],
         userId: undefined,
       });
@@ -330,6 +362,9 @@ describe('PostsService', () => {
         orderBy: [
           {
             createdAt: 'desc',
+          },
+          {
+            id: 'desc',
           },
         ],
         userId: 'user-1',
@@ -1048,18 +1083,14 @@ describe('PostsService', () => {
 
       const result = await service.remove('post-1', 'user-1');
 
-      expect(postsRepository.softDelete).toHaveBeenCalledWith(
-        'post-1',
-        'game-1',
-        true,
-      );
+      expect(postsRepository.softDelete).toHaveBeenCalledWith('post-1');
 
       expect(result).toEqual({
         message: 'Post deleted successfully',
       });
     });
 
-    it('does not decrement game post count for draft post', async () => {
+    it('soft deletes own draft post', async () => {
       postsRepository.findById.mockResolvedValue({
         ...basePost,
         status: 'DRAFT',
@@ -1069,17 +1100,19 @@ describe('PostsService', () => {
 
       await service.remove('post-1', 'user-1');
 
-      expect(postsRepository.softDelete).toHaveBeenCalledWith(
-        'post-1',
-        'game-1',
-        false,
-      );
+      expect(postsRepository.softDelete).toHaveBeenCalledWith('post-1');
     });
   });
 
   describe('like', () => {
     it('likes an existing post', async () => {
-      postsRepository.findById.mockResolvedValue(basePost);
+      postsRepository.findPostForInteraction.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'user-1',
+        status: 'PUBLISHED',
+        visibility: 'PUBLIC',
+        deletedAt: null,
+      });
 
       postsRepository.like.mockResolvedValue({
         liked: true,
@@ -1097,7 +1130,7 @@ describe('PostsService', () => {
     });
 
     it('throws when liking missing post', async () => {
-      postsRepository.findById.mockResolvedValue(null);
+      postsRepository.findPostForInteraction.mockResolvedValue(null);
 
       await expect(service.like('missing-post', 'user-1')).rejects.toThrow(
         NotFoundException,
@@ -1109,7 +1142,13 @@ describe('PostsService', () => {
 
   describe('unlike', () => {
     it('unlikes an existing post', async () => {
-      postsRepository.findById.mockResolvedValue(basePost);
+      postsRepository.findPostForInteraction.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'user-1',
+        status: 'PUBLISHED',
+        visibility: 'PUBLIC',
+        deletedAt: null,
+      });
 
       postsRepository.unlike.mockResolvedValue({
         liked: false,
@@ -1127,7 +1166,7 @@ describe('PostsService', () => {
     });
 
     it('throws when unliking missing post', async () => {
-      postsRepository.findById.mockResolvedValue(null);
+      postsRepository.findPostForInteraction.mockResolvedValue(null);
 
       await expect(service.unlike('missing-post', 'user-1')).rejects.toThrow(
         NotFoundException,
