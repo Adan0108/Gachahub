@@ -248,6 +248,7 @@ export class FeedService {
       throw new BadRequestException('Trending feed pagination limit exceeded');
     }
 
+    // MVP: start dưới 500 nhưng vượt số bài đã rank thì vẫn trả mảng rỗng kèm 200.
     const selectedIds = ranked
       .slice(start, start + limit)
       .map((candidate) => candidate.id);
