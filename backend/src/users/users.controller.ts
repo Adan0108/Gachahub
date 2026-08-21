@@ -1,15 +1,33 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Session } from '@thallesp/nestjs-better-auth';
+import { Session, OptionalAuth } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { PostsService } from '../posts/posts.service';
 
 @ApiTags('Users')
-@ApiCookieAuth('better-auth.session_token')
 @Controller('users')
 export class UsersController {
+  constructor(private readonly postsService: PostsService) {}
   @Get('me')
+  @ApiCookieAuth('better-auth.session_token')
   @ApiOperation({ summary: 'Get current authenticated user' })
   getMe(@Session() session: UserSession) {
     return session.user;
+  }
+
+  @Get(':userId/posts')
+  @OptionalAuth()
+  @ApiOperation({ summary: 'Get public posts from this user' })
+  findUserPosts(
+    @Param('userId') userId: string,
+    @Query() query: PaginationQueryDto,
+    @Session() session?: UserSession,
+  ) {
+    return this.postsService.findByAuthorPublic(
+      query,
+      userId,
+      session?.user.id,
+    );
   }
 }

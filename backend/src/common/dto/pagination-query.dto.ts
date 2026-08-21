@@ -6,6 +6,7 @@ export class PaginationQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(500)
   page?: number = 1;
 
   @IsOptional()
