@@ -55,49 +55,6 @@ export class ChatRepository {
   }
 
   /**
-   * Finds a game before creating game-scoped emotes.
-   *
-   * The service uses this to return a clear 404 before permission checks.
-   */
-  findGameById(gameId: string) {
-    return this.prisma.game.findUnique({
-      where: { id: gameId },
-    });
-  }
-
-  /**
-   * Finds the caller's membership in a game community.
-   *
-   * Game emotes are usable only by members of that game community.
-   */
-  findGameMember(gameId: string, userId: string) {
-    return this.prisma.gameMember.findUnique({
-      where: {
-        gameId_userId: {
-          gameId,
-          userId,
-        },
-      },
-    });
-  }
-
-  /**
-   * Finds game moderator assignment for emote management permission.
-   *
-   * App admins bypass this in the service; game moderators use this row.
-   */
-  findGameModerator(gameId: string, userId: string) {
-    return this.prisma.gameModerator.findUnique({
-      where: {
-        gameId_userId: {
-          gameId,
-          userId,
-        },
-      },
-    });
-  }
-
-  /**
    * Finds a specific directional block: did blockerId block blockedId.
    *
    * Unlike findAnyUserBlock (which checks either direction), this is used

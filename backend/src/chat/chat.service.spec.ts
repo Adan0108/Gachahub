@@ -9,6 +9,12 @@ jest.mock('./chat.repository', () => ({
 jest.mock('../follows/follows.service', () => ({
   FollowsService: class {},
 }));
+jest.mock('../games/games.service', () => ({
+  GamesService: class {},
+}));
+jest.mock('../game-moderators/game-moderators.service', () => ({
+  GameModeratorsService: class {},
+}));
 jest.mock('../generated/prisma/client', () => ({
   ChatMessageContentType: { TEXT: 'TEXT' },
   UserRole: { ADMIN: 'ADMIN' },
@@ -36,8 +42,6 @@ describe('ChatService', () => {
     findSentMessageInConversation: jest.fn(),
     createMessage: jest.fn(),
     updateParticipantArchivedState: jest.fn(),
-    findGameById: jest.fn(),
-    findGameModerator: jest.fn(),
     createGameChatEmote: jest.fn(),
     findMessageWithParticipants: jest.fn(),
     upsertMessageReaction: jest.fn(),
@@ -65,6 +69,14 @@ describe('ChatService', () => {
     areMutualFollowers: jest.fn(),
   };
 
+  const gamesService = {
+    findById: jest.fn(),
+  };
+
+  const gameModeratorsService = {
+    isModerator: jest.fn(),
+  };
+
   const messageEncryption = {
     preparePayload: jest.fn(),
   };
@@ -80,6 +92,8 @@ describe('ChatService', () => {
     service = new ChatService(
       repository as any,
       followsService as any,
+      gamesService as any,
+      gameModeratorsService as any,
       messageEncryption,
       chatDelivery,
     );
@@ -1325,7 +1339,7 @@ describe('ChatService', () => {
 
   describe('createGameEmote', () => {
     it('rejects when the game does not exist', async () => {
-      repository.findGameById.mockResolvedValue(null);
+      gamesService.findById.mockResolvedValue(null);
 
       await expect(
         service.createGameEmote('user-1', 'game-1', {
@@ -1336,9 +1350,9 @@ describe('ChatService', () => {
     });
 
     it('rejects a caller who is neither admin nor game moderator', async () => {
-      repository.findGameById.mockResolvedValue({ id: 'game-1' });
+      gamesService.findById.mockResolvedValue({ id: 'game-1' });
       repository.findUserById.mockResolvedValue({ id: 'user-1', role: 'USER' });
-      repository.findGameModerator.mockResolvedValue(null);
+      gameModeratorsService.isModerator.mockResolvedValue(false);
 
       await expect(
         service.createGameEmote('user-1', 'game-1', {
@@ -1349,7 +1363,7 @@ describe('ChatService', () => {
     });
 
     it('allows an app admin regardless of moderator assignment', async () => {
-      repository.findGameById.mockResolvedValue({ id: 'game-1' });
+      gamesService.findById.mockResolvedValue({ id: 'game-1' });
       repository.findUserById.mockResolvedValue({
         id: 'user-1',
         role: 'ADMIN',
@@ -1361,17 +1375,14 @@ describe('ChatService', () => {
         unicode: '\\u{1F639}',
       });
 
-      expect(repository.findGameModerator).not.toHaveBeenCalled();
+      expect(gameModeratorsService.isModerator).not.toHaveBeenCalled();
       expect(repository.createGameChatEmote).toHaveBeenCalled();
     });
 
     it('allows an assigned game moderator', async () => {
-      repository.findGameById.mockResolvedValue({ id: 'game-1' });
+      gamesService.findById.mockResolvedValue({ id: 'game-1' });
       repository.findUserById.mockResolvedValue({ id: 'user-1', role: 'USER' });
-      repository.findGameModerator.mockResolvedValue({
-        gameId: 'game-1',
-        userId: 'user-1',
-      });
+      gameModeratorsService.isModerator.mockResolvedValue(true);
       repository.createGameChatEmote.mockResolvedValue({ id: 'emote-1' });
 
       await service.createGameEmote('user-1', 'game-1', {
@@ -1383,7 +1394,7 @@ describe('ChatService', () => {
     });
 
     it('rejects an emote with no renderable value', async () => {
-      repository.findGameById.mockResolvedValue({ id: 'game-1' });
+      gamesService.findById.mockResolvedValue({ id: 'game-1' });
       repository.findUserById.mockResolvedValue({
         id: 'user-1',
         role: 'ADMIN',
@@ -1399,7 +1410,7 @@ describe('ChatService', () => {
     });
 
     it('creates the emote with the given fields on success', async () => {
-      repository.findGameById.mockResolvedValue({ id: 'game-1' });
+      gamesService.findById.mockResolvedValue({ id: 'game-1' });
       repository.findUserById.mockResolvedValue({
         id: 'user-1',
         role: 'ADMIN',

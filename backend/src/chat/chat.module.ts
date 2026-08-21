@@ -9,6 +9,8 @@ import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
 import { CommonModule } from '../common/common.module';
 import { FollowsModule } from '../follows/follows.module';
+import { GamesModule } from '../games/games.module';
+import { GameModeratorsModule } from '../game-moderators/game-moderators.module';
 
 /**
  * Chat feature module.
@@ -17,7 +19,13 @@ import { FollowsModule } from '../follows/follows.module';
  * and replaceable adapter ports used by the chat system.
  */
 @Module({
-  imports: [PrismaModule, CommonModule, FollowsModule],
+  imports: [
+    PrismaModule,
+    CommonModule,
+    FollowsModule,
+    GamesModule,
+    GameModeratorsModule,
+  ],
   controllers: [ChatController],
   providers: [
     ChatRepository,

@@ -43,6 +43,19 @@ export class GameModeratorsService {
   }
 
   /**
+   * Check if a user moderates a game, by id.
+   */
+
+  async isModerator(gameId: string, userId: string): Promise<boolean> {
+    const moderator = await this.gameModeratorsRepository.findByGameIdAndUserId(
+      gameId,
+      userId,
+    );
+
+    return moderator !== null;
+  }
+
+  /**
    * Assigns a user as moderator of a game.
    *
    * Business behavior:

@@ -29,6 +29,8 @@ import { TransferGroupOwnershipDto } from './dto/transfer-group-ownership.dto';
 import { UpdateGroupChatDto } from './dto/update-group-chat.dto';
 import { UpdateGroupMembersDto } from './dto/update-group-members.dto';
 import { UpdateGroupMemberRoleDto } from './dto/update-group-member-role.dto';
+import { GamesService } from '../games/games.service';
+import { GameModeratorsService } from '../game-moderators/game-moderators.service';
 import type { MessageEncryptionPort } from './ports/message-encryption.port';
 import type { ChatDeliveryPort } from './ports/chat-delivery.port';
 
@@ -45,6 +47,8 @@ export class ChatService {
   constructor(
     private readonly chatRepository: ChatRepository,
     private readonly followsService: FollowsService,
+    private readonly gamesService: GamesService,
+    private readonly gameModeratorsService: GameModeratorsService,
     @Inject(MESSAGE_ENCRYPTION_PORT)
     private readonly messageEncryption: MessageEncryptionPort,
     @Inject(CHAT_DELIVERY_PORT)
@@ -809,7 +813,7 @@ export class ChatService {
     gameId: string,
     dto: CreateChatEmoteDto,
   ) {
-    const game = await this.chatRepository.findGameById(gameId);
+    const game = await this.gamesService.findById(gameId);
 
     if (!game) {
       throw new NotFoundException('Game not found');
@@ -1206,12 +1210,12 @@ export class ChatService {
       return;
     }
 
-    const moderator = await this.chatRepository.findGameModerator(
+    const isModerator = await this.gameModeratorsService.isModerator(
       gameId,
       userId,
     );
 
-    if (!moderator) {
+    if (!isModerator) {
       throw new ForbiddenException('You cannot manage emotes for this game');
     }
   }
