@@ -28,6 +28,7 @@ import { MarkMessagesDeliveredDto } from './dto/mark-messages-delivered.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
 import { ReactToMessageDto } from './dto/react-to-message.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { SetNotificationLevelDto } from './dto/set-notification-level.dto';
 import { TransferGroupOwnershipDto } from './dto/transfer-group-ownership.dto';
 import { UpdateGroupChatDto } from './dto/update-group-chat.dto';
 import { UpdateGroupMembersDto } from './dto/update-group-members.dto';
@@ -437,44 +438,27 @@ export class ChatController {
   }
 
   /**
-   * Mutes a conversation for the current user.
-   *
-   * Muted chats still receive messages, but notification delivery can skip
-   * this user later by checking participant mutedAt.
+   * Sets notification level for a conversation
    */
-  @Post('conversations/:conversationId/mute')
+  @Patch('conversations/:conversationId/notification-level')
   @ApiOperation({
-    summary: 'Mute a conversation for the current user',
+    summary: 'Set notification level for a conversation',
   })
   @ApiParam({
     name: 'conversationId',
     example: 'cm123conversation456',
   })
-  muteConversation(
+  setNotificationLevel(
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
+    @Body() dto: SetNotificationLevelDto,
   ) {
-    return this.chatService.muteConversation(session.user.id, conversationId);
-  }
-
-  /**
-   * Unmutes a conversation for the current user.
-   *
-   * This clears mutedAt on the caller's participant row.
-   */
-  @Delete('conversations/:conversationId/mute')
-  @ApiOperation({
-    summary: 'Unmute a conversation for the current user',
-  })
-  @ApiParam({
-    name: 'conversationId',
-    example: 'cm123conversation456',
-  })
-  unmuteConversation(
-    @Session() session: UserSession,
-    @Param('conversationId') conversationId: string,
-  ) {
-    return this.chatService.unmuteConversation(session.user.id, conversationId);
+    return this.chatService.setNotificationLevel(
+      session.user.id,
+      conversationId,
+      dto.notificationLevel,
+      dto.mutedUntil,
+    );
   }
 
   /**

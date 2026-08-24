@@ -138,7 +138,8 @@ export class ChatService {
     const shouldNotify = await this.isRecipientNotifiable('DIRECT', senderId, {
       userId: dto.recipientUserId,
       state: recipientState,
-      mutedAt: null,
+      notificationLevel: 'ALL',
+      mutedUntil: null,
     });
 
     const result =
@@ -640,33 +641,23 @@ export class ChatService {
   }
 
   /**
-   * Mutes a conversation for the current user.
-   *
-   * Mute is stored per participant, so one user can mute a convo without
-   * affecting other participants.
+   * Sets notification level for a conversation, with optional mute expiry.
    */
-  async muteConversation(userId: string, conversationId: string) {
+  async setNotificationLevel(
+    userId: string,
+    conversationId: string,
+    notificationLevel: 'ALL' | 'NOTHING',
+    mutedUntil?: string,
+  ) {
     await this.assertReadableParticipant(conversationId, userId);
 
-    return this.chatRepository.updateParticipantMutedAt(
+    return this.chatRepository.updateParticipantNotificationLevel(
       conversationId,
       userId,
-      new Date(),
-    );
-  }
-
-  /**
-   * Unmutes a conversation for the current user.
-   *
-   * Clearing mutedAt makes future notification logic treat this convo normally.
-   */
-  async unmuteConversation(userId: string, conversationId: string) {
-    await this.assertReadableParticipant(conversationId, userId);
-
-    return this.chatRepository.updateParticipantMutedAt(
-      conversationId,
-      userId,
-      null,
+      notificationLevel,
+      notificationLevel === 'NOTHING' && mutedUntil
+        ? new Date(mutedUntil)
+        : null,
     );
   }
 
@@ -1286,9 +1277,18 @@ export class ChatService {
   private async isRecipientNotifiable(
     conversationType: string,
     senderId: string,
-    recipient: { userId: string; state: string; mutedAt: Date | null },
+    recipient: {
+      userId: string;
+      state: string;
+      notificationLevel: 'ALL' | 'NOTHING';
+      mutedUntil: Date | null;
+    },
   ) {
-    if (recipient.state !== 'ACTIVE' || recipient.mutedAt) {
+    const isMuted =
+      recipient.notificationLevel === 'NOTHING' &&
+      (!recipient.mutedUntil || recipient.mutedUntil > new Date());
+
+    if (recipient.state !== 'ACTIVE' || isMuted) {
       return false;
     }
 
@@ -1534,7 +1534,8 @@ export class ChatService {
       role: participant.role,
       state: this.maskParticipantStateForViewer(participant, viewerId),
       pinnedAt: participant.pinnedAt,
-      mutedAt: participant.mutedAt,
+      notificationLevel: participant.notificationLevel,
+      mutedUntil: participant.mutedUntil,
       user: participant.user,
       isBlockedByMe: blockedUserIds.has(participant.userId),
     };

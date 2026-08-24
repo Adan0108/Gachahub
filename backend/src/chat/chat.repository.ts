@@ -1060,14 +1060,13 @@ export class ChatRepository {
   }
 
   /**
-   * Updates the current user's mute timestamp for a conversation.
-   *
-   * This is per participant so mute/unmute does not affect the other user.
+   * Updates notification level and mute expiry for one participant
    */
-  updateParticipantMutedAt(
+  updateParticipantNotificationLevel(
     conversationId: string,
     userId: string,
-    mutedAt: Date | null,
+    notificationLevel: 'ALL' | 'NOTHING',
+    mutedUntil: Date | null,
   ) {
     return this.prisma.chatParticipant.update({
       where: {
@@ -1077,7 +1076,8 @@ export class ChatRepository {
         },
       },
       data: {
-        mutedAt,
+        notificationLevel,
+        mutedUntil,
       },
     });
   }

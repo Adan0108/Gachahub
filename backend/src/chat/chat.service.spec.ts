@@ -48,7 +48,7 @@ describe('ChatService', () => {
     findUsableChatEmote: jest.fn(),
     deleteMessageReaction: jest.fn(),
     updateParticipantState: jest.fn(),
-    updateParticipantMutedAt: jest.fn(),
+    updateParticipantNotificationLevel: jest.fn(),
     updateParticipantPinnedAt: jest.fn(),
     blockUser: jest.fn(),
     unblockUser: jest.fn(),
@@ -1281,9 +1281,9 @@ describe('ChatService', () => {
         state: 'ACTIVE',
       });
       repository.findParticipants.mockResolvedValue([
-        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
-        { userId: 'user-2', state: 'ACTIVE', mutedAt: new Date() },
-        { userId: 'user-3', state: 'ACTIVE', mutedAt: null },
+        { userId: 'user-1', state: 'ACTIVE', notificationLevel: 'ALL' },
+        { userId: 'user-2', state: 'ACTIVE', notificationLevel: 'NOTHING' },
+        { userId: 'user-3', state: 'ACTIVE', notificationLevel: 'ALL' },
       ]);
       repository.findConversationWithParticipants.mockResolvedValue(
         groupConversation([
@@ -1308,6 +1308,76 @@ describe('ChatService', () => {
         expect.objectContaining({
           recipientUserIds: ['user-2'],
           shouldNotify: false,
+        }),
+      );
+    });
+
+    it('still suppresses notification while a timed mute has not expired', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-1', state: 'ACTIVE', notificationLevel: 'ALL' },
+        {
+          userId: 'user-2',
+          state: 'ACTIVE',
+          notificationLevel: 'NOTHING',
+          mutedUntil: new Date(Date.now() + 60 * 60 * 1000),
+        },
+      ]);
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE' },
+        ]),
+      );
+      repository.findUserBlock.mockResolvedValue(null);
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserIds: ['user-2'],
+          shouldNotify: false,
+        }),
+      );
+    });
+
+    it('resumes notification once a timed mute has expired', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-1', state: 'ACTIVE', notificationLevel: 'ALL' },
+        {
+          userId: 'user-2',
+          state: 'ACTIVE',
+          notificationLevel: 'NOTHING',
+          mutedUntil: new Date(Date.now() - 60 * 60 * 1000),
+        },
+      ]);
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE' },
+        ]),
+      );
+      repository.findUserBlock.mockResolvedValue(null);
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserIds: ['user-2'],
+          shouldNotify: true,
         }),
       );
     });
@@ -1590,12 +1660,8 @@ describe('ChatService', () => {
         call: (u, c) => service.blockConversation(u, c),
       },
       {
-        name: 'muteConversation',
-        call: (u, c) => service.muteConversation(u, c),
-      },
-      {
-        name: 'unmuteConversation',
-        call: (u, c) => service.unmuteConversation(u, c),
+        name: 'setNotificationLevel',
+        call: (u, c) => service.setNotificationLevel(u, c, 'NOTHING'),
       },
       {
         name: 'archiveConversation',
@@ -1659,24 +1725,30 @@ describe('ChatService', () => {
       );
     });
 
-    it('muteConversation sets mutedAt to a timestamp', async () => {
-      await service.muteConversation('user-1', 'conversation-1');
+    it('setNotificationLevel sets NOTHING with a mute expiry', async () => {
+      await service.setNotificationLevel(
+        'user-1',
+        'conversation-1',
+        'NOTHING',
+        '2026-08-17T20:00:00.000Z',
+      );
 
-      expect(repository.updateParticipantMutedAt).toHaveBeenCalledWith(
+      expect(
+        repository.updateParticipantNotificationLevel,
+      ).toHaveBeenCalledWith(
         'conversation-1',
         'user-1',
-        expect.any(Date),
+        'NOTHING',
+        new Date('2026-08-17T20:00:00.000Z'),
       );
     });
 
-    it('unmuteConversation clears mutedAt', async () => {
-      await service.unmuteConversation('user-1', 'conversation-1');
+    it('setNotificationLevel sets ALL and clears any mute expiry', async () => {
+      await service.setNotificationLevel('user-1', 'conversation-1', 'ALL');
 
-      expect(repository.updateParticipantMutedAt).toHaveBeenCalledWith(
-        'conversation-1',
-        'user-1',
-        null,
-      );
+      expect(
+        repository.updateParticipantNotificationLevel,
+      ).toHaveBeenCalledWith('conversation-1', 'user-1', 'ALL', null);
     });
 
     it('archiveConversation sets archived to true', async () => {
