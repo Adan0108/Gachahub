@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { chatUserRoom } from './chat-socket.util';
-import { ChatGateway } from './chat.gateway';
+import { ChatSocketRegistry } from './chat-socket-registry.service';
 import {
   ChatDeliveryPort,
   ChatMessageCreatedEvent,
@@ -9,13 +9,13 @@ import {
 // real ChatDeliveryPort now, was noop before, ChatService untouched either way
 @Injectable()
 export class SocketChatDeliveryService implements ChatDeliveryPort {
-  constructor(private readonly chatGateway: ChatGateway) {}
+  constructor(private readonly socketRegistry: ChatSocketRegistry) {}
 
   publishMessageCreated(event: ChatMessageCreatedEvent): Promise<void> {
     // offline recipient just doesnt get it, no queue no retry, REST covers that case
     for (const recipientUserId of event.recipientUserIds) {
-      this.chatGateway.server
-        .to(chatUserRoom(recipientUserId))
+      this.socketRegistry.server
+        ?.to(chatUserRoom(recipientUserId))
         .emit('message:created', event);
     }
 

@@ -1322,6 +1322,32 @@ export class ChatService {
     }
   }
 
+  // used by the ws gateway for typing broadcast, not a rest route
+  async getTypingRecipients(
+    conversationId: string,
+    userId: string,
+  ): Promise<string[]> {
+    const participant = await this.chatRepository.findParticipant(
+      conversationId,
+      userId,
+    );
+
+    if (
+      !participant ||
+      participant.deletedAt ||
+      !this.canReadState(participant.state)
+    ) {
+      return [];
+    }
+
+    const participants =
+      await this.chatRepository.findParticipants(conversationId);
+
+    return participants
+      .filter((otherParticipant) => otherParticipant.userId !== userId)
+      .map((otherParticipant) => otherParticipant.userId);
+  }
+
   /**
    * Verifies the user can read a conversation.
    *

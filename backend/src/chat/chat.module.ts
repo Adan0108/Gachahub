@@ -4,6 +4,7 @@ import { ChatController } from './chat.controller';
 import { ChatRepository } from './chat.repository';
 import { ChatService } from './chat.service';
 import { ChatGateway } from './chat.gateway';
+import { ChatSocketRegistry } from './chat-socket-registry.service';
 import { SocketChatDeliveryService } from './socket-chat-delivery.service';
 import { OpaqueMessageEncryptionService } from './opaque-message-encryption.service';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
@@ -32,6 +33,7 @@ import { GameModeratorsModule } from '../game-moderators/game-moderators.module'
     ChatRepository,
     ChatService,
     ChatGateway,
+    ChatSocketRegistry,
     {
       provide: CHAT_DELIVERY_PORT,
       useClass: SocketChatDeliveryService,
