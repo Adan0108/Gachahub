@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FiBell, FiMenu, FiPlus, FiSearch, FiX } from "react-icons/fi";
-import { api } from "../lib/api";
+import { api, fallbackGames, fallbackPosts } from "../lib/api";
 import { queries } from "../lib/queries";
 import { glyph, navItems } from "./constants";
 
@@ -71,13 +71,18 @@ function Sidebar({ open, close, onNotice }) {
 function Topbar({ onMenu, onNotice }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
+  const [focused, setFocused] = useState(false);
   const health = useQuery(queries.health());
   const apiStatus = health.isSuccess ? "connected" : health.isError ? "offline" : "checking";
+  const search = query.trim();
+  const suggestedGames = search ? fallbackGames(search).items.slice(0, 3) : [];
+  const suggestedPosts = search ? fallbackPosts({ search }).slice(0, 2) : [];
+  const suggestionsOpen = focused && search && (suggestedGames.length || suggestedPosts.length);
 
   const submit = (event) => {
     event.preventDefault();
-    const search = query.trim();
     router.push(search ? `/explore?q=${encodeURIComponent(search)}` : "/explore");
+    setFocused(false);
   };
 
   return (
@@ -85,16 +90,52 @@ function Topbar({ onMenu, onNotice }) {
       <button aria-label="Open menu" className="menu-btn" onClick={onMenu} type="button">
         <FiMenu />
       </button>
-      <form className="search" onSubmit={submit}>
-        <FiSearch />
-        <input
-          aria-label="Search GachaHub"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search games, characters, posts..."
-        />
-        <kbd>Ctrl K</kbd>
-      </form>
+      <div className="search-wrap">
+        <form className="search" onSubmit={submit}>
+          <FiSearch />
+          <input
+            aria-label="Search GachaHub"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+            placeholder="Search games, characters, posts..."
+          />
+          <kbd>Ctrl K</kbd>
+        </form>
+        {suggestionsOpen && (
+          <div className="search-suggestions" role="listbox" aria-label="Search suggestions">
+            {suggestedGames.map((game) => (
+              <button
+                key={game.slug}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => router.push(`/community/${encodeURIComponent(game.slug)}`)}
+              >
+                <span>{game.symbol}</span>
+                <div>
+                  <b>{game.name}</b>
+                  <small>{game.members} members</small>
+                </div>
+              </button>
+            ))}
+            {suggestedPosts.map((post) => (
+              <button
+                key={post.id}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => router.push(`/explore?q=${encodeURIComponent(post.title)}`)}
+              >
+                <span>#</span>
+                <div>
+                  <b>{post.title}</b>
+                  <small>{post.gameName}</small>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="top-actions">
         <span className={`api-status ${apiStatus}`} title={`Backend: ${api.baseUrl}`}>
           <i />{" "}
@@ -107,6 +148,9 @@ function Topbar({ onMenu, onNotice }) {
         <button className="outline-btn" onClick={() => router.push("/studio")} type="button">
           <FiPlus /> <span>Create</span>
         </button>
+        <Link className="auth-top-link" href="/login">
+          Log in
+        </Link>
         <button
           className="icon-btn"
           aria-label="Notifications"
@@ -135,6 +179,7 @@ export function AppShell({ children }) {
   const noticeTimerRef = useRef(null);
   const pathname = usePathname();
   const studio = pathname === "/studio";
+  const auth = pathname === "/login" || pathname === "/register";
 
   const flashNotice = (message) => {
     window.clearTimeout(noticeTimerRef.current);
@@ -143,6 +188,17 @@ export function AppShell({ children }) {
   };
 
   useEffect(() => () => window.clearTimeout(noticeTimerRef.current), []);
+
+  if (auth) {
+    return (
+      <div className="auth-shell">
+        <div className="toast-slot" aria-live="polite">
+          {notice}
+        </div>
+        {children}
+      </div>
+    );
+  }
 
   return (
     <div className={`app-shell ${studio ? "studio-shell" : ""}`}>

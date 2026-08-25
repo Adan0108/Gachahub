@@ -11,6 +11,8 @@ export const backendRoutes = {
   game: (slug) => `/games/${encodePathParam(slug)}`,
   gameCategories: (gameSlug) => `/games/${encodePathParam(gameSlug)}/categories`,
   currentUser: "/users/me",
+  signInEmail: "/api/auth/sign-in/email",
+  signUpEmail: "/api/auth/sign-up/email",
   chatConversations: "/chat/conversations",
   chatRequests: "/chat/requests",
   chatDirect: "/chat/direct",
@@ -183,6 +185,8 @@ async function mockResponse(path) {
 
   if (pathname === backendRoutes.health) return { status: "ok" };
   if (pathname === backendRoutes.currentUser) return null;
+  if (pathname === backendRoutes.signInEmail || pathname === backendRoutes.signUpEmail)
+    return { ok: true };
   if (pathname === backendRoutes.games) return fallbackGames(params.get("search") || "");
   if (pathname.startsWith("/games/") && pathname.endsWith("/categories"))
     return fallbackCategories();
@@ -227,6 +231,17 @@ export const api = {
   getCommunity: async (slug) => normalizeGame(await request(backendRoutes.game(slug))),
   getCategories: (gameSlug) => request(backendRoutes.gameCategories(gameSlug)),
   getProfile: () => request(backendRoutes.currentUser),
+  signIn: ({ email, password }) =>
+    mutation(backendRoutes.signInEmail, {
+      email,
+      password,
+    }),
+  signUp: ({ name, email, password }) =>
+    mutation(backendRoutes.signUpEmail, {
+      name,
+      email,
+      password,
+    }),
   getHome: async ({ search = "" } = {}) => {
     const games = await api.getGames({ status: "ACTIVE", search, limit: 20 });
     const forYouPosts = fallbackPosts({ search });
