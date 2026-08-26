@@ -2,12 +2,34 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FiBell, FiMenu, FiMoon, FiPlus, FiSearch, FiSun, FiX } from "react-icons/fi";
 import { api, fallbackGames, fallbackPosts } from "../lib/api";
 import { queries } from "../lib/queries";
 import { glyph, navItems } from "./constants";
+
+const THEME_STORAGE_KEY = "gachahub-theme";
+const THEME_CHANGE_EVENT = "gachahub-theme-change";
+
+function getPreferredTheme() {
+  if (typeof window === "undefined") return "dark";
+
+  const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (savedTheme === "dark" || savedTheme === "light") return savedTheme;
+
+  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function subscribeTheme(callback) {
+  window.addEventListener("storage", callback);
+  window.addEventListener(THEME_CHANGE_EVENT, callback);
+
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener(THEME_CHANGE_EVENT, callback);
+  };
+}
 
 function Logo() {
   return (
@@ -256,15 +278,7 @@ function Topbar({ onMenu, onNotice, theme, onToggleTheme }) {
 export function AppShell({ children }) {
   const [menu, setMenu] = useState(false);
   const [notice, setNotice] = useState("");
-  const [theme, setTheme] = useState(() => {
-    if (typeof window === "undefined") return "dark";
-
-    const savedTheme = window.localStorage.getItem("gachahub-theme");
-    if (savedTheme === "dark" || savedTheme === "light") return savedTheme;
-
-    const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
-    return prefersLight ? "light" : "dark";
-  });
+  const theme = useSyncExternalStore(subscribeTheme, getPreferredTheme, () => "dark");
   const noticeTimerRef = useRef(null);
   const pathname = usePathname();
   const studio = pathname === "/studio";
@@ -277,11 +291,9 @@ export function AppShell({ children }) {
   };
 
   const toggleTheme = () => {
-    setTheme((current) => {
-      const nextTheme = current === "dark" ? "light" : "dark";
-      window.localStorage.setItem("gachahub-theme", nextTheme);
-      return nextTheme;
-    });
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
   };
 
   useEffect(() => {
