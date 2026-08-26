@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FiCompass, FiX } from "react-icons/fi";
+import { FiCompass } from "react-icons/fi";
 import { Art } from "../../components/Art";
 import { glyph, toolItems } from "../../components/constants";
 
@@ -29,8 +29,8 @@ const canvasSizes = {
 };
 
 const canvasFonts = {
-  Orbitron: '"Orbitron", "Space Grotesk", sans-serif',
   Inter: '"Inter", "Segoe UI", sans-serif',
+  Display: '"Space Grotesk", "Inter", sans-serif',
 };
 
 export default function StudioPage() {
@@ -38,7 +38,8 @@ export default function StudioPage() {
   const [particles, setParticles] = useState(true);
   const [rarity, setRarity] = useState(true);
   const [size, setSize] = useState("16:9");
-  const [font, setFont] = useState("Orbitron");
+  const [font, setFont] = useState("Inter");
+  const [activeTool, setActiveTool] = useState("Template");
   const [saved, setSaved] = useState(false);
   const [notice, setNotice] = useState("");
   const timerRef = useRef(null);
@@ -59,6 +60,11 @@ export default function StudioPage() {
     }, 1600);
   };
 
+  const chooseTool = (item) => {
+    setActiveTool(item);
+    flash(`${item} tool selected`);
+  };
+
   useEffect(() => () => window.clearTimeout(timerRef.current), []);
 
   return (
@@ -75,7 +81,13 @@ export default function StudioPage() {
         </div>
         <small>Untitled Build</small>
         {toolItems.map(([Icon, item]) => (
-          <button key={item} type="button">
+          <button
+            aria-pressed={activeTool === item}
+            className={activeTool === item ? "active" : ""}
+            key={item}
+            onClick={() => chooseTool(item)}
+            type="button"
+          >
             <Icon />
             {item}
           </button>
@@ -161,7 +173,7 @@ export default function StudioPage() {
       <aside className="canvas-settings">
         <div className="panel-head">
           <b>Canvas Settings</b>
-          <FiX aria-hidden="true" />
+          <span>Live</span>
         </div>
         <label>Theme</label>
         <div className="color-row">
@@ -192,8 +204,8 @@ export default function StudioPage() {
         </div>
         <label>Font</label>
         <select value={font} onChange={(event) => setFont(event.target.value)}>
-          <option>Orbitron</option>
           <option>Inter</option>
+          <option>Display</option>
         </select>
         <Toggle label="Show Rarity" value={rarity} setValue={setRarity} />
         <Toggle label="Show Particles" value={particles} setValue={setParticles} />
@@ -204,7 +216,7 @@ export default function StudioPage() {
             setParticles(true);
             setRarity(true);
             setSize("16:9");
-            setFont("Orbitron");
+            setFont("Inter");
             flash("Canvas settings reset");
           }}
           type="button"
