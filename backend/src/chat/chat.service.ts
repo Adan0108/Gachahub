@@ -16,6 +16,7 @@ import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
 import { ChatRepository } from './chat.repository';
 import { FollowsService } from '../follows/follows.service';
+import { BlocksService } from '../blocks/blocks.service';
 import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
@@ -47,6 +48,7 @@ export class ChatService {
   constructor(
     private readonly chatRepository: ChatRepository,
     private readonly followsService: FollowsService,
+    private readonly blocksService: BlocksService,
     private readonly gamesService: GamesService,
     private readonly gameModeratorsService: GameModeratorsService,
     @Inject(MESSAGE_ENCRYPTION_PORT)
@@ -494,7 +496,7 @@ export class ChatService {
       ),
     );
 
-    const blockedUserIds = await this.chatRepository.findBlockedUserIds(
+    const blockedUserIds = await this.blocksService.getBlockedIdsAmong(
       userId,
       senderIds,
     );
@@ -619,7 +621,7 @@ export class ChatService {
       throw new NotFoundException('User not found');
     }
 
-    return this.chatRepository.blockUser(blockerId, blockedId);
+    return this.blocksService.block(blockerId, blockedId);
   }
 
   /**
@@ -633,10 +635,13 @@ export class ChatService {
       throw new BadRequestException('You cannot unblock yourself');
     }
 
-    const result = await this.chatRepository.unblockUser(blockerId, blockedId);
+    const unblockedCount = await this.blocksService.unblock(
+      blockerId,
+      blockedId,
+    );
 
     return {
-      unblockedCount: result.count,
+      unblockedCount,
     };
   }
 
@@ -1221,12 +1226,9 @@ export class ChatService {
     senderId: string,
     recipientId: string,
   ) {
-    const block = await this.chatRepository.findUserBlock(
-      senderId,
-      recipientId,
-    );
+    const isBlocked = await this.blocksService.isBlocked(senderId, recipientId);
 
-    if (block) {
+    if (isBlocked) {
       throw new ForbiddenException('You have blocked this user');
     }
   }
@@ -1296,7 +1298,7 @@ export class ChatService {
       return true;
     }
 
-    const recipientBlockedSender = await this.chatRepository.findUserBlock(
+    const recipientBlockedSender = await this.blocksService.isBlocked(
       recipient.userId,
       senderId,
     );
@@ -1491,7 +1493,7 @@ export class ChatService {
       ),
     );
 
-    const blockedUserIds = await this.chatRepository.findBlockedUserIds(
+    const blockedUserIds = await this.blocksService.getBlockedIdsAmong(
       userId,
       otherParticipantIds,
     );

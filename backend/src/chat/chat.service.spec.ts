@@ -15,6 +15,9 @@ jest.mock('../games/games.service', () => ({
 jest.mock('../game-moderators/game-moderators.service', () => ({
   GameModeratorsService: class {},
 }));
+jest.mock('../blocks/blocks.service', () => ({
+  BlocksService: class {},
+}));
 jest.mock('../generated/prisma/client', () => ({
   ChatMessageContentType: { TEXT: 'TEXT' },
   UserRole: { ADMIN: 'ADMIN' },
@@ -38,7 +41,6 @@ describe('ChatService', () => {
     createDirectConversationWithMessage: jest.fn(),
     findMessageBySenderClientMessageId: jest.fn(),
     findParticipants: jest.fn(),
-    findUserBlock: jest.fn(),
     findSentMessageInConversation: jest.fn(),
     createMessage: jest.fn(),
     updateParticipantArchivedState: jest.fn(),
@@ -50,8 +52,6 @@ describe('ChatService', () => {
     updateParticipantState: jest.fn(),
     updateParticipantNotificationLevel: jest.fn(),
     updateParticipantPinnedAt: jest.fn(),
-    blockUser: jest.fn(),
-    unblockUser: jest.fn(),
     markMessagesDelivered: jest.fn(),
     markConversationRead: jest.fn(),
     updateMessage: jest.fn(),
@@ -61,12 +61,18 @@ describe('ChatService', () => {
     findMessages: jest.fn(),
     softDeleteConversationForParticipant: jest.fn(),
     restoreDeletedParticipants: jest.fn(),
-    findBlockedUserIds: jest.fn(),
   };
 
   const followsService = {
     isFollowing: jest.fn(),
     areMutualFollowers: jest.fn(),
+  };
+
+  const blocksService = {
+    isBlocked: jest.fn(),
+    getBlockedIdsAmong: jest.fn(),
+    block: jest.fn(),
+    unblock: jest.fn(),
   };
 
   const gamesService = {
@@ -92,12 +98,14 @@ describe('ChatService', () => {
     service = new ChatService(
       repository as any,
       followsService as any,
+      blocksService as any,
       gamesService as any,
       gameModeratorsService as any,
       messageEncryption,
       chatDelivery,
     );
-    repository.findBlockedUserIds.mockResolvedValue(new Set());
+    blocksService.getBlockedIdsAmong.mockResolvedValue(new Set());
+    blocksService.isBlocked.mockResolvedValue(false);
     followsService.isFollowing.mockResolvedValue({ following: false });
   });
 
@@ -760,10 +768,7 @@ describe('ChatService', () => {
         id: 'user-2',
         status: 'ACTIVE',
       });
-      repository.findUserBlock.mockResolvedValue({
-        blockerId: 'user-1',
-        blockedId: 'user-2',
-      });
+      blocksService.isBlocked.mockResolvedValue(true);
 
       await expect(
         service.createDirectMessage('user-1', {
@@ -778,7 +783,7 @@ describe('ChatService', () => {
         id: 'user-2',
         status: 'ACTIVE',
       });
-      repository.findUserBlock.mockResolvedValue(null);
+      blocksService.isBlocked.mockResolvedValue(false);
       repository.findMessageBySenderClientMessageId.mockResolvedValue({
         id: 'message-1',
         conversationId: 'conversation-1',
@@ -802,7 +807,7 @@ describe('ChatService', () => {
         id: 'user-2',
         status: 'ACTIVE',
       });
-      repository.findUserBlock.mockResolvedValue(null);
+      blocksService.isBlocked.mockResolvedValue(false);
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
 
@@ -823,7 +828,7 @@ describe('ChatService', () => {
         id: 'user-2',
         status: 'ACTIVE',
       });
-      repository.findUserBlock.mockResolvedValue(null);
+      blocksService.isBlocked.mockResolvedValue(false);
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
       repository.createDirectConversationWithMessage.mockResolvedValue({
@@ -864,7 +869,7 @@ describe('ChatService', () => {
         status: 'ACTIVE',
         messageRequestSetting: 'NO_ONE',
       });
-      repository.findUserBlock.mockResolvedValue(null);
+      blocksService.isBlocked.mockResolvedValue(false);
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
 
@@ -886,7 +891,7 @@ describe('ChatService', () => {
         status: 'ACTIVE',
         messageRequestSetting: 'FOLLOWERS',
       });
-      repository.findUserBlock.mockResolvedValue(null);
+      blocksService.isBlocked.mockResolvedValue(false);
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
       followsService.isFollowing.mockResolvedValue({ following: false });
@@ -913,7 +918,7 @@ describe('ChatService', () => {
         status: 'ACTIVE',
         messageRequestSetting: 'FOLLOWERS',
       });
-      repository.findUserBlock.mockResolvedValue(null);
+      blocksService.isBlocked.mockResolvedValue(false);
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
       followsService.isFollowing.mockImplementation((followerId, followingId) =>
@@ -944,7 +949,7 @@ describe('ChatService', () => {
         status: 'ACTIVE',
         messageRequestSetting: 'FOLLOWERS',
       });
-      repository.findUserBlock.mockResolvedValue(null);
+      blocksService.isBlocked.mockResolvedValue(false);
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
       followsService.isFollowing.mockResolvedValue({ following: true });
@@ -980,7 +985,7 @@ describe('ChatService', () => {
         id: 'user-2',
         status: 'ACTIVE',
       });
-      repository.findUserBlock.mockResolvedValue(null);
+      blocksService.isBlocked.mockResolvedValue(false);
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
       followsService.isFollowing.mockResolvedValue({ following: true });
@@ -1021,12 +1026,9 @@ describe('ChatService', () => {
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue(null);
       followsService.isFollowing.mockResolvedValue({ following: true });
-      repository.findUserBlock.mockImplementation((blockerId, blockedId) => {
-        if (blockerId === 'user-2' && blockedId === 'user-1') {
-          return Promise.resolve({ blockerId: 'user-2', blockedId: 'user-1' });
-        }
-        return Promise.resolve(null);
-      });
+      blocksService.isBlocked.mockImplementation((blockerId, blockedId) =>
+        Promise.resolve(blockerId === 'user-2' && blockedId === 'user-1'),
+      );
       repository.createDirectConversationWithMessage.mockResolvedValue({
         conversation: { id: 'conversation-1' },
         message: { id: 'message-1' },
@@ -1056,7 +1058,7 @@ describe('ChatService', () => {
         id: 'user-2',
         status: 'ACTIVE',
       });
-      repository.findUserBlock.mockResolvedValue(null);
+      blocksService.isBlocked.mockResolvedValue(false);
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
       repository.findDirectPair.mockResolvedValue({
         conversation: { id: 'conversation-1' },
@@ -1096,7 +1098,7 @@ describe('ChatService', () => {
         encryptionMeta: undefined,
       });
       repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
-      repository.findUserBlock.mockResolvedValue(null);
+      blocksService.isBlocked.mockResolvedValue(false);
     });
 
     it('returns duplicate immediately without checking the sender', async () => {
@@ -1168,10 +1170,7 @@ describe('ChatService', () => {
           { userId: 'user-2', state: 'ACTIVE' },
         ]),
       );
-      repository.findUserBlock.mockResolvedValue({
-        blockerId: 'user-1',
-        blockedId: 'user-2',
-      });
+      blocksService.isBlocked.mockResolvedValue(true);
 
       await expect(
         service.sendMessage('user-1', 'conversation-1', {
@@ -1249,12 +1248,9 @@ describe('ChatService', () => {
           { userId: 'user-2', state: 'ACTIVE' },
         ]),
       );
-      repository.findUserBlock.mockImplementation((blockerId, blockedId) => {
-        if (blockerId === 'user-2' && blockedId === 'user-1') {
-          return Promise.resolve({ blockerId: 'user-2', blockedId: 'user-1' });
-        }
-        return Promise.resolve(null);
-      });
+      blocksService.isBlocked.mockImplementation((blockerId, blockedId) =>
+        Promise.resolve(blockerId === 'user-2' && blockedId === 'user-1'),
+      );
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
       await service.sendMessage('user-1', 'conversation-1', {
@@ -1332,7 +1328,7 @@ describe('ChatService', () => {
           { userId: 'user-2', state: 'ACTIVE' },
         ]),
       );
-      repository.findUserBlock.mockResolvedValue(null);
+      blocksService.isBlocked.mockResolvedValue(false);
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
       await service.sendMessage('user-1', 'conversation-1', {
@@ -1367,7 +1363,7 @@ describe('ChatService', () => {
           { userId: 'user-2', state: 'ACTIVE' },
         ]),
       );
-      repository.findUserBlock.mockResolvedValue(null);
+      blocksService.isBlocked.mockResolvedValue(false);
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
       await service.sendMessage('user-1', 'conversation-1', {
@@ -1823,14 +1819,14 @@ describe('ChatService', () => {
         id: 'user-2',
         status: 'ACTIVE',
       });
-      repository.blockUser.mockResolvedValue({
+      blocksService.block.mockResolvedValue({
         blockerId: 'user-1',
         blockedId: 'user-2',
       });
 
       await service.blockUser('user-1', 'user-2');
 
-      expect(repository.blockUser).toHaveBeenCalledWith('user-1', 'user-2');
+      expect(blocksService.block).toHaveBeenCalledWith('user-1', 'user-2');
     });
   });
 
@@ -1842,11 +1838,11 @@ describe('ChatService', () => {
     });
 
     it('removes the block and returns the count on success', async () => {
-      repository.unblockUser.mockResolvedValue({ count: 1 });
+      blocksService.unblock.mockResolvedValue(1);
 
       const result = await service.unblockUser('user-1', 'user-2');
 
-      expect(repository.unblockUser).toHaveBeenCalledWith('user-1', 'user-2');
+      expect(blocksService.unblock).toHaveBeenCalledWith('user-1', 'user-2');
       expect(result).toEqual({ unblockedCount: 1 });
     });
   });
