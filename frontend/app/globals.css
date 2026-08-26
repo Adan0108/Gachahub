@@ -3975,3 +3975,310 @@ body {
   background: #6f52d9;
   color: #ffffff;
 }
+
+:root {
+  --motion-fast: 160ms;
+  --motion-base: 240ms;
+  --motion-slow: 520ms;
+  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes panel-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes dropdown-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes backdrop-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes soft-drift {
+  from {
+    transform: translate3d(-8px, -6px, 0) scale(1);
+  }
+
+  to {
+    transform: translate3d(10px, 8px, 0) scale(1.04);
+  }
+}
+
+@keyframes glow-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 color-mix(in srgb, var(--purple), transparent 100%);
+  }
+
+  50% {
+    box-shadow: 0 0 24px color-mix(in srgb, var(--purple), transparent 78%);
+  }
+}
+
+.page,
+.auth-page,
+.studio-page {
+  animation: page-enter var(--motion-slow) var(--motion-ease) both;
+}
+
+.hero-polish,
+.panel,
+.community-card,
+.build-card,
+.summary-card,
+.lore-card,
+.profile-stats,
+.tabs.wide,
+.state-card,
+.auth-card,
+.auth-side,
+.studio-tools,
+.canvas-settings,
+.build-canvas {
+  animation: panel-rise var(--motion-slow) var(--motion-ease) both;
+}
+
+.community-card:nth-child(2),
+.build-card:nth-child(2),
+.summary-card:nth-child(2),
+.lore-card:nth-child(2),
+.post:nth-child(2) {
+  animation-delay: 45ms;
+}
+
+.community-card:nth-child(3),
+.build-card:nth-child(3),
+.summary-card:nth-child(3),
+.lore-card:nth-child(3),
+.post:nth-child(3) {
+  animation-delay: 90ms;
+}
+
+.community-card:nth-child(4),
+.build-card:nth-child(4),
+.summary-card:nth-child(4),
+.lore-card:nth-child(4),
+.post:nth-child(4) {
+  animation-delay: 135ms;
+}
+
+.community-card:nth-child(5),
+.build-card:nth-child(5),
+.summary-card:nth-child(5),
+.lore-card:nth-child(5),
+.post:nth-child(5) {
+  animation-delay: 180ms;
+}
+
+.app-shell::before,
+.app-shell::after,
+.auth-shell::before,
+.auth-shell::after {
+  animation: soft-drift 16s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.app-shell::after,
+.auth-shell::after {
+  animation-duration: 22s;
+  animation-direction: alternate-reverse;
+}
+
+.search-suggestions,
+.user-menu,
+.mobile-nav,
+.toast-slot > *,
+.notice,
+.query-notice {
+  animation: dropdown-enter var(--motion-base) var(--motion-ease) both;
+}
+
+.toast-slot > * {
+  animation-name: toast-enter;
+}
+
+.modal-backdrop {
+  animation: backdrop-enter var(--motion-base) ease both;
+}
+
+.profile-modal,
+.modal-card {
+  animation: modal-enter var(--motion-base) var(--motion-ease) both;
+}
+
+.brand-mark,
+.mini-avatar,
+.theme-toggle,
+.icon-btn,
+.status-pill,
+.panel-pill,
+.badge,
+.tabs a,
+.chips button,
+.chips span,
+.side-nav a,
+.favorites a,
+.community-card,
+.build-card,
+.post,
+.highlight,
+.leader,
+.soft-btn,
+.outline-btn,
+.join-btn,
+.panel-button,
+.auth-submit,
+.auth-top-link,
+.studio-tools > button,
+.toggle,
+.reset,
+.filter-chip {
+  transition:
+    background-color var(--motion-base) ease,
+    border-color var(--motion-base) ease,
+    box-shadow var(--motion-base) ease,
+    color var(--motion-base) ease,
+    opacity var(--motion-base) ease,
+    transform var(--motion-fast) var(--motion-ease);
+}
+
+.brand-mark:hover,
+.mini-avatar:hover,
+.theme-toggle:hover,
+.icon-btn:hover,
+.status-pill:hover,
+.panel-pill:hover,
+.tabs a:hover,
+.chips button:hover,
+.side-nav a:hover,
+.favorites a:hover,
+.soft-btn:hover:not(:disabled),
+.outline-btn:hover:not(:disabled),
+.join-btn:hover:not(:disabled),
+.panel-button:hover:not(:disabled),
+.auth-submit:hover:not(:disabled),
+.auth-top-link:hover,
+.studio-tools > button:hover,
+.toggle:hover,
+.reset:hover:not(:disabled),
+.filter-chip:hover {
+  transform: translateY(-1px);
+}
+
+.community-card:hover,
+.build-card:hover,
+.post:hover,
+.highlight:hover,
+.leader:hover,
+.auth-card:hover,
+.auth-side:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 44px color-mix(in srgb, var(--shadow), transparent 24%);
+}
+
+.community-card:active,
+.build-card:active,
+.post:active,
+.soft-btn:active:not(:disabled),
+.outline-btn:active:not(:disabled),
+.join-btn:active:not(:disabled),
+.panel-button:active:not(:disabled),
+.auth-submit:active:not(:disabled) {
+  transform: translateY(0) scale(0.99);
+}
+
+.search-box:focus-within,
+.auth-input:focus-within,
+.field:focus-within,
+.build-canvas:focus-within {
+  animation: glow-pulse 1.6s ease-in-out;
+}
+
+.build-canvas,
+.art .silhouette,
+.empty-state svg {
+  transition:
+    filter var(--motion-base) ease,
+    opacity var(--motion-base) ease,
+    transform var(--motion-slow) var(--motion-ease);
+}
+
+.build-canvas:hover {
+  transform: translateY(-2px);
+  filter: saturate(1.08);
+}
+
+.art .silhouette:hover,
+.empty-state:hover svg {
+  transform: translateY(-4px) scale(1.02);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
