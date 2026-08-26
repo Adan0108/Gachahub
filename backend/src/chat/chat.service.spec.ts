@@ -58,6 +58,8 @@ describe('ChatService', () => {
     softDeleteMessage: jest.fn(),
     findInboxConversations: jest.fn(),
     countUnreadMessages: jest.fn(),
+    countUnreadMessagesForUser: jest.fn(),
+    countUnreadConversationsForUser: jest.fn(),
     findMessages: jest.fn(),
     softDeleteConversationForParticipant: jest.fn(),
     restoreDeletedParticipants: jest.fn(),
@@ -2143,6 +2145,136 @@ describe('ChatService', () => {
         'user-1',
         'ACTIVE',
       );
+    });
+  });
+
+  describe('listMessageRequests', () => {
+    const buildPendingConversation = () => ({
+      id: 'conversation-1',
+      type: 'DIRECT',
+      status: 'ACTIVE',
+      updatedAt: new Date('2024-01-01'),
+      createdAt: new Date('2024-01-01'),
+      participants: [
+        {
+          userId: 'user-1',
+          role: 'MEMBER',
+          state: 'PENDING',
+          pinnedAt: null,
+          notificationLevel: 'ALL',
+          mutedUntil: null,
+          user: { id: 'user-1' },
+        },
+        {
+          userId: 'user-2',
+          role: 'MEMBER',
+          state: 'ACTIVE',
+          pinnedAt: null,
+          notificationLevel: 'ALL',
+          mutedUntil: null,
+          user: { id: 'user-2' },
+        },
+      ],
+      messages: [],
+    });
+
+    it('fetches PENDING inbox conversations', async () => {
+      repository.findInboxConversations.mockResolvedValue([]);
+
+      await service.listMessageRequests('user-1');
+
+      expect(repository.findInboxConversations).toHaveBeenCalledWith(
+        'user-1',
+        'PENDING',
+      );
+    });
+
+    it('returns a summary for each pending request', async () => {
+      repository.findInboxConversations.mockResolvedValue([
+        buildPendingConversation(),
+      ]);
+      repository.countUnreadMessages.mockResolvedValue(2);
+
+      const result = await service.listMessageRequests('user-1');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('conversation-1');
+      expect(result[0].participantState).toBe('PENDING');
+      expect(result[0].unreadCount).toBe(2);
+    });
+  });
+
+  describe('listArchivedConversations', () => {
+    const buildArchivedConversation = () => ({
+      id: 'conversation-1',
+      type: 'DIRECT',
+      status: 'ACTIVE',
+      updatedAt: new Date('2024-01-01'),
+      createdAt: new Date('2024-01-01'),
+      participants: [
+        {
+          userId: 'user-1',
+          role: 'MEMBER',
+          state: 'ARCHIVED',
+          pinnedAt: null,
+          notificationLevel: 'ALL',
+          mutedUntil: null,
+          user: { id: 'user-1' },
+        },
+        {
+          userId: 'user-2',
+          role: 'MEMBER',
+          state: 'ACTIVE',
+          pinnedAt: null,
+          notificationLevel: 'ALL',
+          mutedUntil: null,
+          user: { id: 'user-2' },
+        },
+      ],
+      messages: [],
+    });
+
+    it('fetches ARCHIVED inbox conversations', async () => {
+      repository.findInboxConversations.mockResolvedValue([]);
+
+      await service.listArchivedConversations('user-1');
+
+      expect(repository.findInboxConversations).toHaveBeenCalledWith(
+        'user-1',
+        'ARCHIVED',
+      );
+    });
+
+    it('returns a summary for each archived conversation', async () => {
+      repository.findInboxConversations.mockResolvedValue([
+        buildArchivedConversation(),
+      ]);
+      repository.countUnreadMessages.mockResolvedValue(0);
+
+      const result = await service.listArchivedConversations('user-1');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].participantState).toBe('ARCHIVED');
+    });
+  });
+
+  describe('getUnreadSummary', () => {
+    it('combines unread message and conversation counts', async () => {
+      repository.countUnreadMessagesForUser.mockResolvedValue(5);
+      repository.countUnreadConversationsForUser.mockResolvedValue(2);
+
+      const result = await service.getUnreadSummary('user-1');
+
+      expect(repository.countUnreadMessagesForUser).toHaveBeenCalledWith(
+        'user-1',
+      );
+      expect(repository.countUnreadConversationsForUser).toHaveBeenCalledWith(
+        'user-1',
+      );
+      expect(result).toEqual({
+        unreadMessageCount: 5,
+        unreadConversationCount: 2,
+      });
     });
   });
 
