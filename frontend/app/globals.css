@@ -3119,6 +3119,79 @@ body {
   font-weight: 800;
 }
 
+:root[data-theme="light"] .tabs.wide {
+  background: #ffffff;
+  border-color: #ddd5e4;
+  box-shadow: 0 10px 28px #7b6b8714;
+}
+
+:root[data-theme="light"] .tabs button,
+:root[data-theme="light"] .tabs.wide a {
+  color: #596175;
+}
+
+:root[data-theme="light"] .tabs button:hover,
+:root[data-theme="light"] .tabs.wide a:hover {
+  background: #f4eef8;
+  color: #171a21;
+}
+
+:root[data-theme="light"] .tabs button.active,
+:root[data-theme="light"] .tabs.wide a.active {
+  color: #171a21;
+  border-bottom-color: var(--purple);
+}
+
+:root[data-theme="light"] .community-hero,
+:root[data-theme="light"] .profile-hero {
+  background: #ebe6ee;
+  border-color: #d9d1e2;
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .community-hero:after,
+:root[data-theme="light"] .profile-hero:after {
+  background: linear-gradient(90deg, #ffffffd9 0%, #ffffff78 48%, #ffffff1f 100%);
+}
+
+:root[data-theme="light"] .hero-wordmark {
+  color: #171a21;
+  text-shadow: 0 2px 10px #ffffffc7;
+}
+
+:root[data-theme="light"] .community-hero .silhouette,
+:root[data-theme="light"] .profile-hero .silhouette {
+  color: #7d8492;
+  opacity: 0.5;
+}
+
+:root[data-theme="light"] .community-info {
+  background: #ffffff;
+  border-color: #d9d1e2;
+}
+
+:root[data-theme="light"] .community-copy h1,
+:root[data-theme="light"] .community-copy small {
+  color: #171a21;
+}
+
+:root[data-theme="light"] .community-card > .art,
+:root[data-theme="light"] .build-card > .art {
+  background: #ebe6ee;
+}
+
+:root[data-theme="light"] .community-card span,
+:root[data-theme="light"] .build-card span,
+:root[data-theme="light"] .build-card small {
+  color: #596175;
+}
+
+:root[data-theme="light"] .community-card:hover,
+:root[data-theme="light"] .build-card:hover {
+  border-color: #bba9dc;
+  box-shadow: 0 16px 34px #7b6b871f;
+}
+
 .search-empty {
   padding: 10px 12px;
   color: var(--muted);
