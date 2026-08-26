@@ -12,11 +12,28 @@ import { glyph, navItems } from "./constants";
 const THEME_STORAGE_KEY = "gachahub-theme";
 const THEME_CHANGE_EVENT = "gachahub-theme-change";
 
+function isTheme(value) {
+  return value === "dark" || value === "light";
+}
+
+function getCookieTheme() {
+  const themeCookie = document.cookie
+    .split("; ")
+    .find((cookie) => cookie.startsWith(`${THEME_STORAGE_KEY}=`));
+
+  const cookieValue = themeCookie?.split("=")[1];
+  const theme = cookieValue ? decodeURIComponent(cookieValue) : "";
+  return isTheme(theme) ? theme : "";
+}
+
 function getPreferredTheme() {
   if (typeof window === "undefined") return "dark";
 
   const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-  if (savedTheme === "dark" || savedTheme === "light") return savedTheme;
+  if (isTheme(savedTheme)) return savedTheme;
+
+  const savedCookieTheme = getCookieTheme();
+  if (savedCookieTheme) return savedCookieTheme;
 
   return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
@@ -275,10 +292,10 @@ function Topbar({ onMenu, onNotice, theme, onToggleTheme }) {
   );
 }
 
-export function AppShell({ children }) {
+export function AppShell({ children, initialTheme = "dark" }) {
   const [menu, setMenu] = useState(false);
   const [notice, setNotice] = useState("");
-  const theme = useSyncExternalStore(subscribeTheme, getPreferredTheme, () => "dark");
+  const theme = useSyncExternalStore(subscribeTheme, getPreferredTheme, () => initialTheme);
   const noticeTimerRef = useRef(null);
   const pathname = usePathname();
   const studio = pathname === "/studio";
@@ -293,6 +310,7 @@ export function AppShell({ children }) {
   const toggleTheme = () => {
     const nextTheme = theme === "dark" ? "light" : "dark";
     window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    document.cookie = `${THEME_STORAGE_KEY}=${nextTheme}; path=/; max-age=31536000; SameSite=Lax`;
     window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
   };
 
