@@ -123,7 +123,7 @@ export default function HomePage() {
               <li>Players discovered hidden Rover interactions.</li>
             </ul>
             <Link className="panel-button" href="/summaries">
-              View Full Summary
+              Open summaries
             </Link>
           </section>
           <section className="panel lore">

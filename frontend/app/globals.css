@@ -3896,3 +3896,82 @@ body {
   background: #f0ebf4;
   color: #171a21;
 }
+
+/* Light-mode readability and summary polish */
+.ai-panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.ai-panel > p,
+.ai-panel ul {
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.ai-panel ul {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 20px;
+  padding-left: 20px;
+  color: var(--muted-strong);
+}
+
+.ai-panel li::marker {
+  color: var(--pink);
+}
+
+.ai-panel .panel-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--purple);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.ai-panel .panel-button:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--purple), black 8%);
+  color: #ffffff;
+}
+
+.chips span {
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+:root[data-theme="light"] .side-nav a:hover,
+:root[data-theme="light"] .favorites a:hover {
+  background: #f0ebf4;
+  color: #171a21;
+}
+
+:root[data-theme="light"] .side-nav a:hover svg,
+:root[data-theme="light"] .favorites a:hover svg {
+  color: #6746c9;
+}
+
+:root[data-theme="light"] .chips span {
+  background: #f4f0f7;
+  border-color: #ded6e6;
+  color: #394154;
+}
+
+:root[data-theme="light"] .ai-panel > p,
+:root[data-theme="light"] .ai-panel ul {
+  color: #4d5668;
+}
+
+:root[data-theme="light"] .ai-panel .panel-button {
+  background: #6f52d9;
+  color: #ffffff;
+}
