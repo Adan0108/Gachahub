@@ -2296,4 +2296,70 @@ describe('ChatService', () => {
       },
     );
   });
+
+  describe('getTypingRecipients', () => {
+    it('returns the other active participants', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+        deletedAt: null,
+      });
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-1', state: 'ACTIVE' },
+        { userId: 'user-2', state: 'ACTIVE' },
+        { userId: 'user-3', state: 'PENDING' },
+      ]);
+
+      const result = await service.getTypingRecipients(
+        'conversation-1',
+        'user-1',
+      );
+
+      expect(result).toEqual(['user-2', 'user-3']);
+    });
+
+    it('returns empty when the caller is not a participant', async () => {
+      repository.findParticipant.mockResolvedValue(null);
+
+      const result = await service.getTypingRecipients(
+        'conversation-1',
+        'user-1',
+      );
+
+      expect(result).toEqual([]);
+      expect(repository.findParticipants).not.toHaveBeenCalled();
+    });
+
+    it('returns empty when the caller soft-deleted the conversation', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+        deletedAt: new Date(),
+      });
+
+      const result = await service.getTypingRecipients(
+        'conversation-1',
+        'user-1',
+      );
+
+      expect(result).toEqual([]);
+      expect(repository.findParticipants).not.toHaveBeenCalled();
+    });
+
+    it('returns empty when the caller cannot read the conversation', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'BLOCKED',
+        deletedAt: null,
+      });
+
+      const result = await service.getTypingRecipients(
+        'conversation-1',
+        'user-1',
+      );
+
+      expect(result).toEqual([]);
+      expect(repository.findParticipants).not.toHaveBeenCalled();
+    });
+  });
 });
