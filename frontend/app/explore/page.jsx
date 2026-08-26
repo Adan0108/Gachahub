@@ -14,6 +14,7 @@ import { fallbacks, queries } from "../../lib/queries";
 function ExploreContent() {
   const searchParams = useSearchParams();
   const search = searchParams.get("q") || "";
+  const [activeFilter, setActiveFilter] = useState("Guides");
   const [notice, setNotice] = useState("");
   const noticeTimerRef = useRef(null);
   const games = useQuery(queries.games(search));
@@ -26,6 +27,13 @@ function ExploreContent() {
   const showUnavailable = () => {
     window.clearTimeout(noticeTimerRef.current);
     setNotice("Smart Explore is not available yet");
+    noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
+  };
+
+  const updateFilter = (filter) => {
+    setActiveFilter(filter);
+    window.clearTimeout(noticeTimerRef.current);
+    setNotice(`${filter} filter selected`);
     noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
   };
 
@@ -56,7 +64,12 @@ function ExploreContent() {
 
       <div className="explore-layout">
         <section>
-          <SectionTitle action="Refresh">Recommended Communities</SectionTitle>
+          <div className="section-title">
+            <h2>Recommended Communities</h2>
+            <button className="text-btn" onClick={() => games.refetch()} type="button">
+              Refresh
+            </button>
+          </div>
           <QueryNotice
             isLoading={games.isLoading}
             isError={games.isError}
@@ -70,7 +83,7 @@ function ExploreContent() {
           />
           <CommunityGrid communities={gameData.items} compact />
 
-          <SectionTitle action="See More">Fresh Posts</SectionTitle>
+          <SectionTitle>Fresh Posts</SectionTitle>
           <div className="panel">
             <QueryNotice isEmpty={!posts.length} emptyText="No posts match this search yet." />
             <PostList posts={posts} />
@@ -82,12 +95,17 @@ function ExploreContent() {
             <FiSettings />
           </div>
           <div className="chips tall">
-            <span>Guides</span>
-            <span>Builds</span>
-            <span>Lore</span>
-            <span>Fan Art</span>
-            <span>Events</span>
-            <span>Teams</span>
+            {["Guides", "Builds", "Lore", "Fan Art", "Events", "Teams"].map((filter) => (
+              <button
+                aria-pressed={activeFilter === filter}
+                className={activeFilter === filter ? "active" : ""}
+                key={filter}
+                onClick={() => updateFilter(filter)}
+                type="button"
+              >
+                {filter}
+              </button>
+            ))}
           </div>
         </aside>
       </div>

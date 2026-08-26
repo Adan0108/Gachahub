@@ -3829,3 +3829,70 @@ body {
     min-height: auto;
   }
 }
+
+/* Frontend-wide visual QA fixes */
+.panel-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border: 1px solid color-mix(in srgb, var(--purple), transparent 58%);
+  border-radius: 999px;
+  padding: 0 10px;
+  color: var(--purple);
+  background: color-mix(in srgb, var(--purple), transparent 90%);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.chips button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel2);
+  color: var(--muted-strong);
+  padding: 8px 11px;
+  font-size: 12px;
+  font-weight: 750;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.chips button:hover,
+.chips button.active {
+  transform: translateY(-1px);
+  border-color: var(--purple);
+  color: var(--text);
+  background: color-mix(in srgb, var(--purple), transparent 86%);
+}
+
+.chips.tall button {
+  width: 100%;
+  min-height: 42px;
+  border-radius: 13px;
+  text-align: left;
+  padding: 0 14px;
+}
+
+.soft-btn:disabled {
+  background: var(--panel2);
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+:root[data-theme="light"] .panel-pill {
+  background: #f4edf9;
+  color: #6746c9;
+}
+
+:root[data-theme="light"] .chips button {
+  background: #ffffff;
+  color: #475064;
+}
+
+:root[data-theme="light"] .chips button:hover,
+:root[data-theme="light"] .chips button.active {
+  background: #f0ebf4;
+  color: #171a21;
+}

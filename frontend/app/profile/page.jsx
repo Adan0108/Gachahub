@@ -187,7 +187,7 @@ export default function ProfilePage() {
           <aside className="panel leaderboard">
             <div className="panel-head">
               <h3>Top Performing Builds</h3>
-              <FiX />
+              <span className="panel-pill">Top 3</span>
             </div>
             {builds.slice(0, 3).map((build, index) => (
               <div className="leader" key={build.name}>

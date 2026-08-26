@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FiX } from "react-icons/fi";
 import { Art } from "../../../components/Art";
 import { BuildCard } from "../../../components/BuildCard";
 import { QueryNotice } from "../../../components/QueryNotice";
@@ -106,7 +105,7 @@ function CommunityContent() {
       </div>
       <div className="community-body">
         <section>
-          <SectionTitle action="View All Builds">Featured {selectedTab}</SectionTitle>
+          <SectionTitle>Featured {selectedTab}</SectionTitle>
           <div className="build-grid">
             {builds.map((build, index) => (
               <BuildCard build={build} index={index} key={build.name} />
@@ -116,7 +115,7 @@ function CommunityContent() {
         <aside className="panel highlights">
           <div className="panel-head">
             <h3>Community Highlights</h3>
-            <FiX />
+            <span className="panel-pill">Updated</span>
           </div>
           {["2.2 Livestream Recap", "Tethys System Map", "Lore Theory Megathread"].map(
             (item, index) => (
