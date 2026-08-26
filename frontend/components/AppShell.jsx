@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FiBell, FiMenu, FiPlus, FiSearch, FiX } from "react-icons/fi";
+import { FiBell, FiMenu, FiMoon, FiPlus, FiSearch, FiSun, FiX } from "react-icons/fi";
 import { api, fallbackGames, fallbackPosts } from "../lib/api";
 import { queries } from "../lib/queries";
 import { glyph, navItems } from "./constants";
@@ -68,22 +68,79 @@ function Sidebar({ open, close, onNotice }) {
   );
 }
 
-function Topbar({ onMenu, onNotice }) {
+function Topbar({ onMenu, onNotice, theme, onToggleTheme }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
+  const searchInputRef = useRef(null);
+  const blurTimerRef = useRef(null);
   const health = useQuery(queries.health());
   const apiStatus = health.isSuccess ? "connected" : health.isError ? "offline" : "checking";
   const search = query.trim();
-  const suggestedGames = search ? fallbackGames(search).items.slice(0, 3) : [];
-  const suggestedPosts = search ? fallbackPosts({ search }).slice(0, 2) : [];
-  const suggestionsOpen = focused && search && (suggestedGames.length || suggestedPosts.length);
+  const gameSuggestions = useQuery({
+    ...queries.games(search),
+    enabled: focused && Boolean(search),
+  });
+  const canUseLocalSearch = api.usingMocks;
+  const suggestedGames = search
+    ? (gameSuggestions.data?.items || (canUseLocalSearch ? fallbackGames(search).items : [])).slice(
+        0,
+        3,
+      )
+    : [];
+  const suggestedPosts = search && canUseLocalSearch ? fallbackPosts({ search }).slice(0, 2) : [];
+  const suggestionsOpen = Boolean(
+    focused &&
+    search &&
+    (suggestedGames.length ||
+      suggestedPosts.length ||
+      gameSuggestions.isLoading ||
+      gameSuggestions.isError),
+  );
 
   const submit = (event) => {
     event.preventDefault();
     router.push(search ? `/explore?q=${encodeURIComponent(search)}` : "/explore");
     setFocused(false);
   };
+
+  const delayCloseSuggestions = () => {
+    window.clearTimeout(blurTimerRef.current);
+    blurTimerRef.current = window.setTimeout(() => setFocused(false), 120);
+  };
+
+  const focusSearch = useCallback(() => {
+    window.clearTimeout(blurTimerRef.current);
+    setFocused(true);
+    searchInputRef.current?.focus();
+  }, []);
+
+  const openCommunity = (slug) => {
+    setFocused(false);
+    router.push(`/community/${encodeURIComponent(slug)}`);
+  };
+
+  const openPostSearch = (title) => {
+    setFocused(false);
+    router.push(`/explore?q=${encodeURIComponent(title)}`);
+  };
+
+  useEffect(() => {
+    const handleShortcut = (event) => {
+      const isSearchShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k";
+      if (!isSearchShortcut) return;
+
+      event.preventDefault();
+      focusSearch();
+    };
+
+    window.addEventListener("keydown", handleShortcut);
+
+    return () => {
+      window.removeEventListener("keydown", handleShortcut);
+      window.clearTimeout(blurTimerRef.current);
+    };
+  }, [focusSearch]);
 
   return (
     <header className="topbar">
@@ -95,22 +152,31 @@ function Topbar({ onMenu, onNotice }) {
           <FiSearch />
           <input
             aria-label="Search GachaHub"
+            aria-keyshortcuts="Control+K Meta+K"
+            ref={searchInputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            onFocus={() => setFocused(true)}
-            onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+            onFocus={focusSearch}
+            onBlur={delayCloseSuggestions}
             placeholder="Search games, characters, posts..."
           />
-          <kbd>Ctrl K</kbd>
         </form>
         {suggestionsOpen && (
-          <div className="search-suggestions" role="listbox" aria-label="Search suggestions">
+          <div className="search-suggestions" aria-label="Search suggestions">
+            {gameSuggestions.isLoading && (
+              <div className="search-empty">Searching communities...</div>
+            )}
+            {gameSuggestions.isError && !canUseLocalSearch && (
+              <div className="search-empty">
+                Search needs the backend. Try again when the API is connected.
+              </div>
+            )}
             {suggestedGames.map((game) => (
               <button
                 key={game.slug}
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={() => router.push(`/community/${encodeURIComponent(game.slug)}`)}
+                onClick={() => openCommunity(game.slug)}
               >
                 <span>{game.symbol}</span>
                 <div>
@@ -124,7 +190,7 @@ function Topbar({ onMenu, onNotice }) {
                 key={post.id}
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={() => router.push(`/explore?q=${encodeURIComponent(post.title)}`)}
+                onClick={() => openPostSearch(post.title)}
               >
                 <span>#</span>
                 <div>
@@ -133,6 +199,12 @@ function Topbar({ onMenu, onNotice }) {
                 </div>
               </button>
             ))}
+            {!gameSuggestions.isLoading &&
+              !gameSuggestions.isError &&
+              !suggestedGames.length &&
+              !suggestedPosts.length && (
+                <div className="search-empty">No matches found. Press Enter to search.</div>
+              )}
           </div>
         )}
       </div>
@@ -148,11 +220,19 @@ function Topbar({ onMenu, onNotice }) {
         <button className="outline-btn" onClick={() => router.push("/studio")} type="button">
           <FiPlus /> <span>Create</span>
         </button>
+        <button
+          className="icon-btn theme-toggle"
+          aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+          onClick={onToggleTheme}
+          type="button"
+        >
+          {theme === "dark" ? <FiSun /> : <FiMoon />}
+        </button>
         <Link className="auth-top-link" href="/login">
           Log in
         </Link>
         <button
-          className="icon-btn"
+          className="icon-btn notification-btn"
           aria-label="Notifications"
           onClick={() => onNotice("Notifications are not available yet")}
           type="button"
@@ -176,6 +256,15 @@ function Topbar({ onMenu, onNotice }) {
 export function AppShell({ children }) {
   const [menu, setMenu] = useState(false);
   const [notice, setNotice] = useState("");
+  const [theme, setTheme] = useState(() => {
+    if (typeof window === "undefined") return "dark";
+
+    const savedTheme = window.localStorage.getItem("gachahub-theme");
+    if (savedTheme === "dark" || savedTheme === "light") return savedTheme;
+
+    const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+    return prefersLight ? "light" : "dark";
+  });
   const noticeTimerRef = useRef(null);
   const pathname = usePathname();
   const studio = pathname === "/studio";
@@ -186,6 +275,18 @@ export function AppShell({ children }) {
     setNotice(message);
     noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
   };
+
+  const toggleTheme = () => {
+    setTheme((current) => {
+      const nextTheme = current === "dark" ? "light" : "dark";
+      window.localStorage.setItem("gachahub-theme", nextTheme);
+      return nextTheme;
+    });
+  };
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   useEffect(() => () => window.clearTimeout(noticeTimerRef.current), []);
 
@@ -207,7 +308,14 @@ export function AppShell({ children }) {
       </div>
       <Sidebar open={menu} close={() => setMenu(false)} onNotice={flashNotice} />
       <div className="main-column">
-        {!studio && <Topbar onMenu={() => setMenu(true)} onNotice={flashNotice} />}
+        {!studio && (
+          <Topbar
+            onMenu={() => setMenu(true)}
+            onNotice={flashNotice}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+          />
+        )}
         {children}
       </div>
     </div>

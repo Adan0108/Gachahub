@@ -21,7 +21,7 @@ export default function LorePage() {
             community feed.
           </p>
         </div>
-        <button className="soft-btn" type="button">
+        <button className="soft-btn" disabled type="button">
           <FiBookOpen /> Open Archive
         </button>
       </section>

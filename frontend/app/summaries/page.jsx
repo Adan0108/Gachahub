@@ -12,7 +12,7 @@ export default function SummariesPage() {
             glance.
           </p>
         </div>
-        <button className="soft-btn" type="button">
+        <button className="soft-btn" disabled type="button">
           <FiLayers /> Generate Summary
         </button>
       </section>

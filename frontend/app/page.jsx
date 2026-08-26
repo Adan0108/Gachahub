@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FiChevronRight, FiCompass, FiSettings } from "react-icons/fi";
 import { CommunityGrid } from "../components/CommunityGrid";
@@ -12,12 +13,25 @@ import { fallbacks, queries } from "../lib/queries";
 
 export default function HomePage() {
   const [tab, setTab] = useState("Hot");
+  const [notice, setNotice] = useState("");
+  const noticeTimerRef = useRef(null);
   const home = useQuery(queries.home(""));
   const data = home.data || fallbacks.home("");
   const forYouPosts = data.forYouPosts || data.posts || [];
 
+  const showNotice = (message) => {
+    window.clearTimeout(noticeTimerRef.current);
+    setNotice(message);
+    noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
+  };
+
+  useEffect(() => () => window.clearTimeout(noticeTimerRef.current), []);
+
   return (
     <div className="page home-page">
+      <div className="toast-slot" aria-live="polite">
+        {notice}
+      </div>
       <section className="welcome hero-polish">
         <div>
           <span className="eyebrow">Today on GachaHub</span>
@@ -26,12 +40,18 @@ export default function HomePage() {
           </h1>
           <p>Explore communities, discover builds, and uncover the lore.</p>
         </div>
-        <button className="soft-btn" type="button">
+        <button
+          className="soft-btn"
+          onClick={() => showNotice("Feed customization is not available yet")}
+          type="button"
+        >
           <FiSettings /> Customize Feed
         </button>
       </section>
 
-      <SectionTitle action="View All">Game Communities</SectionTitle>
+      <SectionTitle action="View All" actionHref="/explore">
+        Game Communities
+      </SectionTitle>
       <QueryNotice
         isLoading={home.isLoading}
         isError={home.isError}
@@ -46,7 +66,11 @@ export default function HomePage() {
             <span className="eyebrow">For You</span>
             <h3>Across your games</h3>
           </div>
-          <button className="text-btn" type="button">
+          <button
+            className="text-btn"
+            onClick={() => showNotice("Feed tuning is not available yet")}
+            type="button"
+          >
             Tune Feed <FiChevronRight />
           </button>
         </div>
@@ -79,9 +103,9 @@ export default function HomePage() {
             </div>
           </div>
           <PostList posts={data.posts} />
-          <button className="text-btn" type="button">
+          <Link className="text-btn" href="/explore">
             View All Trending <FiChevronRight />
-          </button>
+          </Link>
         </section>
 
         <div className="stack">
@@ -98,9 +122,9 @@ export default function HomePage() {
               <li>Sanhua and Cantarella headline the new banner phase.</li>
               <li>Players discovered hidden Rover interactions.</li>
             </ul>
-            <button className="panel-button" type="button">
+            <Link className="panel-button" href="/summaries">
               View Full Summary
-            </button>
+            </Link>
           </section>
           <section className="panel lore">
             <div className="panel-head">

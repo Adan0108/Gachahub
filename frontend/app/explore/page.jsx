@@ -8,6 +8,7 @@ import { CommunityGrid } from "../../components/CommunityGrid";
 import { PostList } from "../../components/PostList";
 import { QueryNotice } from "../../components/QueryNotice";
 import { SectionTitle } from "../../components/SectionTitle";
+import { api } from "../../lib/api";
 import { fallbacks, queries } from "../../lib/queries";
 
 function ExploreContent() {
@@ -16,8 +17,11 @@ function ExploreContent() {
   const [notice, setNotice] = useState("");
   const noticeTimerRef = useRef(null);
   const games = useQuery(queries.games(search));
-  const gameData = games.data || fallbacks.games(search);
-  const posts = fallbacks.posts({ search });
+  const canUseLocalSearch = api.usingMocks;
+  const gameData =
+    games.data || (canUseLocalSearch ? fallbacks.games(search) : { items: [], meta: {} });
+  const posts = games.isError && !canUseLocalSearch ? [] : fallbacks.posts({ search });
+  const offlineSearch = Boolean(search && games.isError && !canUseLocalSearch);
 
   const showUnavailable = () => {
     window.clearTimeout(noticeTimerRef.current);
@@ -57,6 +61,11 @@ function ExploreContent() {
             isLoading={games.isLoading}
             isError={games.isError}
             isEmpty={!gameData.items.length}
+            errorText={
+              offlineSearch
+                ? "Search needs the backend. Start the API or enable mock mode to preview results."
+                : undefined
+            }
             emptyText="No communities found for this search."
           />
           <CommunityGrid communities={gameData.items} compact />

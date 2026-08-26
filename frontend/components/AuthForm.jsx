@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { FiArrowLeft, FiArrowRight, FiLock, FiMail, FiUser } from "react-icons/fi";
+import { FiArrowLeft, FiArrowRight, FiEye, FiEyeOff, FiLock, FiMail, FiUser } from "react-icons/fi";
 import { api } from "../lib/api";
 
 export function AuthForm({ mode }) {
@@ -16,7 +16,12 @@ export function AuthForm({ mode }) {
     password: "",
   });
   const [message, setMessage] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const redirectTimerRef = useRef(null);
+  const canSubmit =
+    form.email.trim().length > 0 &&
+    form.password.length >= 8 &&
+    (!isRegister || form.name.trim().length > 0);
 
   const auth = useMutation({
     mutationFn: () => (isRegister ? api.signUp(form) : api.signIn(form)),
@@ -37,6 +42,7 @@ export function AuthForm({ mode }) {
 
   const submit = (event) => {
     event.preventDefault();
+    if (!canSubmit || auth.isPending) return;
     auth.mutate();
   };
 
@@ -58,11 +64,11 @@ export function AuthForm({ mode }) {
         <span className="eyebrow auth-eyebrow">
           {isRegister ? "Create your account" : "Welcome back"}
         </span>
-        <h1>{isRegister ? "Join your gacha communities." : "Log in to GachaHub."}</h1>
+        <h1>{isRegister ? "Join your communities." : "Log in to GachaHub."}</h1>
         <p>
           {isRegister
-            ? "Save builds, follow game communities, and keep your feed ready for backend auth."
-            : "Continue to your personalized communities, saved builds, and AI summaries."}
+            ? "Create your profile, follow game communities, and keep your saved builds in one place."
+            : "Continue to your communities, saved builds, and daily game updates."}
         </p>
 
         <form className="auth-form" onSubmit={submit}>
@@ -97,17 +103,25 @@ export function AuthForm({ mode }) {
           </label>
           <label>
             Password
-            <span>
+            <span className="password-field">
               <FiLock />
               <input
                 required
                 minLength={8}
-                type="password"
+                type={showPassword ? "text" : "password"}
                 value={form.password}
                 onChange={updateField("password")}
                 placeholder="At least 8 characters"
                 autoComplete={isRegister ? "new-password" : "current-password"}
               />
+              <button
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                className="password-toggle"
+                onClick={() => setShowPassword((current) => !current)}
+                type="button"
+              >
+                {showPassword ? <FiEyeOff /> : <FiEye />}
+              </button>
             </span>
           </label>
 
@@ -115,7 +129,11 @@ export function AuthForm({ mode }) {
             <div className={`auth-message ${auth.isError ? "error" : "success"}`}>{message}</div>
           )}
 
-          <button className="primary auth-submit" disabled={auth.isPending} type="submit">
+          <button
+            className="primary auth-submit"
+            disabled={auth.isPending || !canSubmit}
+            type="submit"
+          >
             {auth.isPending ? "Please wait..." : isRegister ? "Create account" : "Log in"}
             <FiArrowRight />
           </button>
