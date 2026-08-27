@@ -1503,9 +1503,21 @@ export class ChatService {
       otherParticipantIds,
     );
 
-    return Promise.all(
-      conversations.map((conversation) =>
-        this.toConversationSummary(conversation, userId, blockedUserIds),
+    const unreadCounts =
+      await this.chatRepository.countUnreadMessagesForConversations(
+        conversations.map((conversation) => conversation.id),
+        userId,
+      );
+    const unreadCountsByConversationId = new Map(
+      unreadCounts.map((row) => [row.conversationId, row._count._all]),
+    );
+
+    return conversations.map((conversation) =>
+      this.toConversationSummary(
+        conversation,
+        userId,
+        blockedUserIds,
+        unreadCountsByConversationId,
       ),
     );
   }
@@ -1516,22 +1528,20 @@ export class ChatService {
    * The summary includes participant info, latest encrypted message payload,
    * unread count, and timestamps needed by the frontend inbox UI.
    */
-  private async toConversationSummary(
+  private toConversationSummary(
     conversation: Awaited<
       ReturnType<ChatRepository['findInboxConversations']>
     >[number],
     userId: string,
     blockedUserIds: Set<string>,
+    unreadCountsByConversationId: Map<string, number>,
   ) {
     const currentParticipant = conversation.participants.find(
       (participant) => participant.userId === userId,
     );
     const lastMessage = conversation.messages[0] ?? null;
 
-    const unreadCount = await this.chatRepository.countUnreadMessages(
-      conversation.id,
-      userId,
-    );
+    const unreadCount = unreadCountsByConversationId.get(conversation.id) ?? 0;
 
     return {
       id: conversation.id,

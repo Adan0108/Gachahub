@@ -544,24 +544,30 @@ export class ChatRepository {
   }
 
   /**
-   * Counts unread messages for a user in one convo.
-   *
-   * Sender's own messages are excluded bc users should not count their own
-   * messages as unread.
+   * Counts unread messages across many conversations in one query.
    */
-  countUnreadMessages(conversationId: string, userId: string) {
-    return this.prisma.chatMessage.count({
+  async countUnreadMessagesForConversations(
+    conversationIds: string[],
+    userId: string,
+  ) {
+    if (conversationIds.length === 0) {
+      return [];
+    }
+
+    return this.prisma.chatMessage.groupBy({
+      by: ['conversationId'],
       where: {
-        conversationId,
-        senderId: {
-          not: userId,
-        },
+        conversationId: { in: conversationIds },
+        senderId: { not: userId },
         receipts: {
           some: {
             userId,
             readAt: null,
           },
         },
+      },
+      _count: {
+        _all: true,
       },
     });
   }

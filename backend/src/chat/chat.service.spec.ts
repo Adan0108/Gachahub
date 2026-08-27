@@ -57,7 +57,7 @@ describe('ChatService', () => {
     updateMessage: jest.fn(),
     softDeleteMessage: jest.fn(),
     findInboxConversations: jest.fn(),
-    countUnreadMessages: jest.fn(),
+    countUnreadMessagesForConversations: jest.fn(),
     countUnreadMessagesForUser: jest.fn(),
     countUnreadConversationsForUser: jest.fn(),
     findMessages: jest.fn(),
@@ -109,6 +109,7 @@ describe('ChatService', () => {
     blocksService.getBlockedIdsAmong.mockResolvedValue(new Set());
     blocksService.isBlocked.mockResolvedValue(false);
     followsService.isFollowing.mockResolvedValue({ following: false });
+    repository.countUnreadMessagesForConversations.mockResolvedValue([]);
   });
 
   const groupConversation = (
@@ -2177,7 +2178,6 @@ describe('ChatService', () => {
           new Date('2024-01-01'),
         ),
       ]);
-      repository.countUnreadMessages.mockResolvedValue(0);
 
       const result = await service.listConversations('user-1');
 
@@ -2246,7 +2246,9 @@ describe('ChatService', () => {
       repository.findInboxConversations.mockResolvedValue([
         buildPendingConversation(),
       ]);
-      repository.countUnreadMessages.mockResolvedValue(2);
+      repository.countUnreadMessagesForConversations.mockResolvedValue([
+        { conversationId: 'conversation-1', _count: { _all: 2 } },
+      ]);
 
       const result = await service.listMessageRequests('user-1');
 
@@ -2302,7 +2304,6 @@ describe('ChatService', () => {
       repository.findInboxConversations.mockResolvedValue([
         buildArchivedConversation(),
       ]);
-      repository.countUnreadMessages.mockResolvedValue(0);
 
       const result = await service.listArchivedConversations('user-1');
 
