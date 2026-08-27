@@ -2511,9 +2511,10 @@ describe('ChatService', () => {
         deletedAt: null,
       });
       repository.findParticipants.mockResolvedValue([
-        { userId: 'user-1', state: 'ACTIVE' },
-        { userId: 'user-2', state: 'ACTIVE' },
-        { userId: 'user-3', state: 'PENDING' },
+        { userId: 'user-1', state: 'ACTIVE', deletedAt: null },
+        { userId: 'user-2', state: 'ACTIVE', deletedAt: null },
+        { userId: 'user-3', state: 'PENDING', deletedAt: null },
+        { userId: 'user-4', state: 'BLOCKED', deletedAt: null },
       ]);
 
       const result = await service.getTypingRecipients(

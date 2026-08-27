@@ -1346,7 +1346,12 @@ export class ChatService {
       await this.chatRepository.findParticipants(conversationId);
 
     return participants
-      .filter((otherParticipant) => otherParticipant.userId !== userId)
+      .filter(
+        (otherParticipant) =>
+          otherParticipant.userId !== userId &&
+          !otherParticipant.deletedAt &&
+          this.canReadState(otherParticipant.state),
+      )
       .map((otherParticipant) => otherParticipant.userId);
   }
 
