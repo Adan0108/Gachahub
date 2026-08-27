@@ -1403,6 +1403,59 @@ describe('ChatService', () => {
 
       expect(repository.updateParticipantArchivedState).not.toHaveBeenCalled();
     });
+
+    it('never restores anyone but the sender, so a deleted recipient stays deleted', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+        deletedAt: null,
+      });
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-1', state: 'ACTIVE', notificationLevel: 'ALL' },
+        { userId: 'user-2', state: 'ACTIVE', notificationLevel: 'ALL' },
+      ]);
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE' },
+        ]),
+      );
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(repository.restoreDeletedParticipants).not.toHaveBeenCalled();
+    });
+
+    it('restores the sender when they had deleted their own copy and send again', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+        deletedAt: new Date(),
+      });
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-1', state: 'ACTIVE', notificationLevel: 'ALL' },
+        { userId: 'user-2', state: 'ACTIVE', notificationLevel: 'ALL' },
+      ]);
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE' },
+        ]),
+      );
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(repository.restoreDeletedParticipants).toHaveBeenCalledWith(
+        'conversation-1',
+        'user-1',
+      );
+    });
   });
 
   describe('createGameEmote', () => {
@@ -2386,6 +2439,27 @@ describe('ChatService', () => {
 
       expect(result.meta.nextBeforeMessageId).toBeNull();
       expect(result.items).toEqual([]);
+    });
+
+    it('delivers messages from a blocked sender instead of filtering them out', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findMessages.mockResolvedValue([
+        { id: 'message-1', senderId: 'user-2' },
+      ]);
+      blocksService.getBlockedIdsAmong.mockResolvedValue(new Set(['user-2']));
+
+      const result = await service.findMessages('user-1', 'conversation-1', {
+        limit: 30,
+      });
+
+      expect(blocksService.getBlockedIdsAmong).toHaveBeenCalledWith('user-1', [
+        'user-2',
+      ]);
+      expect(result.items.map((message) => message.id)).toEqual(['message-1']);
+      expect(result.meta.blockedSenderUserIds).toEqual(['user-2']);
     });
   });
 
