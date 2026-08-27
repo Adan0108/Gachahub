@@ -29,7 +29,11 @@ describe('SocketChatDeliveryService', () => {
 
     expect(to).toHaveBeenCalledWith('user:user-2');
     expect(to).toHaveBeenCalledWith('user:user-3');
-    expect(emit).toHaveBeenCalledWith('message:created', event);
+    expect(emit).toHaveBeenCalledWith('message:created', {
+      conversationId: 'conversation-1',
+      messageId: 'message-1',
+      senderId: 'user-1',
+    });
     expect(emit).toHaveBeenCalledTimes(2);
   });
 

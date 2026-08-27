@@ -12,11 +12,18 @@ export class SocketChatDeliveryService implements ChatDeliveryPort {
   constructor(private readonly socketRegistry: ChatSocketRegistry) {}
 
   publishMessageCreated(event: ChatMessageCreatedEvent): Promise<void> {
+    // only what clients need, recipientUserIds/shouldNotify server internal routing.
+    const payload = {
+      conversationId: event.conversationId,
+      messageId: event.messageId,
+      senderId: event.senderId,
+    };
+
     // offline recipient just doesnt get it, no queue no retry, REST covers that case
     for (const recipientUserId of event.recipientUserIds) {
       this.socketRegistry.server
         ?.to(chatUserRoom(recipientUserId))
-        .emit('message:created', event);
+        .emit('message:created', payload);
     }
 
     return Promise.resolve(); // nothing to await, just satisfy the interface
