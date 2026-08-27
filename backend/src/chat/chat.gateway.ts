@@ -99,7 +99,11 @@ export class ChatGateway
   ) {
     const userId = socket.data.userId;
 
-    if (!userId || !payload?.conversationId) {
+    if (
+      !userId ||
+      !payload?.conversationId ||
+      typeof payload.conversationId !== 'string'
+    ) {
       return;
     }
 
