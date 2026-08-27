@@ -71,4 +71,26 @@ export class RedisService {
   getClient(): RedisClientType {
     return this.client;
   }
+
+  async incrementWithExpiry(key: string, ttlSeconds: number): Promise<number> {
+    const redisKey = this.key(key);
+
+    const result = await this.client.eval(
+      `
+      local count = redis.call('INCR', KEYS[1])
+
+      if count == 1 then
+        redis.call('EXPIRE', KEYS[1], ARGV[1])
+      end
+
+      return count
+    `,
+      {
+        keys: [redisKey],
+        arguments: [String(ttlSeconds)],
+      },
+    );
+
+    return Number(result);
+  }
 }
