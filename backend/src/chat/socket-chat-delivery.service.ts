@@ -12,11 +12,13 @@ export class SocketChatDeliveryService implements ChatDeliveryPort {
   constructor(private readonly socketRegistry: ChatSocketRegistry) {}
 
   publishMessageCreated(event: ChatMessageCreatedEvent): Promise<void> {
-    // only what clients need, recipientUserIds/shouldNotify server internal routing.
+    // recipientUserIds stay out, it leaks who else got this batch; shouldNotify is
+    // safe, each recipient only ever gets one call, so it's about them, not others.
     const payload = {
       conversationId: event.conversationId,
       messageId: event.messageId,
       senderId: event.senderId,
+      shouldNotify: event.shouldNotify,
     };
 
     // offline recipient just doesnt get it, no queue no retry, REST covers that case

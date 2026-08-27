@@ -33,6 +33,7 @@ describe('SocketChatDeliveryService', () => {
       conversationId: 'conversation-1',
       messageId: 'message-1',
       senderId: 'user-1',
+      shouldNotify: true,
     });
     expect(emit).toHaveBeenCalledTimes(2);
   });
