@@ -274,13 +274,9 @@ export class ChatRepository {
   }
 
   /**
-   * Adds or reactivates member rows for a group.
+   * Add or reactivates member rows for a group.
    *
-   * A removed member already has a participant row, so updateMany
-   * restores those rows before createMany inserts only brand-new members.
-   * Each member's state (ACTIVE or PENDING) is resolved by the caller
-   * based on mutual follow, same as a brand-new invite - a rejoin after
-   * removal isn't exempt from consent.
+   * skip BLOCKED rows, clears deletedAt/archivedAt when reactivating.
    */
   async addGroupMembers(
     conversationId: string,
@@ -303,9 +299,14 @@ export class ChatRepository {
             role: {
               not: 'OWNER',
             },
+            state: {
+              not: 'BLOCKED',
+            },
           },
           data: {
             state,
+            deletedAt: null,
+            archivedAt: null,
           },
         });
       }
