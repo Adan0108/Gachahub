@@ -1572,13 +1572,15 @@ export class ChatService {
     viewerId: string,
     blockedUserIds: Set<string>,
   ) {
+    const isViewer = participant.userId === viewerId;
+
     return {
       userId: participant.userId,
       role: participant.role,
       state: this.maskParticipantStateForViewer(participant, viewerId),
-      pinnedAt: participant.pinnedAt,
-      notificationLevel: participant.notificationLevel,
-      mutedUntil: participant.mutedUntil,
+      pinnedAt: isViewer ? participant.pinnedAt : null,
+      notificationLevel: isViewer ? participant.notificationLevel : null,
+      mutedUntil: isViewer ? participant.mutedUntil : null,
       user: participant.user,
       isBlockedByMe: blockedUserIds.has(participant.userId),
     };
