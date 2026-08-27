@@ -968,19 +968,6 @@ export class ChatService {
       };
     }
 
-    const senderParticipant = await this.chatRepository.findParticipant(
-      conversationId,
-      senderId,
-    );
-
-    if (!senderParticipant) {
-      throw new NotFoundException('Conversation not found');
-    }
-
-    if (senderParticipant.state !== 'ACTIVE') {
-      throw new ForbiddenException('You cannot send messages here');
-    }
-
     const conversation =
       await this.chatRepository.findConversationWithParticipants(
         conversationId,
@@ -991,6 +978,18 @@ export class ChatService {
     }
 
     const participants = conversation.participants;
+
+    const senderParticipant = participants.find(
+      (participant) => participant.userId === senderId,
+    );
+
+    if (!senderParticipant) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    if (senderParticipant.state !== 'ACTIVE') {
+      throw new ForbiddenException('You cannot send messages here');
+    }
 
     const deliverableParticipants =
       conversation.type === 'GROUP'

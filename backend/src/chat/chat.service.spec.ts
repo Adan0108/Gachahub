@@ -133,6 +133,7 @@ describe('ChatService', () => {
       mutedAt?: Date | null;
       notificationLevel?: 'ALL' | 'NOTHING';
       mutedUntil?: Date | null;
+      deletedAt?: Date | null;
     }>,
   ) => ({
     id: 'conversation-1',
@@ -1123,7 +1124,9 @@ describe('ChatService', () => {
     });
 
     it('rejects when the sender is not a participant', async () => {
-      repository.findParticipant.mockResolvedValue(null);
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([{ userId: 'user-2', state: 'ACTIVE' }]),
+      );
 
       await expect(
         service.sendMessage('user-1', 'conversation-1', {
@@ -1133,10 +1136,9 @@ describe('ChatService', () => {
     });
 
     it('rejects when the sender participant is not active', async () => {
-      repository.findParticipant.mockResolvedValue({
-        userId: 'user-1',
-        state: 'PENDING',
-      });
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([{ userId: 'user-1', state: 'PENDING' }]),
+      );
 
       await expect(
         service.sendMessage('user-1', 'conversation-1', {
@@ -1410,14 +1412,9 @@ describe('ChatService', () => {
     });
 
     it('restores the sender when they had deleted their own copy and send again', async () => {
-      repository.findParticipant.mockResolvedValue({
-        userId: 'user-1',
-        state: 'ACTIVE',
-        deletedAt: new Date(),
-      });
       repository.findConversationWithParticipants.mockResolvedValue(
         directConversation([
-          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-1', state: 'ACTIVE', deletedAt: new Date() },
           { userId: 'user-2', state: 'ACTIVE' },
         ]),
       );
