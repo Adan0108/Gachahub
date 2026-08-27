@@ -325,7 +325,7 @@ export class ChatService {
 
     if (targetUserId === userId) {
       throw new BadRequestException(
-        'User transferGroupOwnership to change your own role',
+        'Use transferGroupOwnership to change your own role',
       );
     }
 
