@@ -991,15 +991,18 @@ export class ChatService {
       throw new ForbiddenException('You cannot send messages here');
     }
 
-    const deliverableParticipants =
-      conversation.type === 'GROUP'
-        ? participants.filter((participant) =>
-            ['ACTIVE', 'ARCHIVED'].includes(participant.state),
-          )
-        : participants;
+    const deliverableParticipants = participants.filter((participant) => {
+      if (participant.userId !== senderId && participant.deletedAt) {
+        return false;
+      }
+
+      return conversation.type === 'GROUP'
+        ? ['ACTIVE', 'ARCHIVED'].includes(participant.state)
+        : true;
+    });
 
     if (conversation.type === 'DIRECT') {
-      const recipient = deliverableParticipants.find(
+      const recipient = participants.find(
         (participant) => participant.userId !== senderId,
       );
 
