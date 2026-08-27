@@ -981,8 +981,6 @@ export class ChatService {
       throw new ForbiddenException('You cannot send messages here');
     }
 
-    const participants =
-      await this.chatRepository.findParticipants(conversationId);
     const conversation =
       await this.chatRepository.findConversationWithParticipants(
         conversationId,
@@ -991,6 +989,8 @@ export class ChatService {
     if (!conversation) {
       throw new NotFoundException('Conversation not found');
     }
+
+    const participants = conversation.participants;
 
     const deliverableParticipants =
       conversation.type === 'GROUP'

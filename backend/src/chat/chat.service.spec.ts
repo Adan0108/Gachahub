@@ -113,7 +113,13 @@ describe('ChatService', () => {
   });
 
   const groupConversation = (
-    participants: Array<{ userId: string; role: string; state: string }>,
+    participants: Array<{
+      userId: string;
+      role: string;
+      state: string;
+      notificationLevel?: 'ALL' | 'NOTHING';
+      mutedUntil?: Date | null;
+    }>,
   ) => ({
     id: 'conversation-1',
     type: 'GROUP',
@@ -125,6 +131,8 @@ describe('ChatService', () => {
       userId: string;
       state: string;
       mutedAt?: Date | null;
+      notificationLevel?: 'ALL' | 'NOTHING';
+      mutedUntil?: Date | null;
     }>,
   ) => ({
     id: 'conversation-1',
@@ -1070,10 +1078,6 @@ describe('ChatService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
-      repository.findParticipants.mockResolvedValue([
-        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
-        { userId: 'user-2', state: 'ACTIVE', mutedAt: null },
-      ]);
       repository.findConversationWithParticipants.mockResolvedValue(
         directConversation([
           { userId: 'user-1', state: 'ACTIVE' },
@@ -1146,9 +1150,6 @@ describe('ChatService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
-      repository.findParticipants.mockResolvedValue([
-        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
-      ]);
       repository.findConversationWithParticipants.mockResolvedValue(null);
 
       await expect(
@@ -1163,10 +1164,6 @@ describe('ChatService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
-      repository.findParticipants.mockResolvedValue([
-        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
-        { userId: 'user-2', state: 'ACTIVE', mutedAt: null },
-      ]);
       repository.findConversationWithParticipants.mockResolvedValue(
         directConversation([
           { userId: 'user-1', state: 'ACTIVE' },
@@ -1189,10 +1186,6 @@ describe('ChatService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
-      repository.findParticipants.mockResolvedValue([
-        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
-        { userId: 'user-2', state: 'DECLINED', mutedAt: null },
-      ]);
       repository.findConversationWithParticipants.mockResolvedValue(
         directConversation([
           { userId: 'user-1', state: 'ACTIVE' },
@@ -1212,10 +1205,6 @@ describe('ChatService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
-      repository.findParticipants.mockResolvedValue([
-        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
-        { userId: 'user-2', state: 'ACTIVE', mutedAt: null },
-      ]);
       repository.findConversationWithParticipants.mockResolvedValue(
         directConversation([
           { userId: 'user-1', state: 'ACTIVE' },
@@ -1241,10 +1230,6 @@ describe('ChatService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
-      repository.findParticipants.mockResolvedValue([
-        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
-        { userId: 'user-2', state: 'ACTIVE', mutedAt: null },
-      ]);
       repository.findConversationWithParticipants.mockResolvedValue(
         directConversation([
           { userId: 'user-1', state: 'ACTIVE' },
@@ -1279,16 +1264,26 @@ describe('ChatService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
-      repository.findParticipants.mockResolvedValue([
-        { userId: 'user-1', state: 'ACTIVE', notificationLevel: 'ALL' },
-        { userId: 'user-2', state: 'ACTIVE', notificationLevel: 'NOTHING' },
-        { userId: 'user-3', state: 'ACTIVE', notificationLevel: 'ALL' },
-      ]);
       repository.findConversationWithParticipants.mockResolvedValue(
         groupConversation([
-          { userId: 'user-1', role: 'OWNER', state: 'ACTIVE' },
-          { userId: 'user-2', role: 'MEMBER', state: 'ACTIVE' },
-          { userId: 'user-3', role: 'MEMBER', state: 'ACTIVE' },
+          {
+            userId: 'user-1',
+            role: 'OWNER',
+            state: 'ACTIVE',
+            notificationLevel: 'ALL',
+          },
+          {
+            userId: 'user-2',
+            role: 'MEMBER',
+            state: 'ACTIVE',
+            notificationLevel: 'NOTHING',
+          },
+          {
+            userId: 'user-3',
+            role: 'MEMBER',
+            state: 'ACTIVE',
+            notificationLevel: 'ALL',
+          },
         ]),
       );
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
@@ -1316,19 +1311,15 @@ describe('ChatService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
-      repository.findParticipants.mockResolvedValue([
-        { userId: 'user-1', state: 'ACTIVE', notificationLevel: 'ALL' },
-        {
-          userId: 'user-2',
-          state: 'ACTIVE',
-          notificationLevel: 'NOTHING',
-          mutedUntil: new Date(Date.now() + 60 * 60 * 1000),
-        },
-      ]);
       repository.findConversationWithParticipants.mockResolvedValue(
         directConversation([
-          { userId: 'user-1', state: 'ACTIVE' },
-          { userId: 'user-2', state: 'ACTIVE' },
+          { userId: 'user-1', state: 'ACTIVE', notificationLevel: 'ALL' },
+          {
+            userId: 'user-2',
+            state: 'ACTIVE',
+            notificationLevel: 'NOTHING',
+            mutedUntil: new Date(Date.now() + 60 * 60 * 1000),
+          },
         ]),
       );
       blocksService.isBlocked.mockResolvedValue(false);
@@ -1351,19 +1342,15 @@ describe('ChatService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
-      repository.findParticipants.mockResolvedValue([
-        { userId: 'user-1', state: 'ACTIVE', notificationLevel: 'ALL' },
-        {
-          userId: 'user-2',
-          state: 'ACTIVE',
-          notificationLevel: 'NOTHING',
-          mutedUntil: new Date(Date.now() - 60 * 60 * 1000),
-        },
-      ]);
       repository.findConversationWithParticipants.mockResolvedValue(
         directConversation([
-          { userId: 'user-1', state: 'ACTIVE' },
-          { userId: 'user-2', state: 'ACTIVE' },
+          { userId: 'user-1', state: 'ACTIVE', notificationLevel: 'ALL' },
+          {
+            userId: 'user-2',
+            state: 'ACTIVE',
+            notificationLevel: 'NOTHING',
+            mutedUntil: new Date(Date.now() - 60 * 60 * 1000),
+          },
         ]),
       );
       blocksService.isBlocked.mockResolvedValue(false);
@@ -1386,10 +1373,6 @@ describe('ChatService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
-      repository.findParticipants.mockResolvedValue([
-        { userId: 'user-1', state: 'ACTIVE', mutedAt: null },
-        { userId: 'user-2', state: 'ARCHIVED', mutedAt: null },
-      ]);
       repository.findConversationWithParticipants.mockResolvedValue(
         directConversation([
           { userId: 'user-1', state: 'ACTIVE' },
@@ -1411,10 +1394,6 @@ describe('ChatService', () => {
         state: 'ACTIVE',
         deletedAt: null,
       });
-      repository.findParticipants.mockResolvedValue([
-        { userId: 'user-1', state: 'ACTIVE', notificationLevel: 'ALL' },
-        { userId: 'user-2', state: 'ACTIVE', notificationLevel: 'ALL' },
-      ]);
       repository.findConversationWithParticipants.mockResolvedValue(
         directConversation([
           { userId: 'user-1', state: 'ACTIVE' },
@@ -1436,10 +1415,6 @@ describe('ChatService', () => {
         state: 'ACTIVE',
         deletedAt: new Date(),
       });
-      repository.findParticipants.mockResolvedValue([
-        { userId: 'user-1', state: 'ACTIVE', notificationLevel: 'ALL' },
-        { userId: 'user-2', state: 'ACTIVE', notificationLevel: 'ALL' },
-      ]);
       repository.findConversationWithParticipants.mockResolvedValue(
         directConversation([
           { userId: 'user-1', state: 'ACTIVE' },
