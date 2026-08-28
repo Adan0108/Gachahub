@@ -838,12 +838,7 @@ export class ChatService {
   }
 
   /**
-   * Adds or updates the current user's reaction on a message.
-   *
-   * Business behavior:
-   * - User must be able to read the message's convo.
-   * - Deleted messages cannot be reacted to.
-   * - One user gets one reaction per message; another reaction replaces it.
+   * Sets the user's reaction on a message, replacing any existing one, then broadcasts it.
    */
   async reactToMessage(
     userId: string,
@@ -889,6 +884,8 @@ export class ChatService {
 
   /**
    * Removes the current user's reaction from a message.
+   *
+   * Publishes a real-time event only when a reaction actually existed.
    */
   async removeReaction(userId: string, messageId: string) {
     const message = await this.assertCanInteractWithMessage(userId, messageId);
@@ -923,6 +920,7 @@ export class ChatService {
    * - Only the original sender can edit.
    * - Deleted messages cannot be edited.
    * - Edited message gets a new encrypted payload and editedAt timestamp.
+   * - Publishes a real-time event to other participants.
    */
   async editMessage(userId: string, messageId: string, dto: EditMessageDto) {
     const message = await this.assertCanModifyOwnMessage(userId, messageId);
@@ -951,7 +949,7 @@ export class ChatService {
    * Soft deletes the current user's own message.
    *
    * The message row remains, but encrypted content is cleared and status becomes
-   * DELETED.
+   * DELETED. Publishes a real-time event to other participants.
    */
   async deleteMessage(userId: string, messageId: string) {
     const message = await this.assertCanModifyOwnMessage(userId, messageId);

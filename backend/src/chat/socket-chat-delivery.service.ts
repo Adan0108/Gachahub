@@ -46,7 +46,7 @@ export class SocketChatDeliveryService implements ChatDeliveryPort {
     return this.emitActionEvent('reaction:removed', event);
   }
 
-  // shared by edit/delete/reaction events, only the event name and actorId differ
+  // shared by edit/delete/reaction events, only the event name differs
   private emitActionEvent(
     eventName: ChatSocketEventName,
     event: ChatMessageActionEvent,
