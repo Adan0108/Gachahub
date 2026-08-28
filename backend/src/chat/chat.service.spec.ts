@@ -2533,6 +2533,9 @@ describe('ChatService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
+      repository.findSentMessageInConversation.mockResolvedValue({
+        id: 'message-5',
+      });
       repository.findMessages.mockResolvedValue([]);
 
       await service.findMessages('user-1', 'conversation-1', {
@@ -2545,6 +2548,23 @@ describe('ChatService', () => {
         beforeMessageId: 'message-5',
         limit: 30,
       });
+    });
+
+    it('rejects a beforeMessageId that does not belong to this conversation', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findSentMessageInConversation.mockResolvedValue(null);
+
+      await expect(
+        service.findMessages('user-1', 'conversation-1', {
+          beforeMessageId: 'message-from-another-conversation',
+          limit: 30,
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(repository.findMessages).not.toHaveBeenCalled();
     });
 
     it('honors an explicit limit instead of the default', async () => {

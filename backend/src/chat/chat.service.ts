@@ -494,6 +494,17 @@ export class ChatService {
 
     const limit = query.limit;
 
+    if (query.beforeMessageId) {
+      const cursorMessage =
+        await this.chatRepository.findSentMessageInConversation(
+          query.beforeMessageId,
+          conversationId,
+        );
+      if (!cursorMessage) {
+        throw new BadRequestException('Invalid pagination cursor');
+      }
+    }
+
     const messages = await this.chatRepository.findMessages({
       conversationId,
       beforeMessageId: query.beforeMessageId,
