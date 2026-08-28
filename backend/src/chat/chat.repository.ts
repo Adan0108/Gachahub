@@ -662,9 +662,7 @@ export class ChatRepository {
           }
         : {}),
       take: params.limit,
-      orderBy: {
-        createdAt: 'desc',
-      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: {
         receipts: true,
         reactions: {
