@@ -91,6 +91,10 @@ describe('ChatService', () => {
 
   const chatDelivery = {
     publishMessageCreated: jest.fn(),
+    publishMessageEdited: jest.fn(),
+    publishMessageDeleted: jest.fn(),
+    publishReactionAdded: jest.fn(),
+    publishReactionRemoved: jest.fn(),
   };
 
   let service: ChatService;
@@ -1629,6 +1633,55 @@ describe('ChatService', () => {
         emoteId: 'emote-1',
       });
     });
+
+    it('publishes a reaction-added event with the deliverable recipients', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        conversationId: 'conversation-1',
+        status: 'SENT',
+        conversation: {
+          type: 'DIRECT',
+          participants: [
+            { userId: 'user-1', state: 'ACTIVE', deletedAt: null },
+            { userId: 'user-2', state: 'ACTIVE', deletedAt: null },
+          ],
+        },
+      });
+      repository.upsertMessageReaction.mockResolvedValue({ id: 'reaction-1' });
+
+      await service.reactToMessage('user-1', 'message-1', { emoji: '😋' });
+
+      expect(chatDelivery.publishReactionAdded).toHaveBeenCalledWith({
+        conversationId: 'conversation-1',
+        messageId: 'message-1',
+        actorId: 'user-1',
+        recipientUserIds: ['user-2'],
+      });
+    });
+
+    it('excludes the actor, PENDING group members, and deleted participants from the reaction event', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        conversationId: 'conversation-1',
+        status: 'SENT',
+        conversation: {
+          type: 'GROUP',
+          participants: [
+            { userId: 'user-1', state: 'ACTIVE', deletedAt: null },
+            { userId: 'user-2', state: 'ACTIVE', deletedAt: null },
+            { userId: 'user-3', state: 'PENDING', deletedAt: null },
+            { userId: 'user-4', state: 'ACTIVE', deletedAt: new Date() },
+          ],
+        },
+      });
+      repository.upsertMessageReaction.mockResolvedValue({ id: 'reaction-1' });
+
+      await service.reactToMessage('user-1', 'message-1', { emoji: '😋' });
+
+      expect(chatDelivery.publishReactionAdded).toHaveBeenCalledWith(
+        expect.objectContaining({ recipientUserIds: ['user-2'] }),
+      );
+    });
   });
 
   describe('removeReaction', () => {
@@ -1671,6 +1724,50 @@ describe('ChatService', () => {
         'user-1',
       );
       expect(result).toEqual({ removedCount: 1 });
+    });
+
+    it('publishes a reaction-removed event when a reaction was removed', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        conversationId: 'conversation-1',
+        status: 'SENT',
+        conversation: {
+          type: 'DIRECT',
+          participants: [
+            { userId: 'user-1', state: 'ACTIVE', deletedAt: null },
+            { userId: 'user-2', state: 'ACTIVE', deletedAt: null },
+          ],
+        },
+      });
+      repository.deleteMessageReaction.mockResolvedValue({ count: 1 });
+
+      await service.removeReaction('user-1', 'message-1');
+
+      expect(chatDelivery.publishReactionRemoved).toHaveBeenCalledWith({
+        conversationId: 'conversation-1',
+        messageId: 'message-1',
+        actorId: 'user-1',
+        recipientUserIds: ['user-2'],
+      });
+    });
+
+    it('does not publish anything when there was no reaction to remove', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        conversationId: 'conversation-1',
+        status: 'SENT',
+        conversation: {
+          type: 'DIRECT',
+          participants: [
+            { userId: 'user-1', state: 'ACTIVE', deletedAt: null },
+          ],
+        },
+      });
+      repository.deleteMessageReaction.mockResolvedValue({ count: 0 });
+
+      await service.removeReaction('user-1', 'message-1');
+
+      expect(chatDelivery.publishReactionRemoved).not.toHaveBeenCalled();
     });
   });
 
@@ -2081,6 +2178,37 @@ describe('ChatService', () => {
         contentType: 'IMAGE',
       });
     });
+
+    it('publishes a message-edited event with the deliverable recipients', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        conversationId: 'conversation-1',
+        status: 'SENT',
+        senderId: 'user-1',
+        conversation: {
+          type: 'DIRECT',
+          participants: [
+            { userId: 'user-1', state: 'ACTIVE', deletedAt: null },
+            { userId: 'user-2', state: 'ACTIVE', deletedAt: null },
+          ],
+        },
+      });
+      repository.updateMessage.mockResolvedValue({
+        id: 'message-1',
+        ciphertext: 'new-cipher',
+      });
+
+      await service.editMessage('user-1', 'message-1', {
+        ciphertext: 'new-cipher',
+      });
+
+      expect(chatDelivery.publishMessageEdited).toHaveBeenCalledWith({
+        conversationId: 'conversation-1',
+        messageId: 'message-1',
+        actorId: 'user-1',
+        recipientUserIds: ['user-2'],
+      });
+    });
   });
 
   describe('deleteMessage', () => {
@@ -2099,6 +2227,32 @@ describe('ChatService', () => {
 
       expect(repository.softDeleteMessage).toHaveBeenCalledWith('message-1');
       expect(result).toEqual({ message: 'Message deleted successfully' });
+    });
+
+    it('publishes a message-deleted event with the deliverable recipients', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        conversationId: 'conversation-1',
+        status: 'SENT',
+        senderId: 'user-1',
+        conversation: {
+          type: 'DIRECT',
+          participants: [
+            { userId: 'user-1', state: 'ACTIVE', deletedAt: null },
+            { userId: 'user-2', state: 'ACTIVE', deletedAt: null },
+          ],
+        },
+      });
+      repository.softDeleteMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.deleteMessage('user-1', 'message-1');
+
+      expect(chatDelivery.publishMessageDeleted).toHaveBeenCalledWith({
+        conversationId: 'conversation-1',
+        messageId: 'message-1',
+        actorId: 'user-1',
+        recipientUserIds: ['user-2'],
+      });
     });
   });
 
