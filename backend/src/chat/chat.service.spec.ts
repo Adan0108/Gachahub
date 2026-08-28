@@ -537,10 +537,11 @@ describe('ChatService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('throws BadRequestException when the owner tries to leave', async () => {
+    it('throws BadRequestException when the owner tries to leave with other active members present', async () => {
       repository.findConversationWithParticipants.mockResolvedValue(
         groupConversation([
           { userId: 'user-1', role: 'OWNER', state: 'ACTIVE' },
+          { userId: 'user-2', role: 'MEMBER', state: 'ACTIVE' },
         ]),
       );
 
@@ -548,6 +549,29 @@ describe('ChatService', () => {
         service.leaveGroup('user-1', 'conversation-1'),
       ).rejects.toThrow(BadRequestException);
 
+      expect(repository.removeGroupMembers).not.toHaveBeenCalled();
+      expect(repository.updateParticipantState).not.toHaveBeenCalled();
+    });
+
+    it('allows the owner to leave when they are the only active member', async () => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          { userId: 'user-1', role: 'OWNER', state: 'ACTIVE' },
+          { userId: 'user-2', role: 'MEMBER', state: 'DECLINED' },
+        ]),
+      );
+      repository.updateParticipantState.mockResolvedValue({
+        userId: 'user-1',
+        state: 'DECLINED',
+      });
+
+      await service.leaveGroup('user-1', 'conversation-1');
+
+      expect(repository.updateParticipantState).toHaveBeenCalledWith(
+        'conversation-1',
+        'user-1',
+        'DECLINED',
+      );
       expect(repository.removeGroupMembers).not.toHaveBeenCalled();
     });
 

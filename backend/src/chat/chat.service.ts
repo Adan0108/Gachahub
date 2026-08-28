@@ -373,8 +373,21 @@ export class ChatService {
     }
 
     if (participant.role === 'OWNER') {
-      throw new BadRequestException(
-        'Owner cannot leave before transferring ownership',
+      const hasOtherActiveMembers = conversation.participants.some(
+        (item) => item.userId !== userId && item.state === 'ACTIVE',
+      );
+
+      if (hasOtherActiveMembers) {
+        throw new BadRequestException(
+          'Owner cannot leave before transferring ownership',
+        );
+      }
+
+      // sole remaining member, nobody left to transfer to, group closes with them
+      return this.chatRepository.updateParticipantState(
+        conversationId,
+        userId,
+        'DECLINED',
       );
     }
 
