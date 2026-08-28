@@ -673,7 +673,12 @@ export class ChatService {
    * messages and receipts stored.
    */
   async archiveConversation(userId: string, conversationId: string) {
-    await this.assertReadableParticipant(conversationId, userId);
+    await this.assertParticipantState(
+      conversationId,
+      userId,
+      'ACTIVE',
+      'Only active conversations can be archived',
+    );
 
     return this.chatRepository.updateParticipantArchivedState(
       conversationId,
@@ -689,7 +694,12 @@ export class ChatService {
    * inbox again.
    */
   async unarchiveConversation(userId: string, conversationId: string) {
-    await this.assertReadableParticipant(conversationId, userId);
+    await this.assertParticipantState(
+      conversationId,
+      userId,
+      'ARCHIVED',
+      'Only archived conversations can be unarchived',
+    );
 
     return this.chatRepository.updateParticipantArchivedState(
       conversationId,
@@ -1410,6 +1420,23 @@ export class ChatService {
     }
 
     return participant;
+  }
+
+  // readable isn't enough here, the caller needs an exact state (e.g. archive/unarchive)
+  private async assertParticipantState(
+    conversationId: string,
+    userId: string,
+    requiredState: ChatParticipantState,
+    errorMessage: string,
+  ) {
+    const participant = await this.assertReadableParticipant(
+      conversationId,
+      userId,
+    );
+
+    if (participant.state !== requiredState) {
+      throw new BadRequestException(errorMessage);
+    }
   }
 
   /**

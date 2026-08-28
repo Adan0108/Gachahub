@@ -1882,7 +1882,33 @@ describe('ChatService', () => {
       );
     });
 
+    it('archiveConversation rejects a non-active participant', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'PENDING',
+      });
+
+      await expect(
+        service.archiveConversation('user-1', 'conversation-1'),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(repository.updateParticipantArchivedState).not.toHaveBeenCalled();
+    });
+
+    it('unarchiveConversation rejects a non-archived participant', async () => {
+      await expect(
+        service.unarchiveConversation('user-1', 'conversation-1'),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(repository.updateParticipantArchivedState).not.toHaveBeenCalled();
+    });
+
     it('unarchiveConversation sets archived to false', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ARCHIVED',
+      });
+
       await service.unarchiveConversation('user-1', 'conversation-1');
 
       expect(repository.updateParticipantArchivedState).toHaveBeenCalledWith(
