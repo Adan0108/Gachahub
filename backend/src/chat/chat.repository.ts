@@ -559,6 +559,7 @@ export class ChatRepository {
       where: {
         conversationId: { in: conversationIds },
         senderId: { not: userId },
+        status: 'SENT',
         receipts: {
           some: {
             userId,
