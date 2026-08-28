@@ -15,6 +15,19 @@ export interface ChatMessageCreatedEvent {
 }
 
 /**
+ * Shared shape for edit/delete/reaction events.
+ *
+ * All four carry the same fields; only the port method (and the socket event
+ * name it emits) says what actually happened.
+ */
+export interface ChatMessageActionEvent {
+  conversationId: string;
+  messageId: string;
+  actorId: string;
+  recipientUserIds: string[];
+}
+
+/**
  * Port for chat delivery side effects.
  *
  * REST persistence works without this doing anything today. Later, a WebSocket,
@@ -23,4 +36,8 @@ export interface ChatMessageCreatedEvent {
  */
 export interface ChatDeliveryPort {
   publishMessageCreated(event: ChatMessageCreatedEvent): Promise<void>;
+  publishMessageEdited(event: ChatMessageActionEvent): Promise<void>;
+  publishMessageDeleted(event: ChatMessageActionEvent): Promise<void>;
+  publishReactionAdded(event: ChatMessageActionEvent): Promise<void>;
+  publishReactionRemoved(event: ChatMessageActionEvent): Promise<void>;
 }

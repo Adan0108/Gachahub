@@ -850,7 +850,7 @@ export class ChatService {
     messageId: string,
     dto: ReactToMessageDto,
   ) {
-    await this.assertCanInteractWithMessage(userId, messageId);
+    const message = await this.assertCanInteractWithMessage(userId, messageId);
 
     const emoji = dto.emoji?.trim();
     const emoteId = dto.emoteId?.trim();
@@ -863,40 +863,53 @@ export class ChatService {
       throw new BadRequestException('Reaction can only use emoji or emoteId');
     }
 
-    if (emoji) {
-      return this.chatRepository.upsertMessageReaction({
-        messageId,
-        userId,
-        emoji,
-        emoteId: null,
-      });
+    if (emoteId) {
+      await this.assertCanUseEmote(userId, emoteId);
     }
 
-    const customEmoteId = emoteId as string;
-
-    await this.assertCanUseEmote(userId, customEmoteId);
-
-    return this.chatRepository.upsertMessageReaction({
+    const reaction = await this.chatRepository.upsertMessageReaction({
       messageId,
       userId,
-      emoji: null,
-      emoteId: customEmoteId,
+      emoji: emoji ?? null,
+      emoteId: emoteId ?? null,
     });
+
+    await this.chatDelivery.publishReactionAdded({
+      conversationId: message.conversationId,
+      messageId,
+      actorId: userId,
+      recipientUserIds: this.getDeliverableRecipientIds(
+        message.conversation,
+        userId,
+      ),
+    });
+
+    return reaction;
   }
 
   /**
    * Removes the current user's reaction from a message.
-   *
-   * The permission check matches reactToMessage so users cannot reveal or
-   * modify reaction state for messages outside conversations they can access.
    */
   async removeReaction(userId: string, messageId: string) {
-    await this.assertCanInteractWithMessage(userId, messageId);
+    const message = await this.assertCanInteractWithMessage(userId, messageId);
 
     const result = await this.chatRepository.deleteMessageReaction(
       messageId,
       userId,
     );
+
+    // only broadcast when a reaction actually existed, no false events for no-ops
+    if (result.count > 0) {
+      await this.chatDelivery.publishReactionRemoved({
+        conversationId: message.conversationId,
+        messageId,
+        actorId: userId,
+        recipientUserIds: this.getDeliverableRecipientIds(
+          message.conversation,
+          userId,
+        ),
+      });
+    }
 
     return {
       removedCount: result.count,
@@ -912,14 +925,26 @@ export class ChatService {
    * - Edited message gets a new encrypted payload and editedAt timestamp.
    */
   async editMessage(userId: string, messageId: string, dto: EditMessageDto) {
-    await this.assertCanModifyOwnMessage(userId, messageId);
+    const message = await this.assertCanModifyOwnMessage(userId, messageId);
 
-    return this.chatRepository.updateMessage({
+    const updated = await this.chatRepository.updateMessage({
       messageId,
       ciphertext: dto.ciphertext,
       encryptionMeta: dto.encryptionMeta as Prisma.InputJsonValue | undefined,
       contentType: dto.contentType,
     });
+
+    await this.chatDelivery.publishMessageEdited({
+      conversationId: message.conversationId,
+      messageId,
+      actorId: userId,
+      recipientUserIds: this.getDeliverableRecipientIds(
+        message.conversation,
+        userId,
+      ),
+    });
+
+    return updated;
   }
 
   /**
@@ -929,9 +954,19 @@ export class ChatService {
    * DELETED.
    */
   async deleteMessage(userId: string, messageId: string) {
-    await this.assertCanModifyOwnMessage(userId, messageId);
+    const message = await this.assertCanModifyOwnMessage(userId, messageId);
 
     await this.chatRepository.softDeleteMessage(messageId);
+
+    await this.chatDelivery.publishMessageDeleted({
+      conversationId: message.conversationId,
+      messageId,
+      actorId: userId,
+      recipientUserIds: this.getDeliverableRecipientIds(
+        message.conversation,
+        userId,
+      ),
+    });
 
     return {
       message: 'Message deleted successfully',
@@ -991,15 +1026,11 @@ export class ChatService {
       throw new ForbiddenException('You cannot send messages here');
     }
 
-    const deliverableParticipants = participants.filter((participant) => {
-      if (participant.userId !== senderId && participant.deletedAt) {
-        return false;
-      }
-
-      return conversation.type === 'GROUP'
-        ? ['ACTIVE', 'ARCHIVED'].includes(participant.state)
-        : true;
-    });
+    const deliverableParticipants = participants.filter(
+      (participant) =>
+        participant.userId === senderId ||
+        this.isDeliveryEligible(conversation.type, participant),
+    );
 
     if (conversation.type === 'DIRECT') {
       const recipient = participants.find(
@@ -1456,6 +1487,41 @@ export class ChatService {
    */
   private canReadState(state: ChatParticipantState) {
     return ['ACTIVE', 'PENDING', 'ARCHIVED'].includes(state);
+  }
+
+  // deleted participants never get live delivery; groups also require ACTIVE/ARCHIVED
+  private isDeliveryEligible(
+    conversationType: string,
+    participant: { state: string; deletedAt: Date | null },
+  ): boolean {
+    if (participant.deletedAt) {
+      return false;
+    }
+
+    return conversationType === 'GROUP'
+      ? ['ACTIVE', 'ARCHIVED'].includes(participant.state)
+      : true;
+  }
+
+  // same eligibility rule as message delivery, minus the actor themselves
+  private getDeliverableRecipientIds(
+    conversation: {
+      type: string;
+      participants: Array<{
+        userId: string;
+        state: string;
+        deletedAt: Date | null;
+      }>;
+    },
+    actorId: string,
+  ): string[] {
+    return conversation.participants
+      .filter(
+        (participant) =>
+          participant.userId !== actorId &&
+          this.isDeliveryEligible(conversation.type, participant),
+      )
+      .map((participant) => participant.userId);
   }
 
   /**
