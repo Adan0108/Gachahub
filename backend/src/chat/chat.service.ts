@@ -1058,12 +1058,6 @@ export class ChatService {
       throw new ForbiddenException('You cannot send messages here');
     }
 
-    const deliverableParticipants = participants.filter(
-      (participant) =>
-        participant.userId === senderId ||
-        this.isDeliveryEligible(conversation.type, participant),
-    );
-
     if (conversation.type === 'DIRECT') {
       const recipient = participants.find(
         (participant) => participant.userId !== senderId,
@@ -1092,12 +1086,24 @@ export class ChatService {
 
     await this.assertValidReplyTarget(conversationId, dto.message.replyToId);
 
-    if (senderParticipant.deletedAt) {
+    const stateEligibleParticipants = participants.filter(
+      (participant) =>
+        participant.userId === senderId ||
+        this.isStateDeliveryEligible(conversation.type, participant.state),
+    );
+
+    const deletedParticipantIds = stateEligibleParticipants
+      .filter((participant) => participant.deletedAt)
+      .map((participant) => participant.userId);
+
+    if (deletedParticipantIds.length > 0) {
       await this.chatRepository.restoreDeletedParticipants(
         conversationId,
-        senderId,
+        deletedParticipantIds,
       );
     }
+
+    const deliverableParticipants = stateEligibleParticipants;
 
     const payload =
       preparedPayload ??
@@ -1547,8 +1553,17 @@ export class ChatService {
       return false;
     }
 
+    return this.isStateDeliveryEligible(conversationType, participant.state);
+  }
+
+  // same state rule as isDeliveryEligible, minus the deletedAt check, so
+  // callers can decide whether a deleted-for-me participant still counts
+  private isStateDeliveryEligible(
+    conversationType: string,
+    state: string,
+  ): boolean {
     return conversationType === 'GROUP'
-      ? ['ACTIVE', 'ARCHIVED'].includes(participant.state)
+      ? ['ACTIVE', 'ARCHIVED'].includes(state)
       : true;
   }
 

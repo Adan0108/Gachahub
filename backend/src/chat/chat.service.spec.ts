@@ -1418,7 +1418,7 @@ describe('ChatService', () => {
       expect(repository.updateParticipantArchivedState).not.toHaveBeenCalled();
     });
 
-    it('never restores anyone but the sender, so a deleted recipient stays deleted', async () => {
+    it('restores nobody when neither participant had deleted the conversation', async () => {
       repository.findParticipant.mockResolvedValue({
         userId: 'user-1',
         state: 'ACTIVE',
@@ -1454,7 +1454,31 @@ describe('ChatService', () => {
 
       expect(repository.restoreDeletedParticipants).toHaveBeenCalledWith(
         'conversation-1',
-        'user-1',
+        ['user-1'],
+      );
+    });
+
+    it('restores a recipient who had deleted the conversation when a new message arrives', async () => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE', deletedAt: new Date() },
+        ]),
+      );
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(repository.restoreDeletedParticipants).toHaveBeenCalledWith(
+        'conversation-1',
+        ['user-2'],
+      );
+      expect(repository.createMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          participantUserIds: ['user-1', 'user-2'],
+        }),
       );
     });
   });

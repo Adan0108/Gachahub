@@ -1093,18 +1093,16 @@ export class ChatRepository {
   }
 
   /**
-   * Clears deletedAt for one participant.
+   * Clears deletedAt for the given participants.
    *
-   * Resurface trigger: only called when the deleter themselves sends a new
-   * message into a conversation they previously deleted for themselves.
+   * Resurface trigger: called whenever a new message is delivered to someone
+   * (sender or recipient) who had previously deleted the conversation for themselves.
    */
-  restoreDeletedParticipants(conversationId: string, userId: string) {
-    return this.prisma.chatParticipant.update({
+  restoreDeletedParticipants(conversationId: string, userIds: string[]) {
+    return this.prisma.chatParticipant.updateMany({
       where: {
-        conversationId_userId: {
-          conversationId,
-          userId,
-        },
+        conversationId,
+        userId: { in: userIds },
       },
       data: {
         deletedAt: null,
