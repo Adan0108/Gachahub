@@ -5,9 +5,11 @@ import { useQuery } from "@tanstack/react-query";
 import { FiCompass, FiEdit3, FiMessageCircle, FiShare2, FiX } from "react-icons/fi";
 import { Art } from "../../components/Art";
 import { BuildCard } from "../../components/BuildCard";
+import { PostList } from "../../components/PostList";
 import { QueryNotice } from "../../components/QueryNotice";
 import { SectionTitle } from "../../components/SectionTitle";
 import { builds, glyph } from "../../components/constants";
+import { fallbackPosts } from "../../lib/api";
 import { queries } from "../../lib/queries";
 
 const focusableSelector = [
@@ -18,6 +20,20 @@ const focusableSelector = [
   "select:not([disabled])",
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
+
+const profileTabs = {
+  Overview: { title: "Featured work", count: 4 },
+  Builds: { title: "Published Builds", count: builds.length },
+  Posts: { title: "Recent Posts", count: 3 },
+  Collections: { title: "Saved Collections", count: 0 },
+  Achievements: { title: "Achievements", count: 3 },
+};
+
+const achievements = [
+  ["Build Architect", "Published 10 community-rated builds"],
+  ["Lore Keeper", "Contributed to 25 verified lore discussions"],
+  ["Helpful Rover", "Received 100 helpful reactions"],
+];
 
 export default function ProfilePage() {
   const [tab, setTab] = useState("Builds");
@@ -34,6 +50,8 @@ export default function ProfilePage() {
   const wasEditingRef = useRef(false);
   const profile = useQuery(queries.profile());
   const displayName = name || profile.data?.name || "RoverX";
+  const recentPosts = fallbackPosts().slice(0, 3);
+  const activeTab = profileTabs[tab];
 
   const openEditor = () => {
     setDraftName(displayName);
@@ -177,12 +195,40 @@ export default function ProfilePage() {
         </div>
         <div className="profile-body">
           <section>
-            <SectionTitle>Published {tab} (12)</SectionTitle>
-            <div className="build-grid">
-              {builds.map((build, index) => (
-                <BuildCard build={build} index={index} key={build.name} />
-              ))}
-            </div>
+            <SectionTitle>
+              {activeTab.title} ({activeTab.count})
+            </SectionTitle>
+            {(tab === "Overview" || tab === "Builds") && (
+              <div className="build-grid">
+                {(tab === "Overview" ? builds.slice(0, 2) : builds).map((build, index) => (
+                  <BuildCard build={build} index={index} key={build.name} />
+                ))}
+              </div>
+            )}
+            {tab === "Posts" && (
+              <div className="panel profile-posts">
+                <PostList posts={recentPosts} />
+              </div>
+            )}
+            {tab === "Collections" && (
+              <div className="state-card profile-empty-state">
+                <b>No saved collections yet</b>
+                <span>Save builds and posts to organize them here.</span>
+              </div>
+            )}
+            {tab === "Achievements" && (
+              <div className="achievement-grid">
+                {achievements.map(([title, description]) => (
+                  <article className="panel achievement-card" key={title}>
+                    <span aria-hidden="true">{glyph.diamond}</span>
+                    <div>
+                      <b>{title}</b>
+                      <small>{description}</small>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
           <aside className="panel leaderboard">
             <div className="panel-head">
