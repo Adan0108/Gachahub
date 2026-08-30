@@ -1193,6 +1193,29 @@ button {
   margin-top: 10px;
 }
 
+.social button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--panel2);
+  color: var(--muted-strong);
+  transition:
+    transform var(--motion-fast) var(--motion-ease),
+    color var(--motion-base) ease,
+    border-color var(--motion-base) ease,
+    background-color var(--motion-base) ease;
+}
+
+.social button:hover {
+  transform: translateY(-1px);
+  border-color: var(--purple);
+  background: color-mix(in srgb, var(--purple), transparent 88%);
+  color: var(--text);
+}
+
 .profile-stats {
   height: 115px;
   display: flex;

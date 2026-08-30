@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { FiCompass, FiEdit3, FiMessageCircle, FiShare2, FiX } from "react-icons/fi";
 import { Art } from "../../components/Art";
@@ -36,6 +37,7 @@ const achievements = [
 ];
 
 export default function ProfilePage() {
+  const router = useRouter();
   const [tab, setTab] = useState("Builds");
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
@@ -53,6 +55,21 @@ export default function ProfilePage() {
   const recentPosts = fallbackPosts().slice(0, 3);
   const activeTab = profileTabs[tab];
 
+  const flashNotice = (message) => {
+    window.clearTimeout(noticeTimerRef.current);
+    setNotice(message);
+    noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
+  };
+
+  const shareProfile = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      flashNotice("Profile link copied");
+    } catch {
+      flashNotice("Could not copy the profile link");
+    }
+  };
+
   const openEditor = () => {
     setDraftName(displayName);
     setDraftBio(bio);
@@ -65,10 +82,8 @@ export default function ProfilePage() {
     event.preventDefault();
     setName(draftName.trim());
     setBio(draftBio.trim() || "We ride the waves, chasing the unknown.");
-    setNotice("Profile saved locally");
+    flashNotice("Profile saved locally");
     setEditing(false);
-    window.clearTimeout(noticeTimerRef.current);
-    noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
   };
 
   useEffect(() => {
@@ -144,9 +159,23 @@ export default function ProfilePage() {
               <p>{profile.data?.email || "UID: 9008420"}</p>
               <blockquote>&quot;{bio}&quot;</blockquote>
               <div className="social" aria-label="Profile actions">
-                <FiShare2 aria-hidden="true" />
-                <FiMessageCircle aria-hidden="true" />
-                <FiCompass aria-hidden="true" />
+                <button aria-label="Copy profile link" onClick={shareProfile} type="button">
+                  <FiShare2 aria-hidden="true" />
+                </button>
+                <button
+                  aria-label="Message user"
+                  onClick={() => flashNotice("Messaging is not available in this frontend yet")}
+                  type="button"
+                >
+                  <FiMessageCircle aria-hidden="true" />
+                </button>
+                <button
+                  aria-label="Explore communities"
+                  onClick={() => router.push("/explore")}
+                  type="button"
+                >
+                  <FiCompass aria-hidden="true" />
+                </button>
               </div>
             </div>
           </div>
