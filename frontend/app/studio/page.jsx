@@ -34,6 +34,14 @@ const canvasFonts = {
 };
 
 const STORAGE_KEY = "gachahub-studio-settings";
+const focusableSelector = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 export default function StudioPage() {
   const [accent, setAccent] = useState("#8b5cf6");
@@ -46,6 +54,9 @@ export default function StudioPage() {
   const [previewing, setPreviewing] = useState(false);
   const [notice, setNotice] = useState("");
   const timerRef = useRef(null);
+  const previewButtonRef = useRef(null);
+  const previewModalRef = useRef(null);
+  const wasPreviewingRef = useRef(false);
 
   const flash = (message) => {
     window.clearTimeout(timerRef.current);
@@ -93,6 +104,56 @@ export default function StudioPage() {
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
+  useEffect(() => {
+    if (!previewing) return undefined;
+
+    const closeButton = previewModalRef.current?.querySelector("button");
+    closeButton?.focus();
+
+    const handlePreviewKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setPreviewing(false);
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+
+      const focusableItems = Array.from(
+        previewModalRef.current?.querySelectorAll(focusableSelector) || [],
+      ).filter((element) => element.offsetParent !== null);
+      const firstItem = focusableItems[0];
+      const lastItem = focusableItems.at(-1);
+
+      if (!firstItem || !lastItem) {
+        event.preventDefault();
+        return;
+      }
+
+      if (event.shiftKey && document.activeElement === firstItem) {
+        event.preventDefault();
+        lastItem.focus();
+      } else if (!event.shiftKey && document.activeElement === lastItem) {
+        event.preventDefault();
+        firstItem.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handlePreviewKeyDown);
+    return () => window.removeEventListener("keydown", handlePreviewKeyDown);
+  }, [previewing]);
+
+  useEffect(() => {
+    if (previewing) {
+      wasPreviewingRef.current = true;
+      return;
+    }
+
+    if (wasPreviewingRef.current) {
+      previewButtonRef.current?.focus();
+      wasPreviewingRef.current = false;
+    }
+  }, [previewing]);
+
   return (
     <div className="studio-page">
       <div className="toast-slot" aria-live="polite">
@@ -119,7 +180,7 @@ export default function StudioPage() {
           </button>
         ))}
         <div className="studio-spacer" />
-        <button onClick={() => setPreviewing(true)} type="button">
+        <button ref={previewButtonRef} onClick={() => setPreviewing(true)} type="button">
           <FiCompass /> Preview
         </button>
         <button className="export" onClick={() => window.print()} type="button">
@@ -260,6 +321,7 @@ export default function StudioPage() {
             aria-modal="true"
             className="studio-preview-modal"
             onClick={(event) => event.stopPropagation()}
+            ref={previewModalRef}
             role="dialog"
           >
             <button
