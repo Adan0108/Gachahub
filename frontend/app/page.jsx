@@ -18,6 +18,12 @@ export default function HomePage() {
   const home = useQuery(queries.home(""));
   const data = home.data || fallbacks.home("");
   const forYouPosts = data.forYouPosts || data.posts || [];
+  const trendingPosts =
+    tab === "New"
+      ? [...data.posts].reverse()
+      : tab === "Top"
+        ? [...data.posts].sort((a, b) => a.title.localeCompare(b.title))
+        : data.posts;
 
   const showNotice = (message) => {
     window.clearTimeout(noticeTimerRef.current);
@@ -102,7 +108,7 @@ export default function HomePage() {
               ))}
             </div>
           </div>
-          <PostList posts={data.posts} />
+          <PostList posts={trendingPosts} />
           <Link className="text-btn" href="/explore">
             View All Trending <FiChevronRight />
           </Link>

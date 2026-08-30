@@ -14,7 +14,7 @@ import { fallbacks, queries } from "../../lib/queries";
 function ExploreContent() {
   const searchParams = useSearchParams();
   const search = searchParams.get("q") || "";
-  const [activeFilter, setActiveFilter] = useState("Guides");
+  const [activeFilter, setActiveFilter] = useState("All");
   const [notice, setNotice] = useState("");
   const noticeTimerRef = useRef(null);
   const games = useQuery(queries.games(search));
@@ -22,6 +22,20 @@ function ExploreContent() {
   const gameData =
     games.data || (canUseLocalSearch ? fallbacks.games(search) : { items: [], meta: {} });
   const posts = games.isError && !canUseLocalSearch ? [] : fallbacks.posts({ search });
+  const filteredPosts = posts.filter((post) => {
+    if (activeFilter === "All") return true;
+
+    const filterTags = {
+      Guides: ["Guide", "Strategy"],
+      Builds: ["Build"],
+      Lore: ["Lore", "Theory"],
+      "Fan Art": ["Fan Art"],
+      Events: ["Event", "News"],
+      Teams: ["Teams"],
+    };
+
+    return filterTags[activeFilter]?.includes(post.tag);
+  });
   const offlineSearch = Boolean(search && games.isError && !canUseLocalSearch);
 
   const showUnavailable = () => {
@@ -32,9 +46,6 @@ function ExploreContent() {
 
   const updateFilter = (filter) => {
     setActiveFilter(filter);
-    window.clearTimeout(noticeTimerRef.current);
-    setNotice(`${filter} filter selected`);
-    noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
   };
 
   useEffect(() => () => window.clearTimeout(noticeTimerRef.current), []);
@@ -85,8 +96,11 @@ function ExploreContent() {
 
           <SectionTitle>Fresh Posts</SectionTitle>
           <div className="panel">
-            <QueryNotice isEmpty={!posts.length} emptyText="No posts match this search yet." />
-            <PostList posts={posts} />
+            <QueryNotice
+              isEmpty={!filteredPosts.length}
+              emptyText={`No ${activeFilter === "All" ? "posts" : activeFilter.toLowerCase()} match this search yet.`}
+            />
+            <PostList posts={filteredPosts} />
           </div>
         </section>
         <aside className="panel filter-panel">
@@ -95,7 +109,7 @@ function ExploreContent() {
             <FiSettings />
           </div>
           <div className="chips tall">
-            {["Guides", "Builds", "Lore", "Fan Art", "Events", "Teams"].map((filter) => (
+            {["All", "Guides", "Builds", "Lore", "Fan Art", "Events", "Teams"].map((filter) => (
               <button
                 aria-pressed={activeFilter === filter}
                 className={activeFilter === filter ? "active" : ""}

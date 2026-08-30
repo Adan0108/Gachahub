@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FiCompass } from "react-icons/fi";
+import { FiCompass, FiX } from "react-icons/fi";
 import { Art } from "../../components/Art";
 import { glyph, toolItems } from "../../components/constants";
 
@@ -33,6 +33,8 @@ const canvasFonts = {
   Display: '"Space Grotesk", "Inter", sans-serif',
 };
 
+const STORAGE_KEY = "gachahub-studio-settings";
+
 export default function StudioPage() {
   const [accent, setAccent] = useState("#8b5cf6");
   const [particles, setParticles] = useState(true);
@@ -41,6 +43,7 @@ export default function StudioPage() {
   const [font, setFont] = useState("Inter");
   const [activeTool, setActiveTool] = useState("Template");
   const [saved, setSaved] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const [notice, setNotice] = useState("");
   const timerRef = useRef(null);
 
@@ -51,6 +54,10 @@ export default function StudioPage() {
   };
 
   const save = () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ accent, particles, rarity, size, font, activeTool }),
+    );
     window.clearTimeout(timerRef.current);
     setSaved(true);
     setNotice("Saved locally");
@@ -66,6 +73,25 @@ export default function StudioPage() {
   };
 
   useEffect(() => () => window.clearTimeout(timerRef.current), []);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        const settings = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null");
+        if (!settings) return;
+        if (Object.keys(canvasSizes).includes(settings.size)) setSize(settings.size);
+        if (Object.keys(canvasFonts).includes(settings.font)) setFont(settings.font);
+        if (typeof settings.accent === "string") setAccent(settings.accent);
+        if (typeof settings.particles === "boolean") setParticles(settings.particles);
+        if (typeof settings.rarity === "boolean") setRarity(settings.rarity);
+        if (typeof settings.activeTool === "string") setActiveTool(settings.activeTool);
+      } catch {
+        window.localStorage.removeItem(STORAGE_KEY);
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   return (
     <div className="studio-page">
@@ -93,7 +119,7 @@ export default function StudioPage() {
           </button>
         ))}
         <div className="studio-spacer" />
-        <button onClick={() => flash("Preview is not available yet")} type="button">
+        <button onClick={() => setPreviewing(true)} type="button">
           <FiCompass /> Preview
         </button>
         <button className="export" onClick={() => window.print()} type="button">
@@ -224,6 +250,62 @@ export default function StudioPage() {
           Reset All
         </button>
       </aside>
+      {previewing && (
+        <div
+          className="modal-backdrop studio-preview-backdrop"
+          onClick={() => setPreviewing(false)}
+        >
+          <div
+            aria-label="Build canvas preview"
+            aria-modal="true"
+            className="studio-preview-modal"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <button
+              aria-label="Close preview"
+              className="studio-preview-close"
+              onClick={() => setPreviewing(false)}
+              type="button"
+            >
+              <FiX />
+            </button>
+            <div className="studio-preview-copy">
+              <span className="eyebrow">Preview</span>
+              <b>Sanhua build card</b>
+              <small>
+                {size} canvas · {font} type
+              </small>
+            </div>
+            <div className="studio-preview-frame">
+              <div
+                className={`build-canvas ${particles ? "particles-on" : ""}`}
+                style={{
+                  "--accent": accent,
+                  "--canvas-aspect-ratio": canvasSizes[size],
+                  "--canvas-font": canvasFonts[font],
+                }}
+              >
+                <div className="canvas-header">
+                  <div className="char-badge">{glyph.sparkle}</div>
+                  <div>
+                    <h1>Sanhua</h1>
+                    <p>Lv. 90 / 90</p>
+                    {rarity && <div className="stars">{glyph.star.repeat(5)}</div>}
+                  </div>
+                </div>
+                <Art tone="violet" className="canvas-character">
+                  {glyph.snow}
+                </Art>
+                <div className="set-bonus">
+                  <b>{glyph.snow} Frost Seeker</b>
+                  <p>Glacio DMG +10% · Crit Rate 72.4%</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
