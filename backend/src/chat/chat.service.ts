@@ -144,8 +144,12 @@ export class ChatService {
       mutedUntil: null,
     });
 
-    const result =
-      await this.chatRepository.createDirectConversationWithMessage({
+    let result: Awaited<
+      ReturnType<typeof this.chatRepository.createDirectConversationWithMessage>
+    >;
+
+    try {
+      result = await this.chatRepository.createDirectConversationWithMessage({
         senderId,
         recipientUserId: dto.recipientUserId,
         userIdA,
@@ -159,6 +163,16 @@ export class ChatService {
         clientMessageId: dto.message.clientMessageId,
         replyToId: dto.message.replyToId,
       });
+    } catch (error) {
+      if (!this.isDuplicateMessageConflict(error)) {
+        throw error;
+      }
+
+      return this.recoverDuplicateMessage(
+        senderId,
+        dto.message.clientMessageId,
+      );
+    }
 
     await this.chatDelivery.publishMessageCreated({
       conversationId: result.conversation.id,
@@ -1109,20 +1123,32 @@ export class ChatService {
       preparedPayload ??
       (await this.messageEncryption.preparePayload(dto.message));
 
-    const message = await this.chatRepository.createMessage({
-      conversationId,
-      senderId,
-      participantUserIds: deliverableParticipants.map(
-        (participant) => participant.userId,
-      ),
-      ciphertext: payload.ciphertext,
-      encryptionMeta: payload.encryptionMeta as
-        | Prisma.InputJsonValue
-        | undefined,
-      contentType: this.resolveContentType(dto.message.contentType),
-      clientMessageId: dto.message.clientMessageId,
-      replyToId: dto.message.replyToId,
-    });
+    let message: Awaited<ReturnType<typeof this.chatRepository.createMessage>>;
+    try {
+      message = await this.chatRepository.createMessage({
+        conversationId,
+        senderId,
+        participantUserIds: deliverableParticipants.map(
+          (participant) => participant.userId,
+        ),
+        ciphertext: payload.ciphertext,
+        encryptionMeta: payload.encryptionMeta as
+          | Prisma.InputJsonValue
+          | undefined,
+        contentType: this.resolveContentType(dto.message.contentType),
+        clientMessageId: dto.message.clientMessageId,
+        replyToId: dto.message.replyToId,
+      });
+    } catch (error) {
+      if (!this.isDuplicateMessageConflict(error)) {
+        throw error;
+      }
+
+      return this.recoverDuplicateMessage(
+        senderId,
+        dto.message.clientMessageId,
+      );
+    }
 
     const recipientParticipants = deliverableParticipants.filter(
       (participant) => participant.userId !== senderId,
@@ -1565,6 +1591,51 @@ export class ChatService {
     return conversationType === 'GROUP'
       ? ['ACTIVE', 'ARCHIVED'].includes(state)
       : true;
+  }
+
+  /**
+   * True when a P2002 error was caused by the senderId/clientMessageId unique constraint.
+   */
+  private isDuplicateMessageConflict(error: unknown): boolean {
+    if (
+      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+      error.code !== 'P2002'
+    ) {
+      return false;
+    }
+
+    const conflictingFields = error.meta?.target;
+
+    return Array.isArray(conflictingFields)
+      ? conflictingFields.includes('clientMessageId')
+      : typeof conflictingFields === 'string' &&
+          conflictingFields.includes('clientMessageId');
+  }
+
+  /**
+   * Fetches the message that already exists for this sender and clientMessageId.
+   */
+  private async recoverDuplicateMessage(
+    senderId: string,
+    clientMessageId?: string,
+  ) {
+    const existingMessage =
+      await this.chatRepository.findMessageBySenderClientMessageId(
+        senderId,
+        clientMessageId,
+      );
+
+    if (!existingMessage) {
+      throw new BadRequestException(
+        'Message conflict could not be resolved, please retry',
+      );
+    }
+
+    return {
+      conversationId: existingMessage.conversationId,
+      message: existingMessage,
+      duplicate: true,
+    };
   }
 
   // same eligibility rule as message delivery, minus the actor themselves
