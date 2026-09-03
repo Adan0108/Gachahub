@@ -220,8 +220,8 @@ export const api = {
   baseUrl: API_BASE_URL,
   usingMocks: USE_MOCKS,
   getHealth: () => request(backendRoutes.health),
-  getGames: async (query = {}) => {
-    const response = await request(withQuery(backendRoutes.games, query));
+  getGames: async (query = {}, options = {}) => {
+    const response = await request(withQuery(backendRoutes.games, query), options);
     const items = Array.isArray(response) ? response : response.items || [];
     return {
       items: items.map(normalizeGame),

@@ -24,7 +24,7 @@ export const queries = {
   }),
   games: (search) => ({
     queryKey: queryKeys.games(search),
-    queryFn: () => api.getGames({ status: "ACTIVE", search, limit: 20 }),
+    queryFn: ({ signal }) => api.getGames({ status: "ACTIVE", search, limit: 20 }, { signal }),
     retry: 1,
     staleTime: 30_000,
   }),

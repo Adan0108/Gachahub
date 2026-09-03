@@ -71,6 +71,17 @@ function subscribeTheme(callback) {
   };
 }
 
+function useDebouncedValue(value, delay) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedValue(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [delay, value]);
+
+  return debouncedValue;
+}
+
 function Logo() {
   return (
     <Link href="/" className="brand">
@@ -148,26 +159,22 @@ function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
   const health = useQuery(queries.health());
   const apiStatus = health.isSuccess ? "connected" : health.isError ? "offline" : "checking";
   const search = query.trim();
+  const debouncedSearch = useDebouncedValue(search, 350);
+  const canSearch = debouncedSearch.length >= 2;
   const gameSuggestions = useQuery({
-    ...queries.games(search),
-    enabled: focused && Boolean(search),
+    ...queries.games(debouncedSearch),
+    enabled: focused && canSearch,
   });
   const canUseLocalSearch = api.usingMocks;
-  const suggestedGames = search
-    ? (gameSuggestions.data?.items || (canUseLocalSearch ? fallbackGames(search).items : [])).slice(
-        0,
-        3,
-      )
+  const suggestedGames = canSearch
+    ? (
+        gameSuggestions.data?.items ||
+        (canUseLocalSearch ? fallbackGames(debouncedSearch).items : [])
+      ).slice(0, 3)
     : [];
-  const suggestedPosts = search && canUseLocalSearch ? fallbackPosts({ search }).slice(0, 2) : [];
-  const suggestionsOpen = Boolean(
-    focused &&
-    search &&
-    (suggestedGames.length ||
-      suggestedPosts.length ||
-      gameSuggestions.isLoading ||
-      gameSuggestions.isError),
-  );
+  const suggestedPosts =
+    canSearch && canUseLocalSearch ? fallbackPosts({ search: debouncedSearch }).slice(0, 2) : [];
+  const suggestionsOpen = focused && Boolean(search);
   const unreadCount = notifications.filter((item) => !readNotifications.includes(item.id)).length;
 
   const submit = (event) => {
@@ -260,15 +267,16 @@ function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
             onChange={(event) => setQuery(event.target.value)}
             onFocus={focusSearch}
             onBlur={delayCloseSuggestions}
-            placeholder="Search games, characters, posts..."
+            placeholder="Search communities..."
           />
         </form>
         {suggestionsOpen && (
           <div className="search-suggestions" aria-label="Search suggestions">
-            {gameSuggestions.isLoading && (
+            {!canSearch && <div className="search-empty">Enter at least 2 characters.</div>}
+            {canSearch && gameSuggestions.isLoading && (
               <div className="search-empty">Searching communities...</div>
             )}
-            {gameSuggestions.isError && !canUseLocalSearch && (
+            {canSearch && gameSuggestions.isError && !canUseLocalSearch && (
               <div className="search-empty">
                 Search needs the backend. Try again when the API is connected.
               </div>
@@ -301,7 +309,8 @@ function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
                 </div>
               </button>
             ))}
-            {!gameSuggestions.isLoading &&
+            {canSearch &&
+              !gameSuggestions.isLoading &&
               !gameSuggestions.isError &&
               !suggestedGames.length &&
               !suggestedPosts.length && (
