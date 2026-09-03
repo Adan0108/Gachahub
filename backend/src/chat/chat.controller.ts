@@ -403,7 +403,8 @@ export class ChatController {
   /**
    * Blocks another user globally for chat.
    *
-   * The blocked user cannot start or continue direct chat with the caller.
+   * Stops the caller from sending to this user. The block is one-directional:
+   * the blocked user can still send to the caller, silently and without notifying them.
    */
   @Post('users/:userId/block')
   @ApiOperation({

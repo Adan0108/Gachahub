@@ -646,8 +646,8 @@ export class ChatService {
   /**
    * Blocks another user globally for chat.
    *
-   * Global blocks stop both new direct conversations and messages in existing
-   * direct conversations between these users.
+   * One-directional: stops the caller's own new/existing direct messages to
+   * this user. The blocked user can still message the caller back, silently.
    */
   async blockUser(blockerId: string, blockedId: string) {
     if (blockerId === blockedId) {
