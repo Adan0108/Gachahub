@@ -39,21 +39,48 @@ function isTheme(value) {
   return value === "dark" || value === "light";
 }
 
-function getCookieTheme() {
-  const themeCookie = document.cookie
-    .split("; ")
-    .find((cookie) => cookie.startsWith(`${THEME_STORAGE_KEY}=`));
+function getStoredTheme() {
+  try {
+    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return isTheme(savedTheme) ? savedTheme : "";
+  } catch {
+    return "";
+  }
+}
 
-  const cookieValue = themeCookie?.split("=")[1];
-  const theme = cookieValue ? decodeURIComponent(cookieValue) : "";
-  return isTheme(theme) ? theme : "";
+function getCookieTheme() {
+  try {
+    const themeCookie = document.cookie
+      .split("; ")
+      .find((cookie) => cookie.startsWith(`${THEME_STORAGE_KEY}=`));
+
+    const cookieValue = themeCookie?.split("=")[1];
+    const theme = cookieValue ? decodeURIComponent(cookieValue) : "";
+    return isTheme(theme) ? theme : "";
+  } catch {
+    return "";
+  }
+}
+
+function saveTheme(theme) {
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {
+    // Storage can be blocked by browser privacy settings; the in-memory theme still updates.
+  }
+
+  try {
+    document.cookie = `${THEME_STORAGE_KEY}=${theme}; path=/; max-age=31536000; SameSite=Lax`;
+  } catch {
+    // Cookie access can also be restricted, so persistence remains best-effort.
+  }
 }
 
 function getPreferredTheme() {
   if (typeof window === "undefined") return "dark";
 
-  const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-  if (isTheme(savedTheme)) return savedTheme;
+  const savedTheme = getStoredTheme();
+  if (savedTheme) return savedTheme;
 
   const savedCookieTheme = getCookieTheme();
   if (savedCookieTheme) return savedCookieTheme;
@@ -490,8 +517,7 @@ export function AppShell({ children, initialTheme = "dark" }) {
 
   const toggleTheme = () => {
     const nextTheme = theme === "dark" ? "light" : "dark";
-    window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
-    document.cookie = `${THEME_STORAGE_KEY}=${nextTheme}; path=/; max-age=31536000; SameSite=Lax`;
+    saveTheme(nextTheme);
     window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
   };
 
