@@ -364,9 +364,10 @@ export class ChatService {
   }
 
   /**
-   * Lets a normal group member leave.
+   * Lets a group member leave.
    *
-   * Owners must transfer ownership before leaving so the group always has an owner.
+   * Owners must transfer ownership before leaving, unless they're the last
+   * active member left — then leaving just closes the group with them.
    */
   async leaveGroup(userId: string, conversationId: string) {
     const conversation =
