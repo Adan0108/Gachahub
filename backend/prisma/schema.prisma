@@ -20,12 +20,14 @@ model User {
   role   UserRole   @default(USER)
   status UserStatus @default(ACTIVE)
 
-  sessions     Session[]
-  accounts     Account[]
-  posts        Post[]
-  mediaUploads MediaUpload[]
-  postLikes    PostLike[]
-  comments     Comment[]
+  sessions              Session[]
+  accounts              Account[]
+  posts                 Post[]
+  mediaUploads          MediaUpload[]
+  postLikes             PostLike[]
+  comments              Comment[]
+  interests             UserInterest[]
+  messageRequestSetting MessageRequestSetting @default(EVERYONE)
 
   followers            UserFollow[]          @relation("UserFollowers")
   following            UserFollow[]          @relation("UserFollowing")
@@ -274,6 +276,17 @@ enum ChatEmoteScope {
   GAME
 }
 
+enum MessageRequestSetting {
+  EVERYONE
+  FOLLOWERS
+  NO_ONE
+}
+
+enum ChatNotificationLevel {
+  ALL
+  NOTHING
+}
+
 model ChatConversation {
   id            String                 @id @default(cuid())
   type          ChatConversationType   @default(DIRECT)
@@ -299,16 +312,18 @@ model ChatConversation {
 }
 
 model ChatParticipant {
-  id             String               @id @default(cuid())
-  conversationId String
-  userId         String
-  role           ChatParticipantRole  @default(MEMBER)
-  state          ChatParticipantState @default(ACTIVE)
-  lastReadAt     DateTime?
-  pinnedAt       DateTime?
-  archivedAt     DateTime?
-  mutedAt        DateTime?
-  blockedAt      DateTime?
+  id                String                @id @default(cuid())
+  conversationId    String
+  userId            String
+  role              ChatParticipantRole   @default(MEMBER)
+  state             ChatParticipantState  @default(ACTIVE)
+  lastReadAt        DateTime?
+  pinnedAt          DateTime?
+  archivedAt        DateTime?
+  notificationLevel ChatNotificationLevel @default(ALL)
+  mutedUntil        DateTime?
+  blockedAt         DateTime?
+  deletedAt         DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -579,6 +594,34 @@ model PostLike {
   @@index([userId, createdAt])
 }
 
+enum InterestEntityType {
+  GAME
+  CATEGORY
+  POST_TYPE
+  TAG
+  AUTHOR
+}
+
+model UserInterest {
+  userId     String
+  entityType InterestEntityType
+  entityId   String
+
+  score       Float @default(0)
+  signalCount Int   @default(0)
+
+  lastSignalAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, entityType, entityId])
+  // Main For You profile lookup.
+  @@index([userId, score])
+  @@map("user_interests")
+}
+
 enum MediaPurpose {
   POST
   COMMENT
@@ -631,6 +674,7 @@ model MediaUpload {
   responseSignature String?
 
   createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
   uploadedAt DateTime?
   attachedAt DateTime?
   deletedAt  DateTime?
