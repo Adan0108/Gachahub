@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -87,6 +88,16 @@ export class ChatService {
       dto.recipientUserId,
     );
 
+    const [userIdA, userIdB] = this.normalizeDirectPair(
+      senderId,
+      dto.recipientUserId,
+    );
+
+    const existingPair = await this.chatRepository.findDirectPair(
+      userIdA,
+      userIdB,
+    );
+
     const existingMessage =
       await this.chatRepository.findMessageBySenderClientMessageId(
         senderId,
@@ -94,6 +105,12 @@ export class ChatService {
       );
 
     if (existingMessage) {
+      if (existingMessage.conversationId !== existingPair?.conversation.id) {
+        throw new ConflictException(
+          'This clientMessageId was already used with a different recipient',
+        );
+      }
+
       return {
         conversationId: existingMessage.conversationId,
         message: existingMessage,
@@ -101,18 +118,8 @@ export class ChatService {
       };
     }
 
-    const [userIdA, userIdB] = this.normalizeDirectPair(
-      senderId,
-      dto.recipientUserId,
-    );
-
     const preparedPayload = await this.messageEncryption.preparePayload(
       dto.message,
-    );
-
-    const existingPair = await this.chatRepository.findDirectPair(
-      userIdA,
-      userIdB,
     );
 
     if (existingPair) {
@@ -168,8 +175,14 @@ export class ChatService {
         throw error;
       }
 
+      const racedPair = await this.chatRepository.findDirectPair(
+        userIdA,
+        userIdB,
+      );
+
       return this.recoverDuplicateMessage(
         senderId,
+        racedPair?.conversation.id,
         dto.message.clientMessageId,
       );
     }
@@ -1043,6 +1056,12 @@ export class ChatService {
       );
 
     if (existingMessage) {
+      if (existingMessage.conversationId !== conversationId) {
+        throw new ConflictException(
+          'This clientMessageId was already used in a different conversation',
+        );
+      }
+
       return {
         conversationId: existingMessage.conversationId,
         message: existingMessage,
@@ -1147,6 +1166,7 @@ export class ChatService {
 
       return this.recoverDuplicateMessage(
         senderId,
+        conversationId,
         dto.message.clientMessageId,
       );
     }
@@ -1614,10 +1634,12 @@ export class ChatService {
   }
 
   /**
-   * Fetches the message that already exists for this sender and clientMessageId.
+   * Fetches the message that already exists for this sender and clientMessageId,
+   * only if it belongs to the conversation this call actually expected.
    */
   private async recoverDuplicateMessage(
     senderId: string,
+    expectedConversationId: string | undefined,
     clientMessageId?: string,
   ) {
     const existingMessage =
@@ -1626,9 +1648,12 @@ export class ChatService {
         clientMessageId,
       );
 
-    if (!existingMessage) {
-      throw new BadRequestException(
-        'Message conflict could not be resolved, please retry',
+    if (
+      !existingMessage ||
+      existingMessage.conversationId !== expectedConversationId
+    ) {
+      throw new ConflictException(
+        'This clientMessageId was already used in a different conversation',
       );
     }
 

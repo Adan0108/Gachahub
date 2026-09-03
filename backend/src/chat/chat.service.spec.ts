@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
@@ -818,12 +819,15 @@ describe('ChatService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('returns duplicate when a message with the same clientMessageId exists', async () => {
+    it('returns duplicate when the existing message belongs to this same recipient pair', async () => {
       repository.findUserById.mockResolvedValue({
         id: 'user-2',
         status: 'ACTIVE',
       });
       blocksService.isBlocked.mockResolvedValue(false);
+      repository.findDirectPair.mockResolvedValue({
+        conversation: { id: 'conversation-1' },
+      });
       repository.findMessageBySenderClientMessageId.mockResolvedValue({
         id: 'message-1',
         conversationId: 'conversation-1',
@@ -839,7 +843,26 @@ describe('ChatService', () => {
         message: { id: 'message-1', conversationId: 'conversation-1' },
         duplicate: true,
       });
-      expect(repository.findDirectPair).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the existing clientMessageId belongs to a different recipient', async () => {
+      repository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+      });
+      blocksService.isBlocked.mockResolvedValue(false);
+      repository.findDirectPair.mockResolvedValue(null);
+      repository.findMessageBySenderClientMessageId.mockResolvedValue({
+        id: 'message-1',
+        conversationId: 'conversation-from-a-different-recipient',
+      });
+
+      await expect(
+        service.createDirectMessage('user-1', {
+          recipientUserId: 'user-2',
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(ConflictException);
     });
 
     it('rejects a reply target when there is no existing conversation', async () => {
