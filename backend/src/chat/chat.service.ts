@@ -171,7 +171,10 @@ export class ChatService {
         replyToId: dto.message.replyToId,
       });
     } catch (error) {
-      if (!this.isDuplicateMessageConflict(error)) {
+      const isPairConflict = this.isDuplicateDirectPairConflict(error);
+      const isMessageConflict = this.isDuplicateMessageConflict(error);
+
+      if (!isPairConflict && !isMessageConflict) {
         throw error;
       }
 
@@ -179,6 +182,21 @@ export class ChatService {
         userIdA,
         userIdB,
       );
+
+      if (isPairConflict) {
+        if (!racedPair) {
+          throw error;
+        }
+
+        return this.sendMessageToExistingConversation(
+          senderId,
+          racedPair.conversation.id,
+          {
+            message: dto.message,
+          },
+          preparedPayload,
+        );
+      }
 
       return this.recoverDuplicateMessage(
         senderId,
@@ -1623,22 +1641,45 @@ export class ChatService {
   }
 
   /**
-   * True when a P2002 error was caused by the senderId/clientMessageId unique constraint.
+   * True when the error is a Prisma unique-constraint violation (P2002).
    */
-  private isDuplicateMessageConflict(error: unknown): boolean {
-    if (
-      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
-      error.code !== 'P2002'
-    ) {
-      return false;
-    }
+  private isUniqueConstraintViolation(
+    error: unknown,
+  ): error is Prisma.PrismaClientKnownRequestError {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    );
+  }
 
+  private constraintTargetIncludes(
+    error: Prisma.PrismaClientKnownRequestError,
+    field: string,
+  ): boolean {
     const conflictingFields = error.meta?.target;
 
     return Array.isArray(conflictingFields)
-      ? conflictingFields.includes('clientMessageId')
+      ? conflictingFields.includes(field)
       : typeof conflictingFields === 'string' &&
-          conflictingFields.includes('clientMessageId');
+          conflictingFields.includes(field);
+  }
+
+  private isDuplicateMessageConflict(error: unknown): boolean {
+    return (
+      this.isUniqueConstraintViolation(error) &&
+      this.constraintTargetIncludes(error, 'clientMessageId')
+    );
+  }
+
+  /**
+   * Two first-ever messages between the same pair racing the ChatDirectPair
+   * unique constraint, different collision than the message id one above
+   */
+  private isDuplicateDirectPairConflict(error: unknown): boolean {
+    return (
+      this.isUniqueConstraintViolation(error) &&
+      this.constraintTargetIncludes(error, 'userIdA')
+    );
   }
 
   /**
