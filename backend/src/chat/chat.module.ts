@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
+import { WebsocketModule } from '../websocket/websocket.module';
 import { ChatController } from './chat.controller';
 import { ChatRepository } from './chat.repository';
 import { ChatService } from './chat.service';
-import { ChatGateway } from './chat.gateway';
-import { ChatSocketRegistry } from './chat-socket-registry.service';
+import { ChatTypingGateway } from './chat-typing.gateway';
+import { ChatTypingService } from './chat-typing.service';
 import { SocketChatDeliveryService } from './socket-chat-delivery.service';
 import { OpaqueMessageEncryptionService } from './opaque-message-encryption.service';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
@@ -24,6 +25,7 @@ import { BlocksModule } from '../blocks/blocks.module';
 @Module({
   imports: [
     PrismaModule,
+    WebsocketModule,
     CommonModule,
     FollowsModule,
     GamesModule,
@@ -34,8 +36,8 @@ import { BlocksModule } from '../blocks/blocks.module';
   providers: [
     ChatRepository,
     ChatService,
-    ChatGateway,
-    ChatSocketRegistry,
+    ChatTypingGateway,
+    ChatTypingService,
     {
       provide: CHAT_DELIVERY_PORT,
       useClass: SocketChatDeliveryService,

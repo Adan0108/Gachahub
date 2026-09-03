@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import type { Server } from 'socket.io';
 
-// shared server ref, breaks the gateway <-> delivery circular dependency
+// shared server ref, breaks gateway <-> delivery-service circular dependencies
 @Injectable()
-export class ChatSocketRegistry {
+export class SocketRegistry {
   server?: Server;
 }

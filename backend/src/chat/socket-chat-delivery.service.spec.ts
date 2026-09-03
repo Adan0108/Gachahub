@@ -1,13 +1,13 @@
 import type { Server } from 'socket.io';
 import { SocketChatDeliveryService } from './socket-chat-delivery.service';
-import { ChatSocketRegistry } from './chat-socket-registry.service';
+import { SocketRegistry } from '../websocket/socket-registry.service';
 import {
   ChatMessageCreatedEvent,
   ChatMessageActionEvent,
 } from './ports/chat-delivery.port';
 
 describe('SocketChatDeliveryService', () => {
-  let registry: ChatSocketRegistry;
+  let registry: SocketRegistry;
   let service: SocketChatDeliveryService;
 
   const event: ChatMessageCreatedEvent = {
@@ -19,7 +19,7 @@ describe('SocketChatDeliveryService', () => {
   };
 
   beforeEach(() => {
-    registry = new ChatSocketRegistry();
+    registry = new SocketRegistry();
     service = new SocketChatDeliveryService(registry);
   });
 

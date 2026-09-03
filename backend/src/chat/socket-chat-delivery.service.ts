@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { chatUserRoom } from './chat-socket.util';
-import { ChatSocketRegistry } from './chat-socket-registry.service';
+import { userRoom } from '../websocket/socket.util';
+import { SocketRegistry } from '../websocket/socket-registry.service';
 import {
   ChatDeliveryPort,
   ChatMessageCreatedEvent,
@@ -17,7 +17,7 @@ type ChatSocketEventName =
 // real ChatDeliveryPort now, was noop before, ChatService untouched either way
 @Injectable()
 export class SocketChatDeliveryService implements ChatDeliveryPort {
-  constructor(private readonly socketRegistry: ChatSocketRegistry) {}
+  constructor(private readonly socketRegistry: SocketRegistry) {}
 
   publishMessageCreated(event: ChatMessageCreatedEvent): Promise<void> {
     // recipientUserIds stay out, it leaks who else got this batch; shouldNotify is
@@ -66,7 +66,7 @@ export class SocketChatDeliveryService implements ChatDeliveryPort {
   ): Promise<void> {
     for (const recipientUserId of recipientUserIds) {
       this.socketRegistry.server
-        ?.to(chatUserRoom(recipientUserId))
+        ?.to(userRoom(recipientUserId))
         .emit(eventName, payload);
     }
 

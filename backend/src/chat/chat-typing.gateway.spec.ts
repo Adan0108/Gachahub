@@ -1,82 +1,33 @@
-jest.mock('../auth/auth', () => ({
-  auth: { api: { getSession: jest.fn() } },
-}));
 jest.mock('./chat.service', () => ({
   ChatService: class {},
 }));
 
 import type { Server } from 'socket.io';
-import { ChatGateway } from './chat.gateway';
-import { auth } from '../auth/auth';
+import { ChatTypingGateway } from './chat-typing.gateway';
+import { ChatTypingService } from './chat-typing.service';
 
-const getSession = auth.api.getSession as unknown as jest.Mock;
-
-describe('ChatGateway', () => {
+describe('ChatTypingGateway', () => {
   const chatService = {
     getTypingRecipients: jest.fn(),
   };
 
-  const socketRegistry: { server?: unknown } = {};
-
-  let gateway: ChatGateway;
+  let chatTypingService: ChatTypingService;
+  let gateway: ChatTypingGateway;
   let server: { to: jest.Mock; emit: jest.Mock };
 
   const makeSocket = (overrides: Record<string, unknown> = {}) => ({
     id: 'socket-1',
     data: {} as { userId?: string },
-    handshake: { headers: {} },
-    join: jest.fn(),
-    disconnect: jest.fn(),
     ...overrides,
   });
 
   beforeEach(() => {
     jest.clearAllMocks();
-    gateway = new ChatGateway(chatService as any, socketRegistry as any);
+    chatTypingService = new ChatTypingService();
+    gateway = new ChatTypingGateway(chatService as any, chatTypingService);
     server = { to: jest.fn(), emit: jest.fn() };
     server.to.mockReturnValue(server);
     gateway.server = server as unknown as Server;
-  });
-
-  describe('handleConnection', () => {
-    it('joins the user room on a valid session', async () => {
-      getSession.mockResolvedValue({ user: { id: 'user-1' } });
-      const socket = makeSocket();
-
-      await gateway.handleConnection(socket as any);
-
-      expect(socket.data.userId).toBe('user-1');
-      expect(socket.join).toHaveBeenCalledWith('user:user-1');
-      expect(socket.disconnect).not.toHaveBeenCalled();
-    });
-
-    it('disconnects when there is no session', async () => {
-      getSession.mockResolvedValue(null);
-      const socket = makeSocket();
-
-      await gateway.handleConnection(socket as any);
-
-      expect(socket.disconnect).toHaveBeenCalledWith(true);
-      expect(socket.join).not.toHaveBeenCalled();
-    });
-
-    it('disconnects when session lookup throws', async () => {
-      getSession.mockRejectedValue(new Error('boom'));
-      const socket = makeSocket();
-
-      await gateway.handleConnection(socket as any);
-
-      expect(socket.disconnect).toHaveBeenCalledWith(true);
-      expect(socket.join).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('handleDisconnect', () => {
-    it('does not throw', () => {
-      const socket = makeSocket();
-
-      expect(() => gateway.handleDisconnect(socket as any)).not.toThrow();
-    });
   });
 
   describe('typing broadcast', () => {
@@ -136,13 +87,23 @@ describe('ChatGateway', () => {
     });
   });
 
-  describe('afterInit', () => {
-    it('shares the server instance with the socket registry', () => {
-      const ioServer = {};
+  describe('handleDisconnect', () => {
+    it('clears the typing throttle state for the disconnecting user', () => {
+      const clearUserSpy = jest.spyOn(chatTypingService, 'clearUser');
+      const socket = makeSocket({ data: { userId: 'user-1' } });
 
-      gateway.afterInit(ioServer as any);
+      gateway.handleDisconnect(socket as any);
 
-      expect(socketRegistry.server).toBe(ioServer);
+      expect(clearUserSpy).toHaveBeenCalledWith('user-1');
+    });
+
+    it('does nothing when the socket has no authenticated user', () => {
+      const clearUserSpy = jest.spyOn(chatTypingService, 'clearUser');
+      const socket = makeSocket();
+
+      gateway.handleDisconnect(socket as any);
+
+      expect(clearUserSpy).not.toHaveBeenCalled();
     });
   });
 });
