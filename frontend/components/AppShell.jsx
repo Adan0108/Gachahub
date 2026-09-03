@@ -149,6 +149,7 @@ function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(-1);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [readNotifications, setReadNotifications] = useState([]);
   const searchInputRef = useRef(null);
@@ -174,14 +175,15 @@ function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
     : [];
   const suggestedPosts =
     canSearch && canUseLocalSearch ? fallbackPosts({ search: debouncedSearch }).slice(0, 2) : [];
+  const suggestions = [
+    ...suggestedGames.map((game) => ({ type: "community", value: game })),
+    ...suggestedPosts.map((post) => ({ type: "post", value: post })),
+  ];
   const suggestionsOpen = focused && Boolean(search);
+  const activeSuggestionId = suggestions[activeSuggestion]
+    ? `search-suggestion-${suggestions[activeSuggestion].type}-${suggestions[activeSuggestion].value.id}`
+    : undefined;
   const unreadCount = notifications.filter((item) => !readNotifications.includes(item.id)).length;
-
-  const submit = (event) => {
-    event.preventDefault();
-    router.push(search ? `/explore?q=${encodeURIComponent(search)}` : "/explore");
-    setFocused(false);
-  };
 
   const delayCloseSuggestions = () => {
     window.clearTimeout(blurTimerRef.current);
@@ -196,12 +198,50 @@ function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
 
   const openCommunity = (slug) => {
     setFocused(false);
+    setActiveSuggestion(-1);
     router.push(`/community/${encodeURIComponent(slug)}`);
   };
 
   const openPostSearch = (title) => {
     setFocused(false);
+    setActiveSuggestion(-1);
     router.push(`/explore?q=${encodeURIComponent(title)}`);
+  };
+
+  const openSuggestion = (suggestion) => {
+    if (suggestion.type === "community") openCommunity(suggestion.value.slug);
+    else openPostSearch(suggestion.value.title);
+  };
+
+  const submit = (event) => {
+    event.preventDefault();
+    const selectedSuggestion = suggestions[activeSuggestion];
+    if (selectedSuggestion) {
+      openSuggestion(selectedSuggestion);
+      return;
+    }
+
+    router.push(search ? `/explore?q=${encodeURIComponent(search)}` : "/explore");
+    setFocused(false);
+    setActiveSuggestion(-1);
+  };
+
+  const handleSearchKeyDown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setFocused(false);
+      setActiveSuggestion(-1);
+      return;
+    }
+
+    if (!suggestions.length || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
+
+    event.preventDefault();
+    const direction = event.key === "ArrowDown" ? 1 : -1;
+    setActiveSuggestion((current) => {
+      if (current === -1) return direction === 1 ? 0 : suggestions.length - 1;
+      return (current + direction + suggestions.length) % suggestions.length;
+    });
   };
 
   const openNotification = (notification) => {
@@ -260,18 +300,33 @@ function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
         <form className="search" onSubmit={submit}>
           <FiSearch />
           <input
+            aria-activedescendant={activeSuggestionId}
+            aria-autocomplete="list"
+            aria-controls="global-search-suggestions"
+            aria-expanded={suggestionsOpen}
             aria-label="Search GachaHub"
             aria-keyshortcuts="Control+K Meta+K"
+            role="combobox"
             ref={searchInputRef}
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setFocused(true);
+              setActiveSuggestion(-1);
+            }}
             onFocus={focusSearch}
             onBlur={delayCloseSuggestions}
+            onKeyDown={handleSearchKeyDown}
             placeholder="Search communities..."
           />
         </form>
         {suggestionsOpen && (
-          <div className="search-suggestions" aria-label="Search suggestions">
+          <div
+            className="search-suggestions"
+            aria-label="Search suggestions"
+            id="global-search-suggestions"
+            role="listbox"
+          >
             {!canSearch && <div className="search-empty">Enter at least 2 characters.</div>}
             {canSearch && gameSuggestions.isLoading && (
               <div className="search-empty">Searching communities...</div>
@@ -281,11 +336,17 @@ function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
                 Search needs the backend. Try again when the API is connected.
               </div>
             )}
-            {suggestedGames.map((game) => (
+            {suggestedGames.map((game, index) => (
               <button
+                aria-selected={activeSuggestion === index}
+                className={activeSuggestion === index ? "active" : ""}
+                id={`search-suggestion-community-${game.id}`}
                 key={game.slug}
+                role="option"
+                tabIndex={-1}
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setActiveSuggestion(index)}
                 onClick={() => openCommunity(game.slug)}
               >
                 <span>{game.symbol}</span>
@@ -295,20 +356,29 @@ function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
                 </div>
               </button>
             ))}
-            {suggestedPosts.map((post) => (
-              <button
-                key={post.id}
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => openPostSearch(post.title)}
-              >
-                <span>#</span>
-                <div>
-                  <b>{post.title}</b>
-                  <small>{post.gameName}</small>
-                </div>
-              </button>
-            ))}
+            {suggestedPosts.map((post, index) => {
+              const resultIndex = suggestedGames.length + index;
+              return (
+                <button
+                  aria-selected={activeSuggestion === resultIndex}
+                  className={activeSuggestion === resultIndex ? "active" : ""}
+                  id={`search-suggestion-post-${post.id}`}
+                  key={post.id}
+                  role="option"
+                  tabIndex={-1}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setActiveSuggestion(resultIndex)}
+                  onClick={() => openPostSearch(post.title)}
+                >
+                  <span>#</span>
+                  <div>
+                    <b>{post.title}</b>
+                    <small>{post.gameName}</small>
+                  </div>
+                </button>
+              );
+            })}
             {canSearch &&
               !gameSuggestions.isLoading &&
               !gameSuggestions.isError &&

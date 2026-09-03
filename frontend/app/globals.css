@@ -2059,7 +2059,8 @@ h3,
   padding: 10px;
 }
 
-.search-suggestions button:hover {
+.search-suggestions button:hover,
+.search-suggestions button.active {
   border-color: #7c62d855;
   background: #ffffff09;
 }
@@ -3040,6 +3041,7 @@ body {
 }
 
 .search-suggestions button:hover,
+.search-suggestions button.active,
 .post:hover,
 .highlight:hover,
 .leader:hover {
