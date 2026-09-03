@@ -756,9 +756,7 @@ export class ChatRepository {
             where: {
               conversationId: params.conversationId,
             },
-            orderBy: {
-              createdAt: 'desc',
-            },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           });
 
       if (!lastReadMessage) {
@@ -773,9 +771,13 @@ export class ChatRepository {
           readAt: null,
           message: {
             conversationId: params.conversationId,
-            createdAt: {
-              lte: lastReadMessage.createdAt,
-            },
+            OR: [
+              { createdAt: { lt: lastReadMessage.createdAt } },
+              {
+                createdAt: lastReadMessage.createdAt,
+                id: { lte: lastReadMessage.id },
+              },
+            ],
           },
         },
         data: {
