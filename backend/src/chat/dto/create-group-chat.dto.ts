@@ -7,6 +7,7 @@ import {
   IsString,
   IsUrl,
   MaxLength,
+  MinLength,
 } from 'class-validator';
 
 export class CreateGroupChatDto {
@@ -14,6 +15,7 @@ export class CreateGroupChatDto {
     example: 'Wuthering Waves Team Build Chat',
   })
   @IsString()
+  @MinLength(1)
   @MaxLength(120)
   title!: string;
 
