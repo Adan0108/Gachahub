@@ -6,11 +6,30 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Art } from "../../../components/Art";
 import { BuildCard } from "../../../components/BuildCard";
+import { PostList } from "../../../components/PostList";
 import { QueryNotice } from "../../../components/QueryNotice";
 import { SectionTitle } from "../../../components/SectionTitle";
 import { artTones, builds, glyph } from "../../../components/constants";
 import { fallbacks, queries } from "../../../lib/queries";
 import { JOINED_COMMUNITIES_KEY, readStoredJson } from "../../../lib/preferences";
+
+const teamComps = [
+  {
+    name: "Burst Rotation",
+    description: "Fast opener with coordinated burst windows and reliable cleanup.",
+    members: builds.slice(0, 3),
+  },
+  {
+    name: "Sustained Pressure",
+    description: "Flexible rotation focused on consistent damage and safe swaps.",
+    members: [builds[1], builds[3], builds[0]],
+  },
+  {
+    name: "Boss Breaker",
+    description: "High-impact lineup for stagger windows and single-target encounters.",
+    members: [builds[2], builds[0], builds[3]],
+  },
+];
 
 function CommunityContent() {
   const params = useParams();
@@ -32,6 +51,13 @@ function CommunityContent() {
       "Teams",
     ].filter((item, index, all) => all.indexOf(item) === index);
   }, [categoriesQuery.data]);
+  const activeTab = categories.includes(selectedTab) ? selectedTab : "Overview";
+  const communityPosts = fallbacks.posts({ gameSlug: slug });
+  const categoryPosts = communityPosts.filter((post) => {
+    const tag = post.tag.toLowerCase();
+    const category = activeTab.toLowerCase();
+    return tag === category || `${tag}s` === category;
+  });
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -112,12 +138,14 @@ function CommunityContent() {
           </div>
         </div>
       </section>
-      <div className="tabs wide">
+      <div className="tabs wide" aria-label="Community content" role="tablist">
         {categories.map((item) => (
           <Link
-            className={selectedTab === item ? "active" : ""}
+            aria-selected={activeTab === item}
+            className={activeTab === item ? "active" : ""}
             href={`/community/${encodeURIComponent(community.slug)}?tab=${encodeURIComponent(item)}`}
             key={item}
+            role="tab"
           >
             {item}
           </Link>
@@ -125,12 +153,71 @@ function CommunityContent() {
       </div>
       <div className="community-body">
         <section>
-          <SectionTitle>Featured {selectedTab}</SectionTitle>
-          <div className="build-grid">
-            {builds.map((build, index) => (
-              <BuildCard build={build} index={index} key={build.name} />
-            ))}
-          </div>
+          {activeTab === "Overview" && (
+            <div className="community-tab-content">
+              <div>
+                <SectionTitle>Latest discussions</SectionTitle>
+                <PostList posts={communityPosts.slice(0, 3)} />
+              </div>
+              <div>
+                <SectionTitle>Popular builds</SectionTitle>
+                <div className="build-grid overview-builds">
+                  {builds.slice(0, 2).map((build, index) => (
+                    <BuildCard build={build} index={index} key={build.name} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "Builds" && (
+            <>
+              <SectionTitle>Community builds</SectionTitle>
+              <div className="build-grid">
+                {builds.map((build, index) => (
+                  <BuildCard build={build} index={index} key={build.name} />
+                ))}
+              </div>
+            </>
+          )}
+
+          {activeTab === "Teams" && (
+            <>
+              <SectionTitle>Recommended teams</SectionTitle>
+              <div className="team-grid">
+                {teamComps.map((team) => (
+                  <article className="panel team-card" key={team.name}>
+                    <div>
+                      <b>{team.name}</b>
+                      <p>{team.description}</p>
+                    </div>
+                    <div className="team-members" aria-label={`${team.name} members`}>
+                      {team.members.map((member) => (
+                        <span className={`art-${member.tone}`} key={member.name}>
+                          <i>{member.icon}</i>
+                          <small>{member.name}</small>
+                        </span>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </>
+          )}
+
+          {!["Overview", "Builds", "Teams"].includes(activeTab) && (
+            <>
+              <SectionTitle>{activeTab} discussions</SectionTitle>
+              {categoryPosts.length ? (
+                <PostList posts={categoryPosts} />
+              ) : (
+                <div className="panel state-panel compact-state">
+                  <h3>No {activeTab.toLowerCase()} posts yet</h3>
+                  <p>Be the first community member to start this discussion.</p>
+                </div>
+              )}
+            </>
+          )}
         </section>
         <aside className="panel highlights">
           <div className="panel-head">

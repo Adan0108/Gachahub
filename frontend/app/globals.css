@@ -741,6 +741,86 @@ button {
   gap: 10px;
 }
 
+.community-tab-content,
+.team-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.overview-builds {
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+}
+
+.team-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+}
+
+.team-card b {
+  font-size: 15px;
+}
+
+.team-card p,
+.compact-state p {
+  color: var(--muted);
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.team-members {
+  display: flex;
+  gap: 8px;
+}
+
+.team-members > span {
+  display: grid;
+  place-items: center;
+  width: 70px;
+  min-height: 64px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+}
+
+.team-members i {
+  font-style: normal;
+  font-size: 20px;
+}
+
+.team-members small {
+  max-width: 62px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-state {
+  min-height: 150px;
+}
+
+@media (max-width: 760px) {
+  .overview-builds {
+    grid-template-columns: 1fr;
+  }
+
+  .team-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .team-members {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .team-members > span {
+    width: 100%;
+  }
+}
+
 .build-card {
   background: #0d1122;
   border: 1px solid #293052;
