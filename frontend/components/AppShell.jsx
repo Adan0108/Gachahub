@@ -11,6 +11,29 @@ import { glyph, navItems } from "./constants";
 
 const THEME_STORAGE_KEY = "gachahub-theme";
 const THEME_CHANGE_EVENT = "gachahub-theme-change";
+const notifications = [
+  {
+    id: "build-like",
+    title: "Your Sanhua build is trending",
+    detail: "12 new reactions in Wuthering Waves",
+    href: "/profile",
+    time: "8m",
+  },
+  {
+    id: "lore-reply",
+    title: "New reply in The Lament",
+    detail: "LoreSeeker added a source to the theory",
+    href: "/lore",
+    time: "32m",
+  },
+  {
+    id: "summary-ready",
+    title: "Community digest is ready",
+    detail: "Three new trends were summarized",
+    href: "/summaries",
+    time: "1h",
+  },
+];
 
 function isTheme(value) {
   return value === "dark" || value === "light";
@@ -107,10 +130,12 @@ function Sidebar({ open, close, onNotice }) {
   );
 }
 
-function Topbar({ onMenu, onNotice, theme, onToggleTheme }) {
+function Topbar({ onMenu, theme, onToggleTheme }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [readNotifications, setReadNotifications] = useState([]);
   const searchInputRef = useRef(null);
   const blurTimerRef = useRef(null);
   const health = useQuery(queries.health());
@@ -136,6 +161,7 @@ function Topbar({ onMenu, onNotice, theme, onToggleTheme }) {
       gameSuggestions.isLoading ||
       gameSuggestions.isError),
   );
+  const unreadCount = notifications.filter((item) => !readNotifications.includes(item.id)).length;
 
   const submit = (event) => {
     event.preventDefault();
@@ -164,6 +190,12 @@ function Topbar({ onMenu, onNotice, theme, onToggleTheme }) {
     router.push(`/explore?q=${encodeURIComponent(title)}`);
   };
 
+  const openNotification = (notification) => {
+    setReadNotifications((current) => [...new Set([...current, notification.id])]);
+    setNotificationsOpen(false);
+    router.push(notification.href);
+  };
+
   useEffect(() => {
     const handleShortcut = (event) => {
       const isSearchShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k";
@@ -180,6 +212,15 @@ function Topbar({ onMenu, onNotice, theme, onToggleTheme }) {
       window.clearTimeout(blurTimerRef.current);
     };
   }, [focusSearch]);
+
+  useEffect(() => {
+    if (!notificationsOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setNotificationsOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [notificationsOpen]);
 
   return (
     <header className="topbar">
@@ -270,15 +311,53 @@ function Topbar({ onMenu, onNotice, theme, onToggleTheme }) {
         <Link className="auth-top-link" href="/login">
           Log in
         </Link>
-        <button
-          className="icon-btn notification-btn"
-          aria-label="Notifications"
-          onClick={() => onNotice("Notifications are not available yet")}
-          type="button"
-        >
-          <FiBell />
-          <i />
-        </button>
+        <div className="notification-wrap">
+          <button
+            aria-expanded={notificationsOpen}
+            aria-haspopup="dialog"
+            className="icon-btn notification-btn"
+            aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
+            onClick={() => setNotificationsOpen((current) => !current)}
+            type="button"
+          >
+            <FiBell />
+            {unreadCount > 0 && <i />}
+          </button>
+          {notificationsOpen && (
+            <section aria-label="Notifications" className="notification-drawer" role="dialog">
+              <div className="notification-head">
+                <div>
+                  <span className="eyebrow">Inbox</span>
+                  <b>Notifications</b>
+                </div>
+                <button
+                  disabled={!unreadCount}
+                  onClick={() => setReadNotifications(notifications.map((item) => item.id))}
+                  type="button"
+                >
+                  Mark all read
+                </button>
+              </div>
+              <div className="notification-list">
+                {notifications.map((notification) => (
+                  <button
+                    className={readNotifications.includes(notification.id) ? "read" : "unread"}
+                    key={notification.id}
+                    onClick={() => openNotification(notification)}
+                    type="button"
+                  >
+                    <span>{glyph.sparkle}</span>
+                    <div>
+                      <b>{notification.title}</b>
+                      <small>{notification.detail}</small>
+                    </div>
+                    <time>{notification.time}</time>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
         <button
           aria-label="Open profile"
           className="mini-avatar"
@@ -339,12 +418,7 @@ export function AppShell({ children, initialTheme = "dark" }) {
       <Sidebar open={menu} close={() => setMenu(false)} onNotice={flashNotice} />
       <div className="main-column">
         {!studio && (
-          <Topbar
-            onMenu={() => setMenu(true)}
-            onNotice={flashNotice}
-            theme={theme}
-            onToggleTheme={toggleTheme}
-          />
+          <Topbar onMenu={() => setMenu(true)} theme={theme} onToggleTheme={toggleTheme} />
         )}
         {children}
       </div>

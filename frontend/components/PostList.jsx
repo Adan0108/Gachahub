@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { artTones, glyph } from "./constants";
 
 export function PostList({ posts }) {
@@ -9,13 +10,13 @@ export function PostList({ posts }) {
           <div className={`post-thumb art-${artTones[index % artTones.length]}`}>
             {glyph.sparkle}
           </div>
-          <div>
+          <Link className="post-content-link" href={`/explore?q=${encodeURIComponent(post.title)}`}>
             <b>{post.title}</b>
             <small>
               {post.gameName ? `${post.gameName} - ` : ""}
               {post.author} - {post.time}
             </small>
-          </div>
+          </Link>
           <span className="tag">{post.tag}</span>
         </article>
       ))}

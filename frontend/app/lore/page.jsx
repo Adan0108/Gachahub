@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { FiBookOpen } from "react-icons/fi";
 import { Art } from "../../components/Art";
 import { artTones, glyph } from "../../components/constants";
@@ -10,6 +13,12 @@ const loreTopics = [
 ];
 
 export default function LorePage() {
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const filteredTopics = loreTopics.filter(([topic, description]) =>
+    `${topic} ${description}`.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+
   return (
     <div className="page lore-page">
       <section className="welcome hero-polish lore-hero">
@@ -21,12 +30,29 @@ export default function LorePage() {
             community feed.
           </p>
         </div>
-        <button className="soft-btn" disabled type="button">
-          <FiBookOpen /> Open Archive
+        <button
+          className="soft-btn"
+          onClick={() => setArchiveOpen((current) => !current)}
+          type="button"
+        >
+          <FiBookOpen /> {archiveOpen ? "Close Archive" : "Open Archive"}
         </button>
       </section>
+      {archiveOpen && (
+        <section className="panel archive-toolbar" aria-label="Lore archive search">
+          <label htmlFor="lore-search">Search the archive</label>
+          <input
+            id="lore-search"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search mysteries, characters, or regions"
+            type="search"
+            value={query}
+          />
+          <small>{filteredTopics.length} archive entries found</small>
+        </section>
+      )}
       <div className="lore-grid">
-        {loreTopics.map(([topic, description], index) => (
+        {filteredTopics.map(([topic, description], index) => (
           <article className="panel lore-card" key={topic}>
             <Art tone={artTones[index]}>{glyph.sparkle}</Art>
             <div>
@@ -37,6 +63,9 @@ export default function LorePage() {
           </article>
         ))}
       </div>
+      {!filteredTopics.length && (
+        <div className="state-card">No lore entries match this search.</div>
+      )}
     </div>
   );
 }
