@@ -6,8 +6,8 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  Matches,
   MaxLength,
-  MinLength,
 } from 'class-validator';
 
 export class CreateGroupChatDto {
@@ -15,8 +15,8 @@ export class CreateGroupChatDto {
     example: 'Wuthering Waves Team Build Chat',
   })
   @IsString()
-  @MinLength(1)
   @MaxLength(120)
+  @Matches(/\S/)
   title!: string;
 
   @ApiPropertyOptional({
