@@ -51,7 +51,9 @@ export class ChatGateway
     private readonly socketRegistry: ChatSocketRegistry,
   ) {}
 
-  // share the same server instance, delivery service reads it from here
+  /**
+   * Shares the Socket.IO server instance with the delivery service.
+   */
   afterInit(server: Server) {
     this.socketRegistry.server = server;
   }
@@ -64,7 +66,11 @@ export class ChatGateway
   private readonly typingThrottle = new Map<string, Map<string, number>>();
   private readonly typingRateLimiter = new Map<string, number[]>();
 
-  // no session, no room, straight disconnect, no anon sockets
+  /**
+   * Authenticates a new socket connection and joins its personal room.
+   *
+   * No session means no room and a straight disconnect — no anonymous sockets.
+   */
   async handleConnection(socket: ChatSocket) {
     const userId = await this.authenticate(socket);
 
@@ -77,6 +83,9 @@ export class ChatGateway
     await socket.join(chatUserRoom(userId));
   }
 
+  /**
+   * Clears this user's typing-throttle state on disconnect.
+   */
   handleDisconnect(socket: ChatSocket) {
     this.logger.debug(`Socket disconnected: ${socket.id}`);
 
@@ -88,6 +97,9 @@ export class ChatGateway
     }
   }
 
+  /**
+   * Handles a "typing started" event from the client.
+   */
   @SubscribeMessage('typing:start')
   async handleTypingStart(
     @ConnectedSocket() socket: ChatSocket,
@@ -96,6 +108,9 @@ export class ChatGateway
     await this.broadcastTyping(socket, payload, 'typing:start');
   }
 
+  /**
+   * Handles a "typing stopped" event from the client.
+   */
   @SubscribeMessage('typing:stop')
   async handleTypingStop(
     @ConnectedSocket() socket: ChatSocket,
@@ -104,7 +119,11 @@ export class ChatGateway
     await this.broadcastTyping(socket, payload, 'typing:stop');
   }
 
-  // same broadcast for start/stop, only the event name and intent differ
+  /**
+   * Validates and broadcasts a typing event to the conversation's participants.
+   *
+   * Shared by start/stop — only the event name and intent differ.
+   */
   private async broadcastTyping(
     socket: ChatSocket,
     payload: TypingPayload,
@@ -201,7 +220,11 @@ export class ChatGateway
     return false;
   }
 
-  // same session check REST already trusts, handshake is still http under the hood
+  /**
+   * Authenticates a socket using the same session check REST already trusts.
+   *
+   * The handshake is still plain HTTP under the hood, so this works the same way.
+   */
   private async authenticate(socket: Socket): Promise<string | null> {
     try {
       const result = await auth.api.getSession({
@@ -215,7 +238,11 @@ export class ChatGateway
     }
   }
 
-  // getSession wants real Headers, socket gives plain object, convert
+  /**
+   * Converts the socket handshake's plain header object into real Headers.
+   *
+   * getSession() needs the real thing, not the plain object the socket gives.
+   */
   private toHeaders(raw: IncomingHttpHeaders): Headers {
     const headers = new Headers();
 

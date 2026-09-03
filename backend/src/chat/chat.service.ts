@@ -252,6 +252,11 @@ export class ChatService {
     });
   }
 
+  /**
+   * Updates a group chat's title and/or photo.
+   *
+   * Only OWNER and ADMIN participants can make this change.
+   */
   async updateGroupChat(
     userId: string,
     conversationId: string,
@@ -1442,6 +1447,11 @@ export class ChatService {
     return !recipientBlockedSender;
   }
 
+  /**
+   * Verifies a reply target message belongs to this conversation.
+   *
+   * No-op when replyToId isn't set, replies are optional.
+   */
   private async assertValidReplyTarget(
     conversationId: string,
     replyToId?: string,
@@ -1460,7 +1470,11 @@ export class ChatService {
     }
   }
 
-  // used by the ws gateway for typing broadcast, not a rest route
+  /**
+   * Resolves who should receive a typing indicator from this user.
+   *
+   * Called by the websocket gateway, not exposed as a REST route.
+   */
   async getTypingRecipients(
     conversationId: string,
     userId: string,
@@ -1517,7 +1531,12 @@ export class ChatService {
     return participant;
   }
 
-  // readable isn't enough here, the caller needs an exact state (e.g. archive/unarchive)
+  /**
+   * Verifies the user's participant state matches exactly, not just readable.
+   *
+   * Used by actions like archive/unarchive that need one specific starting
+   * state instead of any readable one.
+   */
   private async assertParticipantState(
     conversationId: string,
     userId: string,
@@ -1617,7 +1636,12 @@ export class ChatService {
     return this.canReadState(state) && state !== 'PENDING';
   }
 
-  // deleted participants never get live delivery; groups also require ACTIVE/ARCHIVED
+  /**
+   * Decides whether one participant should receive a real-time delivery.
+   *
+   * Deleted-for-me participants never qualify; groups additionally require
+   * ACTIVE or ARCHIVED state.
+   */
   private isDeliveryEligible(
     conversationType: string,
     participant: { state: string; deletedAt: Date | null },
@@ -1629,8 +1653,11 @@ export class ChatService {
     return this.isStateDeliveryEligible(conversationType, participant.state);
   }
 
-  // same state rule as isDeliveryEligible, minus the deletedAt check, so
-  // callers can decide whether a deleted-for-me participant still counts
+  /**
+   * Same state rule as isDeliveryEligible, minus the deletedAt check.
+   *
+   * Lets callers decide for themselves whether a deleted-for-me participant still counts.
+   */
   private isStateDeliveryEligible(
     conversationType: string,
     state: string,
@@ -1652,6 +1679,11 @@ export class ChatService {
     );
   }
 
+  /**
+   * Checks a unique-constraint error's target field list for one field.
+   *
+   * Handles both array and string target shapes Prisma can return.
+   */
   private constraintTargetIncludes(
     error: Prisma.PrismaClientKnownRequestError,
     field: string,
@@ -1713,7 +1745,11 @@ export class ChatService {
     };
   }
 
-  // same eligibility rule as message delivery, minus the actor themselves
+  /**
+   * Lists who should receive a real-time event for a message action.
+   *
+   * Same eligibility rule as message delivery, minus the actor themselves.
+   */
   private getDeliverableRecipientIds(
     conversation: {
       type: string;
