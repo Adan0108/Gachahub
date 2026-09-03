@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Art } from "../../../components/Art";
 import { BuildCard } from "../../../components/BuildCard";
@@ -10,13 +10,14 @@ import { QueryNotice } from "../../../components/QueryNotice";
 import { SectionTitle } from "../../../components/SectionTitle";
 import { artTones, builds, glyph } from "../../../components/constants";
 import { fallbacks, queries } from "../../../lib/queries";
+import { JOINED_COMMUNITIES_KEY, readStoredJson } from "../../../lib/preferences";
 
 function CommunityContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const slug = Array.isArray(params.slug) ? params.slug[0] : params.slug;
   const selectedTab = searchParams.get("tab") || "Overview";
-  const [joined, setJoined] = useState(true);
+  const [joined, setJoined] = useState(false);
 
   const communityQuery = useQuery(queries.community(slug));
   const categoriesQuery = useQuery(queries.categories(slug));
@@ -31,6 +32,24 @@ function CommunityContent() {
       "Teams",
     ].filter((item, index, all) => all.indexOf(item) === index);
   }, [categoriesQuery.data]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const joinedCommunities = readStoredJson(JOINED_COMMUNITIES_KEY, []);
+      setJoined(joinedCommunities.includes(slug));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [slug]);
+
+  const toggleJoined = () => {
+    const joinedCommunities = readStoredJson(JOINED_COMMUNITIES_KEY, []);
+    const nextJoined = !joined;
+    const nextCommunities = nextJoined
+      ? [...new Set([...joinedCommunities, slug])]
+      : joinedCommunities.filter((item) => item !== slug);
+    window.localStorage.setItem(JOINED_COMMUNITIES_KEY, JSON.stringify(nextCommunities));
+    setJoined(nextJoined);
+  };
 
   if (!community) {
     return (
@@ -76,7 +95,8 @@ function CommunityContent() {
         </div>
         <button
           className={`join-btn ${joined ? "joined" : ""}`}
-          onClick={() => setJoined(!joined)}
+          aria-pressed={joined}
+          onClick={toggleJoined}
           type="button"
         >
           {joined ? `${glyph.check} Joined` : "+ Join"}

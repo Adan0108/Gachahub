@@ -4495,3 +4495,71 @@ body {
   color: var(--muted);
   line-height: 1.5;
 }
+
+.feed-customizer {
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+
+.feed-customizer fieldset {
+  display: grid;
+  gap: 12px;
+  margin: 20px 0 0;
+  border: 0;
+  padding: 0;
+}
+
+.feed-customizer legend {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.preference-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.preference-grid.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.preference-grid label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0 12px;
+  background: var(--panel2);
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.preference-grid label:has(input:checked) {
+  border-color: var(--purple);
+  background: color-mix(in srgb, var(--purple), transparent 86%);
+  color: var(--text);
+}
+
+.preference-grid input {
+  accent-color: var(--purple);
+}
+
+.preference-hint {
+  margin: 16px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 620px) {
+  .preference-grid,
+  .preference-grid.compact {
+    grid-template-columns: 1fr;
+  }
+}

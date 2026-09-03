@@ -10,19 +10,29 @@ import { QueryNotice } from "../../components/QueryNotice";
 import { SectionTitle } from "../../components/SectionTitle";
 import { api } from "../../lib/api";
 import { fallbacks, queries } from "../../lib/queries";
+import {
+  defaultFeedPreferences,
+  FEED_PREFERENCES_KEY,
+  readStoredJson,
+} from "../../lib/preferences";
 
 function ExploreContent() {
   const searchParams = useSearchParams();
   const search = searchParams.get("q") || "";
   const [activeFilter, setActiveFilter] = useState("All");
   const [notice, setNotice] = useState("");
+  const [smartGames, setSmartGames] = useState([]);
+  const [smartMode, setSmartMode] = useState(false);
   const noticeTimerRef = useRef(null);
   const games = useQuery(queries.games(search));
   const canUseLocalSearch = api.usingMocks;
   const gameData =
-    games.data || (canUseLocalSearch ? fallbacks.games(search) : { items: [], meta: {} });
-  const posts = games.isError && !canUseLocalSearch ? [] : fallbacks.posts({ search });
+    games.data ||
+    (canUseLocalSearch || smartMode ? fallbacks.games(search) : { items: [], meta: {} });
+  const posts =
+    games.isError && !canUseLocalSearch && !smartMode ? [] : fallbacks.posts({ search });
   const filteredPosts = posts.filter((post) => {
+    if (smartGames.length && !smartGames.includes(post.gameSlug)) return false;
     if (activeFilter === "All") return true;
 
     const filterTags = {
@@ -36,11 +46,32 @@ function ExploreContent() {
 
     return filterTags[activeFilter]?.includes(post.tag);
   });
+  const recommendedCommunities = smartGames.length
+    ? [...gameData.items].sort(
+        (a, b) => Number(smartGames.includes(b.slug)) - Number(smartGames.includes(a.slug)),
+      )
+    : gameData.items;
   const offlineSearch = Boolean(search && games.isError && !canUseLocalSearch);
 
-  const showUnavailable = () => {
+  const applySmartExplore = () => {
+    const preferences = readStoredJson(FEED_PREFERENCES_KEY, defaultFeedPreferences);
+    setSmartMode(true);
+    setSmartGames(preferences.games);
+    const preferredCategory = preferences.categories[0];
+    const filterByCategory = {
+      Guide: "Guides",
+      Strategy: "Guides",
+      Build: "Builds",
+      Lore: "Lore",
+      Teams: "Teams",
+    };
+    setActiveFilter(filterByCategory[preferredCategory] || "All");
     window.clearTimeout(noticeTimerRef.current);
-    setNotice("Smart Explore is not available yet");
+    setNotice(
+      preferences.games.length || preferences.categories.length
+        ? "Smart recommendations applied from your feed preferences"
+        : "Choose feed preferences on Home for tailored recommendations",
+    );
     noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
   };
 
@@ -68,7 +99,7 @@ function ExploreContent() {
             place.
           </p>
         </div>
-        <button className="soft-btn" onClick={showUnavailable} type="button">
+        <button className="soft-btn" onClick={applySmartExplore} type="button">
           <FiCompass /> Smart Explore
         </button>
       </section>
@@ -84,7 +115,7 @@ function ExploreContent() {
           <QueryNotice
             isLoading={games.isLoading}
             isError={games.isError}
-            isEmpty={!gameData.items.length}
+            isEmpty={!recommendedCommunities.length}
             errorText={
               offlineSearch
                 ? "Search needs the backend. Start the API or enable mock mode to preview results."
@@ -92,7 +123,7 @@ function ExploreContent() {
             }
             emptyText="No communities found for this search."
           />
-          <CommunityGrid communities={gameData.items} compact />
+          <CommunityGrid communities={recommendedCommunities} compact />
 
           <SectionTitle>Fresh Posts</SectionTitle>
           <div className="panel">
