@@ -58,7 +58,11 @@ export class ChatGateway
 
   private readonly logger = new Logger(ChatGateway.name);
   private readonly TYPING_THROTTLE_MS = 2000;
+  private readonly TYPING_RATE_LIMIT_WINDOW_MS = 1000;
+  private readonly TYPING_RATE_LIMIT_MAX_EVENTS = 5;
+  private readonly MAX_TRACKED_CONVERSATIONS_PER_USER = 20;
   private readonly typingThrottle = new Map<string, Map<string, number>>();
+  private readonly typingRateLimiter = new Map<string, number[]>();
 
   // no session, no room, straight disconnect, no anon sockets
   async handleConnection(socket: ChatSocket) {
@@ -80,6 +84,7 @@ export class ChatGateway
 
     if (userId) {
       this.typingThrottle.delete(userId);
+      this.typingRateLimiter.delete(userId);
     }
   }
 
@@ -115,6 +120,10 @@ export class ChatGateway
       return;
     }
 
+    if (this.isTypingRateLimited(userId)) {
+      return;
+    }
+
     if (this.isTypingEventThrottled(userId, payload.conversationId, event)) {
       return;
     }
@@ -130,6 +139,28 @@ export class ChatGateway
         userId,
       });
     }
+  }
+
+  /**
+   * True when this user has already fired too many typing events across all
+   * conversations recently. Checked before the per-conversation map is ever
+   * touched, so spamming distinct/fake conversation ids can't grow it unbounded.
+   */
+  private isTypingRateLimited(userId: string): boolean {
+    const now = Date.now();
+    const windowStart = now - this.TYPING_RATE_LIMIT_WINDOW_MS;
+    const recentEvents = (this.typingRateLimiter.get(userId) ?? []).filter(
+      (timestamp) => timestamp > windowStart,
+    );
+
+    if (recentEvents.length >= this.TYPING_RATE_LIMIT_MAX_EVENTS) {
+      this.typingRateLimiter.set(userId, recentEvents);
+      return true;
+    }
+
+    recentEvents.push(now);
+    this.typingRateLimiter.set(userId, recentEvents);
+    return false;
   }
 
   /**
@@ -154,6 +185,14 @@ export class ChatGateway
     }
 
     if (userThrottle) {
+      if (
+        !userThrottle.has(key) &&
+        userThrottle.size >= this.MAX_TRACKED_CONVERSATIONS_PER_USER
+      ) {
+        const [oldestKey] = userThrottle.keys();
+        userThrottle.delete(oldestKey);
+      }
+
       userThrottle.set(key, now);
     } else {
       this.typingThrottle.set(userId, new Map([[key, now]]));
