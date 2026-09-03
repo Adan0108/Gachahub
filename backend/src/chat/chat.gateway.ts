@@ -57,6 +57,8 @@ export class ChatGateway
   }
 
   private readonly logger = new Logger(ChatGateway.name);
+  private readonly TYPING_THROTTLE_MS = 2000;
+  private readonly typingThrottle = new Map<string, Map<string, number>>();
 
   // no session, no room, straight disconnect, no anon sockets
   async handleConnection(socket: ChatSocket) {
@@ -73,6 +75,12 @@ export class ChatGateway
 
   handleDisconnect(socket: ChatSocket) {
     this.logger.debug(`Socket disconnected: ${socket.id}`);
+
+    const userId = socket.data.userId;
+
+    if (userId) {
+      this.typingThrottle.delete(userId);
+    }
   }
 
   @SubscribeMessage('typing:start')
@@ -107,6 +115,10 @@ export class ChatGateway
       return;
     }
 
+    if (this.isTypingEventThrottled(userId, payload.conversationId, event)) {
+      return;
+    }
+
     const recipientUserIds = await this.chatService.getTypingRecipients(
       payload.conversationId,
       userId,
@@ -118,6 +130,36 @@ export class ChatGateway
         userId,
       });
     }
+  }
+
+  /**
+   * True when this user already fired the same typing event for this
+   * conversation within the throttle window; records the emit otherwise.
+   */
+  private isTypingEventThrottled(
+    userId: string,
+    conversationId: string,
+    event: 'typing:start' | 'typing:stop',
+  ): boolean {
+    const now = Date.now();
+    const key = `${event}:${conversationId}`;
+    const userThrottle = this.typingThrottle.get(userId);
+    const lastEmittedAt = userThrottle?.get(key);
+
+    if (
+      lastEmittedAt !== undefined &&
+      now - lastEmittedAt < this.TYPING_THROTTLE_MS
+    ) {
+      return true;
+    }
+
+    if (userThrottle) {
+      userThrottle.set(key, now);
+    } else {
+      this.typingThrottle.set(userId, new Map([[key, now]]));
+    }
+
+    return false;
   }
 
   // same session check REST already trusts, handshake is still http under the hood
