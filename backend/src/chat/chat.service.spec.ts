@@ -19,11 +19,21 @@ jest.mock('../game-moderators/game-moderators.service', () => ({
 jest.mock('../blocks/blocks.service', () => ({
   BlocksService: class {},
 }));
+// real Prisma namespace, not a stub - chat.service.ts checks `instanceof`
+// Prisma.PrismaClientKnownRequestError, which only works against the same class
+function loadActualPrisma() {
+  const actual: { Prisma: typeof import('../generated/prisma/client').Prisma } =
+    jest.requireActual('../generated/prisma/client');
+  return actual.Prisma;
+}
+
 jest.mock('../generated/prisma/client', () => ({
   ChatMessageContentType: { TEXT: 'TEXT' },
   UserRole: { ADMIN: 'ADMIN' },
+  Prisma: loadActualPrisma(),
 }));
 
+import { Prisma } from '../generated/prisma/client';
 import { ChatService } from './chat.service';
 
 describe('ChatService', () => {
@@ -58,6 +68,7 @@ describe('ChatService', () => {
     updateMessage: jest.fn(),
     softDeleteMessage: jest.fn(),
     findInboxConversations: jest.fn(),
+    findConversationType: jest.fn(),
     countUnreadMessagesForConversations: jest.fn(),
     countUnreadMessagesForUser: jest.fn(),
     countUnreadConversationsForUser: jest.fn(),
@@ -145,6 +156,13 @@ describe('ChatService', () => {
     type: 'DIRECT',
     participants,
   });
+
+  const uniqueConstraintError = (targetField: string) =>
+    new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002',
+      clientVersion: 'test',
+      meta: { target: [targetField] },
+    });
 
   describe('createGroupChat', () => {
     it('rejects when no members remain besides the creator', async () => {
@@ -1148,6 +1166,116 @@ describe('ChatService', () => {
       ).not.toHaveBeenCalled();
       expect(repository.createMessage).toHaveBeenCalled();
     });
+
+    describe('race conditions on the insert', () => {
+      beforeEach(() => {
+        repository.findUserById.mockResolvedValue({
+          id: 'user-2',
+          status: 'ACTIVE',
+        });
+        blocksService.isBlocked.mockResolvedValue(false);
+      });
+
+      it('recovers a clientMessageId conflict as a duplicate of the winning send', async () => {
+        repository.findDirectPair.mockResolvedValueOnce(null);
+        repository.findMessageBySenderClientMessageId.mockResolvedValueOnce(
+          null,
+        );
+        repository.createDirectConversationWithMessage.mockRejectedValue(
+          uniqueConstraintError('clientMessageId'),
+        );
+        repository.findDirectPair.mockResolvedValueOnce({
+          conversation: { id: 'conversation-1' },
+        });
+        repository.findMessageBySenderClientMessageId.mockResolvedValueOnce({
+          id: 'message-1',
+          conversationId: 'conversation-1',
+        });
+
+        const result = await service.createDirectMessage('user-1', {
+          recipientUserId: 'user-2',
+          message: { clientMessageId: 'client-1' },
+        } as any);
+
+        expect(result).toEqual({
+          conversationId: 'conversation-1',
+          message: { id: 'message-1', conversationId: 'conversation-1' },
+          duplicate: true,
+        });
+      });
+
+      it('recovers a direct-pair conflict by sending into the pair the other request just created', async () => {
+        repository.findDirectPair.mockResolvedValueOnce(null);
+        repository.findMessageBySenderClientMessageId.mockResolvedValueOnce(
+          null,
+        );
+        repository.createDirectConversationWithMessage.mockRejectedValue(
+          uniqueConstraintError('userIdA'),
+        );
+        repository.findDirectPair.mockResolvedValueOnce({
+          conversation: { id: 'conversation-1' },
+        });
+        repository.findParticipant.mockResolvedValue({
+          userId: 'user-1',
+          state: 'ACTIVE',
+        });
+        repository.findConversationWithParticipants.mockResolvedValue(
+          directConversation([
+            { userId: 'user-1', state: 'ACTIVE' },
+            { userId: 'user-2', state: 'ACTIVE' },
+          ]),
+        );
+        repository.findMessageBySenderClientMessageId.mockResolvedValueOnce(
+          null,
+        );
+        repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+        const result = await service.createDirectMessage('user-1', {
+          recipientUserId: 'user-2',
+          message: { clientMessageId: 'client-1' },
+        } as any);
+
+        expect(repository.createMessage).toHaveBeenCalled();
+        expect(result).toEqual({
+          conversationId: 'conversation-1',
+          message: { id: 'message-1' },
+          duplicate: false,
+        });
+      });
+
+      it('rethrows a direct-pair conflict when the raced pair cannot be found', async () => {
+        repository.findDirectPair.mockResolvedValueOnce(null);
+        repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+        const conflict = uniqueConstraintError('userIdA');
+        repository.createDirectConversationWithMessage.mockRejectedValue(
+          conflict,
+        );
+        repository.findDirectPair.mockResolvedValueOnce(null);
+
+        await expect(
+          service.createDirectMessage('user-1', {
+            recipientUserId: 'user-2',
+            message: { clientMessageId: 'client-1' },
+          } as any),
+        ).rejects.toBe(conflict);
+      });
+
+      it('rethrows an unrelated error untouched', async () => {
+        repository.findDirectPair.mockResolvedValueOnce(null);
+        repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+        const unrelated = new Error('db connection lost');
+        repository.createDirectConversationWithMessage.mockRejectedValue(
+          unrelated,
+        );
+
+        await expect(
+          service.createDirectMessage('user-1', {
+            recipientUserId: 'user-2',
+            message: { clientMessageId: 'client-1' },
+          } as any),
+        ).rejects.toBe(unrelated);
+      });
+    });
   });
 
   describe('sendMessage (existing conversation)', () => {
@@ -1503,6 +1631,77 @@ describe('ChatService', () => {
           participantUserIds: ['user-1', 'user-2'],
         }),
       );
+    });
+
+    it('rejects a duplicate clientMessageId that belongs to a different conversation', async () => {
+      repository.findMessageBySenderClientMessageId.mockResolvedValue({
+        id: 'message-1',
+        conversationId: 'a-different-conversation',
+      });
+
+      await expect(
+        service.sendMessage('user-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    describe('race conditions on the insert', () => {
+      beforeEach(() => {
+        repository.findConversationWithParticipants.mockResolvedValue(
+          directConversation([
+            { userId: 'user-1', state: 'ACTIVE' },
+            { userId: 'user-2', state: 'ACTIVE' },
+          ]),
+        );
+      });
+
+      it('recovers a clientMessageId conflict as a duplicate of the winning send', async () => {
+        repository.createMessage.mockRejectedValue(
+          uniqueConstraintError('clientMessageId'),
+        );
+        repository.findMessageBySenderClientMessageId.mockResolvedValueOnce(
+          null,
+        );
+        repository.findMessageBySenderClientMessageId.mockResolvedValueOnce({
+          id: 'message-1',
+          conversationId: 'conversation-1',
+        });
+
+        const result = await service.sendMessage('user-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any);
+
+        expect(result).toEqual({
+          conversationId: 'conversation-1',
+          message: { id: 'message-1', conversationId: 'conversation-1' },
+          duplicate: true,
+        });
+      });
+
+      it('rejects when the conflicting row cannot be found on recovery', async () => {
+        repository.createMessage.mockRejectedValue(
+          uniqueConstraintError('clientMessageId'),
+        );
+        repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+
+        await expect(
+          service.sendMessage('user-1', 'conversation-1', {
+            message: { clientMessageId: 'client-1' },
+          } as any),
+        ).rejects.toThrow(ConflictException);
+      });
+
+      it('rethrows an unrelated error untouched', async () => {
+        const unrelated = new Error('db connection lost');
+        repository.createMessage.mockRejectedValue(unrelated);
+
+        await expect(
+          service.sendMessage('user-1', 'conversation-1', {
+            message: { clientMessageId: 'client-1' },
+          } as any),
+        ).rejects.toBe(unrelated);
+      });
     });
   });
 
@@ -2573,6 +2772,31 @@ describe('ChatService', () => {
       await expect(
         service.findMessages('user-1', 'conversation-1', {} as any),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects a pending group invitee before they accept', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'PENDING',
+      });
+      repository.findConversationType.mockResolvedValue({ type: 'GROUP' });
+
+      await expect(
+        service.findMessages('user-1', 'conversation-1', {} as any),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('allows a pending direct message request to preview history', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'PENDING',
+      });
+      repository.findConversationType.mockResolvedValue({ type: 'DIRECT' });
+      repository.findMessages.mockResolvedValue([]);
+
+      await expect(
+        service.findMessages('user-1', 'conversation-1', {} as any),
+      ).resolves.toBeDefined();
     });
 
     it("passes the query params through as given, limit default is the DTO's job", async () => {

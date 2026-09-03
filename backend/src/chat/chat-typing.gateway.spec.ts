@@ -85,6 +85,23 @@ describe('ChatTypingGateway', () => {
       expect(chatService.getTypingRecipients).not.toHaveBeenCalled();
       expect(server.to).not.toHaveBeenCalled();
     });
+
+    it('does nothing when ChatTypingService suppresses the event', async () => {
+      chatService.getTypingRecipients.mockResolvedValue(['user-2']);
+      const socket = makeSocket({ data: { userId: 'user-1' } });
+
+      await gateway.handleTypingStart(socket as any, {
+        conversationId: 'conversation-1',
+      });
+      jest.clearAllMocks();
+
+      await gateway.handleTypingStart(socket as any, {
+        conversationId: 'conversation-1',
+      });
+
+      expect(chatService.getTypingRecipients).not.toHaveBeenCalled();
+      expect(server.to).not.toHaveBeenCalled();
+    });
   });
 
   describe('handleDisconnect', () => {
