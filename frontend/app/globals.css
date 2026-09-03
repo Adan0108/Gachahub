@@ -3663,7 +3663,7 @@ body {
       color-mix(in srgb, var(--accent), transparent 64%),
       transparent 35%
     ),
-    linear-gradient(145deg, #10233b, #07111f 58%, #090b17);
+    linear-gradient(145deg, var(--canvas-start, #10233b), #07111f 58%, var(--canvas-end, #090b17));
 }
 
 .build-canvas.particles-on {
@@ -3674,7 +3674,7 @@ body {
       color-mix(in srgb, var(--accent), transparent 64%),
       transparent 35%
     ),
-    linear-gradient(145deg, #10233b, #07111f 58%, #090b17);
+    linear-gradient(145deg, var(--canvas-start, #10233b), #07111f 58%, var(--canvas-end, #090b17));
   background-size:
     48px 48px,
     auto,
@@ -3853,6 +3853,55 @@ body {
 .canvas-settings select {
   width: 100%;
   padding: 0 12px;
+}
+
+.canvas-settings > input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0 12px;
+  background: var(--panel2);
+  color: var(--text);
+}
+
+.build-canvas.background-1 {
+  --canvas-start: #24143d;
+  --canvas-end: #080815;
+}
+
+.build-canvas.background-2 {
+  --canvas-start: #07304a;
+  --canvas-end: #07131e;
+}
+
+.build-canvas.effects-off .canvas-header,
+.build-canvas.effects-off .stats,
+.build-canvas.effects-off .equipment,
+.build-canvas.effects-off .set-bonus {
+  filter: none;
+}
+
+.build-canvas.frame-off {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.build-canvas.frame-off::before {
+  opacity: 0;
+}
+
+.build-canvas.template-compact .stats {
+  width: 28%;
+}
+
+.build-canvas.template-compact .canvas-character {
+  left: 27%;
+  transform: scale(0.9);
+}
+
+.build-canvas.template-compact .equipment {
+  width: 29%;
 }
 
 .toggle-row {
