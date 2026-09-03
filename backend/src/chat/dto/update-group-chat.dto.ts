@@ -1,5 +1,11 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsUrl,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 
 export class UpdateGroupChatDto {
   @ApiPropertyOptional({
@@ -8,6 +14,7 @@ export class UpdateGroupChatDto {
   @IsOptional()
   @IsString()
   @MaxLength(120)
+  @Matches(/\S/)
   title?: string;
 
   @ApiPropertyOptional({
