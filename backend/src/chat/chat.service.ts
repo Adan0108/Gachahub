@@ -1455,7 +1455,7 @@ export class ChatService {
     if (
       !participant ||
       participant.deletedAt ||
-      !this.canReadState(participant.state)
+      !this.canShowTypingState(participant.state)
     ) {
       return [];
     }
@@ -1468,7 +1468,7 @@ export class ChatService {
         (otherParticipant) =>
           otherParticipant.userId !== userId &&
           !otherParticipant.deletedAt &&
-          this.canReadState(otherParticipant.state),
+          this.canShowTypingState(otherParticipant.state),
       )
       .map((otherParticipant) => otherParticipant.userId);
   }
@@ -1589,6 +1589,14 @@ export class ChatService {
    */
   private canReadState(state: ChatParticipantState) {
     return ['ACTIVE', 'PENDING', 'ARCHIVED'].includes(state);
+  }
+
+  /**
+   * A pending request can be previewed but shouldn't leak a live presence
+   * signal before either side has accepted.
+   */
+  private canShowTypingState(state: ChatParticipantState) {
+    return this.canReadState(state) && state !== 'PENDING';
   }
 
   // deleted participants never get live delivery; groups also require ACTIVE/ARCHIVED

@@ -2748,7 +2748,7 @@ describe('ChatService', () => {
   });
 
   describe('getTypingRecipients', () => {
-    it('returns the other active participants', async () => {
+    it('returns the other active and archived participants', async () => {
       repository.findParticipant.mockResolvedValue({
         userId: 'user-1',
         state: 'ACTIVE',
@@ -2757,7 +2757,7 @@ describe('ChatService', () => {
       repository.findParticipants.mockResolvedValue([
         { userId: 'user-1', state: 'ACTIVE', deletedAt: null },
         { userId: 'user-2', state: 'ACTIVE', deletedAt: null },
-        { userId: 'user-3', state: 'PENDING', deletedAt: null },
+        { userId: 'user-3', state: 'ARCHIVED', deletedAt: null },
         { userId: 'user-4', state: 'BLOCKED', deletedAt: null },
       ]);
 
@@ -2767,6 +2767,39 @@ describe('ChatService', () => {
       );
 
       expect(result).toEqual(['user-2', 'user-3']);
+    });
+
+    it('excludes a pending participant, whether as caller or recipient', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+        deletedAt: null,
+      });
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-1', state: 'ACTIVE', deletedAt: null },
+        { userId: 'user-2', state: 'PENDING', deletedAt: null },
+      ]);
+
+      const result = await service.getTypingRecipients(
+        'conversation-1',
+        'user-1',
+      );
+
+      expect(result).toEqual([]);
+
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-2',
+        state: 'PENDING',
+        deletedAt: null,
+      });
+
+      const resultForPendingCaller = await service.getTypingRecipients(
+        'conversation-1',
+        'user-2',
+      );
+
+      expect(resultForPendingCaller).toEqual([]);
+      expect(repository.findParticipants).toHaveBeenCalledTimes(1);
     });
 
     it('returns empty when the caller is not a participant', async () => {
