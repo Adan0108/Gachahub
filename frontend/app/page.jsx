@@ -21,6 +21,9 @@ export default function HomePage() {
   const [preferences, setPreferences] = useState(defaultFeedPreferences);
   const [draftPreferences, setDraftPreferences] = useState(defaultFeedPreferences);
   const noticeTimerRef = useRef(null);
+  const customizerButtonRef = useRef(null);
+  const customizerRef = useRef(null);
+  const wasCustomizingRef = useRef(false);
   const home = useQuery(queries.home(""));
   const data = home.data || fallbacks.home("");
   const allForYouPosts = data.forYouPosts || data.posts || [];
@@ -79,11 +82,38 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!customizing) return undefined;
-    const closeOnEscape = (event) => {
-      if (event.key === "Escape") setCustomizing(false);
+    wasCustomizingRef.current = true;
+    customizerRef.current?.querySelector("button")?.focus();
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setCustomizing(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = Array.from(
+        customizerRef.current?.querySelectorAll(
+          "button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])",
+        ) || [],
+      ).filter((element) => element.offsetParent !== null);
+      const first = items[0];
+      const last = items.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
     };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [customizing]);
+
+  useEffect(() => {
+    if (!customizing && wasCustomizingRef.current) {
+      customizerButtonRef.current?.focus();
+      wasCustomizingRef.current = false;
+    }
   }, [customizing]);
 
   return (
@@ -99,7 +129,12 @@ export default function HomePage() {
           </h1>
           <p>Explore communities, discover builds, and uncover the lore.</p>
         </div>
-        <button className="soft-btn" onClick={openCustomizer} type="button">
+        <button
+          className="soft-btn"
+          onClick={openCustomizer}
+          ref={customizerButtonRef}
+          type="button"
+        >
           <FiSettings /> Customize Feed
         </button>
       </section>
@@ -139,13 +174,15 @@ export default function HomePage() {
         <section className="panel trending">
           <div className="panel-head">
             <h3>Trending Posts</h3>
-            <div className="tabs small">
+            <div aria-label="Trending post order" className="tabs small" role="tablist">
               {["Hot", "New", "Top"].map((item) => (
                 <button
                   type="button"
                   onClick={() => setTab(item)}
                   className={tab === item ? "active" : ""}
                   key={item}
+                  aria-selected={tab === item}
+                  role="tab"
                 >
                   {item}
                 </button>
@@ -197,6 +234,7 @@ export default function HomePage() {
             aria-modal="true"
             className="modal feed-customizer"
             onClick={(event) => event.stopPropagation()}
+            ref={customizerRef}
             role="dialog"
           >
             <div className="panel-head">
@@ -204,7 +242,11 @@ export default function HomePage() {
                 <span className="eyebrow">Preferences</span>
                 <h2>Customize your feed</h2>
               </div>
-              <button aria-label="Close feed customizer" onClick={() => setCustomizing(false)}>
+              <button
+                aria-label="Close feed customizer"
+                onClick={() => setCustomizing(false)}
+                type="button"
+              >
                 <FiX />
               </button>
             </div>

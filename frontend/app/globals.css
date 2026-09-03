@@ -177,6 +177,17 @@ button {
   color: #b77cff;
 }
 
+.pro-status {
+  display: block;
+  border: 1px solid #5f4690;
+  border-radius: 8px;
+  padding: 8px;
+  color: #bda9ef;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .main-column {
   grid-column: 2;
   min-width: 0;
@@ -1214,6 +1225,12 @@ button {
   border-color: var(--purple);
   background: color-mix(in srgb, var(--purple), transparent 88%);
   color: var(--text);
+}
+
+.social button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+  transform: none;
 }
 
 .profile-stats {
@@ -3970,6 +3987,7 @@ body {
   }
 
   .canvas-settings {
+    display: flex;
     grid-column: 1 / -1;
     min-height: auto;
   }
@@ -4749,5 +4767,37 @@ body {
 @media (max-width: 700px) {
   .archive-toolbar {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .studio-page {
+    overflow-x: hidden;
+  }
+
+  .canvas-wrap {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .studio-tools,
+  .canvas-settings {
+    min-height: auto;
+  }
+
+  .canvas-settings {
+    display: flex;
+    margin-top: 10px;
+  }
+
+  .studio-preview-modal {
+    padding: 18px;
+  }
+
+  .notification-drawer {
+    position: fixed;
+    top: 68px;
+    right: 14px;
   }
 }

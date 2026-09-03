@@ -163,8 +163,9 @@ export default function ProfilePage() {
                   <FiShare2 aria-hidden="true" />
                 </button>
                 <button
-                  aria-label="Message user"
-                  onClick={() => flashNotice("Messaging is not available in this frontend yet")}
+                  aria-label="Messaging coming soon"
+                  disabled
+                  title="Messaging coming soon"
                   type="button"
                 >
                   <FiMessageCircle aria-hidden="true" />
@@ -210,12 +211,14 @@ export default function ProfilePage() {
             <div className="rank-gem">{glyph.sparkle}</div>
           </aside>
         </section>
-        <div className="tabs wide">
+        <div aria-label="Profile sections" className="tabs wide" role="tablist">
           {["Overview", "Builds", "Posts", "Collections", "Achievements"].map((item) => (
             <button
               onClick={() => setTab(item)}
               className={tab === item ? "active" : ""}
               key={item}
+              aria-selected={tab === item}
+              role="tab"
               type="button"
             >
               {item}

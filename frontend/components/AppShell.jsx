@@ -81,14 +81,20 @@ function Logo() {
   );
 }
 
-function Sidebar({ open, close, onNotice }) {
+function Sidebar({ open, close, closeButtonRef }) {
   const pathname = usePathname();
 
   return (
     <>
       <div aria-hidden="true" className={`scrim ${open ? "show" : ""}`} onClick={close} />
       <aside aria-label="Primary navigation" className={`sidebar ${open ? "open" : ""}`}>
-        <button aria-label="Close menu" className="mobile-close" onClick={close} type="button">
+        <button
+          aria-label="Close menu"
+          className="mobile-close"
+          onClick={close}
+          ref={closeButtonRef}
+          type="button"
+        >
           <FiX />
         </button>
         <Logo />
@@ -121,16 +127,14 @@ function Sidebar({ open, close, onNotice }) {
           <div className="pro-gem">{glyph.diamond}</div>
           <b>GachaHub AI Pro</b>
           <p>Exclusive AI tools, premium build cards, and smarter summaries.</p>
-          <button onClick={() => onNotice("Upgrade is not available yet")} type="button">
-            Upgrade Now
-          </button>
+          <span className="pro-status">Early access coming soon</span>
         </div>
       </aside>
     </>
   );
 }
 
-function Topbar({ onMenu, theme, onToggleTheme }) {
+function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
@@ -138,6 +142,9 @@ function Topbar({ onMenu, theme, onToggleTheme }) {
   const [readNotifications, setReadNotifications] = useState([]);
   const searchInputRef = useRef(null);
   const blurTimerRef = useRef(null);
+  const notificationButtonRef = useRef(null);
+  const notificationDrawerRef = useRef(null);
+  const wasNotificationsOpenRef = useRef(false);
   const health = useQuery(queries.health());
   const apiStatus = health.isSuccess ? "connected" : health.isError ? "offline" : "checking";
   const search = query.trim();
@@ -215,6 +222,8 @@ function Topbar({ onMenu, theme, onToggleTheme }) {
 
   useEffect(() => {
     if (!notificationsOpen) return undefined;
+    wasNotificationsOpenRef.current = true;
+    notificationDrawerRef.current?.querySelector("button")?.focus();
     const closeOnEscape = (event) => {
       if (event.key === "Escape") setNotificationsOpen(false);
     };
@@ -222,9 +231,22 @@ function Topbar({ onMenu, theme, onToggleTheme }) {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [notificationsOpen]);
 
+  useEffect(() => {
+    if (!notificationsOpen && wasNotificationsOpenRef.current) {
+      notificationButtonRef.current?.focus();
+      wasNotificationsOpenRef.current = false;
+    }
+  }, [notificationsOpen]);
+
   return (
     <header className="topbar">
-      <button aria-label="Open menu" className="menu-btn" onClick={onMenu} type="button">
+      <button
+        aria-label="Open menu"
+        className="menu-btn"
+        onClick={onMenu}
+        ref={menuButtonRef}
+        type="button"
+      >
         <FiMenu />
       </button>
       <div className="search-wrap">
@@ -318,13 +340,19 @@ function Topbar({ onMenu, theme, onToggleTheme }) {
             className="icon-btn notification-btn"
             aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
             onClick={() => setNotificationsOpen((current) => !current)}
+            ref={notificationButtonRef}
             type="button"
           >
             <FiBell />
             {unreadCount > 0 && <i />}
           </button>
           {notificationsOpen && (
-            <section aria-label="Notifications" className="notification-drawer" role="dialog">
+            <section
+              aria-label="Notifications"
+              className="notification-drawer"
+              ref={notificationDrawerRef}
+              role="dialog"
+            >
               <div className="notification-head">
                 <div>
                   <span className="eyebrow">Inbox</span>
@@ -373,18 +401,13 @@ function Topbar({ onMenu, theme, onToggleTheme }) {
 
 export function AppShell({ children, initialTheme = "dark" }) {
   const [menu, setMenu] = useState(false);
-  const [notice, setNotice] = useState("");
   const theme = useSyncExternalStore(subscribeTheme, getPreferredTheme, () => initialTheme);
-  const noticeTimerRef = useRef(null);
+  const menuButtonRef = useRef(null);
+  const menuCloseButtonRef = useRef(null);
+  const wasMenuOpenRef = useRef(false);
   const pathname = usePathname();
   const studio = pathname === "/studio";
   const auth = pathname === "/login" || pathname === "/register";
-
-  const flashNotice = (message) => {
-    window.clearTimeout(noticeTimerRef.current);
-    setNotice(message);
-    noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
-  };
 
   const toggleTheme = () => {
     const nextTheme = theme === "dark" ? "light" : "dark";
@@ -397,28 +420,39 @@ export function AppShell({ children, initialTheme = "dark" }) {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
-  useEffect(() => () => window.clearTimeout(noticeTimerRef.current), []);
+  useEffect(() => {
+    if (menu) {
+      wasMenuOpenRef.current = true;
+      menuCloseButtonRef.current?.focus();
+      const closeOnEscape = (event) => {
+        if (event.key === "Escape") setMenu(false);
+      };
+      window.addEventListener("keydown", closeOnEscape);
+      return () => window.removeEventListener("keydown", closeOnEscape);
+    }
+
+    if (wasMenuOpenRef.current) {
+      menuButtonRef.current?.focus();
+      wasMenuOpenRef.current = false;
+    }
+    return undefined;
+  }, [menu]);
 
   if (auth) {
-    return (
-      <div className="auth-shell">
-        <div className="toast-slot" aria-live="polite">
-          {notice}
-        </div>
-        {children}
-      </div>
-    );
+    return <div className="auth-shell">{children}</div>;
   }
 
   return (
     <div className={`app-shell ${studio ? "studio-shell" : ""}`}>
-      <div className="toast-slot" aria-live="polite">
-        {notice}
-      </div>
-      <Sidebar open={menu} close={() => setMenu(false)} onNotice={flashNotice} />
+      <Sidebar open={menu} close={() => setMenu(false)} closeButtonRef={menuCloseButtonRef} />
       <div className="main-column">
         {!studio && (
-          <Topbar onMenu={() => setMenu(true)} theme={theme} onToggleTheme={toggleTheme} />
+          <Topbar
+            menuButtonRef={menuButtonRef}
+            onMenu={() => setMenu(true)}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+          />
         )}
         {children}
       </div>
