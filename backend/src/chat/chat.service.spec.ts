@@ -1409,6 +1409,35 @@ describe('ChatService', () => {
       expect(repository.createMessage).not.toHaveBeenCalled();
     });
 
+    it('sends successfully when the reply target exists in this conversation', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE' },
+        ]),
+      );
+      repository.findSentMessageInConversation.mockResolvedValue({
+        id: 'message-x',
+        conversationId: 'conversation-1',
+      });
+      repository.createMessage.mockResolvedValue({
+        id: 'message-1',
+        conversationId: 'conversation-1',
+      });
+
+      await service.sendMessage('user-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1', replyToId: 'message-x' },
+      } as any);
+
+      expect(repository.createMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ replyToId: 'message-x' }),
+      );
+    });
+
     it('stores the message but skips notifying a direct recipient who blocked the sender', async () => {
       repository.findParticipant.mockResolvedValue({
         userId: 'user-1',
@@ -1441,6 +1470,24 @@ describe('ChatService', () => {
           shouldNotify: false,
         }),
       );
+    });
+
+    it('skips the block check when the direct conversation has no other participant left', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([{ userId: 'user-1', state: 'ACTIVE' }]),
+      );
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(blocksService.isBlocked).not.toHaveBeenCalled();
+      expect(repository.createMessage).toHaveBeenCalled();
     });
 
     it('does not let one muted group member suppress notification for others', async () => {
@@ -1680,6 +1727,29 @@ describe('ChatService', () => {
           message: { id: 'message-1', conversationId: 'conversation-1' },
           duplicate: true,
         });
+      });
+
+      it('recovers a clientMessageId conflict when Prisma reports the target as a string, not an array', async () => {
+        repository.createMessage.mockRejectedValue(
+          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+            code: 'P2002',
+            clientVersion: 'test',
+            meta: { target: 'clientMessageId' },
+          }),
+        );
+        repository.findMessageBySenderClientMessageId.mockResolvedValueOnce(
+          null,
+        );
+        repository.findMessageBySenderClientMessageId.mockResolvedValueOnce({
+          id: 'message-1',
+          conversationId: 'conversation-1',
+        });
+
+        const result = await service.sendMessage('user-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any);
+
+        expect(result.duplicate).toBe(true);
       });
 
       it('rejects when the conflicting row cannot be found on recovery', async () => {
@@ -2623,6 +2693,45 @@ describe('ChatService', () => {
         'user-1',
         'ACTIVE',
       );
+    });
+
+    it("masks another participant's BLOCKED state as ACTIVE so it isn't leaked to the viewer", async () => {
+      repository.findInboxConversations.mockResolvedValue([
+        {
+          id: 'conversation-1',
+          type: 'DIRECT',
+          status: 'ACTIVE',
+          updatedAt: new Date('2024-01-01'),
+          createdAt: new Date('2024-01-01'),
+          lastMessageId: null,
+          participants: [
+            {
+              userId: 'user-1',
+              role: 'MEMBER',
+              state: 'ACTIVE',
+              pinnedAt: null,
+              mutedAt: null,
+              user: { id: 'user-1' },
+            },
+            {
+              userId: 'user-2',
+              role: 'MEMBER',
+              state: 'BLOCKED',
+              pinnedAt: null,
+              mutedAt: null,
+              user: { id: 'user-2' },
+            },
+          ],
+          messages: [],
+        },
+      ]);
+
+      const [result] = await service.listConversations('user-1');
+
+      const otherParticipant = result.participants.find(
+        (participant) => participant.userId === 'user-2',
+      );
+      expect(otherParticipant?.state).toBe('ACTIVE');
     });
   });
 
