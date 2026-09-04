@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { RateLimitedException } from '../common/exceptions/rate-limited.exception';
+import {
+  evictOldestIfAtCapacity,
+  pruneOldTimestamps,
+  touch,
+} from '../common/utils/bounded-map';
 
 /**
  * Rate limit how fast one user can send chat messages
@@ -23,54 +28,30 @@ export class ChatMessageRateLimiterService {
 
     if (lockExpiresAt !== undefined) {
       if (now < lockExpiresAt) {
-        this.touch(this.lockedUntil, userId, lockExpiresAt);
+        touch(this.lockedUntil, userId, lockExpiresAt);
         this.reject(lockExpiresAt - now);
       }
 
       this.lockedUntil.delete(userId);
     }
 
-    const windowStart = now - this.WINDOW_MS;
-    const recent = (this.recentSends.get(userId) ?? []).filter(
-      (timestamp) => timestamp > windowStart,
+    const recent = pruneOldTimestamps(
+      this.recentSends.get(userId) ?? [],
+      now,
+      this.WINDOW_MS,
     );
     recent.push(now);
 
     if (recent.length > this.MAX_MESSAGES_PER_WINDOW) {
       this.recentSends.delete(userId);
-      this.evictOldestIfAtCapacity(this.lockedUntil, userId);
-      this.touch(this.lockedUntil, userId, now + this.LOCKOUT_MS);
+      evictOldestIfAtCapacity(this.lockedUntil, this.MAX_TRACKED_USERS, userId);
+      touch(this.lockedUntil, userId, now + this.LOCKOUT_MS);
       this.reject(this.LOCKOUT_MS);
       return;
     }
 
-    this.evictOldestIfAtCapacity(this.recentSends, userId);
-    this.touch(this.recentSends, userId, recent);
-  }
-
-  // moves key to the most-recently-used end so it survives eviction longer
-  private touch<StoredValue>(
-    map: Map<string, StoredValue>,
-    key: string,
-    value: StoredValue,
-  ): void {
-    map.delete(key);
-    map.set(key, value);
-  }
-
-  // shared by both maps - keeps memory bounded since REST requests have
-  // no connection lifecycle to hook cleanup into, unlike the typing gateway
-  private evictOldestIfAtCapacity<StoredValue>(
-    map: Map<string, StoredValue>,
-    keyAboutToBeAdded?: string,
-  ): void {
-    if (
-      (keyAboutToBeAdded === undefined || !map.has(keyAboutToBeAdded)) &&
-      map.size >= this.MAX_TRACKED_USERS
-    ) {
-      const [oldestKey] = map.keys();
-      map.delete(oldestKey);
-    }
+    evictOldestIfAtCapacity(this.recentSends, this.MAX_TRACKED_USERS, userId);
+    touch(this.recentSends, userId, recent);
   }
 
   private reject(remainingMs: number): never {

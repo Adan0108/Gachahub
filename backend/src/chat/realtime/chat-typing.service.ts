@@ -1,4 +1,9 @@
 import { Injectable } from '@nestjs/common';
+import {
+  evictOldestIfAtCapacity,
+  pruneOldTimestamps,
+  touch,
+} from '../../common/utils/bounded-map';
 
 export type TypingEventName = 'typing:start' | 'typing:stop';
 
@@ -48,9 +53,10 @@ export class ChatTypingService {
    */
   private isRateLimited(userId: string): boolean {
     const now = Date.now();
-    const windowStart = now - this.TYPING_RATE_LIMIT_WINDOW_MS;
-    const recentEvents = (this.typingRateLimiter.get(userId) ?? []).filter(
-      (timestamp) => timestamp > windowStart,
+    const recentEvents = pruneOldTimestamps(
+      this.typingRateLimiter.get(userId) ?? [],
+      now,
+      this.TYPING_RATE_LIMIT_WINDOW_MS,
     );
 
     if (recentEvents.length >= this.TYPING_RATE_LIMIT_MAX_EVENTS) {
@@ -74,8 +80,9 @@ export class ChatTypingService {
   ): boolean {
     const now = Date.now();
     const key = `${event}:${conversationId}`;
-    const userThrottle = this.typingThrottle.get(userId);
-    const lastEmittedAt = userThrottle?.get(key);
+    const userThrottle =
+      this.typingThrottle.get(userId) ?? new Map<string, number>();
+    const lastEmittedAt = userThrottle.get(key);
 
     if (
       lastEmittedAt !== undefined &&
@@ -84,19 +91,13 @@ export class ChatTypingService {
       return true;
     }
 
-    if (userThrottle) {
-      if (
-        !userThrottle.has(key) &&
-        userThrottle.size >= this.MAX_TRACKED_CONVERSATIONS_PER_USER
-      ) {
-        const [oldestKey] = userThrottle.keys();
-        userThrottle.delete(oldestKey);
-      }
-
-      userThrottle.set(key, now);
-    } else {
-      this.typingThrottle.set(userId, new Map([[key, now]]));
-    }
+    evictOldestIfAtCapacity(
+      userThrottle,
+      this.MAX_TRACKED_CONVERSATIONS_PER_USER,
+      key,
+    );
+    touch(userThrottle, key, now);
+    this.typingThrottle.set(userId, userThrottle);
 
     return false;
   }
