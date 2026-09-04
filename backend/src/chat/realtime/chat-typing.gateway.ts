@@ -8,10 +8,10 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import type { Server } from 'socket.io';
-import { userRoom } from '../websocket/socket.util';
-import { websocketGatewayOptions } from '../websocket/websocket-gateway.options';
-import type { AppSocket } from '../websocket/websocket.gateway';
-import { ChatService } from './chat.service';
+import { userRoom } from '../../websocket/socket.util';
+import { websocketGatewayOptions } from '../../websocket/websocket-gateway.options';
+import type { AppSocket } from '../../websocket/websocket.gateway';
+import { ChatService } from '../chat.service';
 import { ChatTypingService, TypingEventName } from './chat-typing.service';
 
 interface TypingPayload {

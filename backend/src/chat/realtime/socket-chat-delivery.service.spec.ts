@@ -1,10 +1,10 @@
 import type { Server } from 'socket.io';
 import { SocketChatDeliveryService } from './socket-chat-delivery.service';
-import { SocketRegistry } from '../websocket/socket-registry.service';
+import { SocketRegistry } from '../../websocket/socket-registry.service';
 import {
   ChatMessageCreatedEvent,
   ChatMessageActionEvent,
-} from './ports/chat-delivery.port';
+} from '../ports/chat-delivery.port';
 
 describe('SocketChatDeliveryService', () => {
   let registry: SocketRegistry;

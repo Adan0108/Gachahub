@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { userRoom } from '../websocket/socket.util';
-import { SocketRegistry } from '../websocket/socket-registry.service';
+import { userRoom } from '../../websocket/socket.util';
+import { SocketRegistry } from '../../websocket/socket-registry.service';
 import {
   ChatDeliveryPort,
   ChatMessageCreatedEvent,
   ChatMessageActionEvent,
-} from './ports/chat-delivery.port';
+} from '../ports/chat-delivery.port';
 
 type ChatSocketEventName =
   | 'message:created'
