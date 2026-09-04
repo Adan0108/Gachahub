@@ -79,7 +79,6 @@ describe('ChatService', () => {
 
   const followsService = {
     isFollowing: jest.fn(),
-    areMutualFollowers: jest.fn(),
   };
 
   const blocksService = {
@@ -1029,7 +1028,7 @@ describe('ChatService', () => {
       );
     });
 
-    it('resolves ACTIVE from two isFollowing calls instead of areMutualFollowers when mutual', async () => {
+    it('resolves ACTIVE from two isFollowing calls when mutual', async () => {
       repository.findUserById.mockResolvedValue({
         id: 'user-2',
         status: 'ACTIVE',
@@ -1049,7 +1048,6 @@ describe('ChatService', () => {
         message: { clientMessageId: 'client-1' },
       } as any);
 
-      expect(followsService.areMutualFollowers).not.toHaveBeenCalled();
       expect(followsService.isFollowing).toHaveBeenCalledTimes(2);
       expect(followsService.isFollowing).toHaveBeenCalledWith(
         'user-1',
