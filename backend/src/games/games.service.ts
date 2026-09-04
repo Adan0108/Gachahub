@@ -85,9 +85,6 @@ export class GamesService {
    * /games/wuthering-waves
    *
    * Throws NotFoundException if the slug does not exist.
-   *
-   * Consistent with findById - should return null too instead of throwing for caller
-   * but out of scope for this... so comment will do.
    */
   async findBySlug(slug: string) {
     const game = await this.gamesRepository.findBySlug(slug);
