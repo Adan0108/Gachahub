@@ -13,7 +13,11 @@ describe('ChatTypingGateway', () => {
 
   let chatTypingService: ChatTypingService;
   let gateway: ChatTypingGateway;
-  let server: { to: jest.Mock; emit: jest.Mock };
+  let server: {
+    to: jest.Mock;
+    emit: jest.Mock;
+    sockets: { adapter: { rooms: Map<string, Set<string>> } };
+  };
 
   const makeSocket = (overrides: Record<string, unknown> = {}) => ({
     id: 'socket-1',
@@ -25,7 +29,11 @@ describe('ChatTypingGateway', () => {
     jest.clearAllMocks();
     chatTypingService = new ChatTypingService();
     gateway = new ChatTypingGateway(chatService as any, chatTypingService);
-    server = { to: jest.fn(), emit: jest.fn() };
+    server = {
+      to: jest.fn(),
+      emit: jest.fn(),
+      sockets: { adapter: { rooms: new Map() } },
+    };
     server.to.mockReturnValue(server);
     gateway.server = server as unknown as Server;
   });
@@ -105,13 +113,26 @@ describe('ChatTypingGateway', () => {
   });
 
   describe('handleDisconnect', () => {
-    it('clears the typing throttle state for the disconnecting user', () => {
+    it('clears the typing throttle state when the user has no other sockets left', () => {
       const clearUserSpy = jest.spyOn(chatTypingService, 'clearUser');
       const socket = makeSocket({ data: { userId: 'user-1' } });
 
       gateway.handleDisconnect(socket as any);
 
       expect(clearUserSpy).toHaveBeenCalledWith('user-1');
+    });
+
+    it('does not clear throttle state while the user still has another connected socket', () => {
+      const clearUserSpy = jest.spyOn(chatTypingService, 'clearUser');
+      server.sockets.adapter.rooms.set(
+        'user:user-1',
+        new Set(['other-socket-id']),
+      );
+      const socket = makeSocket({ data: { userId: 'user-1' } });
+
+      gateway.handleDisconnect(socket as any);
+
+      expect(clearUserSpy).not.toHaveBeenCalled();
     });
 
     it('does nothing when the socket has no authenticated user', () => {

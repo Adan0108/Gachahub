@@ -42,9 +42,14 @@ export class ChatTypingGateway implements OnGatewayDisconnect {
   handleDisconnect(socket: AppSocket) {
     const userId = socket.data.userId;
 
-    if (userId) {
+    if (userId && !this.hasOtherActiveSockets(userId)) {
       this.chatTypingService.clearUser(userId);
     }
+  }
+
+  private hasOtherActiveSockets(userId: string): boolean {
+    const room = this.server.sockets.adapter.rooms.get(userRoom(userId));
+    return (room?.size ?? 0) > 0;
   }
 
   /**
