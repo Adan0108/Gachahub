@@ -276,7 +276,7 @@ export class ChatRepository {
   /**
    * Add or reactivates member rows for a group.
    *
-   * skip BLOCKED rows, clears deletedAt/archivedAt when reactivating.
+   * skip BLOCKED rows, clears deletedAt/archivedAt and resets role to MEMBER when reactivating.
    */
   async addGroupMembers(
     conversationId: string,
@@ -305,6 +305,7 @@ export class ChatRepository {
           },
           data: {
             state,
+            role: 'MEMBER',
             deletedAt: null,
             archivedAt: null,
           },
