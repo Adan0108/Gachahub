@@ -6,6 +6,7 @@ import { ChatRepository } from './chat.repository';
 import { ChatService } from './chat.service';
 import { ChatTypingGateway } from './chat-typing.gateway';
 import { ChatTypingService } from './chat-typing.service';
+import { ChatMessageRateLimiterService } from './chat-message-rate-limiter.service';
 import { SocketChatDeliveryService } from './socket-chat-delivery.service';
 import { OpaqueMessageEncryptionService } from './opaque-message-encryption.service';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
@@ -38,6 +39,7 @@ import { BlocksModule } from '../blocks/blocks.module';
     ChatService,
     ChatTypingGateway,
     ChatTypingService,
+    ChatMessageRateLimiterService,
     {
       provide: CHAT_DELIVERY_PORT,
       useClass: SocketChatDeliveryService,

@@ -101,6 +101,10 @@ describe('ChatService', () => {
     preparePayload: jest.fn(),
   };
 
+  const chatMessageRateLimiter = {
+    assertNotRateLimited: jest.fn(),
+  };
+
   const chatDelivery = {
     publishMessageCreated: jest.fn(),
     publishMessageEdited: jest.fn(),
@@ -119,6 +123,7 @@ describe('ChatService', () => {
       blocksService as any,
       gamesService as any,
       gameModeratorsService as any,
+      chatMessageRateLimiter as any,
       messageEncryption,
       chatDelivery,
     );

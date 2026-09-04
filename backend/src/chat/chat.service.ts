@@ -16,6 +16,7 @@ import {
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
 import { ChatRepository } from './chat.repository';
+import { ChatMessageRateLimiterService } from './chat-message-rate-limiter.service';
 import { FollowsService } from '../follows/follows.service';
 import { BlocksService } from '../blocks/blocks.service';
 import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
@@ -52,6 +53,7 @@ export class ChatService {
     private readonly blocksService: BlocksService,
     private readonly gamesService: GamesService,
     private readonly gameModeratorsService: GameModeratorsService,
+    private readonly chatMessageRateLimiter: ChatMessageRateLimiterService,
     @Inject(MESSAGE_ENCRYPTION_PORT)
     private readonly messageEncryption: MessageEncryptionPort,
     @Inject(CHAT_DELIVERY_PORT)
@@ -71,6 +73,8 @@ export class ChatService {
    * - Pending stranger messages are stored but should not notify the receiver.
    */
   async createDirectMessage(senderId: string, dto: CreateDirectMessageDto) {
+    this.chatMessageRateLimiter.assertNotRateLimited(senderId);
+
     if (senderId === dto.recipientUserId) {
       throw new BadRequestException('You cannot message yourself');
     }
@@ -597,6 +601,8 @@ export class ChatService {
     conversationId: string,
     dto: SendMessageDto,
   ) {
+    this.chatMessageRateLimiter.assertNotRateLimited(senderId);
+
     const preparedPayload = await this.messageEncryption.preparePayload(
       dto.message,
     );
