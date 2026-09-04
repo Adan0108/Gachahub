@@ -1,6 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
 
+/**
+ * Request body for marking conversation messages as read
+ *
+ * When lastReadMessageId omitted, the backend marks all-
+ * -current conversation messages as read for the caller
+ */
 export class MarkConversationReadDto {
   @ApiPropertyOptional({
     example: 'cm123message456',
@@ -9,5 +15,6 @@ export class MarkConversationReadDto {
   })
   @IsOptional()
   @IsString()
+  @MaxLength(120)
   lastReadMessageId?: string;
 }
