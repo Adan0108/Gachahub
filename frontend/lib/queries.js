@@ -6,7 +6,8 @@ export const queryKeys = {
   games: (search) => ["games", { search }],
   community: (slug) => ["community", slug],
   categories: (slug) => ["community-categories", slug],
-  profile: ["profile"],
+  currentUser: ["current-user"],
+  profile: ["current-user"],
 };
 
 export const queries = {
@@ -40,12 +41,13 @@ export const queries = {
     retry: 1,
     staleTime: 30_000,
   }),
-  profile: () => ({
-    queryKey: queryKeys.profile,
-    queryFn: api.getProfile,
-    retry: 1,
+  currentUser: () => ({
+    queryKey: queryKeys.currentUser,
+    queryFn: ({ signal }) => api.getCurrentUser({ signal }),
+    retry: false,
     staleTime: 30_000,
   }),
+  profile: () => queries.currentUser(),
 };
 
 export const fallbacks = {

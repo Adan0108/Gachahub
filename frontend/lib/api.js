@@ -13,6 +13,7 @@ export const backendRoutes = {
   currentUser: "/users/me",
   signInEmail: "/api/auth/sign-in/email",
   signUpEmail: "/api/auth/sign-up/email",
+  signOut: "/api/auth/sign-out",
   chatConversations: "/chat/conversations",
   chatRequests: "/chat/requests",
   chatDirect: "/chat/direct",
@@ -130,7 +131,7 @@ function withQuery(path, query = {}) {
 }
 
 async function request(path, options = {}) {
-  const { headers, body, ...fetchOptions } = options;
+  const { headers, body, allowUnauthorized = false, ...fetchOptions } = options;
 
   if (USE_MOCKS) return mockResponse(path);
 
@@ -145,6 +146,8 @@ async function request(path, options = {}) {
     ...(body !== undefined ? { body } : {}),
     ...fetchOptions,
   });
+
+  if (allowUnauthorized && response.status === 401) return null;
 
   if (!response.ok) {
     let message;
@@ -230,7 +233,9 @@ export const api = {
   },
   getCommunity: async (slug) => normalizeGame(await request(backendRoutes.game(slug))),
   getCategories: (gameSlug) => request(backendRoutes.gameCategories(gameSlug)),
-  getProfile: () => request(backendRoutes.currentUser),
+  getCurrentUser: (options = {}) =>
+    request(backendRoutes.currentUser, { ...options, allowUnauthorized: true }),
+  getProfile: (options = {}) => api.getCurrentUser(options),
   signIn: ({ email, password }) =>
     mutation(backendRoutes.signInEmail, {
       email,
@@ -242,6 +247,7 @@ export const api = {
       email,
       password,
     }),
+  signOut: () => mutation(backendRoutes.signOut),
   getHome: async ({ search = "" } = {}) => {
     const games = await api.getGames({ status: "ACTIVE", search, limit: 20 });
     const forYouPosts = fallbackPosts({ search });
