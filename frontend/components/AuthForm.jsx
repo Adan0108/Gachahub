@@ -2,14 +2,18 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { FiArrowLeft, FiArrowRight, FiEye, FiEyeOff, FiLock, FiMail, FiUser } from "react-icons/fi";
+import { useCurrentUser } from "../hooks/useCurrentUser";
 import { api } from "../lib/api";
+import { queries } from "../lib/queries";
 
 export function AuthForm({ mode }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const isRegister = mode === "register";
+  const { isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -25,10 +29,14 @@ export function AuthForm({ mode }) {
 
   const auth = useMutation({
     mutationFn: () => (isRegister ? api.signUp(form) : api.signIn(form)),
-    onSuccess: () => {
+    onSuccess: async () => {
+      await queryClient.fetchQuery({
+        ...queries.currentUser(),
+        staleTime: 0,
+      });
       setMessage(isRegister ? "Account created. Redirecting..." : "Logged in. Redirecting...");
       window.clearTimeout(redirectTimerRef.current);
-      redirectTimerRef.current = window.setTimeout(() => router.push("/"), 650);
+      redirectTimerRef.current = window.setTimeout(() => router.replace("/"), 650);
     },
     onError: (error) => {
       setMessage(error.message || "Auth service is not ready yet.");
@@ -47,6 +55,10 @@ export function AuthForm({ mode }) {
   };
 
   useEffect(() => () => window.clearTimeout(redirectTimerRef.current), []);
+
+  useEffect(() => {
+    if (isAuthenticated && !auth.isPending) router.replace("/");
+  }, [auth.isPending, isAuthenticated, router]);
 
   return (
     <main className="auth-page">
@@ -131,10 +143,14 @@ export function AuthForm({ mode }) {
 
           <button
             className="primary auth-submit"
-            disabled={auth.isPending || !canSubmit}
+            disabled={auth.isPending || isSessionLoading || !canSubmit}
             type="submit"
           >
-            {auth.isPending ? "Please wait..." : isRegister ? "Create account" : "Log in"}
+            {auth.isPending || isSessionLoading
+              ? "Please wait..."
+              : isRegister
+                ? "Create account"
+                : "Log in"}
             <FiArrowRight />
           </button>
         </form>
