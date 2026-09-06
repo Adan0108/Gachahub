@@ -285,6 +285,72 @@ button {
   background: linear-gradient(145deg, #6677a5, #242849);
 }
 
+.account-wrap {
+  position: relative;
+}
+
+.auth-session-placeholder {
+  width: 72px;
+  height: 36px;
+  border-radius: 12px;
+  background: var(--panel2);
+  opacity: 0.65;
+}
+
+.user-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 10px);
+  right: 0;
+  display: grid;
+  min-width: 230px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 20px 55px color-mix(in srgb, var(--shadow), transparent 20%);
+}
+
+.user-menu-profile {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 5px;
+}
+
+.user-menu-profile small,
+.user-menu-error {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-menu a,
+.user-menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  text-decoration: none;
+  text-align: left;
+}
+
+.user-menu a:hover,
+.user-menu button:hover:not(:disabled) {
+  background: var(--panel2);
+}
+
+.user-menu-error {
+  padding: 7px 10px 4px;
+  color: var(--danger, #ff7f8f);
+}
+
 /* Shared page layout */
 .page {
   padding: 26px 28px 50px;
