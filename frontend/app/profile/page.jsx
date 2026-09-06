@@ -51,7 +51,7 @@ export default function ProfilePage() {
   const noticeTimerRef = useRef(null);
   const wasEditingRef = useRef(false);
   const profile = useQuery(queries.profile());
-  const displayName = name || profile.data?.name || "RoverX";
+  const displayName = name || profile.data?.name || "";
   const recentPosts = fallbackPosts().slice(0, 3);
   const activeTab = profileTabs[tab];
 
@@ -136,6 +136,26 @@ export default function ProfilePage() {
 
   useEffect(() => () => window.clearTimeout(noticeTimerRef.current), []);
 
+  useEffect(() => {
+    if (!profile.isLoading && !profile.data) router.replace("/login");
+  }, [profile.data, profile.isLoading, router]);
+
+  if (!profile.data) {
+    return (
+      <div className="page profile-page">
+        <QueryNotice isLoading={profile.isLoading} isError={profile.isError} />
+        <div className="state-card profile-empty-state">
+          <b>{profile.isLoading ? "Loading your profile" : "Sign in required"}</b>
+          <span>
+            {profile.isLoading
+              ? "Checking your GachaHub session..."
+              : "Redirecting you to the login page..."}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="page profile-page">
       <div className="toast-slot" aria-live="polite">
@@ -156,7 +176,7 @@ export default function ProfilePage() {
               <h1>
                 {displayName} <span className="verified">{glyph.check}</span>
               </h1>
-              <p>{profile.data?.email || "UID: 9008420"}</p>
+              <p>{profile.data.email}</p>
               <blockquote>&quot;{bio}&quot;</blockquote>
               <div className="social" aria-label="Profile actions">
                 <button aria-label="Copy profile link" onClick={shareProfile} type="button">
