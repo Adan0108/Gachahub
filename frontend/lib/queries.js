@@ -8,6 +8,7 @@ export const queryKeys = {
   categories: (slug) => ["community-categories", slug],
   currentUser: ["current-user"],
   profile: ["current-user"],
+  myPosts: ["posts", "mine"],
 };
 
 export const queries = {
@@ -48,6 +49,12 @@ export const queries = {
     staleTime: 30_000,
   }),
   profile: () => queries.currentUser(),
+  myPosts: () => ({
+    queryKey: queryKeys.myPosts,
+    queryFn: ({ signal }) => api.getMyPosts({ page: 1, limit: 20 }, { signal }),
+    retry: 1,
+    staleTime: 30_000,
+  }),
 };
 
 export const fallbacks = {

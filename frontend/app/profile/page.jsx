@@ -10,7 +10,6 @@ import { PostList } from "../../components/PostList";
 import { QueryNotice } from "../../components/QueryNotice";
 import { SectionTitle } from "../../components/SectionTitle";
 import { builds, glyph } from "../../components/constants";
-import { fallbackPosts } from "../../lib/api";
 import { queries } from "../../lib/queries";
 
 const focusableSelector = [
@@ -51,9 +50,11 @@ export default function ProfilePage() {
   const noticeTimerRef = useRef(null);
   const wasEditingRef = useRef(false);
   const profile = useQuery(queries.profile());
+  const myPosts = useQuery({ ...queries.myPosts(), enabled: Boolean(profile.data) });
   const displayName = name || profile.data?.name || "";
-  const recentPosts = fallbackPosts().slice(0, 3);
-  const activeTab = profileTabs[tab];
+  const recentPosts = myPosts.data?.items || [];
+  const postCount = myPosts.data?.meta?.total ?? recentPosts.length;
+  const activeTab = tab === "Posts" ? { ...profileTabs.Posts, count: postCount } : profileTabs[tab];
 
   const flashNotice = (message) => {
     window.clearTimeout(noticeTimerRef.current);
@@ -203,7 +204,7 @@ export default function ProfilePage() {
         </section>
         <section className="profile-stats">
           <div>
-            <b>128</b>
+            <b>{postCount}</b>
             <span>Posts</span>
           </div>
           <div>
@@ -259,7 +260,14 @@ export default function ProfilePage() {
             )}
             {tab === "Posts" && (
               <div className="panel profile-posts">
-                <PostList posts={recentPosts} />
+                <QueryNotice isLoading={myPosts.isLoading} isError={myPosts.isError} />
+                {!myPosts.isLoading && recentPosts.length > 0 && <PostList posts={recentPosts} />}
+                {!myPosts.isLoading && !myPosts.isError && recentPosts.length === 0 && (
+                  <div className="state-card profile-empty-state">
+                    <b>No posts yet</b>
+                    <span>Your published posts will appear here.</span>
+                  </div>
+                )}
               </div>
             )}
             {tab === "Collections" && (

@@ -14,6 +14,7 @@ export const backendRoutes = {
   signInEmail: "/api/auth/sign-in/email",
   signUpEmail: "/api/auth/sign-up/email",
   signOut: "/api/auth/sign-out",
+  myPosts: "/posts/mine",
   chatConversations: "/chat/conversations",
   chatRequests: "/chat/requests",
   chatDirect: "/chat/direct",
@@ -72,6 +73,25 @@ export function normalizeGame(game) {
     status: game.status,
     categories: game.categories || [],
     raw: game,
+  };
+}
+
+export function normalizePost(post) {
+  const createdAt = post.createdAt ? new Date(post.createdAt) : null;
+  const elapsed = createdAt && !Number.isNaN(createdAt.valueOf()) ? Date.now() - createdAt : null;
+  const hours = elapsed === null ? null : Math.max(1, Math.floor(elapsed / 3_600_000));
+  const time =
+    hours === null ? "Recently" : hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
+
+  return {
+    id: post.id,
+    title: post.title,
+    author: post.author?.name || "Unknown user",
+    time,
+    tag: post.category?.name || post.tags?.[0]?.name || "Discussion",
+    gameName: post.game?.name,
+    gameSlug: post.game?.slug,
+    raw: post,
   };
 }
 
@@ -190,6 +210,10 @@ async function mockResponse(path) {
   if (pathname === backendRoutes.currentUser) return null;
   if (pathname === backendRoutes.signInEmail || pathname === backendRoutes.signUpEmail)
     return { ok: true };
+  if (pathname === backendRoutes.myPosts) {
+    const items = fallbackPosts();
+    return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
+  }
   if (pathname === backendRoutes.games) return fallbackGames(params.get("search") || "");
   if (pathname.startsWith("/games/") && pathname.endsWith("/categories"))
     return fallbackCategories();
@@ -248,6 +272,14 @@ export const api = {
       password,
     }),
   signOut: () => mutation(backendRoutes.signOut),
+  getMyPosts: async (query = {}, options = {}) => {
+    const response = await request(withQuery(backendRoutes.myPosts, query), options);
+    const items = Array.isArray(response) ? response : response.items || [];
+    return {
+      items: items.map((post) => (post.raw ? post : normalizePost(post))),
+      meta: response.meta || { total: items.length },
+    };
+  },
   getHome: async ({ search = "" } = {}) => {
     const games = await api.getGames({ status: "ACTIVE", search, limit: 20 });
     const forYouPosts = fallbackPosts({ search });
