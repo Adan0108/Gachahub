@@ -15,6 +15,8 @@ export const backendRoutes = {
   signUpEmail: "/api/auth/sign-up/email",
   signOut: "/api/auth/sign-out",
   myPosts: "/posts/mine",
+  latestFeed: "/feed/latest",
+  trendingFeed: "/feed/trending",
   chatConversations: "/chat/conversations",
   chatRequests: "/chat/requests",
   chatDirect: "/chat/direct",
@@ -214,6 +216,10 @@ async function mockResponse(path) {
     const items = fallbackPosts();
     return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
   }
+  if (pathname === backendRoutes.latestFeed || pathname === backendRoutes.trendingFeed) {
+    const items = fallbackPosts();
+    return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
+  }
   if (pathname === backendRoutes.games) return fallbackGames(params.get("search") || "");
   if (pathname.startsWith("/games/") && pathname.endsWith("/categories"))
     return fallbackCategories();
@@ -280,13 +286,28 @@ export const api = {
       meta: response.meta || { total: items.length },
     };
   },
+  getLatestFeed: (query = {}, options = {}) =>
+    api.getPostCollection(backendRoutes.latestFeed, query, options),
+  getTrendingFeed: (query = {}, options = {}) =>
+    api.getPostCollection(backendRoutes.trendingFeed, query, options),
+  getPostCollection: async (path, query = {}, options = {}) => {
+    const response = await request(withQuery(path, query), options);
+    const items = Array.isArray(response) ? response : response.items || [];
+    return {
+      items: items.map((post) => (post.raw ? post : normalizePost(post))),
+      meta: response.meta || { total: items.length },
+    };
+  },
   getHome: async ({ search = "" } = {}) => {
-    const games = await api.getGames({ status: "ACTIVE", search, limit: 20 });
-    const forYouPosts = fallbackPosts({ search });
+    const [games, latest, trending] = await Promise.all([
+      api.getGames({ status: "ACTIVE", search, limit: 20 }),
+      api.getLatestFeed({ page: 1, limit: 10 }),
+      api.getTrendingFeed({ page: 1, limit: 10 }),
+    ]);
     return {
       communities: games.items,
-      forYouPosts,
-      posts: forYouPosts,
+      forYouPosts: latest.items,
+      posts: trending.items,
       meta: games.meta,
     };
   },

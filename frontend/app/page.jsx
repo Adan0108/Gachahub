@@ -37,12 +37,7 @@ export default function HomePage() {
     const matchesCategory = !selectedCategories.size || selectedCategories.has(post.tag);
     return matchesGame && matchesCategory;
   });
-  const trendingPosts =
-    tab === "New"
-      ? [...data.posts].reverse()
-      : tab === "Top"
-        ? [...data.posts].sort((a, b) => a.title.localeCompare(b.title))
-        : data.posts;
+  const trendingPosts = tab === "New" ? allForYouPosts : data.posts;
 
   const showNotice = (message) => {
     window.clearTimeout(noticeTimerRef.current);
@@ -160,9 +155,7 @@ export default function HomePage() {
             Tune Feed <FiChevronRight />
           </button>
         </div>
-        <p className="feed-copy">
-          A personalized local feed based on your selected games and topics.
-        </p>
+        <p className="feed-copy">Latest posts across your selected games and topics.</p>
         <QueryNotice
           isEmpty={!forYouPosts.length}
           emptyText="No For You posts are available yet."
