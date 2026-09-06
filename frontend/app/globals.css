@@ -1,5 +1,5 @@
 /* Font imports */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&family=Orbitron:wght@600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Barlow:wght@600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap");
 
 /* Base tokens */
 :root {
@@ -30,7 +30,7 @@ body,
   min-height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-body, "Source Sans 3", "Segoe UI", Arial, sans-serif);
 }
 
 button,
@@ -508,7 +508,7 @@ button {
   position: absolute;
   right: 18%;
   bottom: -20%;
-  font-family: Orbitron;
+  font-family: var(--font-display);
   font-size: 70px;
   color: #e8eaff;
   text-shadow: 0 0 20px var(--glow);
@@ -692,7 +692,7 @@ button {
   position: absolute;
   left: 28px;
   top: 40px;
-  font-family: serif;
+  font-family: var(--font-display);
   font-weight: bold;
   font-size: 25px;
   line-height: 0.82;
@@ -1077,7 +1077,7 @@ button {
 }
 
 .canvas-header h1 {
-  font-family: Orbitron;
+  font-family: var(--canvas-font, var(--font-display));
   margin: 0;
   font-size: 26px;
 }
@@ -2052,8 +2052,8 @@ body {
 
 /* Typography and spacing overrides */
 :root {
-  --font-body: "Inter", "Segoe UI", Arial, sans-serif;
-  --font-display: "Space Grotesk", "Orbitron", "Segoe UI", sans-serif;
+  --font-body: "Source Sans 3", "Segoe UI", Arial, sans-serif;
+  --font-display: "Barlow", "Arial Narrow", "Segoe UI", sans-serif;
   --radius-xl: 22px;
 }
 
@@ -2068,11 +2068,32 @@ body,
 h1,
 h2,
 h3,
+h4,
+h5,
+h6,
 .brand b,
 .hero-wordmark,
+.side-nav a,
+.tabs button,
+.section-title,
+.eyebrow,
 .canvas-header h1 {
   font-family: var(--font-display);
   letter-spacing: -0.035em;
+}
+
+p,
+span,
+small,
+label,
+input,
+textarea,
+select,
+button,
+a,
+blockquote,
+li {
+  font-family: inherit;
 }
 
 .side-nav a {
@@ -4288,16 +4309,16 @@ body {
 }
 
 :root {
-  --motion-fast: 160ms;
-  --motion-base: 240ms;
-  --motion-slow: 520ms;
-  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-fast: 140ms;
+  --motion-base: 220ms;
+  --motion-slow: 420ms;
+  --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @keyframes page-enter {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(6px);
   }
 
   to {
@@ -4309,12 +4330,12 @@ body {
 @keyframes panel-rise {
   from {
     opacity: 0;
-    transform: translateY(14px) scale(0.985);
+    transform: translateY(8px);
   }
 
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 
@@ -4397,6 +4418,7 @@ body {
 .build-card,
 .summary-card,
 .lore-card,
+.post,
 .profile-stats,
 .tabs.wide,
 .state-card,
@@ -4542,7 +4564,7 @@ body {
 .leader:hover,
 .auth-card:hover,
 .auth-side:hover {
-  transform: translateY(-3px);
+  transform: translateY(-2px);
   box-shadow: 0 18px 44px color-mix(in srgb, var(--shadow), transparent 24%);
 }
 
