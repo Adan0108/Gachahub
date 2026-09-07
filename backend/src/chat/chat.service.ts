@@ -215,6 +215,12 @@ export class ChatService {
       senderId,
       recipientUserIds: [dto.recipientUserId],
       shouldNotify,
+      ciphertext: result.message.ciphertext,
+      encryptionMeta: result.message.encryptionMeta,
+      contentType: result.message.contentType,
+      createdAt: result.message.createdAt,
+      clientMessageId: result.message.clientMessageId,
+      replyToId: result.message.replyToId,
     });
 
     return {
@@ -1218,11 +1224,21 @@ export class ChatService {
       .filter((_, index) => !notifiableFlags[index])
       .map((participant) => participant.userId);
 
+    const messagePayload = {
+      conversationId,
+      messageId: message.id,
+      senderId,
+      ciphertext: message.ciphertext,
+      encryptionMeta: message.encryptionMeta,
+      contentType: message.contentType,
+      createdAt: message.createdAt,
+      clientMessageId: message.clientMessageId,
+      replyToId: message.replyToId,
+    };
+
     if (notifiableRecipientIds.length > 0) {
       await this.chatDelivery.publishMessageCreated({
-        conversationId,
-        messageId: message.id,
-        senderId,
+        ...messagePayload,
         recipientUserIds: notifiableRecipientIds,
         shouldNotify: true,
       });
@@ -1230,9 +1246,7 @@ export class ChatService {
 
     if (silentRecipientIds.length > 0) {
       await this.chatDelivery.publishMessageCreated({
-        conversationId,
-        messageId: message.id,
-        senderId,
+        ...messagePayload,
         recipientUserIds: silentRecipientIds,
         shouldNotify: false,
       });

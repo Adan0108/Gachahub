@@ -23,12 +23,17 @@ export class SocketChatDeliveryService implements ChatDeliveryPort {
     if (!event.shouldNotify) {
       return Promise.resolve();
     }
-    // recipientUserIds stay out, it leaks who else got this batch; shouldNotify is
-    // safe, each recipient only ever gets one call, so it's about them, not others.
+    // recipientUserIds stay out, it leaks who else got this batch
     return this.emitToRecipients('message:created', event.recipientUserIds, {
       conversationId: event.conversationId,
       messageId: event.messageId,
       senderId: event.senderId,
+      ciphertext: event.ciphertext,
+      encryptionMeta: event.encryptionMeta,
+      contentType: event.contentType,
+      createdAt: event.createdAt,
+      clientMessageId: event.clientMessageId,
+      replyToId: event.replyToId,
     });
   }
 

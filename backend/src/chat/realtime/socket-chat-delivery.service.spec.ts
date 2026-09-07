@@ -16,6 +16,12 @@ describe('SocketChatDeliveryService', () => {
     senderId: 'user-1',
     recipientUserIds: ['user-2', 'user-3'],
     shouldNotify: true,
+    ciphertext: 'cipher',
+    encryptionMeta: null,
+    contentType: 'TEXT',
+    createdAt: new Date('2024-01-01'),
+    clientMessageId: 'client-1',
+    replyToId: null,
   };
 
   beforeEach(() => {
@@ -36,6 +42,12 @@ describe('SocketChatDeliveryService', () => {
       conversationId: 'conversation-1',
       messageId: 'message-1',
       senderId: 'user-1',
+      ciphertext: 'cipher',
+      encryptionMeta: null,
+      contentType: 'TEXT',
+      createdAt: new Date('2024-01-01'),
+      clientMessageId: 'client-1',
+      replyToId: null,
     });
     expect(emit).toHaveBeenCalledTimes(2);
   });

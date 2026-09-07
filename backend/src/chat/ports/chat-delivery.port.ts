@@ -12,6 +12,12 @@ export interface ChatMessageCreatedEvent {
   senderId: string;
   recipientUserIds: string[];
   shouldNotify: boolean;
+  ciphertext: string;
+  encryptionMeta: unknown;
+  contentType: string;
+  createdAt: Date;
+  clientMessageId: string | null;
+  replyToId: string | null;
 }
 
 /**
