@@ -24,6 +24,8 @@ export const backendRoutes = {
   followStatus: (userId) => `/users/${encodePathParam(userId)}/follow-status`,
   postComments: (postId) => `/posts/${encodePathParam(postId)}/comments`,
   commentReplies: (commentId) => `/comments/${encodePathParam(commentId)}/replies`,
+  mediaSignatures: "/media/uploads/signatures",
+  mediaConfirm: "/media/uploads/confirm",
   chatConversations: "/chat/conversations",
   chatRequests: "/chat/requests",
   chatDirect: "/chat/direct",
@@ -166,7 +168,7 @@ function withQuery(path, query = {}) {
 async function request(path, options = {}) {
   const { headers, body, allowUnauthorized = false, ...fetchOptions } = options;
 
-  if (USE_MOCKS) return mockResponse(path);
+  if (USE_MOCKS) return mockResponse(path, options);
 
   const shouldSendJsonHeader = body !== undefined && !(body instanceof FormData);
 
@@ -214,7 +216,7 @@ function mutationAuthHeaders(headers) {
   return headers || {};
 }
 
-async function mockResponse(path) {
+async function mockResponse(path, options = {}) {
   await new Promise((resolve) => setTimeout(resolve, 120));
   const [pathname, queryString] = path.split("?");
   const params = new URLSearchParams(queryString || "");
@@ -230,6 +232,9 @@ async function mockResponse(path) {
   if (pathname === backendRoutes.latestFeed || pathname === backendRoutes.trendingFeed) {
     const items = fallbackPosts();
     return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
+  }
+  if (pathname === backendRoutes.posts && options.method === "POST") {
+    return { id: `mock-post-${Date.now()}`, ...JSON.parse(options.body || "{}") };
   }
   if (pathname === backendRoutes.posts) {
     const items = fallbackPosts({ search: params.get("search") || "" });
@@ -263,6 +268,36 @@ async function mockResponse(path) {
   }
   if (pathname.startsWith("/chat")) return [];
   return null;
+}
+
+async function uploadToCloudinary(file, authorization) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("api_key", authorization.apiKey);
+  form.append("timestamp", String(authorization.timestamp));
+  form.append("signature", authorization.signature);
+  form.append("upload_preset", authorization.uploadPreset);
+  form.append("folder", authorization.folder);
+  form.append("public_id", authorization.publicId);
+  form.append("overwrite", "false");
+
+  const response = await fetch(authorization.uploadUrl, { method: "POST", body: form });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error?.message || "Cloudinary upload failed");
+
+  return {
+    uploadId: authorization.uploadId,
+    assetId: result.asset_id,
+    publicId: result.public_id,
+    secureUrl: result.secure_url,
+    version: result.version,
+    signature: result.signature,
+    format: result.format,
+    bytes: result.bytes,
+    ...(result.width ? { width: result.width } : {}),
+    ...(result.height ? { height: result.height } : {}),
+    ...(result.duration !== undefined ? { duration: result.duration } : {}),
+  };
 }
 
 function encryptedMessagePayload({
@@ -339,6 +374,27 @@ export const api = {
     request(withQuery(backendRoutes.commentReplies(commentId), query), options),
   createReply: (commentId, content) =>
     mutation(backendRoutes.commentReplies(commentId), { content }),
+  createPost: (post) => mutation(backendRoutes.posts, post),
+  createUploadSignatures: (files) =>
+    mutation(backendRoutes.mediaSignatures, {
+      purpose: "POST",
+      items: files.map((file) => ({
+        resourceType: file.type.startsWith("video/") ? "VIDEO" : "IMAGE",
+      })),
+    }),
+  confirmMediaUploads: (items) => mutation(backendRoutes.mediaConfirm, { items }),
+  uploadPostMedia: async (files) => {
+    if (!files.length) return [];
+    const authorizations = await api.createUploadSignatures(files);
+    const uploaded = await Promise.all(
+      files.map((file, index) => uploadToCloudinary(file, authorizations.items[index])),
+    );
+    const confirmed = await api.confirmMediaUploads(uploaded);
+    if (confirmed.failedCount) {
+      throw new Error(confirmed.failed?.[0]?.error || "Media confirmation failed");
+    }
+    return confirmed.successful.map(({ result }) => result);
+  },
   getPostCollection: async (path, query = {}, options = {}) => {
     const response = await request(withQuery(path, query), options);
     const items = Array.isArray(response) ? response : response.items || [];

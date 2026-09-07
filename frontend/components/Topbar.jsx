@@ -135,7 +135,7 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
               ? "Offline mode"
               : "Checking API"}
         </span>
-        <button className="outline-btn" onClick={() => router.push("/studio")} type="button">
+        <button className="outline-btn" onClick={() => router.push("/create")} type="button">
           <FiPlus /> <span>Create</span>
         </button>
         <button
