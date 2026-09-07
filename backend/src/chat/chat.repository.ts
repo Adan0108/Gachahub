@@ -577,7 +577,8 @@ export class ChatRepository {
   /**
    * Counts all unread messages for one user's accepted inbox.
    *
-   * Sender messages are excluded, and pending stranger requests are ignored so
+   * Sender messages are excluded, and pending stranger requests +
+   * archived conversation that still getting messages are ignored so
    * the normal chat badge only counts accepted conversations.
    */
   countUnreadMessagesForUser(userId: string) {
@@ -605,7 +606,7 @@ export class ChatRepository {
   }
 
   /**
-   * Counts accepted conversations with at least one unread message.
+   * Counts convos in main inbox only with at least one unread message.
    *
    * This lets the frontend show "how many chats are unread" without loading
    * the full inbox list.
