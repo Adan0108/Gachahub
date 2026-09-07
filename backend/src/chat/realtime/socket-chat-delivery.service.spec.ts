@@ -36,9 +36,19 @@ describe('SocketChatDeliveryService', () => {
       conversationId: 'conversation-1',
       messageId: 'message-1',
       senderId: 'user-1',
-      shouldNotify: true,
     });
     expect(emit).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not emit at all when shouldNotify is false', async () => {
+    const emit = jest.fn();
+    const to = jest.fn().mockReturnValue({ emit });
+    registry.server = { to } as unknown as Server;
+
+    await service.publishMessageCreated({ ...event, shouldNotify: false });
+
+    expect(to).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
   });
 
   it('does nothing when no server is registered yet', async () => {
