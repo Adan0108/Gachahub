@@ -751,6 +751,7 @@ export class ChatRepository {
             where: {
               id: params.lastReadMessageId,
               conversationId: params.conversationId,
+              status: 'SENT',
             },
           })
         : await tx.chatMessage.findFirst({
