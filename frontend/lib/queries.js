@@ -14,6 +14,9 @@ export const queryKeys = {
   followStatus: (userId) => ["follow-status", userId],
   comments: (postId) => ["comments", postId],
   replies: (commentId) => ["comment-replies", commentId],
+  chatConversations: ["chat", "conversations"],
+  chatRequests: ["chat", "requests"],
+  chatMessages: (conversationId) => ["chat", "messages", conversationId],
 };
 
 export const queries = {
@@ -95,6 +98,25 @@ export const queries = {
     enabled: Boolean(commentId),
     retry: 1,
     staleTime: 15_000,
+  }),
+  chatConversations: () => ({
+    queryKey: queryKeys.chatConversations,
+    queryFn: api.getChatConversations,
+    retry: 1,
+    staleTime: 10_000,
+  }),
+  chatRequests: () => ({
+    queryKey: queryKeys.chatRequests,
+    queryFn: api.getChatRequests,
+    retry: 1,
+    staleTime: 10_000,
+  }),
+  chatMessages: (conversationId) => ({
+    queryKey: queryKeys.chatMessages(conversationId),
+    queryFn: () => api.getChatMessages(conversationId, { limit: 50 }),
+    enabled: Boolean(conversationId),
+    retry: 1,
+    staleTime: 5_000,
   }),
 };
 
