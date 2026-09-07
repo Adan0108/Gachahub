@@ -19,6 +19,11 @@ export const backendRoutes = {
   latestFeed: "/feed/latest",
   trendingFeed: "/feed/trending",
   gameFeed: (gameSlug) => `/games/${encodePathParam(gameSlug)}/feed`,
+  postLike: (postId) => `/posts/${encodePathParam(postId)}/like`,
+  userFollow: (userId) => `/users/${encodePathParam(userId)}/follow`,
+  followStatus: (userId) => `/users/${encodePathParam(userId)}/follow-status`,
+  postComments: (postId) => `/posts/${encodePathParam(postId)}/comments`,
+  commentReplies: (commentId) => `/comments/${encodePathParam(commentId)}/replies`,
   chatConversations: "/chat/conversations",
   chatRequests: "/chat/requests",
   chatDirect: "/chat/direct",
@@ -91,10 +96,14 @@ export function normalizePost(post) {
     id: post.id,
     title: post.title,
     author: post.author?.name || "Unknown user",
+    authorId: post.author?.id || post.authorId,
     time,
     tag: post.category?.name || post.tags?.[0]?.name || "Discussion",
     gameName: post.game?.name,
     gameSlug: post.game?.slug,
+    likeCount: post.reactionCount ?? post.likeCount ?? 0,
+    commentCount: post.commentCount ?? 0,
+    likedByCurrentUser: Boolean(post.likedByCurrentUser),
     raw: post,
   };
 }
@@ -226,6 +235,13 @@ async function mockResponse(path) {
     const items = fallbackPosts({ search: params.get("search") || "" });
     return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
   }
+  if (/^\/posts\/[^/]+\/comments$/.test(pathname)) {
+    return { items: [], meta: { page: 1, limit: 20, total: 0, totalPages: 0 } };
+  }
+  if (/^\/comments\/[^/]+\/replies$/.test(pathname)) {
+    return { items: [], meta: { page: 1, limit: 20, total: 0, totalPages: 0 } };
+  }
+  if (/^\/users\/[^/]+\/follow-status$/.test(pathname)) return { following: false };
   if (pathname === backendRoutes.games) return fallbackGames(params.get("search") || "");
   if (pathname.startsWith("/games/") && pathname.endsWith("/categories"))
     return fallbackCategories();
@@ -310,6 +326,19 @@ export const api = {
     api.getPostCollection(backendRoutes.posts, query, options),
   getGameFeed: (gameSlug, query = {}, options = {}) =>
     api.getPostCollection(backendRoutes.gameFeed(gameSlug), query, options),
+  likePost: (postId) => mutation(backendRoutes.postLike(postId)),
+  unlikePost: (postId) => mutation(backendRoutes.postLike(postId), undefined, { method: "DELETE" }),
+  getFollowStatus: (userId, options = {}) => request(backendRoutes.followStatus(userId), options),
+  followUser: (userId) => mutation(backendRoutes.userFollow(userId)),
+  unfollowUser: (userId) =>
+    mutation(backendRoutes.userFollow(userId), undefined, { method: "DELETE" }),
+  getComments: (postId, query = {}, options = {}) =>
+    request(withQuery(backendRoutes.postComments(postId), query), options),
+  createComment: (postId, content) => mutation(backendRoutes.postComments(postId), { content }),
+  getReplies: (commentId, query = {}, options = {}) =>
+    request(withQuery(backendRoutes.commentReplies(commentId), query), options),
+  createReply: (commentId, content) =>
+    mutation(backendRoutes.commentReplies(commentId), { content }),
   getPostCollection: async (path, query = {}, options = {}) => {
     const response = await request(withQuery(path, query), options);
     const items = Array.isArray(response) ? response : response.items || [];

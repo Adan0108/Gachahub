@@ -11,6 +11,9 @@ export const queryKeys = {
   myPosts: ["posts", "mine"],
   posts: (search) => ["posts", { search }],
   gameFeed: (slug, categorySlug) => ["game-feed", slug, { categorySlug }],
+  followStatus: (userId) => ["follow-status", userId],
+  comments: (postId) => ["comments", postId],
+  replies: (commentId) => ["comment-replies", commentId],
 };
 
 export const queries = {
@@ -71,6 +74,27 @@ export const queries = {
     enabled: Boolean(slug),
     retry: 1,
     staleTime: 30_000,
+  }),
+  followStatus: (userId) => ({
+    queryKey: queryKeys.followStatus(userId),
+    queryFn: ({ signal }) => api.getFollowStatus(userId, { signal }),
+    enabled: Boolean(userId),
+    retry: false,
+    staleTime: 30_000,
+  }),
+  comments: (postId) => ({
+    queryKey: queryKeys.comments(postId),
+    queryFn: ({ signal }) => api.getComments(postId, { page: 1, limit: 20 }, { signal }),
+    enabled: Boolean(postId),
+    retry: 1,
+    staleTime: 15_000,
+  }),
+  replies: (commentId) => ({
+    queryKey: queryKeys.replies(commentId),
+    queryFn: ({ signal }) => api.getReplies(commentId, { page: 1, limit: 20 }, { signal }),
+    enabled: Boolean(commentId),
+    retry: 1,
+    staleTime: 15_000,
   }),
 };
 

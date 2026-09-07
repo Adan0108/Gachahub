@@ -4901,6 +4901,136 @@ body {
   outline-offset: 4px;
 }
 
+.post-social {
+  grid-column: 3 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: -2px;
+}
+
+.post-social button,
+.post-comment-actions button,
+.post-sign-in {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.post-social button:hover:not(:disabled),
+.post-comment-actions button:hover,
+.post-sign-in:hover,
+.post-social button.active {
+  background: var(--panel2);
+  color: var(--text);
+}
+
+.post-social button.active:first-child {
+  color: var(--pink);
+}
+
+.post-thread,
+.post-action-error {
+  grid-column: 1 / -1;
+}
+
+.post-thread {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel2), transparent 48%);
+}
+
+.post-comment {
+  display: grid;
+  gap: 5px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--line);
+}
+
+.post-comment-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.post-comment p,
+.post-reply p {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.post-comment-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.post-comment-form,
+.post-reply-form {
+  display: flex;
+  gap: 8px;
+}
+
+.post-comment-form input,
+.post-reply-form input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  outline: 0;
+  background: var(--panel);
+}
+
+.post-comment-form input:focus,
+.post-reply-form input:focus {
+  border-color: var(--purple);
+}
+
+.post-comment-form button,
+.post-reply-form button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 11px;
+  background: var(--purple);
+  color: #fff;
+  font-weight: 800;
+}
+
+.post-replies {
+  display: grid;
+  gap: 8px;
+  margin-left: 18px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+}
+
+.post-reply {
+  display: grid;
+  gap: 3px;
+}
+
+.post-action-error {
+  color: #ff9b9b !important;
+}
+
 .archive-toolbar {
   display: grid;
   grid-template-columns: auto minmax(220px, 1fr) auto;
