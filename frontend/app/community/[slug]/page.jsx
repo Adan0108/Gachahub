@@ -52,12 +52,26 @@ function CommunityContent() {
     ].filter((item, index, all) => all.indexOf(item) === index);
   }, [categoriesQuery.data]);
   const activeTab = categories.includes(selectedTab) ? selectedTab : "Overview";
-  const communityPosts = fallbacks.posts({ gameSlug: slug });
-  const categoryPosts = communityPosts.filter((post) => {
-    const tag = post.tag.toLowerCase();
-    const category = activeTab.toLowerCase();
-    return tag === category || `${tag}s` === category;
+  const selectedCategory = (categoriesQuery.data || fallbacks.categories()).find(
+    (category) => category.name === activeTab,
+  );
+  const categorySlug = ["Overview", "Builds", "Teams"].includes(activeTab)
+    ? undefined
+    : selectedCategory?.slug;
+  const shouldLoadFeed = activeTab === "Overview" || Boolean(categorySlug);
+  const feedQuery = useQuery({
+    ...queries.gameFeed(slug, categorySlug),
+    enabled: Boolean(slug) && shouldLoadFeed,
   });
+  const fallbackCommunityPosts = fallbacks.posts({ gameSlug: slug });
+  const fallbackFeedPosts = categorySlug
+    ? fallbackCommunityPosts.filter((post) => {
+        const tag = post.tag.toLowerCase();
+        return tag === categorySlug || `${tag}s` === categorySlug;
+      })
+    : fallbackCommunityPosts;
+  const communityPosts = feedQuery.data?.items || fallbackFeedPosts;
+  const categoryPosts = communityPosts;
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -157,6 +171,12 @@ function CommunityContent() {
             <div className="community-tab-content">
               <div>
                 <SectionTitle>Latest discussions</SectionTitle>
+                <QueryNotice
+                  isLoading={feedQuery.isLoading}
+                  isError={feedQuery.isError}
+                  isEmpty={!communityPosts.length}
+                  emptyText="No community discussions yet."
+                />
                 <PostList posts={communityPosts.slice(0, 3)} />
               </div>
               <div>
@@ -208,6 +228,7 @@ function CommunityContent() {
           {!["Overview", "Builds", "Teams"].includes(activeTab) && (
             <>
               <SectionTitle>{activeTab} discussions</SectionTitle>
+              <QueryNotice isLoading={feedQuery.isLoading} isError={feedQuery.isError} />
               {categoryPosts.length ? (
                 <PostList posts={categoryPosts} />
               ) : (

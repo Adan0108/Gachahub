@@ -25,12 +25,12 @@ function ExploreContent() {
   const [smartMode, setSmartMode] = useState(false);
   const noticeTimerRef = useRef(null);
   const games = useQuery(queries.games(search));
+  const postsQuery = useQuery(queries.posts(search));
   const canUseLocalSearch = api.usingMocks;
   const gameData =
     games.data ||
     (canUseLocalSearch || smartMode ? fallbacks.games(search) : { items: [], meta: {} });
-  const posts =
-    games.isError && !canUseLocalSearch && !smartMode ? [] : fallbacks.posts({ search });
+  const posts = postsQuery.data?.items || fallbacks.posts({ search });
   const filteredPosts = posts.filter((post) => {
     if (smartGames.length && !smartGames.includes(post.gameSlug)) return false;
     if (activeFilter === "All") return true;
@@ -128,6 +128,8 @@ function ExploreContent() {
           <SectionTitle>Fresh Posts</SectionTitle>
           <div className="panel">
             <QueryNotice
+              isLoading={postsQuery.isLoading}
+              isError={postsQuery.isError}
               isEmpty={!filteredPosts.length}
               emptyText={`No ${activeFilter === "All" ? "posts" : activeFilter.toLowerCase()} match this search yet.`}
             />

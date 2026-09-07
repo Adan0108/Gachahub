@@ -9,6 +9,8 @@ export const queryKeys = {
   currentUser: ["current-user"],
   profile: ["current-user"],
   myPosts: ["posts", "mine"],
+  posts: (search) => ["posts", { search }],
+  gameFeed: (slug, categorySlug) => ["game-feed", slug, { categorySlug }],
 };
 
 export const queries = {
@@ -52,6 +54,21 @@ export const queries = {
   myPosts: () => ({
     queryKey: queryKeys.myPosts,
     queryFn: ({ signal }) => api.getMyPosts({ page: 1, limit: 20 }, { signal }),
+    retry: 1,
+    staleTime: 30_000,
+  }),
+  posts: (search) => ({
+    queryKey: queryKeys.posts(search),
+    queryFn: ({ signal }) =>
+      api.getPosts({ page: 1, limit: 20, search, sort: "latest" }, { signal }),
+    retry: 1,
+    staleTime: 30_000,
+  }),
+  gameFeed: (slug, categorySlug) => ({
+    queryKey: queryKeys.gameFeed(slug, categorySlug),
+    queryFn: ({ signal }) =>
+      api.getGameFeed(slug, { page: 1, limit: 20, sort: "latest", categorySlug }, { signal }),
+    enabled: Boolean(slug),
     retry: 1,
     staleTime: 30_000,
   }),

@@ -15,8 +15,10 @@ export const backendRoutes = {
   signUpEmail: "/api/auth/sign-up/email",
   signOut: "/api/auth/sign-out",
   myPosts: "/posts/mine",
+  posts: "/posts",
   latestFeed: "/feed/latest",
   trendingFeed: "/feed/trending",
+  gameFeed: (gameSlug) => `/games/${encodePathParam(gameSlug)}/feed`,
   chatConversations: "/chat/conversations",
   chatRequests: "/chat/requests",
   chatDirect: "/chat/direct",
@@ -220,9 +222,23 @@ async function mockResponse(path) {
     const items = fallbackPosts();
     return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
   }
+  if (pathname === backendRoutes.posts) {
+    const items = fallbackPosts({ search: params.get("search") || "" });
+    return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
+  }
   if (pathname === backendRoutes.games) return fallbackGames(params.get("search") || "");
   if (pathname.startsWith("/games/") && pathname.endsWith("/categories"))
     return fallbackCategories();
+  if (pathname.startsWith("/games/") && pathname.endsWith("/feed")) {
+    const slug = decodePathParam(pathname.split("/")[2]);
+    const categorySlug = params.get("categorySlug")?.toLowerCase();
+    const items = fallbackPosts({ gameSlug: slug }).filter((post) => {
+      if (!categorySlug) return true;
+      const tag = post.tag.toLowerCase();
+      return tag === categorySlug || `${tag}s` === categorySlug;
+    });
+    return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
+  }
   if (pathname.startsWith("/games/")) {
     const slug = decodePathParam(pathname.split("/")[2]);
     const game = mockGames.find((item) => item.slug === slug || item.id === slug);
@@ -290,6 +306,10 @@ export const api = {
     api.getPostCollection(backendRoutes.latestFeed, query, options),
   getTrendingFeed: (query = {}, options = {}) =>
     api.getPostCollection(backendRoutes.trendingFeed, query, options),
+  getPosts: (query = {}, options = {}) =>
+    api.getPostCollection(backendRoutes.posts, query, options),
+  getGameFeed: (gameSlug, query = {}, options = {}) =>
+    api.getPostCollection(backendRoutes.gameFeed(gameSlug), query, options),
   getPostCollection: async (path, query = {}, options = {}) => {
     const response = await request(withQuery(path, query), options);
     const items = Array.isArray(response) ? response : response.items || [];
