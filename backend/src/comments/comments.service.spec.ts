@@ -1,8 +1,23 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import type { CommentsRepository } from './comments.repository';
 
+import type { CommentsRepository } from './comments.repository';
+import type { FollowsService } from '../follows/follows.service';
+import type { UserInterestService } from '../recommendation/user-interest.service';
+
+/*
+ * These dependencies are mocked at module level so Jest does not load their
+ * real implementations and transitively initialise Prisma.
+ */
 jest.mock('./comments.repository', () => ({
   CommentsRepository: class {},
+}));
+
+jest.mock('../follows/follows.service', () => ({
+  FollowsService: class {},
+}));
+
+jest.mock('../recommendation/user-interest.service', () => ({
+  UserInterestService: class {},
 }));
 
 import { CommentsService } from './comments.service';
@@ -18,6 +33,14 @@ describe('CommentsService', () => {
     softDelete: jest.fn(),
   };
 
+  const followsService = {
+    isFollowing: jest.fn(),
+  };
+
+  const userInterestService = {
+    recordPostInteraction: jest.fn(),
+  };
+
   let service: CommentsService;
 
   beforeEach(() => {
@@ -25,6 +48,8 @@ describe('CommentsService', () => {
 
     service = new CommentsService(
       commentsRepository as unknown as CommentsRepository,
+      followsService as unknown as FollowsService,
+      userInterestService as unknown as UserInterestService,
     );
   });
 
@@ -32,6 +57,7 @@ describe('CommentsService', () => {
     it('lists comments with default pagination', async () => {
       commentsRepository.findPostById.mockResolvedValue({
         id: 'post-1',
+        authorId: 'author-1',
         status: 'PUBLISHED',
         visibility: 'PUBLIC',
         deletedAt: null,
@@ -89,6 +115,7 @@ describe('CommentsService', () => {
     it('uses provided pagination', async () => {
       commentsRepository.findPostById.mockResolvedValue({
         id: 'post-1',
+        authorId: 'author-1',
         status: 'PUBLISHED',
         visibility: 'PUBLIC',
         deletedAt: null,
@@ -117,6 +144,75 @@ describe('CommentsService', () => {
       });
     });
 
+    it('allows follower to view FOLLOWERS_ONLY post comments', async () => {
+      commentsRepository.findPostById.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'PUBLISHED',
+        visibility: 'FOLLOWERS_ONLY',
+        deletedAt: null,
+      });
+
+      followsService.isFollowing.mockResolvedValue({
+        following: true,
+      });
+
+      commentsRepository.findByPostId.mockResolvedValue({
+        items: [],
+        total: 0,
+      });
+
+      await service.findByPost('post-1', {}, 'user-1');
+
+      expect(followsService.isFollowing).toHaveBeenCalledWith(
+        'user-1',
+        'author-1',
+      );
+
+      expect(commentsRepository.findByPostId).toHaveBeenCalled();
+    });
+
+    it('allows author to view own FOLLOWERS_ONLY post without follow lookup', async () => {
+      commentsRepository.findPostById.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'user-1',
+        status: 'PUBLISHED',
+        visibility: 'FOLLOWERS_ONLY',
+        deletedAt: null,
+      });
+
+      commentsRepository.findByPostId.mockResolvedValue({
+        items: [],
+        total: 0,
+      });
+
+      await service.findByPost('post-1', {}, 'user-1');
+
+      expect(followsService.isFollowing).not.toHaveBeenCalled();
+
+      expect(commentsRepository.findByPostId).toHaveBeenCalled();
+    });
+
+    it('rejects non-follower from FOLLOWERS_ONLY post comments', async () => {
+      commentsRepository.findPostById.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'PUBLISHED',
+        visibility: 'FOLLOWERS_ONLY',
+        deletedAt: null,
+      });
+
+      followsService.isFollowing.mockResolvedValue({
+        following: false,
+      });
+
+      await expect(service.findByPost('post-1', {}, 'user-1')).rejects.toThrow(
+        NotFoundException,
+      );
+
+      expect(commentsRepository.findByPostId).not.toHaveBeenCalled();
+    });
+
     it('throws when post does not exist', async () => {
       commentsRepository.findPostById.mockResolvedValue(null);
 
@@ -130,6 +226,7 @@ describe('CommentsService', () => {
     it('throws when post is not published', async () => {
       commentsRepository.findPostById.mockResolvedValue({
         id: 'post-1',
+        authorId: 'author-1',
         status: 'DRAFT',
         visibility: 'PUBLIC',
         deletedAt: null,
@@ -142,9 +239,10 @@ describe('CommentsService', () => {
       expect(commentsRepository.findByPostId).not.toHaveBeenCalled();
     });
 
-    it('throws when post is not public', async () => {
+    it('throws when post is private', async () => {
       commentsRepository.findPostById.mockResolvedValue({
         id: 'post-1',
+        authorId: 'author-1',
         status: 'PUBLISHED',
         visibility: 'PRIVATE',
         deletedAt: null,
@@ -158,6 +256,7 @@ describe('CommentsService', () => {
     it('throws when post is deleted', async () => {
       commentsRepository.findPostById.mockResolvedValue({
         id: 'post-1',
+        authorId: 'author-1',
         status: 'PUBLISHED',
         visibility: 'PUBLIC',
         deletedAt: new Date(),
@@ -171,6 +270,7 @@ describe('CommentsService', () => {
     it('hides deleted comment content but preserves reply count', async () => {
       commentsRepository.findPostById.mockResolvedValue({
         id: 'post-1',
+        authorId: 'author-1',
         status: 'PUBLISHED',
         visibility: 'PUBLIC',
         deletedAt: null,
@@ -203,14 +303,16 @@ describe('CommentsService', () => {
       const result = await service.findByPost('post-1', {});
 
       expect(result.items[0].content).toBeNull();
+
       expect(result.items[0].replyCount).toBe(2);
     });
   });
 
   describe('create', () => {
-    it('creates a comment on a published public post', async () => {
+    it('creates comment and records COMMENT interest', async () => {
       commentsRepository.findPostById.mockResolvedValue({
         id: 'post-1',
+        authorId: 'author-1',
         status: 'PUBLISHED',
         visibility: 'PUBLIC',
         deletedAt: null,
@@ -246,6 +348,12 @@ describe('CommentsService', () => {
         content: 'Nice post',
       });
 
+      expect(userInterestService.recordPostInteraction).toHaveBeenCalledWith(
+        'user-1',
+        'post-1',
+        'COMMENT',
+      );
+
       expect(result).toEqual(
         expect.objectContaining({
           id: 'comment-1',
@@ -255,7 +363,31 @@ describe('CommentsService', () => {
       );
     });
 
-    it('throws when creating comment on unavailable post', async () => {
+    it('does not record interest when comment creation fails', async () => {
+      commentsRepository.findPostById.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'PUBLISHED',
+        visibility: 'PUBLIC',
+        deletedAt: null,
+      });
+
+      commentsRepository.create.mockRejectedValue(new Error('Database error'));
+
+      await expect(
+        service.create(
+          'post-1',
+          {
+            content: 'Hello',
+          },
+          'user-1',
+        ),
+      ).rejects.toThrow('Database error');
+
+      expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
+    });
+
+    it('does not create comment when post is unavailable', async () => {
       commentsRepository.findPostById.mockResolvedValue(null);
 
       await expect(
@@ -269,6 +401,8 @@ describe('CommentsService', () => {
       ).rejects.toThrow(NotFoundException);
 
       expect(commentsRepository.create).not.toHaveBeenCalled();
+
+      expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
     });
   });
 
@@ -280,6 +414,14 @@ describe('CommentsService', () => {
         authorId: 'user-1',
         parentId: null,
         content: 'Parent comment',
+        deletedAt: null,
+      });
+
+      commentsRepository.findPostById.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'PUBLISHED',
+        visibility: 'PUBLIC',
         deletedAt: null,
       });
 
@@ -319,7 +461,12 @@ describe('CommentsService', () => {
         }),
       );
 
-      expect(result.meta.total).toBe(1);
+      expect(result.meta).toEqual({
+        page: 1,
+        limit: 20,
+        total: 1,
+        totalPages: 1,
+      });
     });
 
     it('throws when parent comment does not exist', async () => {
@@ -351,7 +498,7 @@ describe('CommentsService', () => {
   });
 
   describe('reply', () => {
-    it('creates a reply to a root comment', async () => {
+    it('creates reply and records COMMENT interest', async () => {
       commentsRepository.findById.mockResolvedValue({
         id: 'comment-1',
         postId: 'post-1',
@@ -363,6 +510,7 @@ describe('CommentsService', () => {
 
       commentsRepository.findPostById.mockResolvedValue({
         id: 'post-1',
+        authorId: 'author-1',
         status: 'PUBLISHED',
         visibility: 'PUBLIC',
         deletedAt: null,
@@ -399,6 +547,12 @@ describe('CommentsService', () => {
         content: 'I agree',
       });
 
+      expect(userInterestService.recordPostInteraction).toHaveBeenCalledWith(
+        'user-1',
+        'post-1',
+        'COMMENT',
+      );
+
       expect(result).toEqual(
         expect.objectContaining({
           id: 'reply-1',
@@ -428,9 +582,11 @@ describe('CommentsService', () => {
       ).rejects.toThrow(ForbiddenException);
 
       expect(commentsRepository.create).not.toHaveBeenCalled();
+
+      expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
     });
 
-    it('rejects replying to a deleted comment', async () => {
+    it('rejects replying to deleted comment', async () => {
       commentsRepository.findById.mockResolvedValue({
         id: 'comment-1',
         postId: 'post-1',
@@ -451,11 +607,13 @@ describe('CommentsService', () => {
       ).rejects.toThrow(NotFoundException);
 
       expect(commentsRepository.create).not.toHaveBeenCalled();
+
+      expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
     });
   });
 
   describe('update', () => {
-    it('updates own comment', async () => {
+    it('updates own comment without recording new interest', async () => {
       commentsRepository.findById.mockResolvedValue({
         id: 'comment-1',
         postId: 'post-1',
@@ -493,6 +651,8 @@ describe('CommentsService', () => {
         'comment-1',
         'Updated content',
       );
+
+      expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
 
       expect(result).toEqual(
         expect.objectContaining({
@@ -550,7 +710,7 @@ describe('CommentsService', () => {
   });
 
   describe('remove', () => {
-    it('soft deletes own comment', async () => {
+    it('soft deletes own comment and records COMMENT_REMOVE', async () => {
       commentsRepository.findById.mockResolvedValue({
         id: 'comment-1',
         postId: 'post-1',
@@ -572,9 +732,32 @@ describe('CommentsService', () => {
         'post-1',
       );
 
+      expect(userInterestService.recordPostInteraction).toHaveBeenCalledWith(
+        'user-1',
+        'post-1',
+        'COMMENT_REMOVE',
+      );
+
       expect(result).toEqual({
         message: 'Comment deleted successfully',
       });
+    });
+
+    it('does not record COMMENT_REMOVE when soft delete changes nothing', async () => {
+      commentsRepository.findById.mockResolvedValue({
+        id: 'comment-1',
+        postId: 'post-1',
+        authorId: 'user-1',
+        parentId: null,
+        content: 'Comment',
+        deletedAt: null,
+      });
+
+      commentsRepository.softDelete.mockResolvedValue(null);
+
+      await service.remove('comment-1', 'user-1');
+
+      expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
     });
 
     it('rejects deleting another user comment', async () => {
@@ -592,9 +775,11 @@ describe('CommentsService', () => {
       );
 
       expect(commentsRepository.softDelete).not.toHaveBeenCalled();
+
+      expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
     });
 
-    it('rejects deleting an already deleted comment', async () => {
+    it('rejects deleting already deleted comment', async () => {
       commentsRepository.findById.mockResolvedValue({
         id: 'comment-1',
         postId: 'post-1',
@@ -609,6 +794,8 @@ describe('CommentsService', () => {
       );
 
       expect(commentsRepository.softDelete).not.toHaveBeenCalled();
+
+      expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
     });
   });
 });
