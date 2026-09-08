@@ -8,12 +8,14 @@ import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { CommentsRepository } from './comments.repository';
 import { FollowsService } from '../follows/follows.service';
+import { UserInterestService } from '../recommendation/user-interest.service';
 
 @Injectable()
 export class CommentsService {
   constructor(
     private readonly commentsRepository: CommentsRepository,
     private readonly followsService: FollowsService,
+    private readonly userInterestService: UserInterestService,
   ) {}
 
   async findByPost(postId: string, query: PaginationQueryDto, userId?: string) {
@@ -84,6 +86,12 @@ export class CommentsService {
       content: dto.content.trim(),
     });
 
+    await this.userInterestService.recordPostInteraction(
+      userId,
+      postId,
+      'COMMENT',
+    );
+
     return this.formatComment(comment);
   }
 
@@ -113,6 +121,12 @@ export class CommentsService {
       parentId: parent.id,
       content: dto.content.trim(),
     });
+
+    await this.userInterestService.recordPostInteraction(
+      userId,
+      parent.postId,
+      'COMMENT',
+    );
 
     return this.formatComment(reply);
   }
@@ -147,8 +161,18 @@ export class CommentsService {
       throw new ForbiddenException('You can only delete your own comment');
     }
 
-    await this.commentsRepository.softDelete(comment.id, comment.postId);
+    const deleted = await this.commentsRepository.softDelete(
+      comment.id,
+      comment.postId,
+    );
 
+    if (deleted) {
+      await this.userInterestService.recordPostInteraction(
+        userId,
+        comment.postId,
+        'COMMENT_REMOVE',
+      );
+    }
     return {
       message: 'Comment deleted successfully',
     };
