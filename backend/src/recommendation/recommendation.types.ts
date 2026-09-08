@@ -1,6 +1,6 @@
 import type { InterestEntityType, PostType } from '../generated/prisma/client';
 
-export type PostInteractionAction =
+export type PostInterestAction =
   | 'LIKE'
   | 'UNLIKE'
   | 'COMMENT'
