@@ -14,12 +14,12 @@ import {
  */
 @Injectable()
 export class OpaqueMessageEncryptionService implements MessageEncryptionPort {
-  async preparePayload(
+  preparePayload(
     payload: EncryptedMessagePayloadDto,
   ): Promise<PreparedEncryptedMessage> {
-    return {
+    return Promise.resolve({
       ciphertext: payload.ciphertext,
       encryptionMeta: payload.encryptionMeta,
-    };
+    });
   }
 }

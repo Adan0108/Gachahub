@@ -17,8 +17,9 @@ model User {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  role   UserRole   @default(USER)
-  status UserStatus @default(ACTIVE)
+  role                  UserRole              @default(USER)
+  status                UserStatus            @default(ACTIVE)
+  messageRequestSetting MessageRequestSetting @default(EVERYONE)
 
   sessions     Session[]
   accounts     Account[]
@@ -121,6 +122,12 @@ enum UserStatus {
   SUSPENDED
   BANNED
   DELETED
+}
+
+enum MessageRequestSetting {
+  EVERYONE
+  FOLLOWERS
+  NO_ONE
 }
 
 enum GameMemberRole {
@@ -254,6 +261,11 @@ enum ChatParticipantState {
   ARCHIVED
 }
 
+enum ChatNotificationLevel {
+  ALL
+  NOTHING
+}
+
 enum ChatMessageContentType {
   TEXT
   IMAGE
@@ -299,16 +311,18 @@ model ChatConversation {
 }
 
 model ChatParticipant {
-  id             String               @id @default(cuid())
-  conversationId String
-  userId         String
-  role           ChatParticipantRole  @default(MEMBER)
-  state          ChatParticipantState @default(ACTIVE)
-  lastReadAt     DateTime?
-  pinnedAt       DateTime?
-  archivedAt     DateTime?
-  mutedAt        DateTime?
-  blockedAt      DateTime?
+  id                String                @id @default(cuid())
+  conversationId    String
+  userId            String
+  role              ChatParticipantRole   @default(MEMBER)
+  state             ChatParticipantState  @default(ACTIVE)
+  lastReadAt        DateTime?
+  pinnedAt          DateTime?
+  archivedAt        DateTime?
+  notificationLevel ChatNotificationLevel @default(ALL)
+  mutedUntil        DateTime?
+  blockedAt         DateTime?
+  deletedAt         DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -401,6 +415,12 @@ model ChatMessageReaction {
 
   message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
   user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Cascade, not Restrict: deleting a Game cascades to its ChatEmotes, and a Restrict here
+  // would abort that whole delete with an opaque FK violation. Not SetNull either, because
+  // a reaction must carry exactly one of `emoji` / `emoteId` (see ChatService.reactToMessage)
+  // and nulling `emoteId` would leave a reaction with no content. Routine emote removal is
+  // the soft delete via ChatEmote.deletedAt; a hard delete means the emote is really gone,
+  // so its reactions should go with it.
   emote   ChatEmote?  @relation(fields: [emoteId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId])
@@ -435,6 +455,12 @@ model ChatEmote {
 
   reactions ChatMessageReaction[]
 
+  // Only constrains game-scoped emotes: global emotes have a NULL `gameId`, and PostgreSQL
+  // treats NULLs as distinct, so this never fires for scope = GLOBAL. Global shortcode
+  // uniqueness is enforced by the partial unique index "chat_emotes_global_shortcode_key"
+  // (chat_emotes(shortcode) WHERE "gameId" IS NULL), added by hand in migration
+  // 20260805093000_add_global_emote_shortcode_unique because Prisma cannot express
+  // partial indexes. Keep that migration when regenerating this model.
   @@unique([scope, gameId, shortcode])
   @@index([gameId])
   @@index([createdById])

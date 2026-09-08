@@ -1,26 +1,52 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
+import { WebsocketModule } from '../websocket/websocket.module';
 import { ChatController } from './chat.controller';
 import { ChatRepository } from './chat.repository';
 import { ChatService } from './chat.service';
-import { NoopChatDeliveryService } from './noop-chat-delivery.service';
+import { ChatTypingGateway } from './realtime/chat-typing.gateway';
+import { ChatTypingService } from './realtime/chat-typing.service';
+import { ChatMessageRateLimiterService } from './chat-message-rate-limiter.service';
+import { SocketChatDeliveryService } from './realtime/socket-chat-delivery.service';
 import { OpaqueMessageEncryptionService } from './opaque-message-encryption.service';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
+import { CommonModule } from '../common/common.module';
+import { FollowsModule } from '../follows/follows.module';
+import { GamesModule } from '../games/games.module';
+import { GameModeratorsModule } from '../game-moderators/game-moderators.module';
+import { BlocksModule } from '../blocks/blocks.module';
 
+/**
+ * Chat feature module.
+ *
+ * This module wires the HTTP controller, business service, database repository,
+ * and replaceable adapter ports used by the chat system.
+ */
 @Module({
-  imports: [PrismaModule],
+  imports: [
+    PrismaModule,
+    WebsocketModule,
+    CommonModule,
+    FollowsModule,
+    GamesModule,
+    GameModeratorsModule,
+    BlocksModule,
+  ],
   controllers: [ChatController],
   providers: [
     ChatRepository,
     ChatService,
+    ChatTypingGateway,
+    ChatTypingService,
+    ChatMessageRateLimiterService,
+    {
+      provide: CHAT_DELIVERY_PORT,
+      useClass: SocketChatDeliveryService,
+    },
     {
       provide: MESSAGE_ENCRYPTION_PORT,
       useClass: OpaqueMessageEncryptionService,
-    },
-    {
-      provide: CHAT_DELIVERY_PORT,
-      useClass: NoopChatDeliveryService,
     },
   ],
 })
