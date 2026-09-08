@@ -4,9 +4,10 @@ import { PostsRepository } from './posts.repository';
 import { PostsService } from './posts.service';
 import { MediaModule } from '../media/media.module';
 import { FollowsModule } from '../follows/follows.module';
+import { RecommendationModule } from '../recommendation/recommendation.module';
 
 @Module({
-  imports: [MediaModule, FollowsModule],
+  imports: [MediaModule, FollowsModule, RecommendationModule],
   controllers: [PostsController],
   providers: [PostsService, PostsRepository],
   exports: [PostsService, PostsRepository],
