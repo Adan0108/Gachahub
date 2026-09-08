@@ -97,6 +97,14 @@ export class GamesService {
   }
 
   /**
+   * Find one game by id, null if missing
+   * logic for caller on handling missing game.
+   */
+  async findById(id: string) {
+    return this.gamesRepository.findById(id);
+  }
+
+  /**
    * Creates a new game community.
    *
    * Business behavior:

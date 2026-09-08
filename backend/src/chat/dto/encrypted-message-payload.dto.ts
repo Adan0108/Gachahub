@@ -12,8 +12,8 @@ import { ChatMessageContentType } from '../../generated/prisma/client';
 /**
  * Opaque encrypted message payload.
  *
- * The backend never receives plaintext message content. Clients encrypt before
- * sending and decrypt after reading from the API.
+ * Backend never receive plaintext message content.
+ * Clients encrypt before sending and decrypt after reading from the API.
  */
 export class EncryptedMessagePayloadDto {
   @ApiProperty({
@@ -23,7 +23,7 @@ export class EncryptedMessagePayloadDto {
   @IsString()
   @MinLength(1)
   @MaxLength(20000)
-  ciphertext: string;
+  ciphertext!: string;
 
   @ApiPropertyOptional({
     example: {
@@ -63,5 +63,6 @@ export class EncryptedMessagePayloadDto {
   })
   @IsOptional()
   @IsString()
+  @MaxLength(120)
   replyToId?: string;
 }
