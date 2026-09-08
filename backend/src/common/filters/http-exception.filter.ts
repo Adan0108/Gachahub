@@ -6,6 +6,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Response } from 'express';
+import { DiscordLoggerService } from '../discord/discord-logger.service';
 
 type ErrorResponse = {
   success: false;
@@ -17,6 +18,8 @@ type ErrorResponse = {
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
+  constructor(private readonly discordLogger: DiscordLoggerService) {}
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
@@ -46,6 +49,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
       path: request.url,
       timestamp: new Date().toISOString(),
     };
+
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      void this.discordLogger.sendError(body.message.toString(), {
+        path: body.path,
+        status,
+      });
+    }
 
     response.status(status).json(body);
   }
