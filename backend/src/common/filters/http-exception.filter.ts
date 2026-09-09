@@ -58,16 +58,19 @@ export class HttpExceptionFilter implements ExceptionFilter {
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       const errorName = exception instanceof Error ? exception.constructor.name : 'UnknownError';
       const errorMessage = body.message.toString().trim() || 'Internal server error';
+      // Query strings can carry reset tokens/signed-URL secrets — strip them before
+      // this leaves the server, the client-facing body.path above is unaffected.
+      const safePath = body.path.split('?')[0];
 
       void this.discordLogger.sendError({
         source: 'http',
-        title: `${status} on ${request.method} ${body.path}`,
+        title: `${status} on ${request.method} ${safePath}`,
         errorName,
         fields: [
           { name: 'Status', value: String(status), inline: true },
           { name: 'Method', value: request.method, inline: true },
           { name: 'Error', value: errorName, inline: true },
-          { name: 'Path', value: body.path, inline: false },
+          { name: 'Path', value: safePath, inline: false },
           { name: 'Message', value: errorMessage, inline: false },
         ],
         stack: exception instanceof Error ? exception.stack : undefined,
