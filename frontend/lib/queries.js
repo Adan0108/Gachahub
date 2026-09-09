@@ -10,6 +10,7 @@ export const queryKeys = {
   profile: ["current-user"],
   myPosts: ["posts", "mine"],
   posts: (search) => ["posts", { search }],
+  post: (postId) => ["posts", "detail", postId],
   gameFeed: (slug, categorySlug) => ["game-feed", slug, { categorySlug }],
   followStatus: (userId) => ["follow-status", userId],
   comments: (postId) => ["comments", postId],
@@ -67,6 +68,13 @@ export const queries = {
     queryKey: queryKeys.posts(search),
     queryFn: ({ signal }) =>
       api.getPosts({ page: 1, limit: 20, search, sort: "latest" }, { signal }),
+    retry: 1,
+    staleTime: 30_000,
+  }),
+  post: (postId) => ({
+    queryKey: queryKeys.post(postId),
+    queryFn: ({ signal }) => api.getPost(postId, { signal }),
+    enabled: Boolean(postId),
     retry: 1,
     staleTime: 30_000,
   }),

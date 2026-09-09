@@ -4,7 +4,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FiCornerUpLeft, FiHeart, FiMessageCircle, FiSend, FiUserPlus } from "react-icons/fi";
+import {
+  FiCornerUpLeft,
+  FiEye,
+  FiHeart,
+  FiMessageCircle,
+  FiSend,
+  FiUserPlus,
+} from "react-icons/fi";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { api } from "../lib/api";
 import { queries, queryKeys } from "../lib/queries";
@@ -102,19 +109,47 @@ function CommentItem({ comment }) {
   );
 }
 
-function PostItem({ post, index }) {
+function PostMedia({ media, title }) {
+  if (!media.length) return null;
+
+  return (
+    <div className={`post-media-grid media-count-${Math.min(media.length, 4)}`}>
+      {media.map((item) =>
+        item.mediaType === "VIDEO" ? (
+          <video controls key={item.id || item.url} preload="metadata">
+            <source src={item.url} type={item.format ? `video/${item.format}` : undefined} />
+            Your browser does not support this video.
+          </video>
+        ) : (
+          <img
+            alt={item.altText || `${title} attachment`}
+            height={item.height || undefined}
+            key={item.id || item.url}
+            loading="lazy"
+            src={item.url}
+            width={item.width || undefined}
+          />
+        ),
+      )}
+    </div>
+  );
+}
+
+export function PostItem({ post, index = 0, detail = false }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, isAuthenticated } = useCurrentUser();
-  const [threadOpen, setThreadOpen] = useState(false);
+  const [threadOpen, setThreadOpen] = useState(detail);
   const [comment, setComment] = useState("");
   const [likeOverride, setLikeOverride] = useState(null);
+  const [spoilerRevealed, setSpoilerRevealed] = useState(false);
+  const media = Array.isArray(post.media) ? post.media : [];
   const liked = likeOverride?.liked ?? Boolean(post.likedByCurrentUser);
   const likeCount = likeOverride?.likeCount ?? Number(post.likeCount || 0);
   const canFollow = Boolean(post.authorId && post.authorId !== user?.id);
   const followStatus = useQuery({
     ...queries.followStatus(post.authorId),
-    enabled: isAuthenticated && canFollow,
+    enabled: detail && isAuthenticated && canFollow,
   });
   const comments = useQuery({
     ...queries.comments(post.id),
@@ -140,7 +175,10 @@ function PostItem({ post, index }) {
     onError: (_error, _variables, previous) => {
       setLikeOverride(previous);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["posts"] }),
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["posts"] });
+      setLikeOverride(null);
+    },
   });
 
   const toggleFollow = useMutation({
@@ -161,10 +199,10 @@ function PostItem({ post, index }) {
   });
 
   return (
-    <article className="post">
-      <span className="rank">{index + 1}</span>
+    <article className={`post ${detail ? "post-detail-card" : ""}`}>
+      {!detail && <span className="rank">{index + 1}</span>}
       <div className={`post-thumb art-${artTones[index % artTones.length]}`}>{glyph.sparkle}</div>
-      <Link className="post-content-link" href={`/explore?q=${encodeURIComponent(post.title)}`}>
+      <Link className="post-content-link" href={`/post/${encodeURIComponent(post.id)}`}>
         <b>{post.title}</b>
         <small>
           {post.gameName ? `${post.gameName} - ` : ""}
@@ -172,6 +210,32 @@ function PostItem({ post, index }) {
         </small>
       </Link>
       <span className="tag">{post.tag}</span>
+      {(post.content || media.length > 0) && (
+        <div className={`post-body ${detail ? "full" : ""}`}>
+          {post.content && <p>{post.content}</p>}
+          {media.length > 0 && (
+            <div
+              className={`post-media-wrap ${post.isSpoiler && !spoilerRevealed ? "hidden" : ""}`}
+            >
+              <PostMedia media={detail ? media : media.slice(0, 4)} title={post.title} />
+              {post.isSpoiler && !spoilerRevealed && (
+                <button
+                  className="post-spoiler-cover"
+                  onClick={() => setSpoilerRevealed(true)}
+                  type="button"
+                >
+                  <FiEye /> Reveal spoiler
+                </button>
+              )}
+            </div>
+          )}
+          {!detail && (
+            <Link className="post-read-more" href={`/post/${encodeURIComponent(post.id)}`}>
+              Open post
+            </Link>
+          )}
+        </div>
+      )}
       <div className="post-social" aria-label={`Actions for ${post.title}`}>
         <button
           aria-pressed={liked}
@@ -189,7 +253,7 @@ function PostItem({ post, index }) {
         >
           <FiMessageCircle /> {post.commentCount || 0}
         </button>
-        {canFollow && (
+        {detail && canFollow && (
           <button
             aria-pressed={Boolean(followStatus.data?.following)}
             className={followStatus.data?.following ? "active" : ""}

@@ -16,6 +16,7 @@ export const backendRoutes = {
   signOut: "/api/auth/sign-out",
   myPosts: "/posts/mine",
   posts: "/posts",
+  post: (postId) => `/posts/${encodePathParam(postId)}`,
   latestFeed: "/feed/latest",
   trendingFeed: "/feed/trending",
   gameFeed: (gameSlug) => `/games/${encodePathParam(gameSlug)}/feed`,
@@ -99,10 +100,16 @@ export function normalizePost(post) {
     title: post.title,
     author: post.author?.name || "Unknown user",
     authorId: post.author?.id || post.authorId,
+    authorImage: post.author?.image || null,
     time,
     tag: post.category?.name || post.tags?.[0]?.name || "Discussion",
     gameName: post.game?.name,
     gameSlug: post.game?.slug,
+    content: post.content || "",
+    media: Array.isArray(post.media) ? post.media : [],
+    visibility: post.visibility || "PUBLIC",
+    isSpoiler: Boolean(post.isSpoiler),
+    type: post.type || "GENERAL",
     likeCount: post.reactionCount ?? post.likeCount ?? 0,
     commentCount: post.commentCount ?? 0,
     likedByCurrentUser: Boolean(post.likedByCurrentUser),
@@ -240,6 +247,12 @@ async function mockResponse(path, options = {}) {
     const items = fallbackPosts({ search: params.get("search") || "" });
     return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
   }
+  if (/^\/posts\/[^/]+$/.test(pathname)) {
+    const postId = decodePathParam(pathname.split("/")[2]);
+    const post = fallbackPosts().find((item) => item.id === postId);
+    if (!post) throw new Error("Post not found");
+    return post;
+  }
   if (/^\/posts\/[^/]+\/comments$/.test(pathname)) {
     return { items: [], meta: { page: 1, limit: 20, total: 0, totalPages: 0 } };
   }
@@ -359,6 +372,10 @@ export const api = {
     api.getPostCollection(backendRoutes.trendingFeed, query, options),
   getPosts: (query = {}, options = {}) =>
     api.getPostCollection(backendRoutes.posts, query, options),
+  getPost: async (postId, options = {}) => {
+    const post = await request(backendRoutes.post(postId), options);
+    return post.raw ? post : normalizePost(post);
+  },
   getGameFeed: (gameSlug, query = {}, options = {}) =>
     api.getPostCollection(backendRoutes.gameFeed(gameSlug), query, options),
   likePost: (postId) => mutation(backendRoutes.postLike(postId)),

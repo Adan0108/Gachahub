@@ -4901,6 +4901,91 @@ body {
   outline-offset: 4px;
 }
 
+.post-body {
+  grid-column: 3 / -1;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.post-body > p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.post-body.full > p {
+  display: block;
+  overflow: visible;
+}
+
+.post-media-wrap {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel2);
+}
+
+.post-media-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.post-media-grid.media-count-1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.post-media-grid img,
+.post-media-grid video {
+  width: 100%;
+  height: clamp(180px, 30vw, 360px);
+  object-fit: cover;
+  background: #090b12;
+}
+
+.post-media-grid.media-count-1 img,
+.post-media-grid.media-count-1 video {
+  object-fit: contain;
+}
+
+.post-media-wrap.hidden .post-media-grid {
+  filter: blur(22px);
+  transform: scale(1.04);
+}
+
+.post-spoiler-cover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  background: #090b12b8;
+  color: #fff;
+  font-weight: 800;
+}
+
+.post-read-more {
+  width: fit-content;
+  color: var(--purple-soft);
+  font-size: 11px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.post-read-more:hover {
+  color: var(--text);
+}
+
 .post-social {
   grid-column: 3 / -1;
   display: flex;
@@ -5029,6 +5114,55 @@ body {
 
 .post-action-error {
   color: #ff9b9b !important;
+}
+
+.post-detail-page {
+  max-width: 980px;
+}
+
+.post-back-link {
+  width: fit-content;
+  margin-bottom: 16px;
+  text-decoration: none;
+}
+
+.post-detail-panel {
+  padding: clamp(18px, 3vw, 30px);
+}
+
+.post-detail-card {
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  align-items: start;
+  padding: 0;
+}
+
+.post-detail-card:hover {
+  background: transparent;
+}
+
+.post-detail-card .post-thumb {
+  height: 52px;
+}
+
+.post-detail-card .post-content-link b {
+  font-size: clamp(20px, 3vw, 30px);
+  line-height: 1.2;
+}
+
+.post-detail-card .post-body,
+.post-detail-card .post-social,
+.post-detail-card .post-thread,
+.post-detail-card .post-action-error {
+  grid-column: 1 / -1;
+}
+
+.post-detail-card .post-body {
+  margin-top: 10px;
+}
+
+.post-detail-card .post-body > p {
+  font-size: 15px;
+  line-height: 1.7;
 }
 
 .create-post-page {
