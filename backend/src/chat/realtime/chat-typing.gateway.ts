@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -31,6 +31,8 @@ interface TypingPayload {
 export class ChatTypingGateway implements OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
+
+  private readonly logger = new Logger(ChatTypingGateway.name);
 
   constructor(
     private readonly chatService: ChatService,
@@ -120,6 +122,11 @@ export class ChatTypingGateway implements OnGatewayDisconnect {
       }
     } catch (error) {
       const errorName = error instanceof Error ? error.constructor.name : 'UnknownError';
+
+      this.logger.error(
+          `Failed to broadcast ${event} for conversation ${payload.conversationId}`,
+          error instanceof Error? error.stack : undefined,
+      );
 
       void this.discordLogger.sendError({
         source: 'socket',
