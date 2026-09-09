@@ -6,6 +6,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Response } from 'express';
+import { DiscordLoggerService } from '../discord/discord-logger.service';
 import { RateLimitedException } from '../exceptions/rate-limited.exception';
 
 type ErrorResponse = {
@@ -18,10 +19,12 @@ type ErrorResponse = {
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
+  constructor(private readonly discordLogger: DiscordLoggerService) {}
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
-    const request = ctx.getRequest<{ url: string }>();
+    const request = ctx.getRequest<{ url: string; method: string }>();
 
     const status =
       exception instanceof HttpException
@@ -51,6 +54,28 @@ export class HttpExceptionFilter implements ExceptionFilter {
       path: request.url,
       timestamp: new Date().toISOString(),
     };
+
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      const errorName = exception instanceof Error ? exception.constructor.name : 'UnknownError';
+      const errorMessage = body.message.toString().trim() || 'Internal server error';
+      // Query strings can carry reset tokens/signed-URL secrets — strip them before
+      // this leaves the server, the client-facing body.path above is unaffected.
+      const safePath = body.path.split('?')[0];
+
+      void this.discordLogger.sendError({
+        source: 'http',
+        title: `${status} on ${request.method} ${safePath}`,
+        errorName,
+        fields: [
+          { name: 'Status', value: String(status), inline: true },
+          { name: 'Method', value: request.method, inline: true },
+          { name: 'Error', value: errorName, inline: true },
+          { name: 'Path', value: safePath, inline: false },
+          { name: 'Message', value: errorMessage, inline: false },
+        ],
+        stack: exception instanceof Error ? exception.stack : undefined,
+      });
+    }
 
     response.status(status).json(body);
   }

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -11,6 +11,7 @@ import type { Server } from 'socket.io';
 import { userRoom } from '../../websocket/socket.util';
 import { websocketGatewayOptions } from '../../websocket/websocket-gateway.options';
 import type { AppSocket } from '../../websocket/websocket.gateway';
+import { DiscordLoggerService } from '../../common/discord/discord-logger.service';
 import { ChatService } from '../chat.service';
 import { ChatTypingService, TypingEventName } from './chat-typing.service';
 
@@ -31,9 +32,12 @@ export class ChatTypingGateway implements OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
+  private readonly logger = new Logger(ChatTypingGateway.name);
+
   constructor(
     private readonly chatService: ChatService,
     private readonly chatTypingService: ChatTypingService,
+    private readonly discordLogger: DiscordLoggerService,
   ) {}
 
   /**
@@ -104,15 +108,41 @@ export class ChatTypingGateway implements OnGatewayDisconnect {
       return;
     }
 
-    const recipientUserIds = await this.chatService.getTypingRecipients(
-      payload.conversationId,
-      userId,
-    );
-
-    for (const recipientUserId of recipientUserIds) {
-      this.server.to(userRoom(recipientUserId)).emit(event, {
-        conversationId: payload.conversationId,
+    try {
+      const recipientUserIds = await this.chatService.getTypingRecipients(
+        payload.conversationId,
         userId,
+      );
+
+      for (const recipientUserId of recipientUserIds) {
+        this.server.to(userRoom(recipientUserId)).emit(event, {
+          conversationId: payload.conversationId,
+          userId,
+        });
+      }
+    } catch (error) {
+      const errorName = error instanceof Error ? error.constructor.name : 'UnknownError';
+
+      this.logger.error(
+          `Failed to broadcast ${event} for conversation ${payload.conversationId}`,
+          error instanceof Error? error.stack : undefined,
+      );
+
+      void this.discordLogger.sendError({
+        source: 'socket',
+        title: `Socket error on ${event}`,
+        errorName,
+        fields: [
+          { name: 'Event', value: event, inline: true },
+          { name: 'Error', value: errorName, inline: true },
+          { name: 'Conversation', value: payload.conversationId, inline: false },
+          {
+            name: 'Message',
+            value: error instanceof Error ? error.message : 'Unknown error',
+            inline: false,
+          },
+        ],
+        stack: error instanceof Error ? error.stack : undefined,
       });
     }
   }
