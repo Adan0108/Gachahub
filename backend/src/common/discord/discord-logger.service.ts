@@ -6,12 +6,19 @@ const DISCORD_EMBED_TITLE_LIMIT = 256;
 const DISCORD_EMBED_FIELD_VALUE_LIMIT = 1024;
 const STACK_FRAME_LIMIT = 5;
 const DEDUP_WINDOW_MS = 60_000;
-const BANNER_FILENAME = 'banner-500.png';
-const BANNER_PATH = join(process.cwd(), 'assets', 'discord', BANNER_FILENAME);
+
+export type DiscordLogSource = 'http' | 'cron' | 'socket';
+
+const BANNER_FILENAMES: Record<DiscordLogSource, string> = {
+  http: 'banner-500.png',
+  cron: 'banner-cron.png',
+  socket: 'banner-socket.png',
+};
 
 export type DiscordLogField = { name: string; value: string; inline?: boolean };
 
 export type DiscordLogReport = {
+  source: DiscordLogSource;
   title: string;
   errorName: string;
   fields: DiscordLogField[];
@@ -26,7 +33,7 @@ export class DiscordLoggerService {
   private readonly logger = new Logger(DiscordLoggerService.name);
   private readonly webhookUrl = process.env.DISCORD_WEBHOOK_URL;
   private readonly recentlySent = new Map<string, number>();
-  private readonly banner = loadBanner(this.logger);
+  private readonly banners = loadBanners(this.logger);
 
   async sendError(report: DiscordLogReport) {
     if (!this.webhookUrl) return;
@@ -47,19 +54,22 @@ export class DiscordLoggerService {
       });
     }
 
+    const bannerFilename = BANNER_FILENAMES[report.source];
+    const banner = this.banners.get(report.source);
+
     const embed = {
       title: truncate(`🔴 ${report.title}`, DISCORD_EMBED_TITLE_LIMIT),
       color: 0xff0000,
       fields,
-      image: this.banner ? { url: `attachment://${BANNER_FILENAME}` } : undefined,
+      image: banner ? { url: `attachment://${bannerFilename}` } : undefined,
       timestamp: new Date().toISOString(),
       footer: { text: 'GachaHub API' },
     };
 
     const body = new FormData();
     body.append('payload_json', JSON.stringify({ embeds: [embed] }));
-    if (this.banner) {
-      body.append('files[0]', new Blob([new Uint8Array(this.banner)]), BANNER_FILENAME);
+    if (banner) {
+      body.append('files[0]', new Blob([new Uint8Array(banner)]), bannerFilename);
     }
 
     try {
@@ -86,13 +96,19 @@ export class DiscordLoggerService {
   }
 }
 
-function loadBanner(logger: Logger): Buffer | undefined {
-  try {
-    return readFileSync(BANNER_PATH);
-  } catch {
-    logger.warn(`Discord banner image not found at ${BANNER_PATH}, sending embeds without it`);
-    return undefined;
+function loadBanners(logger: Logger): Map<DiscordLogSource, Buffer> {
+  const banners = new Map<DiscordLogSource, Buffer>();
+
+  for (const [source, filename] of Object.entries(BANNER_FILENAMES) as [DiscordLogSource, string][]) {
+    const path = join(process.cwd(), 'assets', 'discord', filename);
+    try {
+      banners.set(source, readFileSync(path));
+    } catch {
+      logger.warn(`Discord banner image not found at ${path}, sending "${source}" embeds without it`);
+    }
   }
+
+  return banners;
 }
 
 function truncate(value: string, limit: number): string {

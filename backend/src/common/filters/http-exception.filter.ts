@@ -60,6 +60,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       const errorMessage = body.message.toString().trim() || 'Internal server error';
 
       void this.discordLogger.sendError({
+        source: 'http',
         title: `${status} on ${request.method} ${body.path}`,
         errorName,
         fields: [

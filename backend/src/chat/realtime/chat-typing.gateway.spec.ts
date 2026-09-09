@@ -25,10 +25,18 @@ describe('ChatTypingGateway', () => {
     ...overrides,
   });
 
+  const discordLogger = {
+    sendError: jest.fn(),
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
     chatTypingService = new ChatTypingService();
-    gateway = new ChatTypingGateway(chatService as any, chatTypingService);
+    gateway = new ChatTypingGateway(
+      chatService as any,
+      chatTypingService,
+      discordLogger as any,
+    );
     server = {
       to: jest.fn(),
       emit: jest.fn(),

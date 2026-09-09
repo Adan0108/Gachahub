@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { DiscordLoggerService } from '../common/discord/discord-logger.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { MediaRepository } from './media.repository';
 
@@ -10,7 +11,39 @@ export class MediaCleanupService {
   constructor(
     private readonly mediaRepository: MediaRepository,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly discordLogger: DiscordLoggerService,
   ) {}
+
+  /**
+   * Cron entry point, delegates to runCleanup and reports any failure
+   * to discord instead of letting it fail silently
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async cleanupExpiredUploads(): Promise<void> {
+    try {
+      await this.runCleanup();
+    } catch (error) {
+      const errorName = error instanceof Error ? error.constructor.name : 'UnknownError';
+
+      this.logger.error('Media cleanup job failed', error instanceof Error ? error.stack : undefined);
+
+      void this.discordLogger.sendError({
+        source: 'cron',
+        title: 'Cron job failed: cleanupExpiredUploads',
+        errorName,
+        fields: [
+          { name: 'Job', value: 'cleanupExpiredUploads', inline: true },
+          { name: 'Error', value: errorName, inline: true },
+          {
+            name: 'Message',
+            value: error instanceof Error ? error.message : 'Unknown error',
+            inline: false,
+          },
+        ],
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+    }
+  }
 
   /**
    * Removes orphaned uploads that were never attached to a Post, Comment
@@ -22,8 +55,7 @@ export class MediaCleanupService {
    * Stale CLEANING rows are retried because a previous cleanup attempt
    * may have failed or the application may have stopped mid-cleanup.
    */
-  @Cron(CronExpression.EVERY_HOUR)
-  async cleanupExpiredUploads(): Promise<void> {
+  private async runCleanup(): Promise<void> {
     const expiryHours = Number(process.env.MEDIA_UPLOAD_EXPIRES_HOURS ?? 24);
 
     if (!Number.isFinite(expiryHours) || expiryHours <= 0) {
