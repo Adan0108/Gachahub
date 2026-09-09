@@ -102,7 +102,6 @@ export default function ChatPage() {
     <div className="page chat-page">
       <section className="welcome hero-polish chat-hero">
         <div>
-          <span className="eyebrow">Messages</span>
           <h1>Your conversations</h1>
           <p>Manage conversations and message requests from other GachaHub members.</p>
         </div>

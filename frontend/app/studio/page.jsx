@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { FiCompass, FiX } from "react-icons/fi";
+import { FiArrowLeft, FiCompass, FiX } from "react-icons/fi";
 import { Art } from "../../components/Art";
 import { glyph, toolItems } from "../../components/constants";
 
@@ -360,6 +361,9 @@ export default function StudioPage() {
         {notice}
       </div>
       <aside className="studio-tools">
+        <Link className="studio-back" href="/">
+          <FiArrowLeft /> Back home
+        </Link>
         <div className="studio-title">
           <b>Build Canvas</b>
           <button onClick={save} type="button">

@@ -401,16 +401,43 @@ export const api = {
     }),
   confirmMediaUploads: (items) => mutation(backendRoutes.mediaConfirm, { items }),
   uploadPostMedia: async (files) => {
-    if (!files.length) return [];
+    if (!files.length) return { successful: [], failed: [] };
     const authorizations = await api.createUploadSignatures(files);
-    const uploaded = await Promise.all(
+    const settled = await Promise.allSettled(
       files.map((file, index) => uploadToCloudinary(file, authorizations.items[index])),
     );
-    const confirmed = await api.confirmMediaUploads(uploaded);
-    if (confirmed.failedCount) {
-      throw new Error(confirmed.failed?.[0]?.error || "Media confirmation failed");
-    }
-    return confirmed.successful.map(({ result }) => result);
+    const uploaded = settled.flatMap((result, index) =>
+      result.status === "fulfilled" ? [{ file: files[index], payload: result.value }] : [],
+    );
+    const failed = settled.flatMap((result, index) =>
+      result.status === "rejected"
+        ? [{ file: files[index], error: result.reason?.message || "Upload failed" }]
+        : [],
+    );
+
+    if (!uploaded.length) return { successful: [], failed };
+
+    const confirmed = await api.confirmMediaUploads(uploaded.map(({ payload }) => payload));
+    const confirmedById = new Map(
+      confirmed.successful.map(({ uploadId, result }) => [uploadId, result]),
+    );
+    const confirmationErrors = new Map(
+      confirmed.failed.map(({ uploadId, error }) => [uploadId, error]),
+    );
+
+    return {
+      successful: uploaded.flatMap(({ payload }) => {
+        const result = confirmedById.get(payload.uploadId);
+        return result ? [result] : [];
+      }),
+      failed: [
+        ...failed,
+        ...uploaded.flatMap(({ file, payload }) => {
+          const error = confirmationErrors.get(payload.uploadId);
+          return error ? [{ file, error }] : [];
+        }),
+      ],
+    };
   },
   getPostCollection: async (path, query = {}, options = {}) => {
     const response = await request(withQuery(path, query), options);

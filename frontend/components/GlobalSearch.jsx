@@ -45,7 +45,7 @@ export function GlobalSearch() {
     ...suggestedGames.map((game) => ({ type: "community", value: game })),
     ...suggestedPosts.map((post) => ({ type: "post", value: post })),
   ];
-  const suggestionsOpen = focused && Boolean(search);
+  const suggestionsOpen = focused && search.length >= 2;
   const activeSuggestionId = suggestions[activeSuggestion]
     ? `search-suggestion-${suggestions[activeSuggestion].type}-${suggestions[activeSuggestion].value.id}`
     : undefined;
@@ -156,7 +156,6 @@ export function GlobalSearch() {
           id="global-search-suggestions"
           role="listbox"
         >
-          {!canSearch && <div className="search-empty">Enter at least 2 characters.</div>}
           {canSearch && gameSuggestions.isLoading && (
             <div className="search-empty">Searching communities...</div>
           )}

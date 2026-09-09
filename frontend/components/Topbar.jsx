@@ -41,6 +41,8 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [readNotifications, setReadNotifications] = useState([]);
+  const [notice, setNotice] = useState("");
+  const noticeTimerRef = useRef(null);
   const notificationButtonRef = useRef(null);
   const notificationDrawerRef = useRef(null);
   const wasNotificationsOpenRef = useRef(false);
@@ -61,6 +63,9 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
     onSuccess: () => {
       queryClient.setQueryData(queryKeys.currentUser, null);
       setAccountOpen(false);
+      window.clearTimeout(noticeTimerRef.current);
+      setNotice("Logged out successfully");
+      noticeTimerRef.current = window.setTimeout(() => setNotice(""), 2200);
       router.push("/");
     },
   });
@@ -75,12 +80,28 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
     if (!notificationsOpen) return undefined;
     wasNotificationsOpenRef.current = true;
     notificationDrawerRef.current?.querySelector("button")?.focus();
-    const closeOnEscape = (event) => {
-      if (event.key === "Escape") setNotificationsOpen(false);
+    const closeNotifications = (event) => {
+      if (event.key === "Escape") {
+        setNotificationsOpen(false);
+        return;
+      }
+      if (
+        event.type === "mousedown" &&
+        !notificationDrawerRef.current?.contains(event.target) &&
+        !notificationButtonRef.current?.contains(event.target)
+      ) {
+        setNotificationsOpen(false);
+      }
     };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
+    window.addEventListener("keydown", closeNotifications);
+    window.addEventListener("mousedown", closeNotifications);
+    return () => {
+      window.removeEventListener("keydown", closeNotifications);
+      window.removeEventListener("mousedown", closeNotifications);
+    };
   }, [notificationsOpen]);
+
+  useEffect(() => () => window.clearTimeout(noticeTimerRef.current), []);
 
   useEffect(() => {
     if (!accountOpen) return undefined;
@@ -116,6 +137,9 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
 
   return (
     <header className="topbar">
+      <div className="toast-slot topbar-toast" aria-live="polite">
+        {notice}
+      </div>
       <button
         aria-label="Open menu"
         className="menu-btn"
@@ -159,7 +183,10 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
               aria-haspopup="dialog"
               className="icon-btn notification-btn"
               aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
-              onClick={() => setNotificationsOpen((current) => !current)}
+              onClick={() => {
+                setAccountOpen(false);
+                setNotificationsOpen((current) => !current);
+              }}
               ref={notificationButtonRef}
               type="button"
             >
@@ -214,7 +241,10 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
               aria-haspopup="menu"
               aria-label="Open account menu"
               className="mini-avatar"
-              onClick={() => setAccountOpen((current) => !current)}
+              onClick={() => {
+                setNotificationsOpen(false);
+                setAccountOpen((current) => !current);
+              }}
               ref={accountButtonRef}
               type="button"
             >

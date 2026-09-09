@@ -128,7 +128,6 @@ export default function HomePage() {
       </div>
       <section className="welcome hero-polish">
         <div>
-          <span className="eyebrow">Today on GachaHub</span>
           <h1>
             Welcome back, Rover <span>{glyph.sparkle}</span>
           </h1>

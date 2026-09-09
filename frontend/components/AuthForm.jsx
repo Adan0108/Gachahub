@@ -73,9 +73,6 @@ export function AuthForm({ mode }) {
             Back home
           </Link>
         </div>
-        <span className="eyebrow auth-eyebrow">
-          {isRegister ? "Create your account" : "Welcome back"}
-        </span>
         <h1>{isRegister ? "Join your communities." : "Log in to GachaHub."}</h1>
         <p>
           {isRegister
