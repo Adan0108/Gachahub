@@ -24,7 +24,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
-    const request = ctx.getRequest<{ url: string }>();
+    const request = ctx.getRequest<{ url: string; method: string }>();
 
     const status =
       exception instanceof HttpException
@@ -56,9 +56,20 @@ export class HttpExceptionFilter implements ExceptionFilter {
     };
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
-      void this.discordLogger.sendError(body.message.toString(), {
-        path: body.path,
-        status,
+      const errorName = exception instanceof Error ? exception.constructor.name : 'UnknownError';
+      const errorMessage = body.message.toString().trim() || 'Internal server error';
+
+      void this.discordLogger.sendError({
+        title: `${status} on ${request.method} ${body.path}`,
+        errorName,
+        fields: [
+          { name: 'Status', value: String(status), inline: true },
+          { name: 'Method', value: request.method, inline: true },
+          { name: 'Error', value: errorName, inline: true },
+          { name: 'Path', value: body.path, inline: false },
+          { name: 'Message', value: errorMessage, inline: false },
+        ],
+        stack: exception instanceof Error ? exception.stack : undefined,
       });
     }
 
