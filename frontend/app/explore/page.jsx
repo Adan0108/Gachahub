@@ -30,7 +30,7 @@ function ExploreContent() {
   const gameData =
     games.data ||
     (canUseLocalSearch || smartMode ? fallbacks.games(search) : { items: [], meta: {} });
-  const posts = postsQuery.data?.items || fallbacks.posts({ search });
+  const posts = postsQuery.data?.items || (canUseLocalSearch ? fallbacks.posts({ search }) : []);
   const filteredPosts = posts.filter((post) => {
     if (smartGames.length && !smartGames.includes(post.gameSlug)) return false;
     if (activeFilter === "All") return true;

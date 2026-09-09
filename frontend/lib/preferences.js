@@ -11,7 +11,6 @@ export function readStoredJson(key, fallback) {
     const value = JSON.parse(window.localStorage.getItem(key) || "null");
     return value ?? fallback;
   } catch {
-    window.localStorage.removeItem(key);
     return fallback;
   }
 }

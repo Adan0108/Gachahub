@@ -9,6 +9,7 @@ import { PostList } from "../components/PostList";
 import { QueryNotice } from "../components/QueryNotice";
 import { SectionTitle } from "../components/SectionTitle";
 import { glyph } from "../components/constants";
+import { api } from "../lib/api";
 import { fallbacks, queries } from "../lib/queries";
 import { defaultFeedPreferences, FEED_PREFERENCES_KEY, readStoredJson } from "../lib/preferences";
 
@@ -25,7 +26,11 @@ export default function HomePage() {
   const customizerRef = useRef(null);
   const wasCustomizingRef = useRef(false);
   const home = useQuery(queries.home(""));
-  const data = home.data || fallbacks.home("");
+  const data =
+    home.data ||
+    (api.usingMocks
+      ? fallbacks.home("")
+      : { communities: [], forYouPosts: [], posts: [], meta: {} });
   const allForYouPosts = data.forYouPosts || data.posts || [];
   const selectedGames = new Set(preferences.games);
   const selectedCategories = new Set(preferences.categories);
@@ -37,7 +42,12 @@ export default function HomePage() {
     const matchesCategory = !selectedCategories.size || selectedCategories.has(post.tag);
     return matchesGame && matchesCategory;
   });
-  const trendingPosts = tab === "New" ? allForYouPosts : data.posts;
+  const trendingPosts =
+    tab === "New"
+      ? allForYouPosts
+      : tab === "Top"
+        ? [...data.posts].sort((a, b) => Number(b.likeCount || 0) - Number(a.likeCount || 0))
+        : data.posts;
 
   const showNotice = (message) => {
     window.clearTimeout(noticeTimerRef.current);
