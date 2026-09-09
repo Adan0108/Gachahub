@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { DiscordLoggerService } from '../discord/discord-logger.service';
+import { RateLimitedException } from '../exceptions/rate-limited.exception';
 
 type ErrorResponse = {
   success: false;
@@ -41,6 +42,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
         : exception instanceof Error
           ? exception.message
           : 'Internal server error';
+
+    if (exception instanceof RateLimitedException) {
+      response.setHeader('Retry-After', String(exception.retryAfterSeconds));
+    }
 
     const body: ErrorResponse = {
       success: false,
