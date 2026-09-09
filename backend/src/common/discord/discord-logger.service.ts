@@ -73,7 +73,15 @@ export class DiscordLoggerService {
     }
 
     try {
-      await fetch(this.webhookUrl, { method: 'POST', body });
+      const res = await fetch(this.webhookUrl, {
+        method: 'POST',
+        body,
+        signal: AbortSignal.timeout(5_000),
+      });
+
+      if (!res.ok) {
+        this.logger.warn(`Discord webhook rejected the log: ${res.status}`);
+      }
     } catch (err) {
       this.logger.warn(`Failed to send Discord log: ${err}`);
     }
