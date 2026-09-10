@@ -427,12 +427,17 @@ export class PostsService {
     const result = await this.postsRepository.like(postId, userId);
 
     if (result.changed) {
-      await this.userInterestService.recordPostInteraction(
+      /**
+       * Recommendation updates are best-effort and should not block
+       * the core like interaction.
+       */
+      void this.userInterestService.recordPostInteraction(
         userId,
         postId,
         'LIKE',
       );
     }
+
     return {
       liked: result.liked,
       likeCount: result.likeCount,
@@ -445,12 +450,17 @@ export class PostsService {
     const result = await this.postsRepository.unlike(postId, userId);
 
     if (result.changed) {
-      await this.userInterestService.recordPostInteraction(
+      /**
+       * Recommendation updates are best-effort and should not block
+       * the core unlike interaction.
+       */
+      void this.userInterestService.recordPostInteraction(
         userId,
         postId,
         'UNLIKE',
       );
     }
+
     return {
       liked: result.liked,
       likeCount: result.likeCount,

@@ -86,7 +86,11 @@ export class CommentsService {
       content: dto.content.trim(),
     });
 
-    await this.userInterestService.recordPostInteraction(
+    /**
+     * Recommendation updates are best-effort and should not block
+     * the core comment interaction.
+     */
+    void this.userInterestService.recordPostInteraction(
       userId,
       postId,
       'COMMENT',
@@ -101,6 +105,7 @@ export class CommentsService {
     if (!parent || parent.deletedAt) {
       throw new NotFoundException('Comment thread not found');
     }
+
     /*
      * MVP supports only one level:
      *
@@ -122,7 +127,11 @@ export class CommentsService {
       content: dto.content.trim(),
     });
 
-    await this.userInterestService.recordPostInteraction(
+    /**
+     * Recommendation updates are best-effort and should not block
+     * the core reply interaction.
+     */
+    void this.userInterestService.recordPostInteraction(
       userId,
       parent.postId,
       'COMMENT',
@@ -167,12 +176,17 @@ export class CommentsService {
     );
 
     if (deleted) {
-      await this.userInterestService.recordPostInteraction(
+      /**
+       * Recommendation updates are best-effort and should not block
+       * the core comment deletion.
+       */
+      void this.userInterestService.recordPostInteraction(
         userId,
         comment.postId,
         'COMMENT_REMOVE',
       );
     }
+
     return {
       message: 'Comment deleted successfully',
     };
