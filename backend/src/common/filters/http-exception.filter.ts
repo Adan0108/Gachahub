@@ -55,9 +55,15 @@ export class HttpExceptionFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
     };
 
-    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
-      const errorName = exception instanceof Error ? exception.constructor.name : 'UnknownError';
-      const errorMessage = body.message.toString().trim() || 'Internal server error';
+    if (status >= Number(HttpStatus.INTERNAL_SERVER_ERROR)) {
+      const errorName =
+        exception instanceof Error
+          ? exception.constructor.name
+          : 'UnknownError';
+
+      const errorMessage =
+        body.message.toString().trim() || 'Internal server error';
+
       // Query strings can carry reset tokens/signed-URL secrets — strip them before
       // this leaves the server, the client-facing body.path above is unaffected.
       const safePath = body.path.split('?')[0];

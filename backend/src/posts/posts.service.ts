@@ -223,6 +223,17 @@ export class PostsService {
       purpose: 'POST',
     });
 
+    if (uploads.length !== mediaReferences.length) {
+      const resolved = new Set(uploads.map((upload) => upload.id));
+      const missing = mediaReferences
+        .map((item) => item.mediaUploadId)
+        .filter((id) => !resolved.has(id));
+
+      throw new BadRequestException(
+        `Media uploads cannot be attached: ${missing.join(', ')}`,
+      );
+    }
+
     /*
      * MVP policy:
      * - 0–10 images, or

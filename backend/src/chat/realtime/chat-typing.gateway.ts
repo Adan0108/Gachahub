@@ -121,11 +121,12 @@ export class ChatTypingGateway implements OnGatewayDisconnect {
         });
       }
     } catch (error) {
-      const errorName = error instanceof Error ? error.constructor.name : 'UnknownError';
+      const errorName =
+        error instanceof Error ? error.constructor.name : 'UnknownError';
 
       this.logger.error(
-          `Failed to broadcast ${event} for conversation ${payload.conversationId}`,
-          error instanceof Error? error.stack : undefined,
+        `Failed to broadcast ${event} for conversation ${payload.conversationId}`,
+        error instanceof Error ? error.stack : undefined,
       );
 
       void this.discordLogger.sendError({
@@ -135,7 +136,11 @@ export class ChatTypingGateway implements OnGatewayDisconnect {
         fields: [
           { name: 'Event', value: event, inline: true },
           { name: 'Error', value: errorName, inline: true },
-          { name: 'Conversation', value: payload.conversationId, inline: false },
+          {
+            name: 'Conversation',
+            value: payload.conversationId,
+            inline: false,
+          },
           {
             name: 'Message',
             value: error instanceof Error ? error.message : 'Unknown error',
