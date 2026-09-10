@@ -64,66 +64,66 @@ export class UserInterestRepository {
    *  decrement only when the row already exist
    */
   applyDeltas(userId: string, deltas: InterestDelta[]) {
-    return this.prisma.$transaction(async (tx) => {
-      const now = new Date();
+    const now = new Date();
 
-      for (const delta of deltas) {
-        if (delta.amount > 0) {
-          await tx.userInterest.upsert({
-            where: {
-              userId_entityType_entityId: {
-                userId,
-                entityType: delta.entityType,
-                entityId: delta.entityId,
-              },
-            },
-            create: {
+    const operations = deltas.map((delta) => {
+      if (delta.amount > 0) {
+        return this.prisma.userInterest.upsert({
+          where: {
+            userId_entityType_entityId: {
               userId,
               entityType: delta.entityType,
               entityId: delta.entityId,
-              score: delta.amount,
-              signalCount: 1,
-              lastSignalAt: now,
             },
-            update: {
-              score: {
-                increment: delta.amount,
-              },
-              signalCount: {
-                increment: 1,
-              },
-              lastSignalAt: now,
-            },
-          });
-          continue;
-        }
-
-        await tx.userInterest.updateMany({
-          where: {
+          },
+          create: {
             userId,
             entityType: delta.entityType,
             entityId: delta.entityId,
-            signalCount: {
-              gt: 0,
-            },
+            score: delta.amount,
+            signalCount: 1,
+            lastSignalAt: now,
           },
-          data: {
+          update: {
             score: {
-              decrement: Math.abs(delta.amount),
+              increment: delta.amount,
             },
             signalCount: {
-              decrement: 1,
+              increment: 1,
             },
+            lastSignalAt: now,
           },
         });
       }
 
-      /**
-       * Undo operation may reduce a materialized interest to zero
-       * Remove dead rows rather than letting the prfile grow forever
-       */
+      return this.prisma.userInterest.updateMany({
+        where: {
+          userId,
+          entityType: delta.entityType,
+          entityId: delta.entityId,
+          signalCount: {
+            gt: 0,
+          },
+        },
+        data: {
+          score: {
+            decrement: Math.abs(delta.amount),
+          },
+          signalCount: {
+            decrement: 1,
+          },
+        },
+      });
+    });
 
-      await tx.userInterest.deleteMany({
+    return this.prisma.$transaction([
+      ...operations,
+
+      /**
+       * Undo operations may reduce a materialized interest to zero.
+       * Remove inactive rows so the profile does not grow indefinitely.
+       */
+      this.prisma.userInterest.deleteMany({
         where: {
           userId,
           OR: [
@@ -139,7 +139,7 @@ export class UserInterestRepository {
             },
           ],
         },
-      });
-    });
+      }),
+    ]);
   }
 }
