@@ -1,5 +1,5 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiTags, ApiCookieAuth } from '@nestjs/swagger';
 import { OptionalAuth, Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { QueryFeedDto, QueryGameFeedDto } from './dto/query-feed.dto';
@@ -9,6 +9,15 @@ import { FeedService } from './feed.service';
 @Controller('feed')
 export class FeedController {
   constructor(private readonly feedService: FeedService) {}
+
+  @Get('for-you')
+  @ApiCookieAuth('better-auth.session_token')
+  @ApiOperation({
+    summary: 'Get personalized For You posts',
+  })
+  forYou(@Query() query: QueryFeedDto, @Session() session: UserSession) {
+    return this.feedService.forYou(query, session.user.id);
+  }
 
   @Get('latest')
   @OptionalAuth()
