@@ -27,6 +27,7 @@ model User {
   mediaUploads MediaUpload[]
   postLikes    PostLike[]
   comments     Comment[]
+  interests    UserInterest[]
 
   followers            UserFollow[]          @relation("UserFollowers")
   following            UserFollow[]          @relation("UserFollowing")
@@ -603,6 +604,34 @@ model PostLike {
 
   @@id([postId, userId])
   @@index([userId, createdAt])
+}
+
+enum InterestEntityType {
+  GAME
+  CATEGORY
+  POST_TYPE
+  TAG
+  AUTHOR
+}
+
+model UserInterest {
+  userId     String
+  entityType InterestEntityType
+  entityId   String
+
+  score       Float @default(0)
+  signalCount Int   @default(0)
+
+  lastSignalAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, entityType, entityId])
+  // Main For You profile lookup.
+  @@index([userId, score])
+  @@map("user_interests")
 }
 
 enum MediaPurpose {

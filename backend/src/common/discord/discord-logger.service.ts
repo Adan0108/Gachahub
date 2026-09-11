@@ -69,7 +69,11 @@ export class DiscordLoggerService {
     const body = new FormData();
     body.append('payload_json', JSON.stringify({ embeds: [embed] }));
     if (banner) {
-      body.append('files[0]', new Blob([new Uint8Array(banner)]), bannerFilename);
+      body.append(
+        'files[0]',
+        new Blob([new Uint8Array(banner)]),
+        bannerFilename,
+      );
     }
 
     try {
@@ -88,9 +92,9 @@ export class DiscordLoggerService {
   }
 
   /**
-  * Skips a send if the same signature fired within the dedup window,
-  * so a flapping dependency doesn't spam the channel or hit Discord's rate limit.
-  */
+   * Skips a send if the same signature fired within the dedup window,
+   * so a flapping dependency doesn't spam the channel or hit Discord's rate limit.
+   */
   private shouldSend(signature: string): boolean {
     const now = Date.now();
     for (const [key, sentAt] of this.recentlySent) {
@@ -107,12 +111,17 @@ export class DiscordLoggerService {
 function loadBanners(logger: Logger): Map<DiscordLogSource, Buffer> {
   const banners = new Map<DiscordLogSource, Buffer>();
 
-  for (const [source, filename] of Object.entries(BANNER_FILENAMES) as [DiscordLogSource, string][]) {
+  for (const [source, filename] of Object.entries(BANNER_FILENAMES) as [
+    DiscordLogSource,
+    string,
+  ][]) {
     const path = join(process.cwd(), 'assets', 'discord', filename);
     try {
       banners.set(source, readFileSync(path));
     } catch {
-      logger.warn(`Discord banner image not found at ${path}, sending "${source}" embeds without it`);
+      logger.warn(
+        `Discord banner image not found at ${path}, sending "${source}" embeds without it`,
+      );
     }
   }
 
@@ -128,7 +137,13 @@ function filterStack(stack?: string): string {
 
   const frames = stack.split('\n').slice(1);
   const appFrames = frames.filter((line) => /[\\/]src[\\/]/.test(line));
-  const relevant = (appFrames.length > 0 ? appFrames : frames).slice(0, STACK_FRAME_LIMIT);
+  const relevant = (appFrames.length > 0 ? appFrames : frames).slice(
+    0,
+    STACK_FRAME_LIMIT,
+  );
 
-  return truncate(relevant.join('\n').trim() || 'No stack trace available', DISCORD_EMBED_FIELD_VALUE_LIMIT - 8);
+  return truncate(
+    relevant.join('\n').trim() || 'No stack trace available',
+    DISCORD_EMBED_FIELD_VALUE_LIMIT - 8,
+  );
 }

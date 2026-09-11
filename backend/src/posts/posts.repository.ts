@@ -515,6 +515,7 @@ export class PostsRepository {
         return {
           liked: true,
           likeCount: post.reactionCount,
+          changed: true,
         };
       }
 
@@ -530,6 +531,7 @@ export class PostsRepository {
       return {
         liked: true,
         likeCount: post.reactionCount,
+        changed: false,
       };
     });
   }
@@ -561,6 +563,7 @@ export class PostsRepository {
         return {
           liked: false,
           likeCount: post.reactionCount,
+          changed: true,
         };
       }
 
@@ -576,6 +579,7 @@ export class PostsRepository {
       return {
         liked: false,
         likeCount: post.reactionCount,
+        changed: false,
       };
     });
   }

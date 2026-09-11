@@ -23,9 +23,13 @@ export class MediaCleanupService {
     try {
       await this.runCleanup();
     } catch (error) {
-      const errorName = error instanceof Error ? error.constructor.name : 'UnknownError';
+      const errorName =
+        error instanceof Error ? error.constructor.name : 'UnknownError';
 
-      this.logger.error('Media cleanup job failed', error instanceof Error ? error.stack : undefined);
+      this.logger.error(
+        'Media cleanup job failed',
+        error instanceof Error ? error.stack : undefined,
+      );
 
       void this.discordLogger.sendError({
         source: 'cron',

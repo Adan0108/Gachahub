@@ -14,6 +14,7 @@ import { MediaService } from '../media/media.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { formatPost } from './post.mapper';
 import { FollowsService } from '../follows/follows.service';
+import { UserInterestService } from '../recommendation/user-interest.service';
 
 @Injectable()
 export class PostsService {
@@ -21,6 +22,7 @@ export class PostsService {
     private readonly postsRepository: PostsRepository,
     private readonly mediaService: MediaService,
     private readonly followsService: FollowsService,
+    private readonly userInterestService: UserInterestService,
   ) {}
 
   async findAll(query: QueryPostsDto, userId?: string) {
@@ -221,6 +223,17 @@ export class PostsService {
       purpose: 'POST',
     });
 
+    if (uploads.length !== mediaReferences.length) {
+      const resolved = new Set(uploads.map((upload) => upload.id));
+      const missing = mediaReferences
+        .map((item) => item.mediaUploadId)
+        .filter((id) => !resolved.has(id));
+
+      throw new BadRequestException(
+        `Media uploads cannot be attached: ${missing.join(', ')}`,
+      );
+    }
+
     /*
      * MVP policy:
      * - 0–10 images, or
@@ -411,13 +424,47 @@ export class PostsService {
   async like(postId: string, userId: string) {
     await this.ensurePostCanBeInteractedWith(postId, userId);
 
-    return this.postsRepository.like(postId, userId);
+    const result = await this.postsRepository.like(postId, userId);
+
+    if (result.changed) {
+      /**
+       * Recommendation updates are best-effort and should not block
+       * the core like interaction.
+       */
+      void this.userInterestService.recordPostInteraction(
+        userId,
+        postId,
+        'LIKE',
+      );
+    }
+
+    return {
+      liked: result.liked,
+      likeCount: result.likeCount,
+    };
   }
 
   async unlike(postId: string, userId: string) {
     await this.ensurePostCanBeInteractedWith(postId, userId);
 
-    return this.postsRepository.unlike(postId, userId);
+    const result = await this.postsRepository.unlike(postId, userId);
+
+    if (result.changed) {
+      /**
+       * Recommendation updates are best-effort and should not block
+       * the core unlike interaction.
+       */
+      void this.userInterestService.recordPostInteraction(
+        userId,
+        postId,
+        'UNLIKE',
+      );
+    }
+
+    return {
+      liked: result.liked,
+      likeCount: result.likeCount,
+    };
   }
 
   private normalizeTags(tags?: string[]) {
