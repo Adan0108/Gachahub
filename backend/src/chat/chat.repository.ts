@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import {
   ChatMessageContentType,
   ChatParticipantRole,
@@ -7,10 +7,10 @@ import {
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-
-type PrismaTransaction = Parameters<
-  Parameters<PrismaService['$transaction']>[0]
->[0];
+import {
+  claimUploadsForAttachment,
+  type PrismaTransaction,
+} from '../media/media.repository';
 
 /**
  * A media upload already validated (ownership, purpose, UPLOADED status) by
@@ -551,24 +551,11 @@ export class ChatRepository {
   ) {
     const mediaUploadIds = media.map((item) => item.mediaUploadId);
 
-    const claimed = await tx.mediaUpload.updateMany({
-      where: {
-        id: { in: mediaUploadIds },
-        userId: senderId,
-        purpose: 'CHAT',
-        status: 'UPLOADED',
-      },
-      data: {
-        status: 'ATTACHED',
-        attachedAt: new Date(),
-      },
+    await claimUploadsForAttachment(tx, {
+      ids: mediaUploadIds,
+      userId: senderId,
+      purpose: 'CHAT',
     });
-
-    if (claimed.count !== mediaUploadIds.length) {
-      throw new ConflictException(
-        'One or more media uploads could not be attached',
-      );
-    }
 
     await tx.chatMessageMedia.createMany({
       data: media.map((item) => ({

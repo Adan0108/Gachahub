@@ -1,9 +1,46 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import type {
   MediaPurpose,
   MediaResourceType,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+
+export type PrismaTransaction = Parameters<
+  Parameters<PrismaService['$transaction']>[0]
+>[0];
+
+/**
+ * Atomically claims uploads for attachment (UPLOADED -> ATTACHED) in the
+ * caller's own transaction, so the claim and the caller's own insert
+ * (PostMedia/ChatMessageMedia row) either both commit or both roll back.
+ *
+ * Throws if any id couldn't be claimed - already attached, wrong
+ * owner/purpose, or gone - so a message/post can never end up with only
+ * some of its media attached.
+ */
+export async function claimUploadsForAttachment(
+  tx: PrismaTransaction,
+  params: { ids: string[]; userId: string; purpose: MediaPurpose },
+): Promise<void> {
+  const claimed = await tx.mediaUpload.updateMany({
+    where: {
+      id: { in: params.ids },
+      userId: params.userId,
+      purpose: params.purpose,
+      status: 'UPLOADED',
+    },
+    data: {
+      status: 'ATTACHED',
+      attachedAt: new Date(),
+    },
+  });
+
+  if (claimed.count !== params.ids.length) {
+    throw new ConflictException(
+      'One or more media uploads could not be attached',
+    );
+  }
+}
 
 @Injectable()
 export class MediaRepository {
