@@ -155,7 +155,7 @@ export class ChatService {
 
     const recipientState = areMutualFollowers ? 'ACTIVE' : 'PENDING';
 
-    const shouldNotify = await this.isRecipientNotifiable('DIRECT', senderId, {
+    const shouldNotify = await this.isRecipientNotifiable(senderId, {
       userId: dto.recipientUserId,
       state: recipientState,
       notificationLevel: 'ALL',
@@ -1285,7 +1285,7 @@ export class ChatService {
 
     const notifiableFlags = await Promise.all(
       recipientParticipants.map((participant) =>
-        this.isRecipientNotifiable(conversation.type, senderId, participant),
+        this.isRecipientNotifiable(senderId, participant),
       ),
     );
 
@@ -1506,13 +1506,11 @@ export class ChatService {
    * Decides whether one recipient should be notified about a new message.
    *
    * Checked per recipient so one muted/archived/blocking group member can't
-   * suppress notifications for everyone else. Direct conversations
-   * additionally suppress notification for a recipient who has blocked the
-   * sender: the message still sends and stores normally, the recipient just
-   * never finds out about it unless they open the convo.
+   * suppress notifications for everyone else. A recipient who has blocked
+   * the sender never finds out about it unless they open the convo -
+   * checked regardless of conversation type, direct or group.
    */
   private async isRecipientNotifiable(
-    conversationType: string,
     senderId: string,
     recipient: {
       userId: string;
@@ -1527,10 +1525,6 @@ export class ChatService {
 
     if (recipient.state !== 'ACTIVE' || isMuted) {
       return false;
-    }
-
-    if (conversationType !== 'DIRECT') {
-      return true;
     }
 
     const recipientBlockedSender = await this.blocksService.isBlocked(

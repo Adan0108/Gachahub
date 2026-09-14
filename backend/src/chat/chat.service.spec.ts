@@ -1669,6 +1669,56 @@ describe('ChatService', () => {
       );
     });
 
+    it('does not notify a group member who has blocked the sender', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          {
+            userId: 'user-1',
+            role: 'OWNER',
+            state: 'ACTIVE',
+            notificationLevel: 'ALL',
+          },
+          {
+            userId: 'user-2',
+            role: 'MEMBER',
+            state: 'ACTIVE',
+            notificationLevel: 'ALL',
+          },
+          {
+            userId: 'user-3',
+            role: 'MEMBER',
+            state: 'ACTIVE',
+            notificationLevel: 'ALL',
+          },
+        ]),
+      );
+      blocksService.isBlocked.mockImplementation((blockerId, blockedId) =>
+        Promise.resolve(blockerId === 'user-2' && blockedId === 'user-1'),
+      );
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserIds: ['user-3'],
+          shouldNotify: true,
+        }),
+      );
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserIds: ['user-2'],
+          shouldNotify: false,
+        }),
+      );
+    });
+
     it('still suppresses notification while a timed mute has not expired', async () => {
       repository.findParticipant.mockResolvedValue({
         userId: 'user-1',
