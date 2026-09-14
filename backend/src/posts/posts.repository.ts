@@ -144,13 +144,10 @@ export class PostsRepository {
     });
   }
 
-  findPublishedById(id: string, userId?: string) {
-    return this.prisma.post.findFirst({
+  findViewableById(id: string, userId?: string) {
+    return this.prisma.post.findUnique({
       where: {
         id,
-        status: 'PUBLISHED',
-        visibility: 'PUBLIC',
-        deletedAt: null,
       },
       include: {
         ...postInclude,

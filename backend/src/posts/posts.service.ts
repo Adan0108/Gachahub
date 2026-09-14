@@ -135,13 +135,39 @@ export class PostsService {
   }
 
   async findOne(id: string, userId?: string) {
-    const post = await this.postsRepository.findPublishedById(id, userId);
+    const post = await this.postsRepository.findViewableById(id, userId);
 
-    if (!post) {
+    if (!post || post.deletedAt || post.status === 'DELETED') {
       throw new NotFoundException('Post not found');
     }
 
-    return formatPost(post);
+    // Owner can view their own post regardless of
+    // draft/private/followers-only status.
+    if (userId && post.authorId === userId) {
+      return formatPost(post);
+    }
+
+    // Everyone else can only view published posts.
+    if (post.status !== 'PUBLISHED') {
+      throw new NotFoundException('Post not found');
+    }
+
+    if (post.visibility === 'PUBLIC') {
+      return formatPost(post);
+    }
+
+    if (post.visibility === 'FOLLOWERS_ONLY' && userId) {
+      const followStatus = await this.followsService.isFollowing(
+        userId,
+        post.authorId,
+      );
+
+      if (followStatus.following) {
+        return formatPost(post);
+      }
+    }
+
+    throw new NotFoundException('Post not found');
   }
 
   async findByAuthor(
