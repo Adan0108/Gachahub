@@ -1814,6 +1814,65 @@ describe('ChatService', () => {
       );
     });
 
+    it('resolves and attaches media when sending into an existing conversation', async () => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE' },
+        ]),
+      );
+      mediaService.resolveAttachableMedia.mockResolvedValue([
+        {
+          id: 'upload-1',
+          assetId: 'asset-1',
+          publicId: 'public-1',
+          secureUrl: 'https://cdn/upload-1',
+          resourceType: 'IMAGE',
+          width: 100,
+          height: 100,
+          duration: null,
+          bytes: 1234,
+          format: 'png',
+        },
+      ]);
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'conversation-1', {
+        message: {
+          clientMessageId: 'client-1',
+          media: [{ mediaUploadId: 'upload-1', sortOrder: 0 }],
+        },
+      } as any);
+
+      expect(mediaService.resolveAttachableMedia).toHaveBeenCalledWith({
+        ids: ['upload-1'],
+        userId: 'user-1',
+        purpose: 'CHAT',
+        maxImages: 4,
+        maxVideos: 1,
+        entityLabel: 'chat message',
+      });
+      expect(repository.createMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          media: [
+            {
+              mediaUploadId: 'upload-1',
+              assetId: 'asset-1',
+              publicId: 'public-1',
+              url: 'https://cdn/upload-1',
+              resourceType: 'IMAGE',
+              sortOrder: 0,
+              width: 100,
+              height: 100,
+              duration: null,
+              bytes: 1234,
+              format: 'png',
+            },
+          ],
+        }),
+      );
+    });
+
     it('does not resurrect a deleted participant when media validation rejects the send', async () => {
       repository.findConversationWithParticipants.mockResolvedValue(
         directConversation([

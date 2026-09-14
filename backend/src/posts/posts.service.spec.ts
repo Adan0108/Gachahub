@@ -319,6 +319,17 @@ describe('PostsService', () => {
         'author-1',
       );
 
+      // pinning these catches a copy-paste of chat's limits (4 images/1
+      // video/'CHAT') into the post path, which no other test would notice
+      expect(mediaService.resolveAttachableMedia).toHaveBeenCalledWith({
+        ids: [],
+        userId: 'author-1',
+        purpose: 'POST',
+        maxImages: 10,
+        maxVideos: 1,
+        entityLabel: 'post',
+      });
+
       expect(postsRepository.create).toHaveBeenCalledWith(
         expect.objectContaining({
           authorId: 'author-1',
