@@ -1208,13 +1208,6 @@ export class ChatService {
       .filter((participant) => participant.deletedAt)
       .map((participant) => participant.userId);
 
-    if (deletedParticipantIds.length > 0) {
-      await this.chatRepository.restoreDeletedParticipants(
-        conversationId,
-        deletedParticipantIds,
-      );
-    }
-
     const deliverableParticipants = stateEligibleParticipants;
 
     const payload =
@@ -1225,6 +1218,16 @@ export class ChatService {
       senderId,
       dto.message.media,
     );
+
+    // deferred until every step that can still throw (payload prep, media
+    // validation) has succeeded, so a rejected send never leaves a deleted
+    // participant's conversation resurrected for nothing
+    if (deletedParticipantIds.length > 0) {
+      await this.chatRepository.restoreDeletedParticipants(
+        conversationId,
+        deletedParticipantIds,
+      );
+    }
 
     let message: Awaited<ReturnType<typeof this.chatRepository.createMessage>>;
     try {

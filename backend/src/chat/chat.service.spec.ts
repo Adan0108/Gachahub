@@ -1812,6 +1812,27 @@ describe('ChatService', () => {
       );
     });
 
+    it('does not resurrect a deleted participant when media validation rejects the send', async () => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE', deletedAt: new Date() },
+        ]),
+      );
+      mediaService.resolveAttachableMedia.mockRejectedValue(
+        new BadRequestException('A chat message supports at most 4 images'),
+      );
+
+      await expect(
+        service.sendMessage('user-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1', media: [{ mediaUploadId: 'upload-1' }] },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(repository.restoreDeletedParticipants).not.toHaveBeenCalled();
+      expect(repository.createMessage).not.toHaveBeenCalled();
+    });
+
     it('rejects a duplicate clientMessageId that belongs to a different conversation', async () => {
       repository.findMessageBySenderClientMessageId.mockResolvedValue({
         id: 'message-1',
