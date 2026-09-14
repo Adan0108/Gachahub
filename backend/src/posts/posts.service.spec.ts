@@ -55,7 +55,7 @@ describe('PostsService', () => {
   };
 
   const mediaService = {
-    getAttachableUploads: jest.fn(),
+    resolveAttachableMedia: jest.fn(),
   };
 
   const followsService = {
@@ -304,7 +304,7 @@ describe('PostsService', () => {
         isActive: true,
       });
 
-      mediaService.getAttachableUploads.mockResolvedValue([]);
+      mediaService.resolveAttachableMedia.mockResolvedValue([]);
 
       postsRepository.create.mockResolvedValue(basePost);
 
@@ -399,22 +399,17 @@ describe('PostsService', () => {
       expect(postsRepository.create).not.toHaveBeenCalled();
     });
 
-    it('rejects more than 10 images', async () => {
+    // Image/video count and mixing limits are enforced by, and tested
+    // directly against, MediaService.resolveAttachableMedia. This just
+    // checks create() propagates a rejection instead of swallowing it.
+    it('propagates a media policy rejection and never creates the post', async () => {
       postsRepository.findGameById.mockResolvedValue({
         id: 'game-1',
         status: 'ACTIVE',
       });
 
-      mediaService.getAttachableUploads.mockResolvedValue(
-        Array.from(
-          {
-            length: 11,
-          },
-          (_, index) => ({
-            id: `upload-${index}`,
-            resourceType: 'IMAGE',
-          }),
-        ),
+      mediaService.resolveAttachableMedia.mockRejectedValue(
+        new BadRequestException('A post supports at most 10 images'),
       );
 
       await expect(
@@ -423,95 +418,7 @@ describe('PostsService', () => {
             gameId: 'game-1',
             title: 'Title',
             content: 'Content',
-
-            media: Array.from(
-              {
-                length: 11,
-              },
-              (_, index) => ({
-                mediaUploadId: `upload-${index}`,
-              }),
-            ),
-          },
-          'author-1',
-        ),
-      ).rejects.toThrow(BadRequestException);
-
-      expect(postsRepository.create).not.toHaveBeenCalled();
-    });
-
-    it('rejects more than one video', async () => {
-      postsRepository.findGameById.mockResolvedValue({
-        id: 'game-1',
-        status: 'ACTIVE',
-      });
-
-      mediaService.getAttachableUploads.mockResolvedValue([
-        {
-          id: 'video-1',
-          resourceType: 'VIDEO',
-        },
-        {
-          id: 'video-2',
-          resourceType: 'VIDEO',
-        },
-      ]);
-
-      await expect(
-        service.create(
-          {
-            gameId: 'game-1',
-            title: 'Title',
-            content: 'Content',
-
-            media: [
-              {
-                mediaUploadId: 'video-1',
-              },
-              {
-                mediaUploadId: 'video-2',
-              },
-            ],
-          },
-          'author-1',
-        ),
-      ).rejects.toThrow(BadRequestException);
-
-      expect(postsRepository.create).not.toHaveBeenCalled();
-    });
-
-    it('rejects mixing image and video', async () => {
-      postsRepository.findGameById.mockResolvedValue({
-        id: 'game-1',
-        status: 'ACTIVE',
-      });
-
-      mediaService.getAttachableUploads.mockResolvedValue([
-        {
-          id: 'image-1',
-          resourceType: 'IMAGE',
-        },
-        {
-          id: 'video-1',
-          resourceType: 'VIDEO',
-        },
-      ]);
-
-      await expect(
-        service.create(
-          {
-            gameId: 'game-1',
-            title: 'Title',
-            content: 'Content',
-
-            media: [
-              {
-                mediaUploadId: 'image-1',
-              },
-              {
-                mediaUploadId: 'video-1',
-              },
-            ],
+            media: [{ mediaUploadId: 'upload-1' }],
           },
           'author-1',
         ),

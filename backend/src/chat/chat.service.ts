@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -34,6 +35,9 @@ import { UpdateGroupMembersDto } from './dto/update-group-members.dto';
 import { UpdateGroupMemberRoleDto } from './dto/update-group-member-role.dto';
 import { GamesService } from '../games/games.service';
 import { GameModeratorsService } from '../game-moderators/game-moderators.service';
+import { MediaService } from '../media/media.service';
+import { ChatMediaReferenceDto } from './dto/chat-media-reference.dto';
+import type { ChatMessageMediaInput } from './chat.repository';
 import type { MessageEncryptionPort } from './ports/message-encryption.port';
 import type { ChatDeliveryPort } from './ports/chat-delivery.port';
 
@@ -47,6 +51,8 @@ import type { ChatDeliveryPort } from './ports/chat-delivery.port';
  */
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     private readonly chatRepository: ChatRepository,
     private readonly followsService: FollowsService,
@@ -54,6 +60,7 @@ export class ChatService {
     private readonly gamesService: GamesService,
     private readonly gameModeratorsService: GameModeratorsService,
     private readonly chatMessageRateLimiter: ChatMessageRateLimiterService,
+    private readonly mediaService: MediaService,
     @Inject(MESSAGE_ENCRYPTION_PORT)
     private readonly messageEncryption: MessageEncryptionPort,
     @Inject(CHAT_DELIVERY_PORT)
@@ -155,6 +162,11 @@ export class ChatService {
       mutedUntil: null,
     });
 
+    const media = await this.resolveChatMessageMedia(
+      senderId,
+      dto.message.media,
+    );
+
     let result: Awaited<
       ReturnType<typeof this.chatRepository.createDirectConversationWithMessage>
     >;
@@ -173,6 +185,7 @@ export class ChatService {
         contentType: this.resolveContentType(dto.message.contentType),
         clientMessageId: dto.message.clientMessageId,
         replyToId: dto.message.replyToId,
+        media,
       });
     } catch (error) {
       const isPairConflict = this.isDuplicateDirectPairConflict(error);
@@ -1046,12 +1059,15 @@ export class ChatService {
    * Soft deletes the current user's own message.
    *
    * The message row remains, but encrypted content is cleared and status becomes
-   * DELETED. Publishes a real-time event to other participants.
+   * DELETED. Any attached media is released too, same "drop the substance,
+   * keep the row" treatment as the ciphertext. Publishes a real-time event to
+   * other participants.
    */
   async deleteMessage(userId: string, messageId: string) {
     const message = await this.assertCanModifyOwnMessage(userId, messageId);
 
     await this.chatRepository.softDeleteMessage(messageId);
+    await this.releaseDeletedMessageMedia(message.media);
 
     await this.chatDelivery.publishMessageDeleted({
       conversationId: message.conversationId,
@@ -1066,6 +1082,32 @@ export class ChatService {
     return {
       message: 'Message deleted successfully',
     };
+  }
+
+  /**
+   * Releases each attachment's underlying upload after its message is deleted.
+   *
+   * Best-effort on purpose: deleting the message content is the user's actual
+   * intent, so a Cloudinary hiccup on one attachment must not fail the whole
+   * delete. Failures are logged rather than swallowed, since nothing else
+   * will ever retry releasing this upload on its own.
+   */
+  private async releaseDeletedMessageMedia(
+    media: Array<{ mediaUploadId: string }> = [],
+  ) {
+    for (const item of media) {
+      try {
+        await this.mediaService.releaseAttachedUpload(item.mediaUploadId);
+        await this.chatRepository.deleteMessageMediaByUploadId(
+          item.mediaUploadId,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Failed to release media ${item.mediaUploadId} after deleting message`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+    }
   }
 
   /**
@@ -1178,6 +1220,11 @@ export class ChatService {
       preparedPayload ??
       (await this.messageEncryption.preparePayload(dto.message));
 
+    const media = await this.resolveChatMessageMedia(
+      senderId,
+      dto.message.media,
+    );
+
     let message: Awaited<ReturnType<typeof this.chatRepository.createMessage>>;
     try {
       message = await this.chatRepository.createMessage({
@@ -1193,6 +1240,7 @@ export class ChatService {
         contentType: this.resolveContentType(dto.message.contentType),
         clientMessageId: dto.message.clientMessageId,
         replyToId: dto.message.replyToId,
+        media,
       });
     } catch (error) {
       if (!this.isDuplicateMessageConflict(error)) {
@@ -1808,6 +1856,53 @@ export class ChatService {
    */
   private resolveContentType(contentType?: ChatMessageContentType) {
     return contentType ?? ChatMessageContentType.TEXT;
+  }
+
+  /**
+   * Validates media references and resolves them into repository-ready
+   * input, shared by createDirectMessage and sendMessageToExistingConversation.
+   *
+   * Ownership/purpose/status/count/mix validation lives in
+   * MediaService.resolveAttachableMedia, shared with PostsService's attach
+   * flow. Only the final mapping to ChatMessageMedia's shape is chat-specific.
+   */
+  private async resolveChatMessageMedia(
+    senderId: string,
+    mediaReferences: ChatMediaReferenceDto[] = [],
+  ): Promise<ChatMessageMediaInput[]> {
+    if (mediaReferences.length === 0) {
+      return [];
+    }
+
+    const uploads = await this.mediaService.resolveAttachableMedia({
+      ids: mediaReferences.map((item) => item.mediaUploadId),
+      userId: senderId,
+      purpose: 'CHAT',
+      maxImages: 4,
+      maxVideos: 1,
+      entityLabel: 'chat message',
+    });
+
+    const sortOrderById = new Map(
+      mediaReferences.map((item, index) => [
+        item.mediaUploadId,
+        item.sortOrder ?? index,
+      ]),
+    );
+
+    return uploads.map((upload) => ({
+      mediaUploadId: upload.id,
+      assetId: upload.assetId!,
+      publicId: upload.publicId,
+      url: upload.secureUrl!,
+      resourceType: upload.resourceType,
+      sortOrder: sortOrderById.get(upload.id) ?? 0,
+      width: upload.width,
+      height: upload.height,
+      duration: upload.duration,
+      bytes: upload.bytes,
+      format: upload.format,
+    }));
   }
 
   /**

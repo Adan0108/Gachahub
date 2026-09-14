@@ -275,9 +275,7 @@ export class MediaService {
     }
 
     if (upload.status === 'UPLOADED') {
-      const resourceType = upload.resourceType === 'IMAGE' ? 'image' : 'video';
-
-      await this.cloudinaryService.deleteAsset(upload.publicId, resourceType);
+      await this.destroyCloudinaryAsset(upload);
     }
 
     await this.mediaRepository.markDeleted(upload.id);
@@ -285,6 +283,40 @@ export class MediaService {
     return {
       message: 'Unused media upload deleted successfully',
     };
+  }
+
+  /**
+   * Deletes the Cloudinary asset and marks an already-attached upload as
+   * deleted, for callers whose parent record (e.g. a chat message) was just
+   * deleted. No ownership check: the caller already verified it can modify
+   * whatever this upload was attached to.
+   *
+   * No-op if the upload is missing or not ATTACHED, so a caller can safely
+   * retry without needing to track whether a prior attempt partially ran.
+   */
+  async releaseAttachedUpload(mediaUploadId: string): Promise<void> {
+    const upload = await this.mediaRepository.findById(mediaUploadId);
+
+    if (!upload || upload.status !== 'ATTACHED') {
+      return;
+    }
+
+    await this.destroyCloudinaryAsset(upload);
+    await this.mediaRepository.markDeleted(upload.id);
+  }
+
+  /**
+   * Shared tail for removePendingUpload/releaseAttachedUpload: only the
+   * Cloudinary call, callers decide when it's needed and always follow up
+   * with their own markDeleted.
+   */
+  private async destroyCloudinaryAsset(upload: {
+    publicId: string;
+    resourceType: MediaResourceType;
+  }): Promise<void> {
+    const resourceType = upload.resourceType === 'IMAGE' ? 'image' : 'video';
+
+    await this.cloudinaryService.deleteAsset(upload.publicId, resourceType);
   }
 
   /**
@@ -337,6 +369,71 @@ export class MediaService {
       ) {
         throw new BadRequestException('Media upload metadata is incomplete');
       }
+    }
+
+    return uploads;
+  }
+
+  /**
+   * getAttachableUploads plus the count/mix policy every attach flow needs:
+   * every id must resolve, and images/video can't exceed the caller's limits
+   * or mix. Shared by PostsService and ChatService so the two don't drift.
+   *
+   * Callers still do their own final mapping to whatever shape their
+   * PostMedia/ChatMessageMedia row needs - that part isn't shared since the
+   * two genuinely differ (e.g. posts distinguish GIF, chat doesn't have
+   * altText).
+   */
+  async resolveAttachableMedia(params: {
+    ids: string[];
+    userId: string;
+    purpose: MediaPurpose;
+    maxImages: number;
+    maxVideos: number;
+    entityLabel: string;
+  }) {
+    if (params.ids.length === 0) {
+      return [];
+    }
+
+    const uploads = await this.getAttachableUploads({
+      ids: params.ids,
+      userId: params.userId,
+      purpose: params.purpose,
+    });
+
+    if (uploads.length !== params.ids.length) {
+      const resolved = new Set(uploads.map((upload) => upload.id));
+      const missing = params.ids.filter((id) => !resolved.has(id));
+
+      throw new BadRequestException(
+        `Media uploads cannot be attached: ${missing.join(', ')}`,
+      );
+    }
+
+    const imageCount = uploads.filter(
+      (upload) => upload.resourceType === 'IMAGE',
+    ).length;
+    const videoCount = uploads.filter(
+      (upload) => upload.resourceType === 'VIDEO',
+    ).length;
+
+    if (imageCount > params.maxImages) {
+      throw new BadRequestException(
+        `A ${params.entityLabel} supports at most ${params.maxImages} image${params.maxImages === 1 ? '' : 's'}`,
+      );
+    }
+
+    if (videoCount > params.maxVideos) {
+      throw new BadRequestException(
+        `A ${params.entityLabel} supports at most ${params.maxVideos} video${params.maxVideos === 1 ? '' : 's'}`,
+      );
+    }
+
+    if (imageCount > 0 && videoCount > 0) {
+      throw new BadRequestException(
+        `A ${params.entityLabel} cannot mix images and video`,
+      );
     }
 
     return uploads;

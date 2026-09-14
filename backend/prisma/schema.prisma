@@ -376,6 +376,7 @@ model ChatMessage {
   replies      ChatMessage[]         @relation("ChatMessageReplies")
   receipts     ChatMessageReceipt[]
   reactions    ChatMessageReaction[]
+  media        ChatMessageMedia[]
 
   @@unique([senderId, clientMessageId])
   @@index([conversationId, createdAt])
@@ -383,6 +384,35 @@ model ChatMessage {
   @@index([senderId])
   @@index([replyToId])
   @@map("chat_messages")
+}
+
+model ChatMessageMedia {
+  id            String @id @default(cuid())
+  messageId     String
+  mediaUploadId String @unique
+
+  assetId      String
+  publicId     String
+  url          String
+  resourceType MediaResourceType
+
+  sortOrder Int @default(0)
+
+  width    Int?
+  height   Int?
+  duration Float?
+  bytes    Int?
+  format   String?
+
+  createdAt DateTime @default(now())
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  // Restrict, not Cascade: a media upload attached to a sent message must
+  // never be deleted out from under it, same guarantee PostMedia gives posts.
+  mediaUpload MediaUpload @relation(fields: [mediaUploadId], references: [id], onDelete: Restrict)
+
+  @@index([messageId, sortOrder])
+  @@map("chat_message_media")
 }
 
 model ChatMessageReceipt {
@@ -691,8 +721,9 @@ model MediaUpload {
   attachedAt DateTime?
   deletedAt  DateTime?
 
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  postMedia PostMedia?
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postMedia        PostMedia?
+  chatMessageMedia ChatMessageMedia?
 
   @@index([userId, status, createdAt])
   @@index([status, createdAt])

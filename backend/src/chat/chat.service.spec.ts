@@ -19,6 +19,9 @@ jest.mock('../game-moderators/game-moderators.service', () => ({
 jest.mock('../blocks/blocks.service', () => ({
   BlocksService: class {},
 }));
+jest.mock('../media/media.service', () => ({
+  MediaService: class {},
+}));
 // real Prisma namespace, not a stub - chat.service.ts checks `instanceof`
 // Prisma.PrismaClientKnownRequestError, which only works against the same class
 function loadActualPrisma() {
@@ -75,6 +78,7 @@ describe('ChatService', () => {
     findMessages: jest.fn(),
     softDeleteConversationForParticipant: jest.fn(),
     restoreDeletedParticipants: jest.fn(),
+    deleteMessageMediaByUploadId: jest.fn(),
   };
 
   const followsService = {
@@ -104,6 +108,11 @@ describe('ChatService', () => {
     assertNotRateLimited: jest.fn(),
   };
 
+  const mediaService = {
+    resolveAttachableMedia: jest.fn(),
+    releaseAttachedUpload: jest.fn(),
+  };
+
   const chatDelivery = {
     publishMessageCreated: jest.fn(),
     publishMessageEdited: jest.fn(),
@@ -123,6 +132,7 @@ describe('ChatService', () => {
       gamesService as any,
       gameModeratorsService as any,
       chatMessageRateLimiter as any,
+      mediaService as any,
       messageEncryption,
       chatDelivery,
     );
@@ -945,6 +955,105 @@ describe('ChatService', () => {
         conversationId: 'conversation-1',
         message: { id: 'message-1' },
         recipientState: 'PENDING',
+      });
+    });
+
+    describe('media attachments', () => {
+      const uploadFixture = (overrides: Record<string, unknown> = {}) => ({
+        id: 'upload-1',
+        assetId: 'asset-1',
+        publicId: 'public-1',
+        secureUrl: 'https://cdn/upload-1',
+        resourceType: 'IMAGE',
+        width: 100,
+        height: 100,
+        duration: null,
+        bytes: 1234,
+        format: 'png',
+        ...overrides,
+      });
+
+      beforeEach(() => {
+        repository.findUserById.mockResolvedValue({
+          id: 'user-2',
+          status: 'ACTIVE',
+        });
+        blocksService.isBlocked.mockResolvedValue(false);
+        repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+        repository.findDirectPair.mockResolvedValue(null);
+      });
+
+      it('resolves and attaches media to a new direct message', async () => {
+        mediaService.resolveAttachableMedia.mockResolvedValue([
+          uploadFixture(),
+        ]);
+        repository.createDirectConversationWithMessage.mockResolvedValue({
+          conversation: { id: 'conversation-1' },
+          message: { id: 'message-1' },
+        });
+
+        await service.createDirectMessage('user-1', {
+          recipientUserId: 'user-2',
+          message: {
+            clientMessageId: 'client-1',
+            media: [{ mediaUploadId: 'upload-1', sortOrder: 0 }],
+          },
+        } as any);
+
+        expect(mediaService.resolveAttachableMedia).toHaveBeenCalledWith({
+          ids: ['upload-1'],
+          userId: 'user-1',
+          purpose: 'CHAT',
+          maxImages: 4,
+          maxVideos: 1,
+          entityLabel: 'chat message',
+        });
+        expect(
+          repository.createDirectConversationWithMessage,
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({
+            media: [
+              {
+                mediaUploadId: 'upload-1',
+                assetId: 'asset-1',
+                publicId: 'public-1',
+                url: 'https://cdn/upload-1',
+                resourceType: 'IMAGE',
+                sortOrder: 0,
+                width: 100,
+                height: 100,
+                duration: null,
+                bytes: 1234,
+                format: 'png',
+              },
+            ],
+          }),
+        );
+      });
+
+      // Count/mix/missing-upload policy is enforced by, and tested directly
+      // against, MediaService.resolveAttachableMedia. This just checks
+      // createDirectMessage propagates a rejection instead of swallowing it.
+      it('propagates a media resolution rejection and creates nothing', async () => {
+        mediaService.resolveAttachableMedia.mockRejectedValue(
+          new BadRequestException(
+            'A chat message supports at most 4 images',
+          ),
+        );
+
+        await expect(
+          service.createDirectMessage('user-1', {
+            recipientUserId: 'user-2',
+            message: {
+              clientMessageId: 'client-1',
+              media: [{ mediaUploadId: 'upload-1' }],
+            },
+          } as any),
+        ).rejects.toThrow(BadRequestException);
+
+        expect(
+          repository.createDirectConversationWithMessage,
+        ).not.toHaveBeenCalled();
       });
     });
 
@@ -2586,6 +2695,7 @@ describe('ChatService', () => {
         id: 'message-1',
         status: 'SENT',
         senderId: 'user-1',
+        media: [],
         conversation: {
           participants: [{ userId: 'user-1', state: 'ACTIVE' }],
         },
@@ -2604,6 +2714,7 @@ describe('ChatService', () => {
         conversationId: 'conversation-1',
         status: 'SENT',
         senderId: 'user-1',
+        media: [],
         conversation: {
           type: 'DIRECT',
           participants: [
@@ -2622,6 +2733,64 @@ describe('ChatService', () => {
         actorId: 'user-1',
         recipientUserIds: ['user-2'],
       });
+    });
+
+    it('releases every attached upload and unlinks it', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        status: 'SENT',
+        senderId: 'user-1',
+        media: [{ mediaUploadId: 'upload-1' }, { mediaUploadId: 'upload-2' }],
+        conversation: {
+          participants: [{ userId: 'user-1', state: 'ACTIVE' }],
+        },
+      });
+      repository.softDeleteMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.deleteMessage('user-1', 'message-1');
+
+      expect(mediaService.releaseAttachedUpload).toHaveBeenCalledWith(
+        'upload-1',
+      );
+      expect(mediaService.releaseAttachedUpload).toHaveBeenCalledWith(
+        'upload-2',
+      );
+      expect(repository.deleteMessageMediaByUploadId).toHaveBeenCalledWith(
+        'upload-1',
+      );
+      expect(repository.deleteMessageMediaByUploadId).toHaveBeenCalledWith(
+        'upload-2',
+      );
+    });
+
+    it('does not unlink an upload whose release failed, and still processes the rest', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        status: 'SENT',
+        senderId: 'user-1',
+        media: [{ mediaUploadId: 'upload-1' }, { mediaUploadId: 'upload-2' }],
+        conversation: {
+          participants: [{ userId: 'user-1', state: 'ACTIVE' }],
+        },
+      });
+      repository.softDeleteMessage.mockResolvedValue({ id: 'message-1' });
+      mediaService.releaseAttachedUpload.mockImplementation(
+        (mediaUploadId: string) =>
+          mediaUploadId === 'upload-1'
+            ? Promise.reject(new Error('cloudinary down'))
+            : Promise.resolve(),
+      );
+
+      const result = await service.deleteMessage('user-1', 'message-1');
+
+      // the failed release must not block the message delete itself
+      expect(result).toEqual({ message: 'Message deleted successfully' });
+      expect(repository.deleteMessageMediaByUploadId).not.toHaveBeenCalledWith(
+        'upload-1',
+      );
+      expect(repository.deleteMessageMediaByUploadId).toHaveBeenCalledWith(
+        'upload-2',
+      );
     });
   });
 

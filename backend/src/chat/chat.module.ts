@@ -16,6 +16,7 @@ import { FollowsModule } from '../follows/follows.module';
 import { GamesModule } from '../games/games.module';
 import { GameModeratorsModule } from '../game-moderators/game-moderators.module';
 import { BlocksModule } from '../blocks/blocks.module';
+import { MediaModule } from '../media/media.module';
 
 /**
  * Chat feature module.
@@ -32,6 +33,7 @@ import { BlocksModule } from '../blocks/blocks.module';
     GamesModule,
     GameModeratorsModule,
     BlocksModule,
+    MediaModule,
   ],
   controllers: [ChatController],
   providers: [
