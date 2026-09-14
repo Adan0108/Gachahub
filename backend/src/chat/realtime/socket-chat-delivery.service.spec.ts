@@ -22,6 +22,7 @@ describe('SocketChatDeliveryService', () => {
     createdAt: new Date('2024-01-01'),
     clientMessageId: 'client-1',
     replyToId: null,
+    media: [],
   };
 
   beforeEach(() => {
@@ -49,6 +50,7 @@ describe('SocketChatDeliveryService', () => {
       createdAt: new Date('2024-01-01'),
       clientMessageId: 'client-1',
       replyToId: null,
+      media: [],
     });
     expect(emit).toHaveBeenCalledTimes(2);
   });

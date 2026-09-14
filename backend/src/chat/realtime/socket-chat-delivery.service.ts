@@ -32,6 +32,7 @@ export class SocketChatDeliveryService implements ChatDeliveryPort {
       createdAt: event.createdAt,
       clientMessageId: event.clientMessageId,
       replyToId: event.replyToId,
+      media: event.media,
     });
   }
 

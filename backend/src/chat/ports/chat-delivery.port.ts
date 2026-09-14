@@ -1,3 +1,5 @@
+import type { ChatMessageMedia } from '../../generated/prisma/client';
+
 export const CHAT_DELIVERY_PORT = Symbol('CHAT_DELIVERY_PORT');
 
 /**
@@ -17,6 +19,7 @@ export interface ChatMessageCreatedEvent {
   createdAt: Date;
   clientMessageId: string | null;
   replyToId: string | null;
+  media: ChatMessageMedia[];
 }
 
 /**

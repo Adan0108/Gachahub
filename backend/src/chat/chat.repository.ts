@@ -121,6 +121,9 @@ export class ChatRepository {
       include: {
         receipts: true,
         replyTo: true,
+        media: {
+          orderBy: { sortOrder: 'asc' },
+        },
       },
     });
   }
@@ -964,6 +967,9 @@ export class ChatRepository {
           include: {
             emote: true,
           },
+        },
+        media: {
+          orderBy: { sortOrder: 'asc' },
         },
       },
     });

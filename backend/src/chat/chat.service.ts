@@ -234,6 +234,7 @@ export class ChatService {
       createdAt: result.message.createdAt,
       clientMessageId: result.message.clientMessageId,
       replyToId: result.message.replyToId,
+      media: result.message.media,
     });
 
     return {
@@ -1282,6 +1283,7 @@ export class ChatService {
       createdAt: message.createdAt,
       clientMessageId: message.clientMessageId,
       replyToId: message.replyToId,
+      media: message.media,
     };
 
     if (notifiableRecipientIds.length > 0) {
