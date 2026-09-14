@@ -42,6 +42,7 @@ describe('SocketChatDeliveryService', () => {
       conversationId: 'conversation-1',
       messageId: 'message-1',
       senderId: 'user-1',
+      shouldNotify: true,
       ciphertext: 'cipher',
       encryptionMeta: null,
       contentType: 'TEXT',
@@ -52,15 +53,19 @@ describe('SocketChatDeliveryService', () => {
     expect(emit).toHaveBeenCalledTimes(2);
   });
 
-  it('does not emit at all when shouldNotify is false', async () => {
+  it('still emits when shouldNotify is false, muting only gates the client-side badge', async () => {
     const emit = jest.fn();
     const to = jest.fn().mockReturnValue({ emit });
     registry.server = { to } as unknown as Server;
 
     await service.publishMessageCreated({ ...event, shouldNotify: false });
 
-    expect(to).not.toHaveBeenCalled();
-    expect(emit).not.toHaveBeenCalled();
+    expect(to).toHaveBeenCalledWith('user:user-2');
+    expect(to).toHaveBeenCalledWith('user:user-3');
+    expect(emit).toHaveBeenCalledWith(
+      'message:created',
+      expect.objectContaining({ shouldNotify: false }),
+    );
   });
 
   it('does nothing when no server is registered yet', async () => {

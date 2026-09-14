@@ -3,8 +3,7 @@ export const CHAT_DELIVERY_PORT = Symbol('CHAT_DELIVERY_PORT');
 /**
  * Event emitted after a chat message is persisted.
  *
- * shouldNotify lets delivery adapters distinguish normal inbox messages from
- * pending stranger requests, which should sync but not notify.
+ * shouldNotify only gates client notification/badge behavior, never delivery.
  */
 export interface ChatMessageCreatedEvent {
   conversationId: string;
