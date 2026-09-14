@@ -1090,8 +1090,9 @@ export class ChatService {
    *
    * Best-effort on purpose: deleting the message content is the user's actual
    * intent, so a Cloudinary hiccup on one attachment must not fail the whole
-   * delete. Failures are logged rather than swallowed, since nothing else
-   * will ever retry releasing this upload on its own.
+   * delete. A failed release is flagged RELEASE_FAILED so
+   * ChatMediaReleaseRetryService picks it back up on a backoff instead of it
+   * sitting ATTACHED - permanently excluded from cleanup - forever.
    */
   private async releaseDeletedMessageMedia(
     media: Array<{ mediaUploadId: string }> = [],
@@ -1116,6 +1117,17 @@ export class ChatService {
           `Failed to release media ${item.mediaUploadId} after deleting message`,
           error instanceof Error ? error.stack : undefined,
         );
+
+        // flag for ChatMediaReleaseRetryService instead of leaving it stuck
+        // ATTACHED - permanently excluded from cleanup - forever
+        await this.mediaService
+          .markReleaseFailed(item.mediaUploadId)
+          .catch((markError) => {
+            this.logger.warn(
+              `Failed to flag media ${item.mediaUploadId} for release retry`,
+              markError instanceof Error ? markError.stack : undefined,
+            );
+          });
       }
     }
   }

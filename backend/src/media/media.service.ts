@@ -303,8 +303,10 @@ export class MediaService {
   }
 
   /**
-   * Destroys the Cloudinary asset for an ATTACHED upload without touching
-   * its row. Returns false (no-op) if the upload is missing or not ATTACHED.
+   * Destroys the Cloudinary asset for an upload that still needs releasing
+   * (ATTACHED, or RELEASE_FAILED from a previous failed attempt) without
+   * touching its row. Returns false (no-op) if the upload is missing or
+   * already released.
    *
    * For a caller that must also drop its own link row (e.g. ChatMessageMedia)
    * atomically with marking the upload DELETED - so a crash between the two
@@ -314,13 +316,27 @@ export class MediaService {
   async destroyAttachedCloudinaryAsset(mediaUploadId: string): Promise<boolean> {
     const upload = await this.mediaRepository.findById(mediaUploadId);
 
-    if (!upload || upload.status !== 'ATTACHED') {
+    if (
+      !upload ||
+      (upload.status !== 'ATTACHED' && upload.status !== 'RELEASE_FAILED')
+    ) {
       return false;
     }
 
     await this.destroyCloudinaryAsset(upload);
 
     return true;
+  }
+
+  /**
+   * Flags an upload whose release failed so a retry job can pick it back up
+   * on a backoff, instead of it sitting ATTACHED - permanently excluded from
+   * cleanup - forever. Callers call this from their own catch block and
+   * should treat it as best-effort too: a failure here shouldn't block
+   * whatever they were already handling.
+   */
+  async markReleaseFailed(mediaUploadId: string): Promise<void> {
+    await this.mediaRepository.markReleaseFailed(mediaUploadId);
   }
 
   /**

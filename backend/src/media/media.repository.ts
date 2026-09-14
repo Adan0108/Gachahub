@@ -130,6 +130,41 @@ export class MediaRepository {
     });
   }
 
+  /**
+   * Flags an upload whose release (Cloudinary delete after its parent was
+   * deleted) failed, so a retry job can pick it up later instead of leaving
+   * it stuck ATTACHED - which cleanup permanently excludes - forever.
+   *
+   * Matches from ATTACHED or RELEASE_FAILED so a retry that fails again just
+   * bumps updatedAt (via @updatedAt) and pushes the next retry out.
+   */
+  markReleaseFailed(id: string) {
+    return this.prisma.mediaUpload.updateMany({
+      where: {
+        id,
+        status: { in: ['ATTACHED', 'RELEASE_FAILED'] },
+      },
+      data: {
+        status: 'RELEASE_FAILED',
+      },
+    });
+  }
+
+  /**
+   * Uploads flagged RELEASE_FAILED whose last attempt was far enough back to
+   * retry again. take caps one run's blast radius, same as findExpiredUploads.
+   */
+  findReleaseFailedUploads(retryCutoff: Date, take = 50) {
+    return this.prisma.mediaUpload.findMany({
+      where: {
+        status: 'RELEASE_FAILED',
+        updatedAt: { lt: retryCutoff },
+      },
+      orderBy: { updatedAt: 'asc' },
+      take,
+    });
+  }
+
   findExpiredUploads(normalCutoff: Date, cleaningCutoff: Date, take = 100) {
     return this.prisma.mediaUpload.findMany({
       where: {

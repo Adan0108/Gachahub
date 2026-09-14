@@ -684,6 +684,11 @@ enum MediaUploadStatus {
   ATTACHED
   DELETED
   FAILED
+  /// An ATTACHED upload whose parent (e.g. a chat message) was deleted, but
+  /// releasing its Cloudinary asset failed. Retried on a backoff by the
+  /// owning feature (see ChatMediaReleaseRetryService) instead of leaking
+  /// forever, since ATTACHED itself is permanently excluded from cleanup.
+  RELEASE_FAILED
 }
 
 model MediaUpload {

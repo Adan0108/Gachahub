@@ -4,6 +4,7 @@ import { WebsocketModule } from '../websocket/websocket.module';
 import { ChatController } from './chat.controller';
 import { ChatRepository } from './chat.repository';
 import { ChatService } from './chat.service';
+import { ChatMediaReleaseRetryService } from './chat-media-release-retry.service';
 import { ChatTypingGateway } from './realtime/chat-typing.gateway';
 import { ChatTypingService } from './realtime/chat-typing.service';
 import { ChatMessageRateLimiterService } from './chat-message-rate-limiter.service';
@@ -39,6 +40,7 @@ import { MediaModule } from '../media/media.module';
   providers: [
     ChatRepository,
     ChatService,
+    ChatMediaReleaseRetryService,
     ChatTypingGateway,
     ChatTypingService,
     ChatMessageRateLimiterService,

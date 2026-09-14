@@ -113,6 +113,7 @@ describe('ChatService', () => {
     resolveAttachableMedia: jest.fn(),
     releaseAttachedUpload: jest.fn(),
     destroyAttachedCloudinaryAsset: jest.fn(),
+    markReleaseFailed: jest.fn().mockResolvedValue(undefined),
   };
 
   const chatDelivery = {
@@ -2914,6 +2915,10 @@ describe('ChatService', () => {
         'upload-1',
       );
       expect(repository.finalizeReleasedMedia).toHaveBeenCalledWith(
+        'upload-2',
+      );
+      expect(mediaService.markReleaseFailed).toHaveBeenCalledWith('upload-1');
+      expect(mediaService.markReleaseFailed).not.toHaveBeenCalledWith(
         'upload-2',
       );
     });

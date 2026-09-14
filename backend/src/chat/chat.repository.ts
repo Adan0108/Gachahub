@@ -935,7 +935,10 @@ export class ChatRepository {
   finalizeReleasedMedia(mediaUploadId: string) {
     return this.prisma.$transaction([
       this.prisma.mediaUpload.updateMany({
-        where: { id: mediaUploadId, status: 'ATTACHED' },
+        where: {
+          id: mediaUploadId,
+          status: { in: ['ATTACHED', 'RELEASE_FAILED'] },
+        },
         data: { status: 'DELETED', deletedAt: new Date() },
       }),
       this.prisma.chatMessageMedia.deleteMany({

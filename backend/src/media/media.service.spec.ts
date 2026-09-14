@@ -5,6 +5,7 @@ describe('MediaService', () => {
     findById: jest.fn(),
     markDeleted: jest.fn(),
     findManyByIds: jest.fn(),
+    markReleaseFailed: jest.fn(),
   };
 
   const cloudinaryService = {
@@ -66,6 +67,33 @@ describe('MediaService', () => {
 
       expect(released).toBe(false);
       expect(cloudinaryService.deleteAsset).not.toHaveBeenCalled();
+    });
+
+    it('also destroys the asset for an upload retrying after a previous failure', async () => {
+      mediaRepository.findById.mockResolvedValue({
+        id: 'upload-1',
+        status: 'RELEASE_FAILED',
+        publicId: 'public-1',
+        resourceType: 'IMAGE',
+      });
+
+      const released = await service.destroyAttachedCloudinaryAsset('upload-1');
+
+      expect(released).toBe(true);
+      expect(cloudinaryService.deleteAsset).toHaveBeenCalledWith(
+        'public-1',
+        'image',
+      );
+    });
+  });
+
+  describe('markReleaseFailed', () => {
+    it('delegates to the repository', async () => {
+      await service.markReleaseFailed('upload-1');
+
+      expect(mediaRepository.markReleaseFailed).toHaveBeenCalledWith(
+        'upload-1',
+      );
     });
   });
 
