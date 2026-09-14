@@ -940,6 +940,24 @@ export class ChatRepository {
   }
 
   /**
+   * Marks an upload DELETED and drops its message link row together, once
+   * MediaService.destroyAttachedCloudinaryAsset has already destroyed the
+   * Cloudinary asset. One transaction so a crash between the two writes
+   * can't leave a link row pointing at a dead upload.
+   */
+  finalizeReleasedMedia(mediaUploadId: string) {
+    return this.prisma.$transaction([
+      this.prisma.mediaUpload.updateMany({
+        where: { id: mediaUploadId, status: 'ATTACHED' },
+        data: { status: 'DELETED', deletedAt: new Date() },
+      }),
+      this.prisma.chatMessageMedia.deleteMany({
+        where: { mediaUploadId },
+      }),
+    ]);
+  }
+
+  /**
    * Updates an existing encrypted message payload.
    *
    * Used for message edit. The service checks ownership and permissions before

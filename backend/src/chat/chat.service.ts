@@ -1098,10 +1098,19 @@ export class ChatService {
   ) {
     for (const item of media) {
       try {
-        await this.mediaService.releaseAttachedUpload(item.mediaUploadId);
-        await this.chatRepository.deleteMessageMediaByUploadId(
+        const released = await this.mediaService.destroyAttachedCloudinaryAsset(
           item.mediaUploadId,
         );
+
+        if (released) {
+          // one transaction: a crash here can't leave the link row behind
+          // pointing at an upload we already marked DELETED
+          await this.chatRepository.finalizeReleasedMedia(item.mediaUploadId);
+        } else {
+          await this.chatRepository.deleteMessageMediaByUploadId(
+            item.mediaUploadId,
+          );
+        }
       } catch (error) {
         this.logger.warn(
           `Failed to release media ${item.mediaUploadId} after deleting message`,

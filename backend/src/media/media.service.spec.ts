@@ -24,6 +24,51 @@ describe('MediaService', () => {
     );
   });
 
+  describe('destroyAttachedCloudinaryAsset', () => {
+    it('destroys the cloudinary asset and returns true without touching the row', async () => {
+      mediaRepository.findById.mockResolvedValue({
+        id: 'upload-1',
+        status: 'ATTACHED',
+        publicId: 'public-1',
+        resourceType: 'IMAGE',
+      });
+
+      const released =
+        await service.destroyAttachedCloudinaryAsset('upload-1');
+
+      expect(released).toBe(true);
+      expect(cloudinaryService.deleteAsset).toHaveBeenCalledWith(
+        'public-1',
+        'image',
+      );
+      expect(mediaRepository.markDeleted).not.toHaveBeenCalled();
+    });
+
+    it('returns false without calling cloudinary when the upload is missing', async () => {
+      mediaRepository.findById.mockResolvedValue(null);
+
+      const released =
+        await service.destroyAttachedCloudinaryAsset('missing-upload');
+
+      expect(released).toBe(false);
+      expect(cloudinaryService.deleteAsset).not.toHaveBeenCalled();
+    });
+
+    it('returns false without calling cloudinary when the upload is not ATTACHED', async () => {
+      mediaRepository.findById.mockResolvedValue({
+        id: 'upload-1',
+        status: 'UPLOADED',
+        publicId: 'public-1',
+        resourceType: 'IMAGE',
+      });
+
+      const released = await service.destroyAttachedCloudinaryAsset('upload-1');
+
+      expect(released).toBe(false);
+      expect(cloudinaryService.deleteAsset).not.toHaveBeenCalled();
+    });
+  });
+
   describe('releaseAttachedUpload', () => {
     it('deletes the cloudinary asset and marks the upload deleted', async () => {
       mediaRepository.findById.mockResolvedValue({

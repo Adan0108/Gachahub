@@ -79,6 +79,7 @@ describe('ChatService', () => {
     softDeleteConversationForParticipant: jest.fn(),
     restoreDeletedParticipants: jest.fn(),
     deleteMessageMediaByUploadId: jest.fn(),
+    finalizeReleasedMedia: jest.fn(),
   };
 
   const followsService = {
@@ -111,6 +112,7 @@ describe('ChatService', () => {
   const mediaService = {
     resolveAttachableMedia: jest.fn(),
     releaseAttachedUpload: jest.fn(),
+    destroyAttachedCloudinaryAsset: jest.fn(),
   };
 
   const chatDelivery = {
@@ -2776,7 +2778,7 @@ describe('ChatService', () => {
       });
     });
 
-    it('releases every attached upload and unlinks it', async () => {
+    it('releases every attached upload and finalizes it atomically', async () => {
       repository.findMessageWithParticipants.mockResolvedValue({
         id: 'message-1',
         status: 'SENT',
@@ -2787,21 +2789,44 @@ describe('ChatService', () => {
         },
       });
       repository.softDeleteMessage.mockResolvedValue({ id: 'message-1' });
+      mediaService.destroyAttachedCloudinaryAsset.mockResolvedValue(true);
 
       await service.deleteMessage('user-1', 'message-1');
 
-      expect(mediaService.releaseAttachedUpload).toHaveBeenCalledWith(
+      expect(mediaService.destroyAttachedCloudinaryAsset).toHaveBeenCalledWith(
         'upload-1',
       );
-      expect(mediaService.releaseAttachedUpload).toHaveBeenCalledWith(
+      expect(mediaService.destroyAttachedCloudinaryAsset).toHaveBeenCalledWith(
         'upload-2',
       );
+      expect(repository.finalizeReleasedMedia).toHaveBeenCalledWith(
+        'upload-1',
+      );
+      expect(repository.finalizeReleasedMedia).toHaveBeenCalledWith(
+        'upload-2',
+      );
+      expect(repository.deleteMessageMediaByUploadId).not.toHaveBeenCalled();
+    });
+
+    it('just unlinks an upload that never needed releasing', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        status: 'SENT',
+        senderId: 'user-1',
+        media: [{ mediaUploadId: 'upload-1' }],
+        conversation: {
+          participants: [{ userId: 'user-1', state: 'ACTIVE' }],
+        },
+      });
+      repository.softDeleteMessage.mockResolvedValue({ id: 'message-1' });
+      mediaService.destroyAttachedCloudinaryAsset.mockResolvedValue(false);
+
+      await service.deleteMessage('user-1', 'message-1');
+
       expect(repository.deleteMessageMediaByUploadId).toHaveBeenCalledWith(
         'upload-1',
       );
-      expect(repository.deleteMessageMediaByUploadId).toHaveBeenCalledWith(
-        'upload-2',
-      );
+      expect(repository.finalizeReleasedMedia).not.toHaveBeenCalled();
     });
 
     it('does not unlink an upload whose release failed, and still processes the rest', async () => {
@@ -2815,21 +2840,21 @@ describe('ChatService', () => {
         },
       });
       repository.softDeleteMessage.mockResolvedValue({ id: 'message-1' });
-      mediaService.releaseAttachedUpload.mockImplementation(
+      mediaService.destroyAttachedCloudinaryAsset.mockImplementation(
         (mediaUploadId: string) =>
           mediaUploadId === 'upload-1'
             ? Promise.reject(new Error('cloudinary down'))
-            : Promise.resolve(),
+            : Promise.resolve(true),
       );
 
       const result = await service.deleteMessage('user-1', 'message-1');
 
       // the failed release must not block the message delete itself
       expect(result).toEqual({ message: 'Message deleted successfully' });
-      expect(repository.deleteMessageMediaByUploadId).not.toHaveBeenCalledWith(
+      expect(repository.finalizeReleasedMedia).not.toHaveBeenCalledWith(
         'upload-1',
       );
-      expect(repository.deleteMessageMediaByUploadId).toHaveBeenCalledWith(
+      expect(repository.finalizeReleasedMedia).toHaveBeenCalledWith(
         'upload-2',
       );
     });

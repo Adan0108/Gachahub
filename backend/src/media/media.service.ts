@@ -295,14 +295,32 @@ export class MediaService {
    * retry without needing to track whether a prior attempt partially ran.
    */
   async releaseAttachedUpload(mediaUploadId: string): Promise<void> {
+    const released = await this.destroyAttachedCloudinaryAsset(mediaUploadId);
+
+    if (released) {
+      await this.mediaRepository.markDeleted(mediaUploadId);
+    }
+  }
+
+  /**
+   * Destroys the Cloudinary asset for an ATTACHED upload without touching
+   * its row. Returns false (no-op) if the upload is missing or not ATTACHED.
+   *
+   * For a caller that must also drop its own link row (e.g. ChatMessageMedia)
+   * atomically with marking the upload DELETED - so a crash between the two
+   * writes can never leave a link row pointing at a dead upload - call this
+   * first, then do both DB writes together in one transaction.
+   */
+  async destroyAttachedCloudinaryAsset(mediaUploadId: string): Promise<boolean> {
     const upload = await this.mediaRepository.findById(mediaUploadId);
 
     if (!upload || upload.status !== 'ATTACHED') {
-      return;
+      return false;
     }
 
     await this.destroyCloudinaryAsset(upload);
-    await this.mediaRepository.markDeleted(upload.id);
+
+    return true;
   }
 
   /**
