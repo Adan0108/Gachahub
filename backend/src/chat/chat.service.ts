@@ -1870,9 +1870,11 @@ export class ChatService {
    */
   private async resolveChatMessageMedia(
     senderId: string,
-    mediaReferences: ChatMediaReferenceDto[] = [],
+    mediaReferences?: ChatMediaReferenceDto[] | null,
   ): Promise<ChatMessageMediaInput[]> {
-    if (mediaReferences.length === 0) {
+    // a default param only covers undefined, and an explicit `"media": null`
+    // in the request body passes @IsOptional() validation unchanged
+    if (!mediaReferences || mediaReferences.length === 0) {
       return [];
     }
 

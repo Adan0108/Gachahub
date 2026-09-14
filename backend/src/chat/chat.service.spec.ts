@@ -1055,6 +1055,26 @@ describe('ChatService', () => {
           repository.createDirectConversationWithMessage,
         ).not.toHaveBeenCalled();
       });
+
+      it('treats an explicit null media field the same as no attachments', async () => {
+        repository.createDirectConversationWithMessage.mockResolvedValue({
+          conversation: { id: 'conversation-1' },
+          message: { id: 'message-1' },
+        });
+
+        await service.createDirectMessage('user-1', {
+          recipientUserId: 'user-2',
+          message: {
+            clientMessageId: 'client-1',
+            media: null,
+          },
+        } as any);
+
+        expect(mediaService.resolveAttachableMedia).not.toHaveBeenCalled();
+        expect(
+          repository.createDirectConversationWithMessage,
+        ).toHaveBeenCalledWith(expect.objectContaining({ media: [] }));
+      });
     });
 
     it('rejects a new conversation when the recipient accepts no messages', async () => {
