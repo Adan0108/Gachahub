@@ -29,21 +29,23 @@ model User {
   comments     Comment[]
   interests    UserInterest[]
 
-  followers            UserFollow[]          @relation("UserFollowers")
-  following            UserFollow[]          @relation("UserFollowing")
-  moderatedGames       GameModerator[]       @relation("GameModeratorUser")
-  assignedModerators   GameModerator[]       @relation("GameModeratorAssigner")
-  createdChats         ChatConversation[]    @relation("ChatConversationCreator")
-  gameMemberships      GameMember[]
-  chatParticipants     ChatParticipant[]
-  sentChatMessages     ChatMessage[]         @relation("ChatMessageSender")
-  chatMessageReceipts  ChatMessageReceipt[]
-  directChatPairsAsA   ChatDirectPair[]      @relation("ChatDirectPairUserA")
-  directChatPairsAsB   ChatDirectPair[]      @relation("ChatDirectPairUserB")
-  chatMessageReactions ChatMessageReaction[]
-  createdChatEmotes    ChatEmote[]           @relation("ChatEmoteCreator")
-  blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
-  blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
+  followers             UserFollow[]          @relation("UserFollowers")
+  following             UserFollow[]          @relation("UserFollowing")
+  moderatedGames        GameModerator[]       @relation("GameModeratorUser")
+  assignedModerators    GameModerator[]       @relation("GameModeratorAssigner")
+  createdChats          ChatConversation[]    @relation("ChatConversationCreator")
+  gameMemberships       GameMember[]
+  chatParticipants      ChatParticipant[]
+  sentChatMessages      ChatMessage[]         @relation("ChatMessageSender")
+  chatMessageReceipts   ChatMessageReceipt[]
+  directChatPairsAsA    ChatDirectPair[]      @relation("ChatDirectPairUserA")
+  directChatPairsAsB    ChatDirectPair[]      @relation("ChatDirectPairUserB")
+  chatMessageReactions  ChatMessageReaction[]
+  createdChatEmotes     ChatEmote[]           @relation("ChatEmoteCreator")
+  blockedUsers          ChatUserBlock[]       @relation("ChatUserBlockBlocker")
+  blockedBy             ChatUserBlock[]       @relation("ChatUserBlockBlocked")
+  receivedNotifications Notification[]        @relation("NotificationRecipient")
+  actedNotifications    Notification[]        @relation("NotificationActor")
 
   @@unique([email])
   @@map("user")
@@ -736,4 +738,53 @@ model Comment {
   @@index([authorId])
   @@index([parentId, createdAt])
   @@map("comments")
+}
+
+enum NotificationType {
+  POST_LIKED
+  POST_COMMENTED
+  COMMENT_REPLIED
+
+  USER_FOLLOWED
+  USER_MENTIONED
+
+  MESSAGE_RECEIVED
+  MESSAGE_REPLIED
+
+  GROUP_ADDED
+  GROUP_INVITE_PENDING
+}
+
+enum NotificationEntityType {
+  POST
+  COMMENT
+  MESSAGE
+  CONVERSATION
+  USER
+}
+
+model Notification {
+  id String @id @default(cuid())
+
+  recipientId String
+  actorId     String?
+
+  type NotificationType
+
+  entityType NotificationEntityType
+  entityId   String
+
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recipient User @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  actor User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([recipientId, createdAt])
+  @@index([recipientId, readAt])
+  @@index([actorId])
+  @@map("notifications")
 }
