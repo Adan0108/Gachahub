@@ -179,14 +179,37 @@ describe('ChatDevicesService', () => {
       ).rejects.toThrow(RateLimitedException);
     });
 
-    it('rejects when either party has blocked the other', async () => {
-      blocksService.isBlocked.mockImplementation((blockerId: string) =>
-        Promise.resolve(blockerId === 'user-2'),
+    it('rejects when the requester has blocked the target', async () => {
+      blocksService.isBlocked.mockImplementation(
+        (blockerId: string, blockedId: string) =>
+          Promise.resolve(blockerId === 'user-1' && blockedId === 'user-2'),
       );
 
       await expect(
         service.claimKeyPackageForUser('user-1', 'user-2'),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('does not reject when the target has blocked the requester (asymmetric, matches chat.service.ts)', async () => {
+      blocksService.isBlocked.mockImplementation(
+        (blockerId: string, blockedId: string) =>
+          Promise.resolve(blockerId === 'user-2' && blockedId === 'user-1'),
+      );
+      repository.claimSingleUseKeyPackage.mockResolvedValue({
+        deviceId: 'device-2',
+        payload: Buffer.from('key-package-bytes'),
+      });
+      repository.findById.mockResolvedValue({
+        id: 'device-2',
+        ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
+        signaturePublicKey: Buffer.from('sig-key'),
+      });
+
+      await expect(
+        service.claimKeyPackageForUser('user-1', 'user-2'),
+      ).resolves.toEqual(
+        expect.objectContaining({ deviceId: 'device-2' }),
+      );
     });
 
     it('rejects when the target user does not exist', async () => {

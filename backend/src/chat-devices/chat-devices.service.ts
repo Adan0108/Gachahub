@@ -143,14 +143,16 @@ export class ChatDevicesService {
     requesterId: string,
     targetUserId: string,
   ) {
-    const [requesterBlockedTarget, targetBlockedRequester] = await Promise.all([
-      this.blocksService.isBlocked(requesterId, targetUserId),
-      this.blocksService.isBlocked(targetUserId, requesterId),
-    ]);
-    if (requesterBlockedTarget || targetBlockedRequester) {
-      throw new ForbiddenException(
-        'You cannot fetch key packages for this user',
-      );
+    // Asymmetric, matching chat.service.ts's assertSenderHasNotBlockedRecipient:
+    // the requester's own block stops them, but being blocked BY the target
+    // doesn't - a blocked-by party can still message today (silently), so it
+    // must still be able to provision a device to encrypt that message with.
+    const requesterBlockedTarget = await this.blocksService.isBlocked(
+      requesterId,
+      targetUserId,
+    );
+    if (requesterBlockedTarget) {
+      throw new ForbiddenException('You have blocked this user');
     }
 
     const target =
