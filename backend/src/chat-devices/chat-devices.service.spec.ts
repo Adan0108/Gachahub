@@ -278,9 +278,7 @@ describe('ChatDevicesService', () => {
 
       await expect(
         service.claimKeyPackageForUser('user-1', 'user-2'),
-      ).resolves.toEqual(
-        expect.objectContaining({ deviceId: 'device-2' }),
-      );
+      ).resolves.toEqual(expect.objectContaining({ deviceId: 'device-2' }));
     });
 
     it('rejects when the target user does not exist', async () => {

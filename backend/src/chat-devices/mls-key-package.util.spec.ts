@@ -164,5 +164,4 @@ describe('decodeAndVerifyKeyPackage', () => {
       }),
     ).rejects.toThrow(/not valid yet/);
   });
-
 });

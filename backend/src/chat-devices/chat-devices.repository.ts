@@ -145,4 +145,16 @@ export class ChatDevicesRepository {
       data: { revokedAt: new Date() },
     });
   }
+
+  /**
+   * Bulk-deletes expired key packages. No external resource to release
+   * first (unlike MediaUpload/Cloudinary) - a plain deleteMany is safe and
+   * needs no per-row claim/batch loop.
+   */
+  async deleteExpiredKeyPackages(): Promise<number> {
+    const result = await this.prisma.mlsKeyPackage.deleteMany({
+      where: { expiresAt: { lt: new Date() } },
+    });
+    return result.count;
+  }
 }

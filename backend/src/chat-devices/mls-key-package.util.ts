@@ -145,7 +145,10 @@ async function decodeAndVerifyKeyPackageUnsafe(
   const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
   const durationSeconds = Number(notAfter - notBefore);
 
-  if (durationSeconds <= 0 || durationSeconds > MAX_KEY_PACKAGE_LIFETIME_SECONDS) {
+  if (
+    durationSeconds <= 0 ||
+    durationSeconds > MAX_KEY_PACKAGE_LIFETIME_SECONDS
+  ) {
     throw new BadRequestException(
       `Key package lifetime must be positive and at most ${MAX_KEY_PACKAGE_LIFETIME_SECONDS} seconds`,
     );
