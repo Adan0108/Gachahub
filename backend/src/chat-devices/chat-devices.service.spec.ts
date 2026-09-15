@@ -31,6 +31,10 @@ describe('ChatDevicesService', () => {
     assertNotRateLimited: jest.fn(),
   };
 
+  const uploadRateLimiter = {
+    assertNotRateLimited: jest.fn(),
+  };
+
   let service: ChatDevicesService;
 
   beforeEach(() => {
@@ -41,6 +45,7 @@ describe('ChatDevicesService', () => {
       followsService as any,
       blocksService as any,
       fetchRateLimiter as any,
+      uploadRateLimiter as any,
     );
   });
 
@@ -110,6 +115,23 @@ describe('ChatDevicesService', () => {
 
       expect(repository.createDeviceWithKeyPackages).not.toHaveBeenCalled();
     });
+
+    it('enforces the upload rate limit', async () => {
+      uploadRateLimiter.assertNotRateLimited.mockImplementationOnce(() => {
+        throw new RateLimitedException('slow down', 30);
+      });
+
+      await expect(
+        service.registerDevice('user-1', {
+          deviceId: 'device-1',
+          signaturePublicKey: Buffer.from('sig-key').toString('base64'),
+          ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
+          keyPackages: [],
+        } as any),
+      ).rejects.toThrow(RateLimitedException);
+
+      expect(repository.findById).not.toHaveBeenCalled();
+    });
   });
 
   describe('uploadKeyPackages', () => {
@@ -159,6 +181,20 @@ describe('ChatDevicesService', () => {
           keyPackages: [],
         } as any),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('enforces the upload rate limit', async () => {
+      uploadRateLimiter.assertNotRateLimited.mockImplementationOnce(() => {
+        throw new RateLimitedException('slow down', 30);
+      });
+
+      await expect(
+        service.uploadKeyPackages('user-1', 'device-1', {
+          keyPackages: [],
+        } as any),
+      ).rejects.toThrow(RateLimitedException);
+
+      expect(repository.findById).not.toHaveBeenCalled();
     });
   });
 

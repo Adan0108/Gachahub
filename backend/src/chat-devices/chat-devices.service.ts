@@ -11,6 +11,7 @@ import {
   type NewKeyPackage,
 } from './chat-devices.repository';
 import { KeyPackageFetchRateLimiterService } from './key-package-fetch-rate-limiter.service';
+import { KeyPackageUploadRateLimiterService } from './key-package-upload-rate-limiter.service';
 import { decodeAndVerifyKeyPackage } from './mls-key-package.util';
 import { RegisterDeviceDto } from './dto/register-device.dto';
 import { UploadKeyPackagesDto } from './dto/upload-key-packages.dto';
@@ -23,6 +24,7 @@ export class ChatDevicesService {
     private readonly followsService: FollowsService,
     private readonly blocksService: BlocksService,
     private readonly fetchRateLimiter: KeyPackageFetchRateLimiterService,
+    private readonly uploadRateLimiter: KeyPackageUploadRateLimiterService,
   ) {}
 
   /**
@@ -32,6 +34,8 @@ export class ChatDevicesService {
    * silent no-op, since the caller only calls it once per fresh identity.
    */
   async registerDevice(userId: string, dto: RegisterDeviceDto) {
+    this.uploadRateLimiter.assertNotRateLimited(userId);
+
     const existing = await this.chatDevicesRepository.findById(dto.deviceId);
     if (existing) {
       throw new ConflictException('This device id is already registered');
@@ -62,6 +66,8 @@ export class ChatDevicesService {
     deviceId: string,
     dto: UploadKeyPackagesDto,
   ) {
+    this.uploadRateLimiter.assertNotRateLimited(userId);
+
     const device = await this.assertOwnActiveDevice(userId, deviceId);
 
     const keyPackages = await this.verifyKeyPackages(

@@ -6,6 +6,7 @@ import { ChatDevicesController } from './chat-devices.controller';
 import { ChatDevicesService } from './chat-devices.service';
 import { ChatDevicesRepository } from './chat-devices.repository';
 import { KeyPackageFetchRateLimiterService } from './key-package-fetch-rate-limiter.service';
+import { KeyPackageUploadRateLimiterService } from './key-package-upload-rate-limiter.service';
 
 @Module({
   imports: [PrismaModule, FollowsModule, BlocksModule],
@@ -14,6 +15,7 @@ import { KeyPackageFetchRateLimiterService } from './key-package-fetch-rate-limi
     ChatDevicesService,
     ChatDevicesRepository,
     KeyPackageFetchRateLimiterService,
+    KeyPackageUploadRateLimiterService,
   ],
   exports: [ChatDevicesService],
 })
