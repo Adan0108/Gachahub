@@ -19,6 +19,7 @@ import { CommentsModule } from './comments/comments.module';
 import { FollowsModule } from './follows/follows.module';
 import { FeedModule } from './feed/feed.module';
 import { CommonModule } from './common/common.module';
+import { ChatDevicesModule } from './chat-devices/chat-devices.module';
 
 /**
  * Root application module.
@@ -42,6 +43,7 @@ import { CommonModule } from './common/common.module';
     GameCategoriesModule,
     GameModeratorsModule,
     ChatModule,
+    ChatDevicesModule,
     MediaModule,
     PostsModule,
     CommentsModule,

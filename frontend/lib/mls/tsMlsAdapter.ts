@@ -13,7 +13,6 @@ import {
   processPrivateMessage,
   emptyPskIndex,
   defaultCapabilities,
-  defaultLifetime,
   type Credential,
   type CiphersuiteImpl,
   type ClientState,
@@ -57,6 +56,20 @@ import type { MlsClientCandidate } from './contractTests';
  * separate decision once a library is actually chosen.
  */
 const CIPHERSUITE_NAME = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519';
+
+// ts-mls's own defaultLifetime is notBefore=0/notAfter=max-int64 - an
+// effectively-infinite key package a real server should never accept.
+// Matches the backend's MAX_KEY_PACKAGE_LIFETIME_SECONDS
+// (chat-devices/mls-key-package.util.ts) - keep the two in sync.
+const KEY_PACKAGE_LIFETIME_DAYS = 90;
+
+function boundedLifetime() {
+  const now = BigInt(Math.floor(Date.now() / 1000));
+  return {
+    notBefore: now,
+    notAfter: now + BigInt(KEY_PACKAGE_LIFETIME_DAYS * 24 * 60 * 60),
+  };
+}
 
 let cachedImpl: Promise<CiphersuiteImpl> | undefined;
 function getImpl(): Promise<CiphersuiteImpl> {
@@ -132,7 +145,7 @@ class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
     const kp = await generateKeyPackage(
       mlsCredential,
       defaultCapabilities(),
-      defaultLifetime,
+      boundedLifetime(),
       [],
       impl,
     );
@@ -167,7 +180,7 @@ class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
       const kp = await generateKeyPackage(
         mlsCredential,
         defaultCapabilities(),
-        defaultLifetime,
+        boundedLifetime(),
         [],
         impl,
       );
