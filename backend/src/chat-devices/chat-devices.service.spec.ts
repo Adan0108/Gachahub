@@ -378,4 +378,18 @@ describe('ChatDevicesService', () => {
       );
     });
   });
+
+  describe('deviceExists', () => {
+    it('returns true when the device is found', async () => {
+      repository.findById.mockResolvedValue({ id: 'device-1' });
+
+      await expect(service.deviceExists('device-1')).resolves.toBe(true);
+    });
+
+    it('returns false when no device is found', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(service.deviceExists('device-1')).resolves.toBe(false);
+    });
+  });
 });

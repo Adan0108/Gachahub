@@ -204,7 +204,13 @@ export class ChatDevicesService {
     }
   }
 
-  private async assertOwnActiveDevice(userId: string, deviceId: string) {
+  /**
+   * Public: stage 4 (MlsHandshakesService) reuses this exact ownership
+   * check rather than re-implementing it - a device submitting a handshake
+   * or fetching Welcomes has to pass the same "do you own this active
+   * device" test as uploading key packages does.
+   */
+  async assertOwnActiveDevice(userId: string, deviceId: string) {
     const device = await this.chatDevicesRepository.findById(deviceId);
 
     if (!device || device.userId !== userId) {
@@ -215,6 +221,17 @@ export class ChatDevicesService {
     }
 
     return device;
+  }
+
+  /**
+   * Public: stage 4 uses this to validate a Welcome's recipientDeviceId
+   * before inserting it - MlsWelcome.recipientDeviceId is a foreign key, so
+   * an unknown id would otherwise surface as a raw constraint-violation 500
+   * instead of a clean 400.
+   */
+  async deviceExists(deviceId: string): Promise<boolean> {
+    const device = await this.chatDevicesRepository.findById(deviceId);
+    return device !== null;
   }
 
   private async verifyKeyPackages(

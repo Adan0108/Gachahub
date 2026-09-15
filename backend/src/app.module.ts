@@ -20,6 +20,7 @@ import { FollowsModule } from './follows/follows.module';
 import { FeedModule } from './feed/feed.module';
 import { CommonModule } from './common/common.module';
 import { ChatDevicesModule } from './chat-devices/chat-devices.module';
+import { MlsHandshakesModule } from './mls-handshakes/mls-handshakes.module';
 
 /**
  * Root application module.
@@ -44,6 +45,7 @@ import { ChatDevicesModule } from './chat-devices/chat-devices.module';
     GameModeratorsModule,
     ChatModule,
     ChatDevicesModule,
+    MlsHandshakesModule,
     MediaModule,
     PostsModule,
     CommentsModule,
