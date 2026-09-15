@@ -142,4 +142,27 @@ describe('decodeAndVerifyKeyPackage', () => {
       }),
     ).rejects.toThrow(/lifetime must be positive and at most/);
   });
+
+  // regression: duration alone isn't enough - a short-duration window
+  // scheduled far in the future used to pass, since expiresAt was derived
+  // only from notAfter with no check that notBefore had actually arrived
+  it('rejects a short-duration key package scheduled to start far in the future', async () => {
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    const notBefore = now + BigInt(300 * 24 * 60 * 60);
+    const notAfter = notBefore + BigInt(89 * 24 * 60 * 60);
+    const { payload, signaturePublicKey } = await buildTestKeyPackage(
+      'user-1',
+      'device-1',
+      { lifetime: { notBefore, notAfter } },
+    );
+
+    await expect(
+      decodeAndVerifyKeyPackage(payload, {
+        userId: 'user-1',
+        deviceId: 'device-1',
+        signaturePublicKey,
+      }),
+    ).rejects.toThrow(/not valid yet/);
+  });
+
 });

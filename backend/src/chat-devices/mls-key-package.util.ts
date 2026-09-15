@@ -20,6 +20,10 @@ export const PINNED_CIPHERSUITE =
   'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519';
 
 const MAX_KEY_PACKAGE_LIFETIME_SECONDS = 90 * 24 * 60 * 60;
+// A key package that isn't valid yet is still useless to us today - allow
+// only a small clock-skew tolerance, not a package scheduled to activate
+// far in the future.
+const CLOCK_SKEW_TOLERANCE_SECONDS = 5 * 60;
 
 let cachedImpl: Promise<CiphersuiteImpl> | undefined;
 function getImpl(): Promise<CiphersuiteImpl> {
@@ -137,16 +141,24 @@ async function decodeAndVerifyKeyPackageUnsafe(
     );
   }
 
-  const lifetimeSeconds = Number(
-    keyPackage.leafNode.lifetime.notAfter -
-      keyPackage.leafNode.lifetime.notBefore,
-  );
-  if (
-    lifetimeSeconds <= 0 ||
-    lifetimeSeconds > MAX_KEY_PACKAGE_LIFETIME_SECONDS
-  ) {
+  const { notBefore, notAfter } = keyPackage.leafNode.lifetime;
+  const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
+  const durationSeconds = Number(notAfter - notBefore);
+
+  if (durationSeconds <= 0 || durationSeconds > MAX_KEY_PACKAGE_LIFETIME_SECONDS) {
     throw new BadRequestException(
       `Key package lifetime must be positive and at most ${MAX_KEY_PACKAGE_LIFETIME_SECONDS} seconds`,
+    );
+  }
+
+  // Duration alone isn't enough: a package with an 89-day span starting
+  // 300 days from now would pass that check but isn't valid yet. Once this
+  // holds, notAfter is automatically bounded too (notAfter = notBefore +
+  // duration <= (now + skew) + MAX), so no separate absolute-notAfter
+  // check is needed on top of it.
+  if (notBefore > nowSeconds + BigInt(CLOCK_SKEW_TOLERANCE_SECONDS)) {
+    throw new BadRequestException(
+      'Key package is not valid yet (notBefore is in the future)',
     );
   }
 
