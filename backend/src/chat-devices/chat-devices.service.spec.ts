@@ -126,6 +126,25 @@ describe('ChatDevicesService', () => {
       expect(repository.createDeviceWithKeyPackages).not.toHaveBeenCalled();
     });
 
+    it('rejects a declared ciphersuite that is not the pinned one', async () => {
+      repository.findById.mockResolvedValue(null);
+      const { payload, signaturePublicKey } = await base64KeyPackage(
+        'user-1',
+        'device-1',
+      );
+
+      await expect(
+        service.registerDevice('user-1', {
+          deviceId: 'device-1',
+          signaturePublicKey,
+          ciphersuite: 'something-else-entirely',
+          keyPackages: [{ kind: 'SINGLE_USE', payload }],
+        } as any),
+      ).rejects.toThrow(/Unsupported ciphersuite/);
+
+      expect(repository.createDeviceWithKeyPackages).not.toHaveBeenCalled();
+    });
+
     it('enforces the upload rate limit', async () => {
       uploadRateLimiter.assertNotRateLimited.mockImplementationOnce(() => {
         throw new RateLimitedException('slow down', 30);

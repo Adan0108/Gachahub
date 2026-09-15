@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -12,7 +13,10 @@ import {
 } from './chat-devices.repository';
 import { KeyPackageFetchRateLimiterService } from './key-package-fetch-rate-limiter.service';
 import { KeyPackageUploadRateLimiterService } from './key-package-upload-rate-limiter.service';
-import { decodeAndVerifyKeyPackage } from './mls-key-package.util';
+import {
+  decodeAndVerifyKeyPackage,
+  PINNED_CIPHERSUITE,
+} from './mls-key-package.util';
 import { RegisterDeviceDto } from './dto/register-device.dto';
 import { UploadKeyPackagesDto } from './dto/upload-key-packages.dto';
 import { KeyPackageItemDto } from './dto/key-package-item.dto';
@@ -35,6 +39,16 @@ export class ChatDevicesService {
    */
   async registerDevice(userId: string, dto: RegisterDeviceDto) {
     this.uploadRateLimiter.assertNotRateLimited(userId);
+
+    // Every key package is already checked against PINNED_CIPHERSUITE
+    // individually (decodeAndVerifyKeyPackage) - this closes the gap where
+    // the device's own DECLARED ciphersuite could disagree with that, which
+    // would defeat the whole point of pinning one (critique C1).
+    if (dto.ciphersuite !== PINNED_CIPHERSUITE) {
+      throw new BadRequestException(
+        `Unsupported ciphersuite: expected ${PINNED_CIPHERSUITE}`,
+      );
+    }
 
     const existing = await this.chatDevicesRepository.findById(dto.deviceId);
     if (existing) {
