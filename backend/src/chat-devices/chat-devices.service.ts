@@ -101,7 +101,7 @@ export class ChatDevicesService {
    * service.ts's version doesn't need to consider. Unify then, not now.
    */
   async claimKeyPackageForUser(requesterId: string, targetUserId: string) {
-    this.fetchRateLimiter.assertNotRateLimited(requesterId);
+    this.fetchRateLimiter.assertNotRateLimited(requesterId, targetUserId);
 
     await this.assertMayFetchKeyPackage(requesterId, targetUserId);
 
