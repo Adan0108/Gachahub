@@ -1,0 +1,269 @@
+import { api } from '../api';
+import { bytesToBase64, base64ToBytes } from './base64';
+import type { GroupSession, GroupSessionFactory } from './client';
+import { EncryptedIndexedDbGroupSessionStorage, type GroupSessionStorage } from './groupSessionStorage';
+import { GroupStateUnavailableError, EpochConflictError } from './errors';
+import type {
+  ConversationId,
+  DeviceId,
+  Epoch,
+  MembershipChangeRequest,
+  PlaintextEnvelope,
+  ProcessResult,
+  UserId,
+} from './types';
+
+/**
+ * Orchestrates one device's MLS group sessions against the real backend
+ * (chat-devices claim endpoint, mls-handshakes submit/fetch/welcomes) - the
+ * "SyncEngine" mentioned in client.ts as sitting on top of GroupSession/
+ * GroupSessionFactory. Pure app logic, no per-library variation - depends
+ * only on the GroupSessionFactory contract, not any concrete adapter.
+ *
+ * Does not touch the chat UI or decide which conversations exist - that's
+ * stage 8. This only knows how to keep a conversation's group session in
+ * sync with the backend once told which conversationId to work with.
+ */
+export class SyncEngine {
+  private readonly sessions = new Map<ConversationId, GroupSession>();
+  // Serializes process()/stageCommit() calls per conversation (client.ts:
+  // "the caller ... is responsible for never calling this concurrently for
+  // the same conversationId"). Only covers this browser tab - a second tab
+  // open on the same conversation is a known, accepted gap (same class as
+  // the one already noted for the device identity's AES key).
+  private readonly locks = new Map<ConversationId, Promise<unknown>>();
+
+  constructor(
+    private readonly factory: GroupSessionFactory,
+    private readonly deviceId: DeviceId,
+    private readonly storage: GroupSessionStorage = new EncryptedIndexedDbGroupSessionStorage(),
+  ) {}
+
+  /** Creates a brand-new group for a first DM or group chat - this device is the sole initial member. */
+  async createGroup(conversationId: ConversationId): Promise<GroupSession> {
+    return this.runExclusive(conversationId, async () => {
+      const session = await this.factory.create(conversationId);
+      this.sessions.set(conversationId, session);
+      await this.persistSession(conversationId, session);
+      return session;
+    });
+  }
+
+  /**
+   * Claims a key package for `userId` and commits them into the
+   * conversation. Throws EpochConflictError if another device's commit won
+   * the race first - the group is already caught up on the winner by the
+   * time this throws, so the caller can decide whether to retry.
+   */
+  async addUserToConversation(conversationId: ConversationId, userId: UserId): Promise<Epoch> {
+    const claimed = await api.claimChatDeviceKeyPackage(userId);
+    return this.submitMembershipChange(conversationId, {
+      added: [
+        {
+          credential: {
+            userId,
+            deviceId: claimed.deviceId,
+            signatureKey: base64ToBytes(claimed.signaturePublicKey),
+          },
+          keyPackage: base64ToBytes(claimed.payload),
+        },
+      ],
+      removed: [],
+    });
+  }
+
+  /**
+   * Lower-level primitive for addUserToConversation and any future
+   * multi-add/remove case - the caller supplies already-resolved
+   * KeyPackageOffers/DeviceCredentials directly.
+   */
+  async submitMembershipChange(
+    conversationId: ConversationId,
+    change: MembershipChangeRequest,
+  ): Promise<Epoch> {
+    return this.runExclusive(conversationId, async () => {
+      const session = await this.getSession(conversationId);
+      const { wireBytes, expectedEpoch, welcomes } = await session.stageCommit(change);
+
+      const response = await api.submitMlsHandshake(conversationId, {
+        deviceId: this.deviceId,
+        epoch: expectedEpoch,
+        payload: bytesToBase64(wireBytes),
+        welcomes: welcomes.map((welcome) => ({
+          recipientDeviceId: welcome.deviceId,
+          payload: bytesToBase64(welcome.welcomeBytes),
+        })),
+      });
+
+      if (response.outcome === 'conflict') {
+        await session.commitRejected();
+        await session.process(base64ToBytes(response.handshake.payload));
+        await this.persistSession(conversationId, session);
+        throw new EpochConflictError(conversationId, expectedEpoch);
+      }
+
+      await session.commitAccepted();
+      await this.persistSession(conversationId, session);
+      return session.currentEpoch();
+    });
+  }
+
+  /**
+   * Fetches and applies every commit since this session's current epoch, in
+   * order - catch-up after being offline (client.ts's GroupSession.process
+   * ordering requirement).
+   */
+  async syncCommits(conversationId: ConversationId): Promise<Epoch> {
+    return this.runExclusive(conversationId, async () => {
+      const session = await this.getSession(conversationId);
+      const sinceEpoch = await session.currentEpoch();
+      const handshakes = await api.getMlsHandshakesSince(conversationId, sinceEpoch);
+
+      for (const handshake of handshakes) {
+        // eslint-disable-next-line no-await-in-loop -- must apply strictly in epoch order, and each one persists before the next is attempted
+        const result = await this.applyIncoming(
+          conversationId,
+          session,
+          base64ToBytes(handshake.payload),
+        );
+        if (result.kind === 'rejected') {
+          // The backend already validated framing/groupId before storing
+          // this handshake (mls-handshake-framing.util.ts) - a rejection
+          // here means a local bug, not a bad server response.
+          throw new Error(
+            `Could not apply handshake at epoch ${handshake.epoch}: ${result.reason}`,
+          );
+        }
+      }
+
+      return session.currentEpoch();
+    });
+  }
+
+  /**
+   * Applies one incoming wire item outside the catch-up flow - in practice
+   * an application message delivered live, since commits normally arrive
+   * via syncCommits. Persists immediately: unlike reapplying a Commit
+   * (a deterministic re-derivation from the prior epoch, safe to repeat),
+   * replaying an already-consumed message generation is not safely
+   * repeatable, so a crash between processing and persisting must not
+   * force a retry.
+   */
+  async processIncoming(conversationId: ConversationId, wireBytes: Uint8Array): Promise<ProcessResult> {
+    return this.runExclusive(conversationId, async () => {
+      const session = await this.getSession(conversationId);
+      return this.applyIncoming(conversationId, session, wireBytes);
+    });
+  }
+
+  /** Encrypts a plaintext envelope for the current epoch and persists the advanced ratchet state immediately (key reuse on a crash-before-persist would be a real forward-secrecy violation, not just a lost message). */
+  async encryptMessage(conversationId: ConversationId, envelope: PlaintextEnvelope): Promise<Uint8Array> {
+    return this.runExclusive(conversationId, async () => {
+      const session = await this.getSession(conversationId);
+      const wireBytes = await session.encrypt(envelope);
+      await this.persistSession(conversationId, session);
+      return wireBytes;
+    });
+  }
+
+  /**
+   * Fetches this device's pending Welcomes, joins each one, and consumes it
+   * on success. A failed Welcome (malformed, or addressed to a key package
+   * this device no longer recognizes) is skipped rather than aborting the
+   * whole batch, and is left unconsumed - it will be retried next call
+   * rather than silently discarded. Not device-conversation-scoped like the
+   * other methods, since a device doesn't know which conversationIds it's
+   * being welcomed into until it asks.
+   */
+  async processPendingWelcomes(): Promise<{
+    joined: ConversationId[];
+    failures: Array<{ welcomeId: string; error: unknown }>;
+  }> {
+    const pending = await api.getMlsPendingWelcomes(this.deviceId);
+    const joined: ConversationId[] = [];
+    const failures: Array<{ welcomeId: string; error: unknown }> = [];
+
+    for (const welcome of pending) {
+      try {
+        // eslint-disable-next-line no-await-in-loop -- each Welcome is joined and consumed independently; no benefit to parallelizing sequential backend calls
+        await this.runExclusive(welcome.conversationId, async () => {
+          const session = await this.factory.joinFromWelcome(
+            welcome.conversationId,
+            base64ToBytes(welcome.payload),
+          );
+          this.sessions.set(welcome.conversationId, session);
+          await this.persistSession(welcome.conversationId, session);
+          await api.consumeMlsWelcome(this.deviceId, welcome.id);
+        });
+        joined.push(welcome.conversationId);
+      } catch (error) {
+        failures.push({ welcomeId: welcome.id, error });
+      }
+    }
+
+    return { joined, failures };
+  }
+
+  /** The conversation's current local epoch - throws GroupStateUnavailableError if this device has no session for it. */
+  async getCurrentEpoch(conversationId: ConversationId): Promise<Epoch> {
+    const session = await this.getSession(conversationId);
+    return session.currentEpoch();
+  }
+
+  /** Drops a conversation's cached and persisted session - e.g. after leaving or deleting it. */
+  async forgetConversation(conversationId: ConversationId): Promise<void> {
+    this.sessions.delete(conversationId);
+    this.locks.delete(conversationId);
+    await this.storage.delete(conversationId);
+  }
+
+  private async applyIncoming(
+    conversationId: ConversationId,
+    session: GroupSession,
+    wireBytes: Uint8Array,
+  ): Promise<ProcessResult> {
+    const result = await session.process(wireBytes);
+    await this.persistSession(conversationId, session);
+    return result;
+  }
+
+  private async getSession(conversationId: ConversationId): Promise<GroupSession> {
+    const cached = this.sessions.get(conversationId);
+    if (cached) {
+      return cached;
+    }
+
+    const stateBytes = await this.storage.load(conversationId);
+    if (!stateBytes) {
+      throw new GroupStateUnavailableError(conversationId);
+    }
+
+    let session: GroupSession;
+    try {
+      session = await this.factory.restore(conversationId, stateBytes);
+    } catch (error) {
+      throw new GroupStateUnavailableError(conversationId, error);
+    }
+    this.sessions.set(conversationId, session);
+    return session;
+  }
+
+  private async persistSession(conversationId: ConversationId, session: GroupSession): Promise<void> {
+    const stateBytes = await session.serialize();
+    await this.storage.save(conversationId, stateBytes);
+  }
+
+  /** Chains `task` after whatever is already pending for `conversationId`, so per-conversation operations never overlap - a settled (never-rejecting) copy is what's kept in the map so one failure doesn't wedge the chain for later calls. */
+  private runExclusive<T>(conversationId: ConversationId, task: () => Promise<T>): Promise<T> {
+    const previous = this.locks.get(conversationId) ?? Promise.resolve();
+    const result = previous.then(task, task);
+    this.locks.set(
+      conversationId,
+      result.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return result;
+  }
+}

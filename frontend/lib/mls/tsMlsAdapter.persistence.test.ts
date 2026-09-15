@@ -3,6 +3,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { TsMlsDeviceIdentityStore, TsMlsGroupSessionFactory } from './tsMlsAdapter';
 import { EncryptedIndexedDbDeviceIdentityStorage } from './deviceIdentityStorage';
+import { resetMlsDatabaseForTests } from './mlsEncryptedStore';
 
 /**
  * Stage 6: the step-2 bake-off's TsMlsDeviceIdentityStore never persisted
@@ -14,6 +15,7 @@ import { EncryptedIndexedDbDeviceIdentityStorage } from './deviceIdentityStorage
 describe('TsMlsDeviceIdentityStore persistence', () => {
   beforeEach(() => {
     globalThis.indexedDB = new IDBFactory();
+    resetMlsDatabaseForTests();
   });
 
   it('is not provisioned until provision() is called', async () => {

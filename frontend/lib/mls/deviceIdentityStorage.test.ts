@@ -6,6 +6,7 @@ import {
   InMemoryDeviceIdentityStorage,
   type PersistedDeviceIdentity,
 } from './deviceIdentityStorage';
+import { openMlsDatabase, resetMlsDatabaseForTests } from './mlsEncryptedStore';
 
 function samplePersistedIdentity(): PersistedDeviceIdentity {
   return {
@@ -62,6 +63,7 @@ describe('EncryptedIndexedDbDeviceIdentityStorage', () => {
   // jest.clearAllMocks() elsewhere in this codebase.
   beforeEach(() => {
     globalThis.indexedDB = new IDBFactory();
+    resetMlsDatabaseForTests();
   });
 
   it('round-trips Uint8Array and bigint fields through encryption', async () => {
@@ -90,7 +92,7 @@ describe('EncryptedIndexedDbDeviceIdentityStorage', () => {
     await expect(second.load()).resolves.toEqual(identity);
   });
 
-  it('clear() removes both the identity and the encryption key', async () => {
+  it('clear() wipes the identity (and every other local MLS secret)', async () => {
     const storage = new EncryptedIndexedDbDeviceIdentityStorage();
     await storage.save(samplePersistedIdentity());
 
@@ -105,10 +107,10 @@ describe('EncryptedIndexedDbDeviceIdentityStorage', () => {
 
     // Simulate the encryption key becoming unusable (e.g. a corrupted
     // profile) without touching the encrypted identity blob itself.
-    const db: IDBDatabase = await (storage as any).getDb();
+    const db = await openMlsDatabase();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction('cryptoKeys', 'readwrite');
-      tx.objectStore('cryptoKeys').delete('device-identity-key');
+      tx.objectStore('cryptoKeys').delete('local-encryption-key');
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });

@@ -42,6 +42,12 @@ export const backendRoutes = {
   chatDeviceKeyPackages: (deviceId) =>
     `/chat-devices/${encodePathParam(deviceId)}/key-packages`,
   chatDevice: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}`,
+  chatDeviceClaim: (userId) => `/chat-devices/claim/${encodePathParam(userId)}`,
+  mlsHandshakes: (conversationId) =>
+    `/mls-handshakes/conversations/${encodePathParam(conversationId)}`,
+  mlsPendingWelcomes: (deviceId) => `/mls-handshakes/devices/${encodePathParam(deviceId)}/welcomes`,
+  mlsConsumeWelcome: (deviceId, welcomeId) =>
+    `/mls-handshakes/devices/${encodePathParam(deviceId)}/welcomes/${encodePathParam(welcomeId)}/consume`,
 };
 
 function encodePathParam(value) {
@@ -200,6 +206,33 @@ async function request(path, options = {}) {
   }
 
   return response.status === 204 ? null : response.json();
+}
+
+/**
+ * Submits an MLS handshake without going through request()'s generic error
+ * handling: a 409 there is not a failure to surface as a thrown Error, it's
+ * a structured { outcome: 'conflict', handshake } body the sync engine
+ * needs in full (the winning commit to catch up on) - request() would
+ * collapse that down to just its `message` string and discard the rest.
+ */
+async function submitMlsHandshake(conversationId, payload) {
+  if (USE_MOCKS) return mutation(backendRoutes.mlsHandshakes(conversationId), payload);
+
+  const response = await fetch(`${API_BASE_URL}${backendRoutes.mlsHandshakes(conversationId)}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await response.json().catch(() => null);
+
+  if (response.status === 409 && body?.outcome === "conflict") {
+    return body;
+  }
+  if (!response.ok) {
+    throw new Error(body?.message || `API request failed: ${response.status}`);
+  }
+  return body;
 }
 
 function mutation(path, payload, options = {}) {
@@ -449,4 +482,11 @@ export const api = {
     mutation(backendRoutes.chatDeviceKeyPackages(deviceId), payload),
   revokeChatDevice: (deviceId) =>
     mutation(backendRoutes.chatDevice(deviceId), undefined, { method: "DELETE" }),
+  claimChatDeviceKeyPackage: (userId) => mutation(backendRoutes.chatDeviceClaim(userId)),
+  submitMlsHandshake: (conversationId, payload) => submitMlsHandshake(conversationId, payload),
+  getMlsHandshakesSince: (conversationId, sinceEpoch = 0) =>
+    request(withQuery(backendRoutes.mlsHandshakes(conversationId), { sinceEpoch })),
+  getMlsPendingWelcomes: (deviceId) => request(backendRoutes.mlsPendingWelcomes(deviceId)),
+  consumeMlsWelcome: (deviceId, welcomeId) =>
+    mutation(backendRoutes.mlsConsumeWelcome(deviceId, welcomeId)),
 };
