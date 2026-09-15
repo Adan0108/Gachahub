@@ -45,6 +45,12 @@ import type {
 } from './types';
 import { CredentialMismatchError } from './errors';
 import type { MlsClientCandidate } from './contractTests';
+import {
+  InMemoryDeviceIdentityStorage,
+  type DeviceIdentityStorage,
+  type StoredKeyPackage,
+} from './deviceIdentityStorage';
+import { bytesToBase64, base64ToBytes } from './base64';
 
 /**
  * ts-mls adapter for the step 2 bake-off. Real crypto, real wire format -
@@ -55,7 +61,7 @@ import type { MlsClientCandidate } from './contractTests';
  * enough to prove the contract out; picking a final ciphersuite is a
  * separate decision once a library is actually chosen.
  */
-const CIPHERSUITE_NAME = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519';
+export const CIPHERSUITE_NAME = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519';
 
 // ts-mls's own defaultLifetime is notBefore=0/notAfter=max-int64 - an
 // effectively-infinite key package a real server should never accept.
@@ -85,25 +91,6 @@ function decodeIdentity(identity: Uint8Array): { userId: UserId; deviceId: Devic
   return JSON.parse(new TextDecoder().decode(identity));
 }
 
-// btoa/atob, not Buffer - this adapter's real home is the browser, even
-// though the bake-off runs it under Node via Vitest.
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
-}
-
-function base64ToBytes(value: string): Uint8Array {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
 /** This adapter's own envelope around ts-mls wire bytes - opaque from the contract's point of view. */
 interface Envelope {
   conversationId: ConversationId;
@@ -120,14 +107,19 @@ function unpackEnvelope(bytes: Uint8Array): Envelope {
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 
-interface StoredKeyPackage {
-  id: string;
-  publicPackage: KeyPackage;
-  privatePackage: PrivateKeyPackage;
+/**
+ * Extracts the raw base64 MLS KeyPackage wire bytes from an envelope
+ * produced by generateKeyPackages(), for uploading to the backend's
+ * chat-devices endpoints - the envelope's conversationId/keyPackageId
+ * fields are this adapter's own local bookkeeping, not part of what the
+ * server needs (KeyPackageItemDto.payload wants exactly this base64 string).
+ */
+export function extractKeyPackagePayload(envelope: Uint8Array): string {
+  return unpackEnvelope(envelope).mls;
 }
 
-class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
-  private readonly deviceId: DeviceId = crypto.randomUUID();
+export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
+  private deviceId: DeviceId | undefined;
   private credential: DeviceCredential | undefined;
   // One persistent identity signing keypair, reused for every key package
   // this device ever creates. generateKeyPackage() (no "WithKey") mints a
@@ -137,13 +129,22 @@ class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
   private signatureKeyPair: { signKey: Uint8Array; publicKey: Uint8Array } | undefined;
   private nextKeyPackageId = 0;
   readonly keyPackagesById = new Map<string, StoredKeyPackage>();
+  private hydrationPromise: Promise<void> | undefined;
+
+  constructor(private readonly storage: DeviceIdentityStorage = new InMemoryDeviceIdentityStorage()) {}
 
   async isProvisioned(): Promise<boolean> {
+    await this.ensureHydrated();
     return this.credential !== undefined;
   }
 
   async provision(userId: UserId): Promise<DeviceCredential> {
+    // Nothing to hydrate once we're about to establish fresh state - and a
+    // concurrent hydration finishing afterward must not clobber it.
+    this.hydrationPromise = Promise.resolve();
+
     const impl = await getImpl();
+    this.deviceId = crypto.randomUUID();
     this.signatureKeyPair = await impl.signature.keygen();
     const mlsCredential: Credential = {
       credentialType: 'basic',
@@ -163,10 +164,12 @@ class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
       deviceId: this.deviceId,
       signatureKey: this.signatureKeyPair.publicKey,
     };
+    await this.persist();
     return this.credential;
   }
 
   async getOwnCredential(): Promise<DeviceCredential> {
+    await this.ensureHydrated();
     if (!this.credential) {
       throw new Error('Device not provisioned yet');
     }
@@ -174,7 +177,8 @@ class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
   }
 
   async generateKeyPackages(count: number): Promise<Uint8Array[]> {
-    if (!this.credential || !this.signatureKeyPair) {
+    await this.ensureHydrated();
+    if (!this.credential || !this.signatureKeyPair || !this.deviceId) {
       throw new Error('Device not provisioned yet');
     }
     const impl = await getImpl();
@@ -208,13 +212,58 @@ class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
         }),
       );
     }
+    await this.persist();
     return out;
   }
 
   async revoke(): Promise<void> {
+    this.hydrationPromise = Promise.resolve();
+    this.deviceId = undefined;
     this.credential = undefined;
     this.signatureKeyPair = undefined;
+    this.nextKeyPackageId = 0;
     this.keyPackagesById.clear();
+    await this.storage.clear();
+  }
+
+  private ensureHydrated(): Promise<void> {
+    if (!this.hydrationPromise) {
+      this.hydrationPromise = this.hydrate().catch((error: unknown) => {
+        // Let a real storage failure be retried on the next call instead of
+        // permanently wedging this store on one bad attempt.
+        this.hydrationPromise = undefined;
+        throw error;
+      });
+    }
+    return this.hydrationPromise;
+  }
+
+  private async hydrate(): Promise<void> {
+    const persisted = await this.storage.load();
+    if (!persisted) {
+      return;
+    }
+    this.deviceId = persisted.deviceId;
+    this.credential = persisted.credential;
+    this.signatureKeyPair = persisted.signatureKeyPair;
+    this.nextKeyPackageId = persisted.nextKeyPackageId;
+    this.keyPackagesById.clear();
+    for (const keyPackage of persisted.keyPackages) {
+      this.keyPackagesById.set(keyPackage.id, keyPackage);
+    }
+  }
+
+  private async persist(): Promise<void> {
+    if (!this.credential || !this.deviceId || !this.signatureKeyPair) {
+      return;
+    }
+    await this.storage.save({
+      deviceId: this.deviceId,
+      credential: this.credential,
+      signatureKeyPair: this.signatureKeyPair,
+      nextKeyPackageId: this.nextKeyPackageId,
+      keyPackages: [...this.keyPackagesById.values()],
+    });
   }
 
   private storeKeyPackage(
@@ -486,7 +535,7 @@ class TsMlsGroupSession implements GroupSession {
   }
 }
 
-class TsMlsGroupSessionFactory implements GroupSessionFactory {
+export class TsMlsGroupSessionFactory implements GroupSessionFactory {
   constructor(private readonly store: TsMlsDeviceIdentityStore) {}
 
   async create(conversationId: ConversationId): Promise<GroupSession> {
@@ -531,6 +580,11 @@ class TsMlsGroupSessionFactory implements GroupSessionFactory {
       throw new CredentialMismatchError('Malformed Welcome envelope');
     }
 
+    // getOwnCredential() is also what triggers the store's lazy hydration
+    // from persistent storage - must run before keyPackagesById is read
+    // directly below, or a freshly-constructed (not yet hydrated) store
+    // would always report "no matching key package" after a reload.
+    const credential = await this.store.getOwnCredential();
     const matching = this.store.keyPackagesById.get(envelope.keyPackageId);
     if (!matching) {
       throw new CredentialMismatchError(
@@ -539,7 +593,6 @@ class TsMlsGroupSessionFactory implements GroupSessionFactory {
     }
 
     const impl = await getImpl();
-    const credential = await this.store.getOwnCredential();
     const decoded = decodeMlsMessage(base64ToBytes(envelope.mls), 0)?.[0];
     if (!decoded || decoded.wireformat !== 'mls_welcome') {
       throw new CredentialMismatchError('Envelope does not contain a Welcome message');

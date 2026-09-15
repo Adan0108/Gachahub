@@ -38,6 +38,10 @@ export const backendRoutes = {
     `/chat/conversations/${encodePathParam(conversationId)}/block`,
   chatDelivered: "/chat/messages/delivered",
   chatRead: (conversationId) => `/chat/conversations/${encodePathParam(conversationId)}/read`,
+  chatDevices: "/chat-devices",
+  chatDeviceKeyPackages: (deviceId) =>
+    `/chat-devices/${encodePathParam(deviceId)}/key-packages`,
+  chatDevice: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}`,
 };
 
 function encodePathParam(value) {
@@ -440,4 +444,9 @@ export const api = {
       backendRoutes.chatRead(conversationId),
       lastReadMessageId ? { lastReadMessageId } : {},
     ),
+  registerChatDevice: (payload) => mutation(backendRoutes.chatDevices, payload),
+  uploadChatDeviceKeyPackages: (deviceId, payload) =>
+    mutation(backendRoutes.chatDeviceKeyPackages(deviceId), payload),
+  revokeChatDevice: (deviceId) =>
+    mutation(backendRoutes.chatDevice(deviceId), undefined, { method: "DELETE" }),
 };
