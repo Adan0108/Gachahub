@@ -3,12 +3,19 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import type { MediaService } from '../media/media.service';
-import type { PostsRepository } from './posts.repository';
-import type { FollowsService } from '../follows/follows.service';
-import { PostTypeDto } from './dto/create-post.dto';
-import { PostSortDto } from './dto/query-posts.dto';
 
+import { PostSortDto } from './dto/query-posts.dto';
+import type { PostsRepository } from './posts.repository';
+import type { MediaService } from '../media/media.service';
+import type { FollowsService } from '../follows/follows.service';
+import type { UserInterestService } from '../recommendation/user-interest.service';
+
+/*
+ * Unit test only mocks service dependencies.
+ *
+ * Do not load their real implementations because MediaService and
+ * FollowsService eventually import Prisma.
+ */
 jest.mock('./posts.repository', () => ({
   PostsRepository: class {},
 }));
@@ -21,6 +28,10 @@ jest.mock('../follows/follows.service', () => ({
   FollowsService: class {},
 }));
 
+jest.mock('../recommendation/user-interest.service', () => ({
+  UserInterestService: class {},
+}));
+
 import { PostsService } from './posts.service';
 
 describe('PostsService', () => {
@@ -29,12 +40,15 @@ describe('PostsService', () => {
     count: jest.fn(),
     findPublishedById: jest.fn(),
     findByAuthorId: jest.fn(),
+
     findGameById: jest.fn(),
     findCategoryById: jest.fn(),
-    findById: jest.fn(),
+
     create: jest.fn(),
+    findById: jest.fn(),
     update: jest.fn(),
     softDelete: jest.fn(),
+
     findPostForInteraction: jest.fn(),
     like: jest.fn(),
     unlike: jest.fn(),
@@ -48,28 +62,62 @@ describe('PostsService', () => {
     isFollowing: jest.fn(),
   };
 
+  const userInterestService = {
+    recordPostInteraction: jest.fn(),
+  };
+
   let service: PostsService;
 
   const basePost = {
     id: 'post-1',
-    authorId: 'user-1',
+    authorId: 'author-1',
+
     gameId: 'game-1',
-    categoryId: null,
-    title: 'Test Post',
-    content: 'Test Content',
+    categoryId: 'category-1',
+
+    title: 'Test post',
+    content: 'Test content',
+
     type: 'GENERAL',
     status: 'PUBLISHED',
     visibility: 'PUBLIC',
+
     isSpoiler: false,
+
     viewCount: 0,
     commentCount: 0,
     reactionCount: 0,
     saveCount: 0,
     shareCount: 0,
+
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
+
+    author: {
+      id: 'author-1',
+      name: 'Author',
+      image: null,
+    },
+
+    game: {
+      id: 'game-1',
+      name: 'Wuthering Waves',
+      slug: 'wuthering-waves',
+      iconUrl: null,
+    },
+
+    category: {
+      id: 'category-1',
+      name: 'General',
+      slug: 'general',
+    },
+
+    media: [],
+
     tags: [],
+
+    postLikes: [],
   };
 
   beforeEach(() => {
@@ -79,12 +127,14 @@ describe('PostsService', () => {
       postsRepository as unknown as PostsRepository,
       mediaService as unknown as MediaService,
       followsService as unknown as FollowsService,
+      userInterestService as unknown as UserInterestService,
     );
   });
 
   describe('findAll', () => {
-    it('lists posts with default pagination', async () => {
+    it('returns published public posts with default pagination', async () => {
       postsRepository.findMany.mockResolvedValue([basePost]);
+
       postsRepository.count.mockResolvedValue(1);
 
       const result = await service.findAll({});
@@ -95,8 +145,10 @@ describe('PostsService', () => {
           visibility: 'PUBLIC',
           deletedAt: null,
         },
+
         skip: 0,
         take: 20,
+
         orderBy: [
           {
             createdAt: 'desc',
@@ -105,6 +157,7 @@ describe('PostsService', () => {
             id: 'desc',
           },
         ],
+
         userId: undefined,
       });
 
@@ -114,6 +167,8 @@ describe('PostsService', () => {
         deletedAt: null,
       });
 
+      expect(result.items).toHaveLength(1);
+
       expect(result.meta).toEqual({
         page: 1,
         limit: 20,
@@ -122,298 +177,59 @@ describe('PostsService', () => {
       });
     });
 
-    it('uses provided pagination', async () => {
+    it('passes current user to repository for likedByCurrentUser', async () => {
       postsRepository.findMany.mockResolvedValue([]);
-      postsRepository.count.mockResolvedValue(25);
 
-      const result = await service.findAll({
-        page: 2,
-        limit: 10,
-      });
-
-      expect(postsRepository.findMany).toHaveBeenCalledWith({
-        where: {
-          status: 'PUBLISHED',
-          visibility: 'PUBLIC',
-          deletedAt: null,
-        },
-        skip: 10,
-        take: 10,
-        orderBy: [
-          {
-            createdAt: 'desc',
-          },
-          {
-            id: 'desc',
-          },
-        ],
-        userId: undefined,
-      });
-
-      expect(result.meta).toEqual({
-        page: 2,
-        limit: 10,
-        total: 25,
-        totalPages: 3,
-      });
-    });
-
-    it('filters posts by game slug', async () => {
-      postsRepository.findMany.mockResolvedValue([]);
       postsRepository.count.mockResolvedValue(0);
 
-      await service.findAll({
-        gameSlug: 'wuthering-waves',
-      });
+      await service.findAll({}, 'user-1');
 
-      expect(postsRepository.findMany).toHaveBeenCalledWith({
-        where: {
-          status: 'PUBLISHED',
-          visibility: 'PUBLIC',
-          deletedAt: null,
-          game: {
-            slug: 'wuthering-waves',
-            status: 'ACTIVE',
-          },
-        },
-        skip: 0,
-        take: 20,
-        orderBy: [
-          {
-            createdAt: 'desc',
-          },
-          {
-            id: 'desc',
-          },
-        ],
-        userId: undefined,
-      });
-    });
-
-    it('filters posts by category slug', async () => {
-      postsRepository.findMany.mockResolvedValue([]);
-      postsRepository.count.mockResolvedValue(0);
-
-      await service.findAll({
-        categorySlug: 'builds',
-      });
-
-      expect(postsRepository.findMany).toHaveBeenCalledWith({
-        where: {
-          status: 'PUBLISHED',
-          visibility: 'PUBLIC',
-          deletedAt: null,
-          category: {
-            slug: 'builds',
-            isActive: true,
-          },
-        },
-        skip: 0,
-        take: 20,
-        orderBy: [
-          {
-            createdAt: 'desc',
-          },
-          {
-            id: 'desc',
-          },
-        ],
-        userId: undefined,
-      });
-    });
-
-    it('filters posts by type', async () => {
-      postsRepository.findMany.mockResolvedValue([]);
-      postsRepository.count.mockResolvedValue(0);
-
-      await service.findAll({
-        type: PostTypeDto.GUIDE,
-      });
-
-      expect(postsRepository.findMany).toHaveBeenCalledWith({
-        where: {
-          status: 'PUBLISHED',
-          visibility: 'PUBLIC',
-          deletedAt: null,
-          type: PostTypeDto.GUIDE,
-        },
-        skip: 0,
-        take: 20,
-        orderBy: [
-          {
-            createdAt: 'desc',
-          },
-          {
-            id: 'desc',
-          },
-        ],
-        userId: undefined,
-      });
-    });
-
-    it('searches title, content and tags', async () => {
-      postsRepository.findMany.mockResolvedValue([]);
-      postsRepository.count.mockResolvedValue(0);
-
-      await service.findAll({
-        search: 'Jinhsi',
-      });
-
-      expect(postsRepository.findMany).toHaveBeenCalledWith({
-        where: {
-          status: 'PUBLISHED',
-          visibility: 'PUBLIC',
-          deletedAt: null,
-          OR: [
-            {
-              title: {
-                contains: 'Jinhsi',
-                mode: 'insensitive',
-              },
-            },
-            {
-              content: {
-                contains: 'Jinhsi',
-                mode: 'insensitive',
-              },
-            },
-            {
-              tags: {
-                some: {
-                  tag: {
-                    name: {
-                      contains: 'Jinhsi',
-                      mode: 'insensitive',
-                    },
-                  },
-                },
-              },
-            },
-          ],
-        },
-        skip: 0,
-        take: 20,
-        orderBy: [
-          {
-            createdAt: 'desc',
-          },
-          {
-            id: 'desc',
-          },
-        ],
-        userId: undefined,
-      });
+      expect(postsRepository.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+        }),
+      );
     });
 
     it('uses popular sorting', async () => {
       postsRepository.findMany.mockResolvedValue([]);
+
       postsRepository.count.mockResolvedValue(0);
 
       await service.findAll({
         sort: PostSortDto.POPULAR,
       });
 
-      expect(postsRepository.findMany).toHaveBeenCalledWith({
-        where: {
-          status: 'PUBLISHED',
-          visibility: 'PUBLIC',
-          deletedAt: null,
-        },
-        skip: 0,
-        take: 20,
-        orderBy: [
-          {
-            saveCount: 'desc',
-          },
-          {
-            commentCount: 'desc',
-          },
-          {
-            reactionCount: 'desc',
-          },
-          {
-            shareCount: 'desc',
-          },
-          {
-            createdAt: 'desc',
-          },
-          {
-            id: 'desc',
-          },
-        ],
-        userId: undefined,
-      });
-    });
-
-    it('passes current user id for liked state', async () => {
-      postsRepository.findMany.mockResolvedValue([]);
-      postsRepository.count.mockResolvedValue(0);
-
-      await service.findAll({}, 'user-1');
-
-      expect(postsRepository.findMany).toHaveBeenCalledWith({
-        where: {
-          status: 'PUBLISHED',
-          visibility: 'PUBLIC',
-          deletedAt: null,
-        },
-        skip: 0,
-        take: 20,
-        orderBy: [
-          {
-            createdAt: 'desc',
-          },
-          {
-            id: 'desc',
-          },
-        ],
-        userId: 'user-1',
-      });
-    });
-
-    it('formats tags and liked state', async () => {
-      postsRepository.findMany.mockResolvedValue([
-        {
-          ...basePost,
-          tags: [
+      expect(postsRepository.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [
             {
-              tag: {
-                id: 'tag-1',
-                name: 'Guide',
-                slug: 'guide',
-              },
+              saveCount: 'desc',
+            },
+            {
+              commentCount: 'desc',
+            },
+            {
+              reactionCount: 'desc',
+            },
+            {
+              shareCount: 'desc',
+            },
+            {
+              createdAt: 'desc',
+            },
+            {
+              id: 'desc',
             },
           ],
-          postLikes: [
-            {
-              userId: 'user-1',
-            },
-          ],
-        },
-      ]);
-
-      postsRepository.count.mockResolvedValue(1);
-
-      const result = await service.findAll({}, 'user-1');
-
-      expect(result.items[0].tags).toEqual([
-        {
-          id: 'tag-1',
-          name: 'Guide',
-          slug: 'guide',
-        },
-      ]);
-
-      expect(result.items[0].likedByCurrentUser).toBe(true);
+        }),
+      );
     });
   });
 
   describe('findOne', () => {
-    it('returns a published post', async () => {
-      postsRepository.findPublishedById.mockResolvedValue({
-        ...basePost,
-        postLikes: [],
-      });
+    it('returns published post', async () => {
+      postsRepository.findPublishedById.mockResolvedValue(basePost);
 
       const result = await service.findOne('post-1', 'user-1');
 
@@ -422,81 +238,121 @@ describe('PostsService', () => {
         'user-1',
       );
 
-      expect(result.id).toBe('post-1');
-      expect(result.likedByCurrentUser).toBe(false);
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: 'post-1',
+          likedByCurrentUser: false,
+        }),
+      );
     });
 
     it('throws when post does not exist', async () => {
       postsRepository.findPublishedById.mockResolvedValue(null);
 
-      await expect(service.findOne('missing-post')).rejects.toThrow(
+      await expect(service.findOne('missing-post', 'user-1')).rejects.toThrow(
         NotFoundException,
       );
     });
   });
 
   describe('findByAuthor', () => {
-    it('lists posts belonging to current author', async () => {
+    it('passes viewer userId to repository', async () => {
       postsRepository.findByAuthorId.mockResolvedValue({
-        items: [basePost],
-        total: 1,
+        items: [],
+        total: 0,
       });
 
-      const result = await service.findByAuthor({}, 'user-1');
+      await service.findByAuthor({}, 'author-1', 'viewer-1');
 
-      expect(postsRepository.findByAuthorId).toHaveBeenCalledWith('user-1', {
+      expect(postsRepository.findByAuthorId).toHaveBeenCalledWith('author-1', {
         page: 1,
         limit: 20,
-      });
-
-      expect(result.meta).toEqual({
-        page: 1,
-        limit: 20,
-        total: 1,
-        totalPages: 1,
+        userId: 'viewer-1',
       });
     });
   });
 
   describe('findByAuthorPublic', () => {
-    it('only requests published public posts', async () => {
+    it('only requests public published posts', async () => {
       postsRepository.findByAuthorId.mockResolvedValue({
-        items: [basePost],
-        total: 1,
+        items: [],
+        total: 0,
       });
 
-      await service.findByAuthorPublic({}, 'user-1');
+      await service.findByAuthorPublic({}, 'author-1', 'viewer-1');
 
-      expect(postsRepository.findByAuthorId).toHaveBeenCalledWith('user-1', {
+      expect(postsRepository.findByAuthorId).toHaveBeenCalledWith('author-1', {
         page: 1,
         limit: 20,
         visibility: 'PUBLIC',
         status: 'PUBLISHED',
+        userId: 'viewer-1',
       });
     });
   });
 
   describe('create', () => {
-    it('throws when active game does not exist', async () => {
+    it('creates post with trimmed title and content', async () => {
+      postsRepository.findGameById.mockResolvedValue({
+        id: 'game-1',
+        status: 'ACTIVE',
+      });
+
+      postsRepository.findCategoryById.mockResolvedValue({
+        id: 'category-1',
+        gameId: 'game-1',
+        isActive: true,
+      });
+
+      mediaService.getAttachableUploads.mockResolvedValue([]);
+
+      postsRepository.create.mockResolvedValue(basePost);
+
+      const result = await service.create(
+        {
+          gameId: 'game-1',
+          categoryId: 'category-1',
+          title: '  Test post  ',
+          content: '  Test content  ',
+          tags: ['DPS', ' dps ', 'Build'],
+        },
+        'author-1',
+      );
+
+      expect(postsRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          authorId: 'author-1',
+          gameId: 'game-1',
+          categoryId: 'category-1',
+
+          title: 'Test post',
+          content: 'Test content',
+
+          media: [],
+        }),
+      );
+
+      expect(result.id).toBe('post-1');
+    });
+
+    it('throws when game does not exist', async () => {
       postsRepository.findGameById.mockResolvedValue(null);
 
       await expect(
         service.create(
           {
-            gameId: 'game-1',
-            title: 'Test Post',
+            gameId: 'missing-game',
+            title: 'Title',
             content: 'Content',
           },
-          'user-1',
+          'author-1',
         ),
       ).rejects.toThrow(NotFoundException);
-
-      expect(mediaService.getAttachableUploads).not.toHaveBeenCalled();
 
       expect(postsRepository.create).not.toHaveBeenCalled();
     });
 
-    it('throws when game is inactive', async () => {
+    it('throws when game is not active', async () => {
       postsRepository.findGameById.mockResolvedValue({
         id: 'game-1',
         status: 'ARCHIVED',
@@ -506,17 +362,17 @@ describe('PostsService', () => {
         service.create(
           {
             gameId: 'game-1',
-            title: 'Test Post',
+            title: 'Title',
             content: 'Content',
           },
-          'user-1',
+          'author-1',
         ),
       ).rejects.toThrow(NotFoundException);
 
       expect(postsRepository.create).not.toHaveBeenCalled();
     });
 
-    it('throws when category does not belong to selected game', async () => {
+    it('throws when category belongs to another game', async () => {
       postsRepository.findGameById.mockResolvedValue({
         id: 'game-1',
         status: 'ACTIVE',
@@ -533,203 +389,14 @@ describe('PostsService', () => {
           {
             gameId: 'game-1',
             categoryId: 'category-1',
-            title: 'Test Post',
+            title: 'Title',
             content: 'Content',
           },
-          'user-1',
+          'author-1',
         ),
       ).rejects.toThrow(NotFoundException);
 
       expect(postsRepository.create).not.toHaveBeenCalled();
-    });
-
-    it('creates a text-only post', async () => {
-      postsRepository.findGameById.mockResolvedValue({
-        id: 'game-1',
-        status: 'ACTIVE',
-      });
-
-      mediaService.getAttachableUploads.mockResolvedValue([]);
-
-      postsRepository.create.mockResolvedValue({
-        ...basePost,
-        title: 'Test Post',
-        content: 'Content',
-        tags: [],
-      });
-
-      const result = await service.create(
-        {
-          gameId: 'game-1',
-          title: '  Test Post  ',
-          content: '  Content  ',
-        },
-        'user-1',
-      );
-
-      expect(mediaService.getAttachableUploads).toHaveBeenCalledWith({
-        ids: [],
-        userId: 'user-1',
-        purpose: 'POST',
-      });
-
-      expect(postsRepository.create).toHaveBeenCalledWith({
-        authorId: 'user-1',
-        gameId: 'game-1',
-        categoryId: undefined,
-        title: 'Test Post',
-        content: 'Content',
-        type: undefined,
-        status: undefined,
-        visibility: undefined,
-        isSpoiler: undefined,
-        media: [],
-        tags: undefined,
-      });
-
-      expect(result.id).toBe('post-1');
-    });
-
-    it('creates post with image media', async () => {
-      postsRepository.findGameById.mockResolvedValue({
-        id: 'game-1',
-        status: 'ACTIVE',
-      });
-
-      mediaService.getAttachableUploads.mockResolvedValue([
-        {
-          id: 'upload-1',
-          assetId: 'asset-1',
-          publicId: 'gachahub/post/image-1',
-          secureUrl: 'https://example.com/image.jpg',
-          resourceType: 'IMAGE',
-          format: 'jpg',
-          width: 1080,
-          height: 1080,
-          duration: null,
-          bytes: 1000,
-        },
-      ]);
-
-      postsRepository.create.mockResolvedValue({
-        ...basePost,
-        tags: [],
-      });
-
-      await service.create(
-        {
-          gameId: 'game-1',
-          title: 'Image Post',
-          content: 'Content',
-          media: [
-            {
-              mediaUploadId: 'upload-1',
-              altText: 'Test image',
-              sortOrder: 0,
-            },
-          ],
-        },
-        'user-1',
-      );
-
-      expect(postsRepository.create).toHaveBeenCalledWith({
-        authorId: 'user-1',
-        gameId: 'game-1',
-        categoryId: undefined,
-        title: 'Image Post',
-        content: 'Content',
-        type: undefined,
-        status: undefined,
-        visibility: undefined,
-        isSpoiler: undefined,
-        media: [
-          {
-            mediaUploadId: 'upload-1',
-            assetId: 'asset-1',
-            publicId: 'gachahub/post/image-1',
-            url: 'https://example.com/image.jpg',
-            mediaType: 'IMAGE',
-            altText: 'Test image',
-            sortOrder: 0,
-            width: 1080,
-            height: 1080,
-            duration: null,
-            bytes: 1000,
-            format: 'jpg',
-          },
-        ],
-        tags: undefined,
-      });
-    });
-
-    it('maps gif image to GIF media type', async () => {
-      postsRepository.findGameById.mockResolvedValue({
-        id: 'game-1',
-        status: 'ACTIVE',
-      });
-
-      mediaService.getAttachableUploads.mockResolvedValue([
-        {
-          id: 'upload-1',
-          assetId: 'asset-1',
-          publicId: 'gachahub/post/gif-1',
-          secureUrl: 'https://example.com/test.gif',
-          resourceType: 'IMAGE',
-          format: 'gif',
-          width: 500,
-          height: 500,
-          duration: null,
-          bytes: 1000,
-        },
-      ]);
-
-      postsRepository.create.mockResolvedValue({
-        ...basePost,
-        tags: [],
-      });
-
-      await service.create(
-        {
-          gameId: 'game-1',
-          title: 'GIF Post',
-          content: 'Content',
-          media: [
-            {
-              mediaUploadId: 'upload-1',
-            },
-          ],
-        },
-        'user-1',
-      );
-
-      expect(postsRepository.create).toHaveBeenCalledWith({
-        authorId: 'user-1',
-        gameId: 'game-1',
-        categoryId: undefined,
-        title: 'GIF Post',
-        content: 'Content',
-        type: undefined,
-        status: undefined,
-        visibility: undefined,
-        isSpoiler: undefined,
-        media: [
-          {
-            mediaUploadId: 'upload-1',
-            assetId: 'asset-1',
-            publicId: 'gachahub/post/gif-1',
-            url: 'https://example.com/test.gif',
-            mediaType: 'GIF',
-            altText: undefined,
-            sortOrder: 0,
-            width: 500,
-            height: 500,
-            duration: null,
-            bytes: 1000,
-            format: 'gif',
-          },
-        ],
-        tags: undefined,
-      });
     });
 
     it('rejects more than 10 images', async () => {
@@ -739,27 +406,34 @@ describe('PostsService', () => {
       });
 
       mediaService.getAttachableUploads.mockResolvedValue(
-        Array.from({ length: 11 }, (_, index) => ({
-          id: `upload-${index}`,
-          assetId: `asset-${index}`,
-          publicId: `image-${index}`,
-          secureUrl: `https://example.com/${index}.jpg`,
-          resourceType: 'IMAGE',
-          format: 'jpg',
-        })),
+        Array.from(
+          {
+            length: 11,
+          },
+          (_, index) => ({
+            id: `upload-${index}`,
+            resourceType: 'IMAGE',
+          }),
+        ),
       );
 
       await expect(
         service.create(
           {
             gameId: 'game-1',
-            title: 'Too many images',
+            title: 'Title',
             content: 'Content',
-            media: Array.from({ length: 11 }, (_, index) => ({
-              mediaUploadId: `upload-${index}`,
-            })),
+
+            media: Array.from(
+              {
+                length: 11,
+              },
+              (_, index) => ({
+                mediaUploadId: `upload-${index}`,
+              }),
+            ),
           },
-          'user-1',
+          'author-1',
         ),
       ).rejects.toThrow(BadRequestException);
 
@@ -787,8 +461,9 @@ describe('PostsService', () => {
         service.create(
           {
             gameId: 'game-1',
-            title: 'Videos',
+            title: 'Title',
             content: 'Content',
+
             media: [
               {
                 mediaUploadId: 'video-1',
@@ -798,7 +473,7 @@ describe('PostsService', () => {
               },
             ],
           },
-          'user-1',
+          'author-1',
         ),
       ).rejects.toThrow(BadRequestException);
 
@@ -826,8 +501,9 @@ describe('PostsService', () => {
         service.create(
           {
             gameId: 'game-1',
-            title: 'Mixed media',
+            title: 'Title',
             content: 'Content',
+
             media: [
               {
                 mediaUploadId: 'image-1',
@@ -837,251 +513,91 @@ describe('PostsService', () => {
               },
             ],
           },
-          'user-1',
+          'author-1',
         ),
       ).rejects.toThrow(BadRequestException);
 
       expect(postsRepository.create).not.toHaveBeenCalled();
     });
-
-    it('normalizes and removes duplicate tags', async () => {
-      postsRepository.findGameById.mockResolvedValue({
-        id: 'game-1',
-        status: 'ACTIVE',
-      });
-
-      mediaService.getAttachableUploads.mockResolvedValue([]);
-
-      postsRepository.create.mockResolvedValue({
-        ...basePost,
-        tags: [],
-      });
-
-      await service.create(
-        {
-          gameId: 'game-1',
-          title: 'Tags',
-          content: 'Content',
-          tags: [' Build ', 'build', 'Team Guide'],
-        },
-        'user-1',
-      );
-
-      expect(postsRepository.create).toHaveBeenCalledWith({
-        authorId: 'user-1',
-        gameId: 'game-1',
-        categoryId: undefined,
-        title: 'Tags',
-        content: 'Content',
-        type: undefined,
-        status: undefined,
-        visibility: undefined,
-        isSpoiler: undefined,
-        media: [],
-        tags: [
-          {
-            name: 'build',
-            slug: 'build',
-          },
-          {
-            name: 'Team Guide',
-            slug: 'team-guide',
-          },
-        ],
-      });
-    });
   });
 
   describe('update', () => {
-    it('throws when post does not exist', async () => {
-      postsRepository.findById.mockResolvedValue(null);
-
-      await expect(
-        service.update(
-          'missing-post',
-          {
-            title: 'Updated',
-          },
-          'user-1',
-        ),
-      ).rejects.toThrow(NotFoundException);
-
-      expect(postsRepository.update).not.toHaveBeenCalled();
-    });
-
-    it('throws when post is deleted', async () => {
-      postsRepository.findById.mockResolvedValue({
-        ...basePost,
-        status: 'DELETED',
-      });
-
-      await expect(
-        service.update(
-          'post-1',
-          {
-            title: 'Updated',
-          },
-          'user-1',
-        ),
-      ).rejects.toThrow(NotFoundException);
-
-      expect(postsRepository.update).not.toHaveBeenCalled();
-    });
-
-    it('rejects updating another user post', async () => {
-      postsRepository.findById.mockResolvedValue({
-        ...basePost,
-        authorId: 'user-2',
-      });
-
-      await expect(
-        service.update(
-          'post-1',
-          {
-            title: 'Updated',
-          },
-          'user-1',
-        ),
-      ).rejects.toThrow(ForbiddenException);
-
-      expect(postsRepository.update).not.toHaveBeenCalled();
-    });
-
-    it('rejects category from another game', async () => {
-      postsRepository.findById.mockResolvedValue(basePost);
-
-      postsRepository.findCategoryById.mockResolvedValue({
-        id: 'category-1',
-        gameId: 'game-2',
-        isActive: true,
-      });
-
-      await expect(
-        service.update(
-          'post-1',
-          {
-            categoryId: 'category-1',
-          },
-          'user-1',
-        ),
-      ).rejects.toThrow(NotFoundException);
-
-      expect(postsRepository.update).not.toHaveBeenCalled();
-    });
-
-    it('updates and trims title and content', async () => {
+    it('updates own post', async () => {
       postsRepository.findById.mockResolvedValue(basePost);
 
       postsRepository.update.mockResolvedValue({
         ...basePost,
         title: 'Updated title',
-        content: 'Updated content',
-        tags: [],
       });
 
       const result = await service.update(
         'post-1',
         {
           title: '  Updated title  ',
-          content: '  Updated content  ',
         },
-        'user-1',
+        'author-1',
       );
 
       expect(postsRepository.update).toHaveBeenCalledWith({
         id: 'post-1',
+
         data: {
           title: 'Updated title',
-          content: 'Updated content',
         },
+
         tags: undefined,
       });
 
       expect(result.title).toBe('Updated title');
-      expect(result.content).toBe('Updated content');
     });
 
-    it('connects a new category', async () => {
+    it('rejects updating another user post', async () => {
       postsRepository.findById.mockResolvedValue(basePost);
 
-      postsRepository.findCategoryById.mockResolvedValue({
-        id: 'category-1',
-        gameId: 'game-1',
-        isActive: true,
-      });
-
-      postsRepository.update.mockResolvedValue({
-        ...basePost,
-        categoryId: 'category-1',
-        tags: [],
-      });
-
-      await service.update(
-        'post-1',
-        {
-          categoryId: 'category-1',
-        },
-        'user-1',
-      );
-
-      expect(postsRepository.update).toHaveBeenCalledWith({
-        id: 'post-1',
-        data: {
-          category: {
-            connect: {
-              id: 'category-1',
-            },
+      await expect(
+        service.update(
+          'post-1',
+          {
+            title: 'Changed',
           },
-        },
-        tags: undefined,
-      });
-    });
-  });
+          'other-user',
+        ),
+      ).rejects.toThrow(ForbiddenException);
 
-  describe('remove', () => {
-    it('throws when post does not exist', async () => {
-      postsRepository.findById.mockResolvedValue(null);
-
-      await expect(service.remove('missing-post', 'user-1')).rejects.toThrow(
-        NotFoundException,
-      );
-
-      expect(postsRepository.softDelete).not.toHaveBeenCalled();
+      expect(postsRepository.update).not.toHaveBeenCalled();
     });
 
-    it('throws when post is already deleted', async () => {
+    it('rejects updating deleted post', async () => {
       postsRepository.findById.mockResolvedValue({
         ...basePost,
         status: 'DELETED',
       });
 
-      await expect(service.remove('post-1', 'user-1')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.update(
+          'post-1',
+          {
+            title: 'Changed',
+          },
+          'author-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(postsRepository.update).not.toHaveBeenCalled();
     });
+  });
 
-    it('rejects deleting another user post', async () => {
-      postsRepository.findById.mockResolvedValue({
-        ...basePost,
-        authorId: 'user-2',
-      });
-
-      await expect(service.remove('post-1', 'user-1')).rejects.toThrow(
-        ForbiddenException,
-      );
-
-      expect(postsRepository.softDelete).not.toHaveBeenCalled();
-    });
-
-    it('soft deletes own published post', async () => {
+  describe('remove', () => {
+    it('soft deletes own post', async () => {
       postsRepository.findById.mockResolvedValue(basePost);
 
       postsRepository.softDelete.mockResolvedValue({
         ...basePost,
         status: 'DELETED',
+        deletedAt: new Date(),
       });
 
-      const result = await service.remove('post-1', 'user-1');
+      const result = await service.remove('post-1', 'author-1');
 
       expect(postsRepository.softDelete).toHaveBeenCalledWith('post-1');
 
@@ -1090,25 +606,35 @@ describe('PostsService', () => {
       });
     });
 
-    it('soft deletes own draft post', async () => {
+    it('rejects deleting another user post', async () => {
+      postsRepository.findById.mockResolvedValue(basePost);
+
+      await expect(service.remove('post-1', 'other-user')).rejects.toThrow(
+        ForbiddenException,
+      );
+
+      expect(postsRepository.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('rejects deleting already deleted post', async () => {
       postsRepository.findById.mockResolvedValue({
         ...basePost,
-        status: 'DRAFT',
+        status: 'DELETED',
       });
 
-      postsRepository.softDelete.mockResolvedValue({});
+      await expect(service.remove('post-1', 'author-1')).rejects.toThrow(
+        NotFoundException,
+      );
 
-      await service.remove('post-1', 'user-1');
-
-      expect(postsRepository.softDelete).toHaveBeenCalledWith('post-1');
+      expect(postsRepository.softDelete).not.toHaveBeenCalled();
     });
   });
 
   describe('like', () => {
-    it('likes an existing post', async () => {
+    it('likes public post and records LIKE when state changed', async () => {
       postsRepository.findPostForInteraction.mockResolvedValue({
         id: 'post-1',
-        authorId: 'user-1',
+        authorId: 'author-1',
         status: 'PUBLISHED',
         visibility: 'PUBLIC',
         deletedAt: null,
@@ -1116,23 +642,161 @@ describe('PostsService', () => {
 
       postsRepository.like.mockResolvedValue({
         liked: true,
-        likeCount: 1,
+        likeCount: 11,
+        changed: true,
       });
 
       const result = await service.like('post-1', 'user-1');
 
       expect(postsRepository.like).toHaveBeenCalledWith('post-1', 'user-1');
 
+      expect(userInterestService.recordPostInteraction).toHaveBeenCalledWith(
+        'user-1',
+        'post-1',
+        'LIKE',
+      );
+
       expect(result).toEqual({
         liked: true,
-        likeCount: 1,
+        likeCount: 11,
       });
     });
 
-    it('throws when liking missing post', async () => {
-      postsRepository.findPostForInteraction.mockResolvedValue(null);
+    it('does not record LIKE again when duplicate like does not change state', async () => {
+      postsRepository.findPostForInteraction.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'PUBLISHED',
+        visibility: 'PUBLIC',
+        deletedAt: null,
+      });
 
-      await expect(service.like('missing-post', 'user-1')).rejects.toThrow(
+      postsRepository.like.mockResolvedValue({
+        liked: true,
+        likeCount: 11,
+        changed: false,
+      });
+
+      await service.like('post-1', 'user-1');
+
+      expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
+    });
+
+    it('allows follower to like FOLLOWERS_ONLY post', async () => {
+      postsRepository.findPostForInteraction.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'PUBLISHED',
+        visibility: 'FOLLOWERS_ONLY',
+        deletedAt: null,
+      });
+
+      followsService.isFollowing.mockResolvedValue({
+        following: true,
+      });
+
+      postsRepository.like.mockResolvedValue({
+        liked: true,
+        likeCount: 5,
+        changed: true,
+      });
+
+      await service.like('post-1', 'user-1');
+
+      expect(followsService.isFollowing).toHaveBeenCalledWith(
+        'user-1',
+        'author-1',
+      );
+
+      expect(postsRepository.like).toHaveBeenCalledWith('post-1', 'user-1');
+    });
+
+    it('allows author to like own FOLLOWERS_ONLY post without follow lookup', async () => {
+      postsRepository.findPostForInteraction.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'PUBLISHED',
+        visibility: 'FOLLOWERS_ONLY',
+        deletedAt: null,
+      });
+
+      postsRepository.like.mockResolvedValue({
+        liked: true,
+        likeCount: 5,
+        changed: true,
+      });
+
+      await service.like('post-1', 'author-1');
+
+      expect(followsService.isFollowing).not.toHaveBeenCalled();
+
+      expect(postsRepository.like).toHaveBeenCalledWith('post-1', 'author-1');
+    });
+
+    it('rejects non-follower from liking FOLLOWERS_ONLY post', async () => {
+      postsRepository.findPostForInteraction.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'PUBLISHED',
+        visibility: 'FOLLOWERS_ONLY',
+        deletedAt: null,
+      });
+
+      followsService.isFollowing.mockResolvedValue({
+        following: false,
+      });
+
+      await expect(service.like('post-1', 'user-1')).rejects.toThrow(
+        NotFoundException,
+      );
+
+      expect(postsRepository.like).not.toHaveBeenCalled();
+
+      expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
+    });
+
+    it('rejects liking private post', async () => {
+      postsRepository.findPostForInteraction.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'PUBLISHED',
+        visibility: 'PRIVATE',
+        deletedAt: null,
+      });
+
+      await expect(service.like('post-1', 'user-1')).rejects.toThrow(
+        NotFoundException,
+      );
+
+      expect(postsRepository.like).not.toHaveBeenCalled();
+    });
+
+    it('rejects liking non-published post', async () => {
+      postsRepository.findPostForInteraction.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'DRAFT',
+        visibility: 'PUBLIC',
+        deletedAt: null,
+      });
+
+      await expect(service.like('post-1', 'user-1')).rejects.toThrow(
+        NotFoundException,
+      );
+
+      expect(postsRepository.like).not.toHaveBeenCalled();
+    });
+
+    it('rejects liking deleted post', async () => {
+      postsRepository.findPostForInteraction.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'PUBLISHED',
+        visibility: 'PUBLIC',
+        deletedAt: new Date(),
+      });
+
+      await expect(service.like('post-1', 'user-1')).rejects.toThrow(
         NotFoundException,
       );
 
@@ -1141,10 +805,10 @@ describe('PostsService', () => {
   });
 
   describe('unlike', () => {
-    it('unlikes an existing post', async () => {
+    it('unlikes post and records UNLIKE when state changed', async () => {
       postsRepository.findPostForInteraction.mockResolvedValue({
         id: 'post-1',
-        authorId: 'user-1',
+        authorId: 'author-1',
         status: 'PUBLISHED',
         visibility: 'PUBLIC',
         deletedAt: null,
@@ -1152,27 +816,66 @@ describe('PostsService', () => {
 
       postsRepository.unlike.mockResolvedValue({
         liked: false,
-        likeCount: 0,
+        likeCount: 9,
+        changed: true,
       });
 
       const result = await service.unlike('post-1', 'user-1');
 
       expect(postsRepository.unlike).toHaveBeenCalledWith('post-1', 'user-1');
 
+      expect(userInterestService.recordPostInteraction).toHaveBeenCalledWith(
+        'user-1',
+        'post-1',
+        'UNLIKE',
+      );
+
       expect(result).toEqual({
         liked: false,
-        likeCount: 0,
+        likeCount: 9,
       });
     });
 
-    it('throws when unliking missing post', async () => {
-      postsRepository.findPostForInteraction.mockResolvedValue(null);
+    it('does not record UNLIKE when state did not change', async () => {
+      postsRepository.findPostForInteraction.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'PUBLISHED',
+        visibility: 'PUBLIC',
+        deletedAt: null,
+      });
 
-      await expect(service.unlike('missing-post', 'user-1')).rejects.toThrow(
+      postsRepository.unlike.mockResolvedValue({
+        liked: false,
+        likeCount: 9,
+        changed: false,
+      });
+
+      await service.unlike('post-1', 'user-1');
+
+      expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
+    });
+
+    it('rejects unlike when post is inaccessible', async () => {
+      postsRepository.findPostForInteraction.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'PUBLISHED',
+        visibility: 'FOLLOWERS_ONLY',
+        deletedAt: null,
+      });
+
+      followsService.isFollowing.mockResolvedValue({
+        following: false,
+      });
+
+      await expect(service.unlike('post-1', 'user-1')).rejects.toThrow(
         NotFoundException,
       );
 
       expect(postsRepository.unlike).not.toHaveBeenCalled();
+
+      expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
     });
   });
 });

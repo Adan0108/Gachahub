@@ -18,6 +18,7 @@ import { MediaModule } from './media/media.module';
 import { CommentsModule } from './comments/comments.module';
 import { FollowsModule } from './follows/follows.module';
 import { FeedModule } from './feed/feed.module';
+import { CommonModule } from './common/common.module';
 
 /**
  * Root application module.
@@ -30,6 +31,7 @@ import { FeedModule } from './feed/feed.module';
      * Provides scheduled cleanup jobs for orphaned Cloudinary uploads.
      */
     ScheduleModule.forRoot(),
+    CommonModule,
     CloudinaryModule,
     PrismaModule,
     RedisModule,

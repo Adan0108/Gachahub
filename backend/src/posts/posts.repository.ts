@@ -144,13 +144,10 @@ export class PostsRepository {
     });
   }
 
-  findPublishedById(id: string, userId?: string) {
-    return this.prisma.post.findFirst({
+  findViewableById(id: string, userId?: string) {
+    return this.prisma.post.findUnique({
       where: {
         id,
-        status: 'PUBLISHED',
-        visibility: 'PUBLIC',
-        deletedAt: null,
       },
       include: {
         ...postInclude,
@@ -515,6 +512,7 @@ export class PostsRepository {
         return {
           liked: true,
           likeCount: post.reactionCount,
+          changed: true,
         };
       }
 
@@ -530,6 +528,7 @@ export class PostsRepository {
       return {
         liked: true,
         likeCount: post.reactionCount,
+        changed: false,
       };
     });
   }
@@ -561,6 +560,7 @@ export class PostsRepository {
         return {
           liked: false,
           likeCount: post.reactionCount,
+          changed: true,
         };
       }
 
@@ -576,6 +576,7 @@ export class PostsRepository {
       return {
         liked: false,
         likeCount: post.reactionCount,
+        changed: false,
       };
     });
   }
