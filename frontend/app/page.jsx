@@ -9,6 +9,7 @@ import { PostList } from "../components/PostList";
 import { QueryNotice } from "../components/QueryNotice";
 import { SectionTitle } from "../components/SectionTitle";
 import { glyph } from "../components/constants";
+import { useToast } from "../hooks/useToast";
 import { api } from "../lib/api";
 import { fallbacks, queries } from "../lib/queries";
 import { defaultFeedPreferences, FEED_PREFERENCES_KEY, readStoredJson } from "../lib/preferences";
@@ -17,11 +18,10 @@ const feedCategories = ["Guide", "Build", "Lore", "Teams", "Strategy"];
 
 export default function HomePage() {
   const [tab, setTab] = useState("Hot");
-  const [notice, setNotice] = useState("");
+  const { notice, showNotice } = useToast();
   const [customizing, setCustomizing] = useState(false);
   const [preferences, setPreferences] = useState(defaultFeedPreferences);
   const [draftPreferences, setDraftPreferences] = useState(defaultFeedPreferences);
-  const noticeTimerRef = useRef(null);
   const customizerButtonRef = useRef(null);
   const customizerRef = useRef(null);
   const wasCustomizingRef = useRef(false);
@@ -49,12 +49,6 @@ export default function HomePage() {
         ? [...data.posts].sort((a, b) => Number(b.likeCount || 0) - Number(a.likeCount || 0))
         : data.posts;
 
-  const showNotice = (message) => {
-    window.clearTimeout(noticeTimerRef.current);
-    setNotice(message);
-    noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
-  };
-
   const openCustomizer = () => {
     setDraftPreferences(preferences);
     setCustomizing(true);
@@ -75,8 +69,6 @@ export default function HomePage() {
     setCustomizing(false);
     showNotice("Feed preferences saved");
   };
-
-  useEffect(() => () => window.clearTimeout(noticeTimerRef.current), []);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {

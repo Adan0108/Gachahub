@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FiFileText, FiImage, FiSend, FiTrash2 } from "react-icons/fi";
-import { useCurrentUser } from "../../hooks/useCurrentUser";
+import { useRequireAuth } from "../../hooks/useRequireAuth";
 import { api } from "../../lib/api";
 import {
   buildPostPayload,
@@ -30,7 +30,7 @@ const postTypes = [
 export default function CreatePostPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
+  const { isAuthenticated, isLoading: isSessionLoading } = useRequireAuth();
   const games = useQuery(queries.games(""));
   const [form, setForm] = useState({
     gameId: "",
@@ -67,43 +67,56 @@ export default function CreatePostPage() {
     form.content.trim().length > 0 &&
     !tagError &&
     !fileError;
-
-  useEffect(() => {
-    if (!isSessionLoading && !isAuthenticated) router.replace("/login");
-  }, [isAuthenticated, isSessionLoading, router]);
-
   const publish = useMutation({
     mutationFn: async () => {
-      const uploadResult = await api.uploadPostMedia(files);
+      let uploadResult;
+      try {
+        uploadResult = await api.uploadPostMedia(files);
+      } catch (error) {
+        return {
+          ok: false,
+          error,
+          failedFiles: files,
+          successfulUploads: confirmedUploads,
+        };
+      }
       const uploads = [...confirmedUploads, ...uploadResult.successful];
 
       if (uploadResult.failed.length) {
-        const error = new Error(
-          `${uploadResult.failed.length} file${uploadResult.failed.length === 1 ? "" : "s"} failed. Retry the remaining upload${uploadResult.failed.length === 1 ? "" : "s"}.`,
-        );
-        error.failedFiles = uploadResult.failed.map(({ file }) => file);
-        error.successfulUploads = uploads;
-        throw error;
+        return {
+          ok: false,
+          error: new Error(
+            `${uploadResult.failed.length} file${uploadResult.failed.length === 1 ? "" : "s"} failed. Retry the remaining upload${uploadResult.failed.length === 1 ? "" : "s"}.`,
+          ),
+          failedFiles: uploadResult.failed.map(({ file }) => file),
+          successfulUploads: uploads,
+        };
       }
 
       try {
-        return await api.createPost(buildPostPayload(form, parsedTags, uploads));
+        const post = await api.createPost(buildPostPayload(form, parsedTags, uploads));
+        return { ok: true, post };
       } catch (error) {
-        error.failedFiles = [];
-        error.successfulUploads = uploads;
-        throw error;
+        return {
+          ok: false,
+          error,
+          failedFiles: [],
+          successfulUploads: uploads,
+        };
       }
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
+      if (!result.ok) {
+        setConfirmedUploads(result.successfulUploads);
+        setFiles(result.failedFiles);
+        return;
+      }
       await queryClient.invalidateQueries({ queryKey: ["posts"] });
       router.push("/profile");
     },
-    onError: (error) => {
-      if (!Array.isArray(error.successfulUploads)) return;
-      setConfirmedUploads(error.successfulUploads);
-      setFiles(Array.isArray(error.failedFiles) ? error.failedFiles : []);
-    },
   });
+  const publishError =
+    publish.data?.ok === false ? publish.data.error : publish.isError ? publish.error : null;
 
   const updateField = (field) => (event) => {
     const value = event.target.type === "checkbox" ? event.target.checked : event.target.value;
@@ -349,7 +362,9 @@ export default function CreatePostPage() {
           isLoading={games.isLoading || categories.isLoading}
           isError={games.isError || categories.isError}
         />
-        {publish.isError && <div className="auth-message error">{publish.error.message}</div>}
+        {!publish.isPending && publishError && (
+          <div className="auth-message error">{publishError.message}</div>
+        )}
         <button className="primary create-post-submit" disabled={publish.isPending} type="submit">
           <FiSend />{" "}
           {publish.isPending

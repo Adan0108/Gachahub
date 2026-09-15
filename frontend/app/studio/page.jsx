@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { FiArrowLeft, FiCompass, FiX } from "react-icons/fi";
 import { Art } from "../../components/Art";
 import { glyph, toolItems } from "../../components/constants";
+import { useToast } from "../../hooks/useToast";
 
 function Toggle({ label, value, setValue }) {
   return (
@@ -69,10 +70,9 @@ export default function StudioPage() {
   const [frame, setFrame] = useState(true);
   const [decorations, setDecorations] = useState(true);
   const [compactTemplate, setCompactTemplate] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [previewing, setPreviewing] = useState(false);
-  const [notice, setNotice] = useState("");
-  const timerRef = useRef(null);
+  const { notice, showNotice } = useToast();
+  const saved = notice === "Saved locally";
   const previewButtonRef = useRef(null);
   const previewModalRef = useRef(null);
   const wasPreviewingRef = useRef(false);
@@ -88,12 +88,6 @@ export default function StudioPage() {
   ]
     .filter(Boolean)
     .join(" ");
-
-  const flash = (message) => {
-    window.clearTimeout(timerRef.current);
-    setNotice(message);
-    timerRef.current = window.setTimeout(() => setNotice(""), 1800);
-  };
 
   const save = () => {
     window.localStorage.setItem(
@@ -113,13 +107,7 @@ export default function StudioPage() {
         compactTemplate,
       }),
     );
-    window.clearTimeout(timerRef.current);
-    setSaved(true);
-    setNotice("Saved locally");
-    timerRef.current = window.setTimeout(() => {
-      setSaved(false);
-      setNotice("");
-    }, 1600);
+    showNotice("Saved locally", 1600);
   };
 
   const chooseTool = (item) => {
@@ -127,32 +115,32 @@ export default function StudioPage() {
     const actions = {
       Template: () => {
         setCompactTemplate((current) => !current);
-        flash(`Switched to ${compactTemplate ? "classic" : "compact"} template`);
+        showNotice(`Switched to ${compactTemplate ? "classic" : "compact"} template`);
       },
       Background: () => {
         const nextIndex = (backgroundIndex + 1) % backgrounds.length;
         setBackgroundIndex(nextIndex);
-        flash(`${backgrounds[nextIndex].name} background applied`);
+        showNotice(`${backgrounds[nextIndex].name} background applied`);
       },
       Particles: () => {
         setParticles((current) => !current);
-        flash(`Particles ${particles ? "hidden" : "shown"}`);
+        showNotice(`Particles ${particles ? "hidden" : "shown"}`);
       },
       Effects: () => {
         setEffects((current) => !current);
-        flash(`Glow effects ${effects ? "disabled" : "enabled"}`);
+        showNotice(`Glow effects ${effects ? "disabled" : "enabled"}`);
       },
       Text: () => {
         nameInputRef.current?.focus();
-        flash("Character name ready to edit");
+        showNotice("Character name ready to edit");
       },
       Frame: () => {
         setFrame((current) => !current);
-        flash(`Frame ${frame ? "hidden" : "shown"}`);
+        showNotice(`Frame ${frame ? "hidden" : "shown"}`);
       },
       Decorations: () => {
         setDecorations((current) => !current);
-        flash(`Set bonus ${decorations ? "hidden" : "shown"}`);
+        showNotice(`Set bonus ${decorations ? "hidden" : "shown"}`);
       },
     };
     actions[item]?.();
@@ -165,7 +153,7 @@ export default function StudioPage() {
     canvas.height = height;
     const context = canvas.getContext("2d");
     if (!context) {
-      flash("Image export is not supported in this browser");
+      showNotice("Image export is not supported in this browser");
       return;
     }
     const background = backgrounds[backgroundIndex];
@@ -259,7 +247,7 @@ export default function StudioPage() {
 
     canvas.toBlob((blob) => {
       if (!blob) {
-        flash("Image export failed");
+        showNotice("Image export failed");
         return;
       }
       const url = URL.createObjectURL(blob);
@@ -270,11 +258,9 @@ export default function StudioPage() {
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 0);
-      flash("PNG exported");
+      showNotice("PNG exported");
     }, "image/png");
   };
-
-  useEffect(() => () => window.clearTimeout(timerRef.current), []);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -527,7 +513,7 @@ export default function StudioPage() {
             setFrame(true);
             setDecorations(true);
             setCompactTemplate(false);
-            flash("Canvas settings reset");
+            showNotice("Canvas settings reset");
           }}
           type="button"
         >

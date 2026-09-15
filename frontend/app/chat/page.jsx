@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FiCheck, FiInbox, FiLock, FiMessageCircle, FiShield, FiX } from "react-icons/fi";
 import { QueryNotice } from "../../components/QueryNotice";
-import { useCurrentUser } from "../../hooks/useCurrentUser";
+import { useRequireAuth } from "../../hooks/useRequireAuth";
 import { api } from "../../lib/api";
 import { queries, queryKeys } from "../../lib/queries";
 
@@ -21,9 +20,8 @@ function conversationPeer(conversation, userId) {
 }
 
 export default function ChatPage() {
-  const router = useRouter();
   const queryClient = useQueryClient();
-  const { user, isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
+  const { user, isAuthenticated, isLoading: isSessionLoading } = useRequireAuth();
   const [view, setView] = useState("inbox");
   const [selectedId, setSelectedId] = useState("");
   const conversations = useQuery({ ...queries.chatConversations(), enabled: isAuthenticated });
@@ -45,10 +43,6 @@ export default function ChatPage() {
     [messages.data?.items, user?.id],
   );
   const messageIdsKey = messageIds.join(",");
-
-  useEffect(() => {
-    if (!isSessionLoading && !isAuthenticated) router.replace("/login");
-  }, [isAuthenticated, isSessionLoading, router]);
 
   useEffect(() => {
     if (!activeId || !messageIdsKey) return;

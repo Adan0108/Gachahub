@@ -10,6 +10,8 @@ import { PostList } from "../../components/PostList";
 import { QueryNotice } from "../../components/QueryNotice";
 import { SectionTitle } from "../../components/SectionTitle";
 import { builds, glyph } from "../../components/constants";
+import { useRequireAuth } from "../../hooks/useRequireAuth";
+import { useToast } from "../../hooks/useToast";
 import { queries } from "../../lib/queries";
 
 const focusableSelector = [
@@ -37,37 +39,30 @@ const achievements = [
 
 export default function ProfilePage() {
   const router = useRouter();
+  const { user, isAuthenticated, isLoading: isSessionLoading, isError } = useRequireAuth();
   const [tab, setTab] = useState("Builds");
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [bio, setBio] = useState("We ride the waves, chasing the unknown.");
   const [draftName, setDraftName] = useState("");
   const [draftBio, setDraftBio] = useState("");
-  const [notice, setNotice] = useState("");
+  const { notice, showNotice } = useToast();
   const editButtonRef = useRef(null);
   const modalRef = useRef(null);
   const nameInputRef = useRef(null);
-  const noticeTimerRef = useRef(null);
   const wasEditingRef = useRef(false);
-  const profile = useQuery(queries.profile());
-  const myPosts = useQuery({ ...queries.myPosts(), enabled: Boolean(profile.data) });
-  const displayName = name || profile.data?.name || "";
+  const myPosts = useQuery({ ...queries.myPosts(), enabled: isAuthenticated });
+  const displayName = name || user?.name || "";
   const recentPosts = myPosts.data?.items || [];
   const postCount = myPosts.data?.meta?.total ?? recentPosts.length;
   const activeTab = tab === "Posts" ? { ...profileTabs.Posts, count: postCount } : profileTabs[tab];
 
-  const flashNotice = (message) => {
-    window.clearTimeout(noticeTimerRef.current);
-    setNotice(message);
-    noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
-  };
-
   const shareProfile = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
-      flashNotice("Profile link copied");
+      showNotice("Profile link copied");
     } catch {
-      flashNotice("Could not copy the profile link");
+      showNotice("Could not copy the profile link");
     }
   };
 
@@ -83,7 +78,7 @@ export default function ProfilePage() {
     event.preventDefault();
     setName(draftName.trim());
     setBio(draftBio.trim() || "We ride the waves, chasing the unknown.");
-    flashNotice("Profile saved locally");
+    showNotice("Profile saved locally");
     setEditing(false);
   };
 
@@ -135,20 +130,14 @@ export default function ProfilePage() {
     }
   }, [editing]);
 
-  useEffect(() => () => window.clearTimeout(noticeTimerRef.current), []);
-
-  useEffect(() => {
-    if (!profile.isLoading && !profile.data) router.replace("/login");
-  }, [profile.data, profile.isLoading, router]);
-
-  if (!profile.data) {
+  if (!user) {
     return (
       <div className="page profile-page">
-        <QueryNotice isLoading={profile.isLoading} isError={profile.isError} />
+        <QueryNotice isLoading={isSessionLoading} isError={isError} />
         <div className="state-card profile-empty-state">
-          <b>{profile.isLoading ? "Loading your profile" : "Sign in required"}</b>
+          <b>{isSessionLoading ? "Loading your profile" : "Sign in required"}</b>
           <span>
-            {profile.isLoading
+            {isSessionLoading
               ? "Checking your GachaHub session..."
               : "Redirecting you to the login page..."}
           </span>
@@ -162,7 +151,7 @@ export default function ProfilePage() {
       <div className="toast-slot" aria-live="polite">
         {notice}
       </div>
-      <QueryNotice isLoading={profile.isLoading} isError={profile.isError} />
+      <QueryNotice isLoading={isSessionLoading} isError={isError} />
       <div aria-hidden={editing ? "true" : undefined}>
         <section className="profile-hero">
           <Art tone="indigo">{glyph.sparkle}</Art>
@@ -177,7 +166,7 @@ export default function ProfilePage() {
               <h1>
                 {displayName} <span className="verified">{glyph.check}</span>
               </h1>
-              <p>{profile.data.email}</p>
+              <p>{user.email}</p>
               <blockquote>&quot;{bio}&quot;</blockquote>
               <div className="social" aria-label="Profile actions">
                 <button aria-label="Copy profile link" onClick={shareProfile} type="button">

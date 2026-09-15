@@ -117,6 +117,10 @@ export function normalizePost(post) {
   };
 }
 
+function normalizePostResponse(post) {
+  return post.raw ? post : normalizePost(post);
+}
+
 export function fallbackGames(search = "") {
   const query = search.trim().toLowerCase();
   const items = query
@@ -362,7 +366,7 @@ export const api = {
     const response = await request(withQuery(backendRoutes.myPosts, query), options);
     const items = Array.isArray(response) ? response : response.items || [];
     return {
-      items: items.map((post) => (post.raw ? post : normalizePost(post))),
+      items: items.map(normalizePostResponse),
       meta: response.meta || { total: items.length },
     };
   },
@@ -374,7 +378,7 @@ export const api = {
     api.getPostCollection(backendRoutes.posts, query, options),
   getPost: async (postId, options = {}) => {
     const post = await request(backendRoutes.post(postId), options);
-    return post.raw ? post : normalizePost(post);
+    return normalizePostResponse(post);
   },
   getGameFeed: (gameSlug, query = {}, options = {}) =>
     api.getPostCollection(backendRoutes.gameFeed(gameSlug), query, options),
@@ -445,7 +449,7 @@ export const api = {
     const response = await request(withQuery(path, query), options);
     const items = Array.isArray(response) ? response : response.items || [];
     return {
-      items: items.map((post) => (post.raw ? post : normalizePost(post))),
+      items: items.map(normalizePostResponse),
       meta: response.meta || { total: items.length },
     };
   },
