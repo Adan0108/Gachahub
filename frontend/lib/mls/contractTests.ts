@@ -75,6 +75,21 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
   const conversationId = 'conversation-1';
 
   describe(`MlsClient contract: ${candidate.name}`, () => {
+    // A device's identity is only meaningful for pinning/safety-number
+    // verification if it's actually stable - an implementation that mints a
+    // fresh signing key per key package would make every "device" look like
+    // a different one each time, defeating the point of DeviceCredential.
+    it("reports a stable credential across multiple key packages", async () => {
+      const alice = await setUpDevice(candidate, 'user-alice');
+      const before = await alice.store.getOwnCredential();
+
+      await alice.store.generateKeyPackages(3);
+
+      const after = await alice.store.getOwnCredential();
+      expect(after.signatureKey).toEqual(before.signatureKey);
+      expect(after.deviceId).toBe(before.deviceId);
+    });
+
     it('supports 3+ members exchanging application messages', async () => {
       const alice = await setUpDevice(candidate, 'user-alice');
       const bob = await setUpDevice(candidate, 'user-bob');

@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { buildTestKeyPackage as buildKeyPackage } from './test-support/build-key-package';
+import { buildTestKeyPackage } from './test-support/build-key-package';
 import {
   decodeAndVerifyKeyPackage,
   PINNED_CIPHERSUITE,
@@ -7,11 +7,15 @@ import {
 
 describe('decodeAndVerifyKeyPackage', () => {
   it('accepts a real key package matching the expected identity', async () => {
-    const payload = await buildKeyPackage('user-1', 'device-1');
+    const { payload, signaturePublicKey } = await buildTestKeyPackage(
+      'user-1',
+      'device-1',
+    );
 
     const result = await decodeAndVerifyKeyPackage(payload, {
       userId: 'user-1',
       deviceId: 'device-1',
+      signaturePublicKey,
     });
 
     expect(result.cipherSuite).toBe(PINNED_CIPHERSUITE);
@@ -24,20 +28,43 @@ describe('decodeAndVerifyKeyPackage', () => {
       decodeAndVerifyKeyPackage(garbage, {
         userId: 'user-1',
         deviceId: 'device-1',
+        signaturePublicKey: new Uint8Array(),
       }),
     ).rejects.toThrow('Not a valid MLS key package');
   });
 
   it('rejects a credential that does not match the expected userId/deviceId', async () => {
-    const payload = await buildKeyPackage('user-1', 'device-1');
+    const { payload, signaturePublicKey } = await buildTestKeyPackage(
+      'user-1',
+      'device-1',
+    );
 
     await expect(
       decodeAndVerifyKeyPackage(payload, {
         userId: 'user-1',
         deviceId: 'a-different-device',
+        signaturePublicKey,
       }),
     ).rejects.toThrow(
       'Key package credential does not match the authenticated user/device',
+    );
+  });
+
+  // regression: the device's registered signaturePublicKey used to never be
+  // checked against what the key package was actually signed with
+  it("rejects a key package not signed with the device's registered signature key", async () => {
+    const { payload } = await buildTestKeyPackage('user-1', 'device-1');
+    const unrelatedKey = (await buildTestKeyPackage('user-1', 'device-1'))
+      .signaturePublicKey;
+
+    await expect(
+      decodeAndVerifyKeyPackage(payload, {
+        userId: 'user-1',
+        deviceId: 'device-1',
+        signaturePublicKey: unrelatedKey,
+      }),
+    ).rejects.toThrow(
+      "Key package is not signed with this device's registered signature key",
     );
   });
 
@@ -45,20 +72,26 @@ describe('decodeAndVerifyKeyPackage', () => {
     // MLS_128_DHKEMP256_AES128GCM_SHA256_P256 also needs zero-extra deps
     // beyond @noble/curves (already installed) - a real, differently-signed
     // key package, not just a tampered field.
-    const payload = await buildKeyPackage('user-1', 'device-1', {
-      ciphersuite: 'MLS_128_DHKEMP256_AES128GCM_SHA256_P256',
-    });
+    const { payload, signaturePublicKey } = await buildTestKeyPackage(
+      'user-1',
+      'device-1',
+      { ciphersuite: 'MLS_128_DHKEMP256_AES128GCM_SHA256_P256' },
+    );
 
     await expect(
       decodeAndVerifyKeyPackage(payload, {
         userId: 'user-1',
         deviceId: 'device-1',
+        signaturePublicKey,
       }),
     ).rejects.toThrow(/Unsupported ciphersuite/);
   });
 
   it('rejects a tampered signature', async () => {
-    const payload = await buildKeyPackage('user-1', 'device-1');
+    const { payload, signaturePublicKey } = await buildTestKeyPackage(
+      'user-1',
+      'device-1',
+    );
     // flip a byte near the end, where the signature lives in the TLS encoding
     const tampered = new Uint8Array(payload);
     tampered[tampered.length - 1] ^= 0xff;
@@ -67,6 +100,7 @@ describe('decodeAndVerifyKeyPackage', () => {
       decodeAndVerifyKeyPackage(tampered, {
         userId: 'user-1',
         deviceId: 'device-1',
+        signaturePublicKey,
       }),
     ).rejects.toThrow(/signature is invalid|Not a valid MLS key package/);
   });
@@ -75,13 +109,17 @@ describe('decodeAndVerifyKeyPackage', () => {
   // variable-length fields instead of returning undefined - this must
   // still surface as a clean BadRequestException, not an unhandled 500
   it('rejects a truncated real key package as a BadRequestException, not an unhandled throw', async () => {
-    const payload = await buildKeyPackage('user-1', 'device-1');
+    const { payload, signaturePublicKey } = await buildTestKeyPackage(
+      'user-1',
+      'device-1',
+    );
     const truncated = payload.slice(0, Math.floor(payload.length * 0.4));
 
     await expect(
       decodeAndVerifyKeyPackage(truncated, {
         userId: 'user-1',
         deviceId: 'device-1',
+        signaturePublicKey,
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -90,14 +128,17 @@ describe('decodeAndVerifyKeyPackage', () => {
     const farFuture = BigInt(
       Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60,
     );
-    const payload = await buildKeyPackage('user-1', 'device-1', {
-      lifetime: { notBefore: 0n, notAfter: farFuture },
-    });
+    const { payload, signaturePublicKey } = await buildTestKeyPackage(
+      'user-1',
+      'device-1',
+      { lifetime: { notBefore: 0n, notAfter: farFuture } },
+    );
 
     await expect(
       decodeAndVerifyKeyPackage(payload, {
         userId: 'user-1',
         deviceId: 'device-1',
+        signaturePublicKey,
       }),
     ).rejects.toThrow(/lifetime must be positive and at most/);
   });

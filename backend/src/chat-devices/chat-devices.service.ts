@@ -41,18 +41,21 @@ export class ChatDevicesService {
       throw new ConflictException('This device id is already registered');
     }
 
+    const signaturePublicKey = Uint8Array.from(
+      Buffer.from(dto.signaturePublicKey, 'base64'),
+    );
+
     const keyPackages = await this.verifyKeyPackages(
       userId,
       dto.deviceId,
+      signaturePublicKey,
       dto.keyPackages,
     );
 
     return this.chatDevicesRepository.createDeviceWithKeyPackages({
       deviceId: dto.deviceId,
       userId,
-      signaturePublicKey: Uint8Array.from(
-        Buffer.from(dto.signaturePublicKey, 'base64'),
-      ),
+      signaturePublicKey,
       ciphersuite: dto.ciphersuite,
       keyPackages,
     });
@@ -73,6 +76,7 @@ export class ChatDevicesService {
     const keyPackages = await this.verifyKeyPackages(
       userId,
       device.id,
+      device.signaturePublicKey,
       dto.keyPackages,
     );
 
@@ -202,6 +206,7 @@ export class ChatDevicesService {
   private async verifyKeyPackages(
     userId: string,
     deviceId: string,
+    signaturePublicKey: Uint8Array,
     items: KeyPackageItemDto[],
   ): Promise<NewKeyPackage[]> {
     return Promise.all(
@@ -212,6 +217,7 @@ export class ChatDevicesService {
         const keyPackage = await decodeAndVerifyKeyPackage(payloadBytes, {
           userId,
           deviceId,
+          signaturePublicKey,
         });
 
         return {

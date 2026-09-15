@@ -27,9 +27,29 @@ function getImpl(): Promise<CiphersuiteImpl> {
   return cachedImpl;
 }
 
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export interface ExpectedKeyPackageIdentity {
   userId: string;
   deviceId: string;
+  /**
+   * The device's claimed long-term identity signing key. Every key package
+   * a well-behaved device produces reuses this same key (see the frontend
+   * adapter's signatureKeyPair reuse fix) - checking it here catches a
+   * device whose registered signaturePublicKey has no actual relationship
+   * to the key its key packages are really signed with.
+   */
+  signaturePublicKey: Uint8Array;
 }
 
 /**
@@ -103,6 +123,17 @@ async function decodeAndVerifyKeyPackageUnsafe(
   ) {
     throw new BadRequestException(
       'Key package credential does not match the authenticated user/device',
+    );
+  }
+
+  if (
+    !bytesEqual(
+      keyPackage.leafNode.signaturePublicKey,
+      expected.signaturePublicKey,
+    )
+  ) {
+    throw new BadRequestException(
+      "Key package is not signed with this device's registered signature key",
     );
   }
 

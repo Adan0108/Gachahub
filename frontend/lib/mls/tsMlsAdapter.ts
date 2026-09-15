@@ -6,7 +6,7 @@ import {
   encodeMlsMessage,
   encodeGroupState,
   decodeGroupState,
-  generateKeyPackage,
+  generateKeyPackageWithKey,
   getCiphersuiteImpl,
   getCiphersuiteFromName,
   joinGroup,
@@ -129,6 +129,12 @@ interface StoredKeyPackage {
 class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
   private readonly deviceId: DeviceId = crypto.randomUUID();
   private credential: DeviceCredential | undefined;
+  // One persistent identity signing keypair, reused for every key package
+  // this device ever creates. generateKeyPackage() (no "WithKey") mints a
+  // FRESH signature key on every call - using it directly would mean each
+  // key package for the same device reports a different signaturePublicKey,
+  // making device identity meaningless for pinning/safety-number checks.
+  private signatureKeyPair: { signKey: Uint8Array; publicKey: Uint8Array } | undefined;
   private nextKeyPackageId = 0;
   readonly keyPackagesById = new Map<string, StoredKeyPackage>();
 
@@ -138,22 +144,24 @@ class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
 
   async provision(userId: UserId): Promise<DeviceCredential> {
     const impl = await getImpl();
+    this.signatureKeyPair = await impl.signature.keygen();
     const mlsCredential: Credential = {
       credentialType: 'basic',
       identity: encodeIdentity(userId, this.deviceId),
     };
-    const kp = await generateKeyPackage(
+    const kp = await generateKeyPackageWithKey(
       mlsCredential,
       defaultCapabilities(),
       boundedLifetime(),
       [],
+      this.signatureKeyPair,
       impl,
     );
     this.storeKeyPackage(kp.publicPackage, kp.privatePackage);
     this.credential = {
       userId,
       deviceId: this.deviceId,
-      signatureKey: kp.publicPackage.leafNode.signaturePublicKey,
+      signatureKey: this.signatureKeyPair.publicKey,
     };
     return this.credential;
   }
@@ -166,7 +174,7 @@ class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
   }
 
   async generateKeyPackages(count: number): Promise<Uint8Array[]> {
-    if (!this.credential) {
+    if (!this.credential || !this.signatureKeyPair) {
       throw new Error('Device not provisioned yet');
     }
     const impl = await getImpl();
@@ -177,11 +185,12 @@ class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
     const out: Uint8Array[] = [];
     for (let i = 0; i < count; i += 1) {
       // eslint-disable-next-line no-await-in-loop -- each key package's keygen depends on none of the others, but ts-mls's API is one-at-a-time
-      const kp = await generateKeyPackage(
+      const kp = await generateKeyPackageWithKey(
         mlsCredential,
         defaultCapabilities(),
         boundedLifetime(),
         [],
+        this.signatureKeyPair,
         impl,
       );
       const id = this.storeKeyPackage(kp.publicPackage, kp.privatePackage);
@@ -204,6 +213,7 @@ class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
 
   async revoke(): Promise<void> {
     this.credential = undefined;
+    this.signatureKeyPair = undefined;
     this.keyPackagesById.clear();
   }
 
@@ -364,7 +374,11 @@ class TsMlsGroupSession implements GroupSession {
     const impl = await getImpl();
     const expectedEpoch = Number(this.state.groupContext.epoch);
 
-    const addedKeyPackages: Array<{ deviceId: DeviceId; keyPackage: KeyPackage }> = [];
+    const addedKeyPackages: Array<{
+      deviceId: DeviceId;
+      keyPackage: KeyPackage;
+      keyPackageId: string;
+    }> = [];
     const extraProposals: Proposal[] = [];
 
     for (const offer of change.added) {
@@ -372,6 +386,9 @@ class TsMlsGroupSession implements GroupSession {
       const decoded = decodeMlsMessage(base64ToBytes(envelope.mls), 0)?.[0];
       if (!decoded || decoded.wireformat !== 'mls_key_package') {
         throw new CredentialMismatchError('Offered bytes are not a valid key package');
+      }
+      if (!envelope.keyPackageId) {
+        throw new CredentialMismatchError('Offered key package is missing its id');
       }
       const embeddedCredential = decoded.keyPackage.leafNode.credential;
       if (embeddedCredential.credentialType !== 'basic') {
@@ -386,7 +403,11 @@ class TsMlsGroupSession implements GroupSession {
           `Key package identity (${identity.userId}/${identity.deviceId}) does not match the offered credential (${offer.credential.userId}/${offer.credential.deviceId})`,
         );
       }
-      addedKeyPackages.push({ deviceId: offer.credential.deviceId, keyPackage: decoded.keyPackage });
+      addedKeyPackages.push({
+        deviceId: offer.credential.deviceId,
+        keyPackage: decoded.keyPackage,
+        keyPackageId: envelope.keyPackageId,
+      });
       extraProposals.push({ proposalType: 'add', add: { keyPackage: decoded.keyPackage } });
     }
 
@@ -434,9 +455,12 @@ class TsMlsGroupSession implements GroupSession {
             conversationId: this.conversationId,
             mls: encodedWelcome,
             ratchetTree: encodedTree,
-            // the joiner resolves this against ITS OWN keyPackagesById map, not
-            // ours - it's an opaque tag round-tripped through generateKeyPackages
-            keyPackageId: bytesToBase64(added.keyPackage.leafNode.signaturePublicKey),
+            // the joiner resolves this against ITS OWN keyPackagesById map -
+            // round-tripped from the same id generateKeyPackages() tagged the
+            // offer with. Cannot be signaturePublicKey: that's now shared
+            // across all of a device's key packages (see the identity-key
+            // reuse fix above), so it can no longer identify *which* one.
+            keyPackageId: added.keyPackageId,
           }),
         });
       }
@@ -507,10 +531,7 @@ class TsMlsGroupSessionFactory implements GroupSessionFactory {
       throw new CredentialMismatchError('Malformed Welcome envelope');
     }
 
-    const matching = [...this.store.keyPackagesById.values()].find(
-      (kp) =>
-        bytesToBase64(kp.publicPackage.leafNode.signaturePublicKey) === envelope.keyPackageId,
-    );
+    const matching = this.store.keyPackagesById.get(envelope.keyPackageId);
     if (!matching) {
       throw new CredentialMismatchError(
         'This Welcome is not addressed to any key package this device holds',

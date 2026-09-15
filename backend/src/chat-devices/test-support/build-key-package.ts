@@ -25,12 +25,18 @@ export function boundedTestLifetime(days = 30): Lifetime {
   return { notBefore: now, notAfter: now + BigInt(days * 24 * 60 * 60) };
 }
 
+export interface TestKeyPackage {
+  payload: Uint8Array;
+  /** The signature key actually embedded in this key package's leaf node. */
+  signaturePublicKey: Uint8Array;
+}
+
 /** Builds a real, validly-signed MLS key package for use in tests. */
 export async function buildTestKeyPackage(
   userId: string,
   deviceId: string,
   options: { ciphersuite?: CiphersuiteName; lifetime?: Lifetime } = {},
-): Promise<Uint8Array> {
+): Promise<TestKeyPackage> {
   const impl = await getCiphersuiteImpl(
     getCiphersuiteFromName(options.ciphersuite ?? PINNED_CIPHERSUITE),
   );
@@ -45,9 +51,12 @@ export async function buildTestKeyPackage(
     [],
     impl,
   );
-  return encodeMlsMessage({
-    keyPackage: kp.publicPackage,
-    wireformat: 'mls_key_package',
-    version: 'mls10',
-  });
+  return {
+    payload: encodeMlsMessage({
+      keyPackage: kp.publicPackage,
+      wireformat: 'mls_key_package',
+      version: 'mls10',
+    }),
+    signaturePublicKey: kp.publicPackage.leafNode.signaturePublicKey,
+  };
 }

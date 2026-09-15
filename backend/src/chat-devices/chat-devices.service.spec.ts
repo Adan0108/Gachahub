@@ -50,8 +50,13 @@ describe('ChatDevicesService', () => {
   });
 
   async function base64KeyPackage(userId: string, deviceId: string) {
-    const bytes = await buildTestKeyPackage(userId, deviceId);
-    return Buffer.from(bytes).toString('base64');
+    const built = await buildTestKeyPackage(userId, deviceId);
+    return {
+      payload: Buffer.from(built.payload).toString('base64'),
+      signaturePublicKey: Buffer.from(built.signaturePublicKey).toString(
+        'base64',
+      ),
+    };
   }
 
   describe('registerDevice', () => {
@@ -60,11 +65,14 @@ describe('ChatDevicesService', () => {
       repository.createDeviceWithKeyPackages.mockResolvedValue({
         id: 'device-1',
       });
-      const payload = await base64KeyPackage('user-1', 'device-1');
+      const { payload, signaturePublicKey } = await base64KeyPackage(
+        'user-1',
+        'device-1',
+      );
 
       await service.registerDevice('user-1', {
         deviceId: 'device-1',
-        signaturePublicKey: Buffer.from('sig-key').toString('base64'),
+        signaturePublicKey,
         ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
         keyPackages: [{ kind: 'SINGLE_USE', payload }],
       } as any);
@@ -80,18 +88,17 @@ describe('ChatDevicesService', () => {
 
     it('rejects when the device id is already registered', async () => {
       repository.findById.mockResolvedValue({ id: 'device-1' });
+      const { payload, signaturePublicKey } = await base64KeyPackage(
+        'user-1',
+        'device-1',
+      );
 
       await expect(
         service.registerDevice('user-1', {
           deviceId: 'device-1',
-          signaturePublicKey: Buffer.from('sig-key').toString('base64'),
+          signaturePublicKey,
           ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
-          keyPackages: [
-            {
-              kind: 'SINGLE_USE',
-              payload: await base64KeyPackage('user-1', 'device-1'),
-            },
-          ],
+          keyPackages: [{ kind: 'SINGLE_USE', payload }],
         } as any),
       ).rejects.toThrow(ConflictException);
 
@@ -100,12 +107,15 @@ describe('ChatDevicesService', () => {
 
     it('rejects a key package whose credential belongs to a different device', async () => {
       repository.findById.mockResolvedValue(null);
-      const payload = await base64KeyPackage('user-1', 'some-other-device');
+      const { payload, signaturePublicKey } = await base64KeyPackage(
+        'user-1',
+        'some-other-device',
+      );
 
       await expect(
         service.registerDevice('user-1', {
           deviceId: 'device-1',
-          signaturePublicKey: Buffer.from('sig-key').toString('base64'),
+          signaturePublicKey,
           ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
           keyPackages: [{ kind: 'SINGLE_USE', payload }],
         } as any),
@@ -136,15 +146,21 @@ describe('ChatDevicesService', () => {
 
   describe('uploadKeyPackages', () => {
     it('adds key packages to a device the caller owns', async () => {
+      const built = await buildTestKeyPackage('user-1', 'device-1');
       repository.findById.mockResolvedValue({
         id: 'device-1',
         userId: 'user-1',
         revokedAt: null,
+        signaturePublicKey: Buffer.from(built.signaturePublicKey),
       });
-      const payload = await base64KeyPackage('user-1', 'device-1');
 
       await service.uploadKeyPackages('user-1', 'device-1', {
-        keyPackages: [{ kind: 'SINGLE_USE', payload }],
+        keyPackages: [
+          {
+            kind: 'SINGLE_USE',
+            payload: Buffer.from(built.payload).toString('base64'),
+          },
+        ],
       } as any);
 
       expect(repository.addKeyPackages).toHaveBeenCalledWith(
