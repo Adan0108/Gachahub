@@ -1,4 +1,4 @@
-import { runMlsClientContractTests } from './contractTests';
+import { runMlsClientContractTests } from '../contract/contractTests';
 import { tsMlsCandidate } from './tsMlsAdapter';
 
 runMlsClientContractTests(tsMlsCandidate);

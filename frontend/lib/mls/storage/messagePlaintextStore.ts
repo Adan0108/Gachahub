@@ -1,4 +1,4 @@
-import type { ConversationId, DeviceId, Epoch, PlaintextEnvelope } from './types';
+import type { ConversationId, DeviceId, Epoch, PlaintextEnvelope } from '../contract/types';
 import { openMlsDatabase, encryptAndStore, loadAndDecrypt } from './mlsEncryptedStore';
 
 /**

@@ -32,7 +32,7 @@ import type {
   DeviceIdentityStore,
   GroupSession,
   GroupSessionFactory,
-} from './client';
+} from '../contract/client';
 import type {
   ConversationId,
   DeviceCredential,
@@ -42,14 +42,14 @@ import type {
   PlaintextEnvelope,
   ProcessResult,
   UserId,
-} from './types';
-import { CredentialMismatchError } from './errors';
-import type { MlsClientCandidate } from './contractTests';
+} from '../contract/types';
+import { CredentialMismatchError } from '../contract/errors';
+import type { MlsClientCandidate } from '../contract/contractTests';
 import {
   InMemoryDeviceIdentityStorage,
   type DeviceIdentityStorage,
   type StoredKeyPackage,
-} from './deviceIdentityStorage';
+} from '../storage/deviceIdentityStorage';
 
 /**
  * ts-mls adapter for the step 2 bake-off. Real crypto, real wire format -

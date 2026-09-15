@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SyncEngine } from './syncEngine';
-import { TsMlsDeviceIdentityStore, TsMlsGroupSessionFactory } from './tsMlsAdapter';
-import { InMemoryGroupSessionStorage } from './groupSessionStorage';
-import { bytesToBase64, base64ToBytes } from './base64';
-import { EpochConflictError, GroupStateUnavailableError } from './errors';
-import type { DeviceCredential, KeyPackageOffer } from './types';
+import { TsMlsDeviceIdentityStore, TsMlsGroupSessionFactory } from '../adapter/tsMlsAdapter';
+import { InMemoryGroupSessionStorage } from '../storage/groupSessionStorage';
+import { bytesToBase64, base64ToBytes } from '../storage/base64';
+import { EpochConflictError, GroupStateUnavailableError } from '../contract/errors';
+import type { DeviceCredential, KeyPackageOffer } from '../contract/types';
 
-vi.mock('../api', () => ({
+vi.mock('../../api', () => ({
   api: {
     claimChatDeviceKeyPackage: vi.fn(),
     submitMlsHandshake: vi.fn(),
@@ -90,7 +90,7 @@ describe('SyncEngine', () => {
 
   describe('addUserToConversation', () => {
     it('claims a key package, stages a commit, and submits it', async () => {
-      const { api } = await import('../api');
+      const { api } = await import('../../api');
       const alice = await setUpDevice('user-alice');
       const bob = await setUpDevice('user-bob');
       await alice.engine.createGroup('conv-1');
@@ -120,7 +120,7 @@ describe('SyncEngine', () => {
     });
 
     it('throws EpochConflictError and catches the local session up when another commit wins the epoch race', async () => {
-      const { api } = await import('../api');
+      const { api } = await import('../../api');
       const alice = await setUpDevice('user-alice');
       const bob = await setUpDevice('user-bob');
       const carol = await setUpDevice('user-carol');
@@ -171,7 +171,7 @@ describe('SyncEngine', () => {
 
   describe('syncCommits', () => {
     it('applies missed handshakes in order and advances the epoch', async () => {
-      const { api } = await import('../api');
+      const { api } = await import('../../api');
       const alice = await setUpDevice('user-alice');
       const bob = await setUpDevice('user-bob');
       const carol = await setUpDevice('user-carol');
@@ -214,7 +214,7 @@ describe('SyncEngine', () => {
     });
 
     it('throws when a fetched handshake is rejected instead of silently continuing', async () => {
-      const { api } = await import('../api');
+      const { api } = await import('../../api');
       const alice = await setUpDevice('user-alice');
       await alice.engine.createGroup('conv-1');
 
@@ -232,7 +232,7 @@ describe('SyncEngine', () => {
 
   describe('processPendingWelcomes', () => {
     it('joins and consumes each pending Welcome', async () => {
-      const { api } = await import('../api');
+      const { api } = await import('../../api');
       const alice = await setUpDevice('user-alice');
       const bob = await setUpDevice('user-bob');
 
@@ -263,7 +263,7 @@ describe('SyncEngine', () => {
     });
 
     it('records a failure and does not consume a Welcome that fails to join, without aborting the batch', async () => {
-      const { api } = await import('../api');
+      const { api } = await import('../../api');
       const bob = await setUpDevice('user-bob');
 
       vi.mocked(api.getMlsPendingWelcomes).mockResolvedValue([

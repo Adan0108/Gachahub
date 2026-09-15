@@ -1,9 +1,9 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sendEncryptedChatMessage } from './sendEncryptedMessage';
-import { GroupStateUnavailableError } from './errors';
+import { GroupStateUnavailableError } from '../contract/errors';
 
-vi.mock('../api', () => ({
+vi.mock('../../api', () => ({
   api: {
     sendChatMessage: vi.fn(),
   },
@@ -24,7 +24,7 @@ describe('sendEncryptedChatMessage', () => {
   });
 
   it('encrypts, sends, and caches the plaintext when a group already exists', async () => {
-    const { api } = await import('../api');
+    const { api } = await import('../../api');
     const engine = fakeSyncEngine();
     engine.getCurrentEpoch.mockResolvedValue(2);
     engine.encryptMessage.mockResolvedValue(new Uint8Array([1, 2, 3]));
@@ -54,7 +54,7 @@ describe('sendEncryptedChatMessage', () => {
   });
 
   it('sets up the group first when this device has never established one', async () => {
-    const { api } = await import('../api');
+    const { api } = await import('../../api');
     const engine = fakeSyncEngine();
     engine.getCurrentEpoch
       .mockRejectedValueOnce(new GroupStateUnavailableError('conv-1'))

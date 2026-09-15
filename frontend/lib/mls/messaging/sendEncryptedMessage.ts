@@ -1,9 +1,9 @@
-import { api } from '../api';
-import { bytesToBase64 } from './base64';
+import { api } from '../../api';
+import { bytesToBase64 } from '../storage/base64';
 import { ensureConversationGroup } from './ensureConversationGroup';
-import type { SyncEngine } from './syncEngine';
-import { EncryptedIndexedDbMessagePlaintextStore } from './messagePlaintextStore';
-import type { ConversationId, DeviceId, UserId } from './types';
+import type { SyncEngine } from '../sync/syncEngine';
+import { EncryptedIndexedDbMessagePlaintextStore } from '../storage/messagePlaintextStore';
+import type { ConversationId, DeviceId, UserId } from '../contract/types';
 
 const plaintextStore = new EncryptedIndexedDbMessagePlaintextStore();
 

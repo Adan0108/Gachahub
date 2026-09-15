@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ensureConversationGroup } from './ensureConversationGroup';
-import { GroupStateUnavailableError } from './errors';
+import { GroupStateUnavailableError } from '../contract/errors';
 
 function fakeSyncEngine() {
   return {

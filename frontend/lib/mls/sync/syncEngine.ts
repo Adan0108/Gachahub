@@ -1,8 +1,11 @@
-import { api } from '../api';
-import { bytesToBase64, base64ToBytes } from './base64';
-import type { GroupSession, GroupSessionFactory } from './client';
-import { EncryptedIndexedDbGroupSessionStorage, type GroupSessionStorage } from './groupSessionStorage';
-import { GroupStateUnavailableError, EpochConflictError } from './errors';
+import { api } from '../../api';
+import { bytesToBase64, base64ToBytes } from '../storage/base64';
+import type { GroupSession, GroupSessionFactory } from '../contract/client';
+import {
+  EncryptedIndexedDbGroupSessionStorage,
+  type GroupSessionStorage,
+} from '../storage/groupSessionStorage';
+import { GroupStateUnavailableError, EpochConflictError } from '../contract/errors';
 import type {
   ConversationId,
   DeviceId,
@@ -11,7 +14,7 @@ import type {
   PlaintextEnvelope,
   ProcessResult,
   UserId,
-} from './types';
+} from '../contract/types';
 
 /**
  * Orchestrates one device's MLS group sessions against the real backend

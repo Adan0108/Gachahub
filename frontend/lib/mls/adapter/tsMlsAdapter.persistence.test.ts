@@ -2,8 +2,8 @@ import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { TsMlsDeviceIdentityStore, TsMlsGroupSessionFactory } from './tsMlsAdapter';
-import { EncryptedIndexedDbDeviceIdentityStorage } from './deviceIdentityStorage';
-import { resetMlsDatabaseForTests } from './mlsEncryptedStore';
+import { EncryptedIndexedDbDeviceIdentityStorage } from '../storage/deviceIdentityStorage';
+import { resetMlsDatabaseForTests } from '../storage/mlsEncryptedStore';
 
 /**
  * Stage 6: the step-2 bake-off's TsMlsDeviceIdentityStore never persisted

@@ -1,6 +1,6 @@
-import { GroupStateUnavailableError } from './errors';
-import type { SyncEngine } from './syncEngine';
-import type { ConversationId, UserId } from './types';
+import { GroupStateUnavailableError } from '../contract/errors';
+import type { SyncEngine } from '../sync/syncEngine';
+import type { ConversationId, UserId } from '../contract/types';
 
 /**
  * Ensures a local MLS group exists for `conversationId`, creating one and

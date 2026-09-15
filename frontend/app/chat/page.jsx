@@ -20,7 +20,7 @@ import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useDeviceIdentity } from "../../hooks/useDeviceIdentity";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
 import { useDecryptedMessages } from "../../hooks/useDecryptedMessages";
-import { sendEncryptedChatMessage } from "../../lib/mls/sendEncryptedMessage";
+import { sendEncryptedChatMessage } from "../../lib/mls/messaging/sendEncryptedMessage";
 import { api } from "../../lib/api";
 import { queries, queryKeys } from "../../lib/queries";
 

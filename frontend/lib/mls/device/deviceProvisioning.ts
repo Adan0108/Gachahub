@@ -1,7 +1,7 @@
-import { api } from '../api';
-import { CIPHERSUITE_NAME, TsMlsDeviceIdentityStore } from './tsMlsAdapter';
-import { bytesToBase64 } from './base64';
-import type { DeviceCredential, UserId } from './types';
+import { api } from '../../api';
+import { CIPHERSUITE_NAME, TsMlsDeviceIdentityStore } from '../adapter/tsMlsAdapter';
+import { bytesToBase64 } from '../storage/base64';
+import type { DeviceCredential, UserId } from '../contract/types';
 
 /**
  * Uploaded alongside the one LAST_RESORT package on first provision, so the

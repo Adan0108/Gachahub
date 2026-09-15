@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useSyncEngine } from './useSyncEngine';
-import { base64ToBytes } from '../lib/mls/base64';
-import { EncryptedIndexedDbMessagePlaintextStore } from '../lib/mls/messagePlaintextStore';
-import type { ConversationId, PlaintextEnvelope } from '../lib/mls/types';
+import { base64ToBytes } from '../lib/mls/storage/base64';
+import { EncryptedIndexedDbMessagePlaintextStore } from '../lib/mls/storage/messagePlaintextStore';
+import type { ConversationId, PlaintextEnvelope } from '../lib/mls/contract/types';
 
 const plaintextStore = new EncryptedIndexedDbMessagePlaintextStore();
 

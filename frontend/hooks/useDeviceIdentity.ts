@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useCurrentUser } from './useCurrentUser';
-import { TsMlsDeviceIdentityStore } from '../lib/mls/tsMlsAdapter';
-import { EncryptedIndexedDbDeviceIdentityStorage } from '../lib/mls/deviceIdentityStorage';
-import { ensureDeviceProvisioned, revokeDeviceEverywhere } from '../lib/mls/deviceProvisioning';
-import type { DeviceCredential } from '../lib/mls/types';
+import { TsMlsDeviceIdentityStore } from '../lib/mls/adapter/tsMlsAdapter';
+import { EncryptedIndexedDbDeviceIdentityStorage } from '../lib/mls/storage/deviceIdentityStorage';
+import { ensureDeviceProvisioned, revokeDeviceEverywhere } from '../lib/mls/device/deviceProvisioning';
+import type { DeviceCredential } from '../lib/mls/contract/types';
 
 // One store per browser tab, reused across renders/hook instances - the
 // underlying identity is still one-per-browser-profile (persisted in

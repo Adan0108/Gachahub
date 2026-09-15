@@ -2,9 +2,9 @@
 
 import { useEffect, useRef } from 'react';
 import { useDeviceIdentity, getSharedDeviceIdentityStore } from './useDeviceIdentity';
-import { TsMlsGroupSessionFactory } from '../lib/mls/tsMlsAdapter';
-import { SyncEngine } from '../lib/mls/syncEngine';
-import type { DeviceId } from '../lib/mls/types';
+import { TsMlsGroupSessionFactory } from '../lib/mls/adapter/tsMlsAdapter';
+import { SyncEngine } from '../lib/mls/sync/syncEngine';
+import type { DeviceId } from '../lib/mls/contract/types';
 
 // One engine per browser tab per device, reused across hook instances - a
 // second SyncEngine wrapping the same store would just duplicate the

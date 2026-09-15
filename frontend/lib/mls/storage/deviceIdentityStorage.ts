@@ -1,5 +1,5 @@
 import type { KeyPackage, PrivateKeyPackage } from 'ts-mls';
-import type { DeviceCredential, DeviceId } from './types';
+import type { DeviceCredential, DeviceId } from '../contract/types';
 import { openMlsDatabase, encryptAndStore, loadAndDecrypt, wipeAllLocalMlsSecrets } from './mlsEncryptedStore';
 
 /**

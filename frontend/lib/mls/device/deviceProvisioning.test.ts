@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ensureDeviceProvisioned, revokeDeviceEverywhere } from './deviceProvisioning';
-import { TsMlsDeviceIdentityStore } from './tsMlsAdapter';
+import { TsMlsDeviceIdentityStore } from '../adapter/tsMlsAdapter';
 
-vi.mock('../api', () => ({
+vi.mock('../../api', () => ({
   api: {
     registerChatDevice: vi.fn().mockResolvedValue({ id: 'device-1' }),
     revokeChatDevice: vi.fn().mockResolvedValue({ message: 'Device revoked successfully' }),
@@ -15,7 +15,7 @@ describe('ensureDeviceProvisioned', () => {
   });
 
   it('provisions and registers a brand-new device', async () => {
-    const { api } = await import('../api');
+    const { api } = await import('../../api');
     const store = new TsMlsDeviceIdentityStore();
 
     const credential = await ensureDeviceProvisioned(store, 'user-1');
@@ -30,7 +30,7 @@ describe('ensureDeviceProvisioned', () => {
   });
 
   it('does not re-register an already-provisioned device for the same user', async () => {
-    const { api } = await import('../api');
+    const { api } = await import('../../api');
     const store = new TsMlsDeviceIdentityStore();
     const first = await ensureDeviceProvisioned(store, 'user-1');
     vi.clearAllMocks();
@@ -42,7 +42,7 @@ describe('ensureDeviceProvisioned', () => {
   });
 
   it('re-provisions with a fresh device identity when a different user signs in', async () => {
-    const { api } = await import('../api');
+    const { api } = await import('../../api');
     const store = new TsMlsDeviceIdentityStore();
     const first = await ensureDeviceProvisioned(store, 'user-1');
     vi.clearAllMocks();
@@ -61,7 +61,7 @@ describe('revokeDeviceEverywhere', () => {
   });
 
   it('calls the backend before clearing local state', async () => {
-    const { api } = await import('../api');
+    const { api } = await import('../../api');
     const store = new TsMlsDeviceIdentityStore();
     const credential = await ensureDeviceProvisioned(store, 'user-1');
 
@@ -72,7 +72,7 @@ describe('revokeDeviceEverywhere', () => {
   });
 
   it('does not clear local state when the backend call fails', async () => {
-    const { api } = await import('../api');
+    const { api } = await import('../../api');
     vi.mocked(api.revokeChatDevice).mockRejectedValueOnce(new Error('network error'));
     const store = new TsMlsDeviceIdentityStore();
     await ensureDeviceProvisioned(store, 'user-1');

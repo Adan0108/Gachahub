@@ -1,4 +1,4 @@
-import type { ConversationId } from './types';
+import type { ConversationId } from '../contract/types';
 import { openMlsDatabase, encryptAndStore, loadAndDecrypt, deleteRecord } from './mlsEncryptedStore';
 
 /**
