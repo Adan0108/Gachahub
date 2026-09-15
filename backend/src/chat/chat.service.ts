@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -34,6 +35,9 @@ import { UpdateGroupMembersDto } from './dto/update-group-members.dto';
 import { UpdateGroupMemberRoleDto } from './dto/update-group-member-role.dto';
 import { GamesService } from '../games/games.service';
 import { GameModeratorsService } from '../game-moderators/game-moderators.service';
+import { MediaService } from '../media/media.service';
+import { ChatMediaReferenceDto } from './dto/chat-media-reference.dto';
+import type { ChatMessageMediaInput } from './chat.repository';
 import type { MessageEncryptionPort } from './ports/message-encryption.port';
 import type { ChatDeliveryPort } from './ports/chat-delivery.port';
 
@@ -47,6 +51,8 @@ import type { ChatDeliveryPort } from './ports/chat-delivery.port';
  */
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     private readonly chatRepository: ChatRepository,
     private readonly followsService: FollowsService,
@@ -54,6 +60,7 @@ export class ChatService {
     private readonly gamesService: GamesService,
     private readonly gameModeratorsService: GameModeratorsService,
     private readonly chatMessageRateLimiter: ChatMessageRateLimiterService,
+    private readonly mediaService: MediaService,
     @Inject(MESSAGE_ENCRYPTION_PORT)
     private readonly messageEncryption: MessageEncryptionPort,
     @Inject(CHAT_DELIVERY_PORT)
@@ -148,12 +155,17 @@ export class ChatService {
 
     const recipientState = areMutualFollowers ? 'ACTIVE' : 'PENDING';
 
-    const shouldNotify = await this.isRecipientNotifiable('DIRECT', senderId, {
+    const shouldNotify = await this.isRecipientNotifiable(senderId, {
       userId: dto.recipientUserId,
       state: recipientState,
       notificationLevel: 'ALL',
       mutedUntil: null,
     });
+
+    const media = await this.resolveChatMessageMedia(
+      senderId,
+      dto.message.media,
+    );
 
     let result: Awaited<
       ReturnType<typeof this.chatRepository.createDirectConversationWithMessage>
@@ -173,6 +185,7 @@ export class ChatService {
         contentType: this.resolveContentType(dto.message.contentType),
         clientMessageId: dto.message.clientMessageId,
         replyToId: dto.message.replyToId,
+        media,
       });
     } catch (error) {
       const isPairConflict = this.isDuplicateDirectPairConflict(error);
@@ -221,6 +234,7 @@ export class ChatService {
       createdAt: result.message.createdAt,
       clientMessageId: result.message.clientMessageId,
       replyToId: result.message.replyToId,
+      media: result.message.media,
     });
 
     return {
@@ -1046,12 +1060,15 @@ export class ChatService {
    * Soft deletes the current user's own message.
    *
    * The message row remains, but encrypted content is cleared and status becomes
-   * DELETED. Publishes a real-time event to other participants.
+   * DELETED. Any attached media is released too, same "drop the substance,
+   * keep the row" treatment as the ciphertext. Publishes a real-time event to
+   * other participants.
    */
   async deleteMessage(userId: string, messageId: string) {
     const message = await this.assertCanModifyOwnMessage(userId, messageId);
 
     await this.chatRepository.softDeleteMessage(messageId);
+    await this.releaseDeletedMessageMedia(message.media);
 
     await this.chatDelivery.publishMessageDeleted({
       conversationId: message.conversationId,
@@ -1066,6 +1083,53 @@ export class ChatService {
     return {
       message: 'Message deleted successfully',
     };
+  }
+
+  /**
+   * Releases each attachment's underlying upload after its message is deleted.
+   *
+   * Best-effort on purpose: deleting the message content is the user's actual
+   * intent, so a Cloudinary hiccup on one attachment must not fail the whole
+   * delete. A failed release is flagged RELEASE_FAILED so
+   * ChatMediaReleaseRetryService picks it back up on a backoff instead of it
+   * sitting ATTACHED - permanently excluded from cleanup - forever.
+   */
+  private async releaseDeletedMessageMedia(
+    media: Array<{ mediaUploadId: string }> = [],
+  ) {
+    for (const item of media) {
+      try {
+        const released = await this.mediaService.destroyAttachedCloudinaryAsset(
+          item.mediaUploadId,
+        );
+
+        if (released) {
+          // one transaction: a crash here can't leave the link row behind
+          // pointing at an upload we already marked DELETED
+          await this.chatRepository.finalizeReleasedMedia(item.mediaUploadId);
+        } else {
+          await this.chatRepository.deleteMessageMediaByUploadId(
+            item.mediaUploadId,
+          );
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Failed to release media ${item.mediaUploadId} after deleting message`,
+          error instanceof Error ? error.stack : undefined,
+        );
+
+        // flag for ChatMediaReleaseRetryService instead of leaving it stuck
+        // ATTACHED - permanently excluded from cleanup - forever
+        await this.mediaService
+          .markReleaseFailed(item.mediaUploadId)
+          .catch((markError) => {
+            this.logger.warn(
+              `Failed to flag media ${item.mediaUploadId} for release retry`,
+              markError instanceof Error ? markError.stack : undefined,
+            );
+          });
+      }
+    }
   }
 
   /**
@@ -1165,18 +1229,26 @@ export class ChatService {
       .filter((participant) => participant.deletedAt)
       .map((participant) => participant.userId);
 
+    const deliverableParticipants = stateEligibleParticipants;
+
+    const payload =
+      preparedPayload ??
+      (await this.messageEncryption.preparePayload(dto.message));
+
+    const media = await this.resolveChatMessageMedia(
+      senderId,
+      dto.message.media,
+    );
+
+    // deferred until every step that can still throw (payload prep, media
+    // validation) has succeeded, so a rejected send never leaves a deleted
+    // participant's conversation resurrected for nothing
     if (deletedParticipantIds.length > 0) {
       await this.chatRepository.restoreDeletedParticipants(
         conversationId,
         deletedParticipantIds,
       );
     }
-
-    const deliverableParticipants = stateEligibleParticipants;
-
-    const payload =
-      preparedPayload ??
-      (await this.messageEncryption.preparePayload(dto.message));
 
     let message: Awaited<ReturnType<typeof this.chatRepository.createMessage>>;
     try {
@@ -1193,6 +1265,7 @@ export class ChatService {
         contentType: this.resolveContentType(dto.message.contentType),
         clientMessageId: dto.message.clientMessageId,
         replyToId: dto.message.replyToId,
+        media,
       });
     } catch (error) {
       if (!this.isDuplicateMessageConflict(error)) {
@@ -1212,7 +1285,7 @@ export class ChatService {
 
     const notifiableFlags = await Promise.all(
       recipientParticipants.map((participant) =>
-        this.isRecipientNotifiable(conversation.type, senderId, participant),
+        this.isRecipientNotifiable(senderId, participant),
       ),
     );
 
@@ -1234,6 +1307,7 @@ export class ChatService {
       createdAt: message.createdAt,
       clientMessageId: message.clientMessageId,
       replyToId: message.replyToId,
+      media: message.media,
     };
 
     if (notifiableRecipientIds.length > 0) {
@@ -1432,13 +1506,11 @@ export class ChatService {
    * Decides whether one recipient should be notified about a new message.
    *
    * Checked per recipient so one muted/archived/blocking group member can't
-   * suppress notifications for everyone else. Direct conversations
-   * additionally suppress notification for a recipient who has blocked the
-   * sender: the message still sends and stores normally, the recipient just
-   * never finds out about it unless they open the convo.
+   * suppress notifications for everyone else. A recipient who has blocked
+   * the sender never finds out about it unless they open the convo -
+   * checked regardless of conversation type, direct or group.
    */
   private async isRecipientNotifiable(
-    conversationType: string,
     senderId: string,
     recipient: {
       userId: string;
@@ -1453,10 +1525,6 @@ export class ChatService {
 
     if (recipient.state !== 'ACTIVE' || isMuted) {
       return false;
-    }
-
-    if (conversationType !== 'DIRECT') {
-      return true;
     }
 
     const recipientBlockedSender = await this.blocksService.isBlocked(
@@ -1808,6 +1876,55 @@ export class ChatService {
    */
   private resolveContentType(contentType?: ChatMessageContentType) {
     return contentType ?? ChatMessageContentType.TEXT;
+  }
+
+  /**
+   * Validates media references and resolves them into repository-ready
+   * input, shared by createDirectMessage and sendMessageToExistingConversation.
+   *
+   * Ownership/purpose/status/count/mix validation lives in
+   * MediaService.resolveAttachableMedia, shared with PostsService's attach
+   * flow. Only the final mapping to ChatMessageMedia's shape is chat-specific.
+   */
+  private async resolveChatMessageMedia(
+    senderId: string,
+    mediaReferences?: ChatMediaReferenceDto[] | null,
+  ): Promise<ChatMessageMediaInput[]> {
+    // a default param only covers undefined, and an explicit `"media": null`
+    // in the request body passes @IsOptional() validation unchanged
+    if (!mediaReferences || mediaReferences.length === 0) {
+      return [];
+    }
+
+    const uploads = await this.mediaService.resolveAttachableMedia({
+      ids: mediaReferences.map((item) => item.mediaUploadId),
+      userId: senderId,
+      purpose: 'CHAT',
+      maxImages: 4,
+      maxVideos: 1,
+      entityLabel: 'chat message',
+    });
+
+    const sortOrderById = new Map(
+      mediaReferences.map((item, index) => [
+        item.mediaUploadId,
+        item.sortOrder ?? index,
+      ]),
+    );
+
+    return uploads.map((upload) => ({
+      mediaUploadId: upload.id,
+      assetId: upload.assetId!,
+      publicId: upload.publicId,
+      url: upload.secureUrl!,
+      resourceType: upload.resourceType,
+      sortOrder: sortOrderById.get(upload.id) ?? 0,
+      width: upload.width,
+      height: upload.height,
+      duration: upload.duration,
+      bytes: upload.bytes,
+      format: upload.format,
+    }));
   }
 
   /**

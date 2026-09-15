@@ -1,13 +1,18 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsEnum,
   IsObject,
   IsOptional,
   IsString,
   MaxLength,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { ChatMessageContentType } from '../../generated/prisma/client';
+import { ChatMediaReferenceDto } from './chat-media-reference.dto';
 
 /**
  * Opaque encrypted message payload.
@@ -65,4 +70,17 @@ export class EncryptedMessagePayloadDto {
   @IsString()
   @MaxLength(120)
   replyToId?: string;
+
+  @ApiPropertyOptional({
+    type: [ChatMediaReferenceDto],
+    maxItems: 4,
+    description:
+      'Already-uploaded media to attach. Up to four images, or one video.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(4)
+  @ValidateNested({ each: true })
+  @Type(() => ChatMediaReferenceDto)
+  media?: ChatMediaReferenceDto[];
 }

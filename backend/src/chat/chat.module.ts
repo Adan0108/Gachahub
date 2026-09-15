@@ -4,6 +4,7 @@ import { WebsocketModule } from '../websocket/websocket.module';
 import { ChatController } from './chat.controller';
 import { ChatRepository } from './chat.repository';
 import { ChatService } from './chat.service';
+import { ChatMediaReleaseRetryService } from './chat-media-release-retry.service';
 import { ChatTypingGateway } from './realtime/chat-typing.gateway';
 import { ChatTypingService } from './realtime/chat-typing.service';
 import { ChatMessageRateLimiterService } from './chat-message-rate-limiter.service';
@@ -16,6 +17,7 @@ import { FollowsModule } from '../follows/follows.module';
 import { GamesModule } from '../games/games.module';
 import { GameModeratorsModule } from '../game-moderators/game-moderators.module';
 import { BlocksModule } from '../blocks/blocks.module';
+import { MediaModule } from '../media/media.module';
 
 /**
  * Chat feature module.
@@ -32,11 +34,13 @@ import { BlocksModule } from '../blocks/blocks.module';
     GamesModule,
     GameModeratorsModule,
     BlocksModule,
+    MediaModule,
   ],
   controllers: [ChatController],
   providers: [
     ChatRepository,
     ChatService,
+    ChatMediaReleaseRetryService,
     ChatTypingGateway,
     ChatTypingService,
     ChatMessageRateLimiterService,

@@ -45,6 +45,12 @@ model User {
   blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
   blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
 
+  // Notification model/migration pulled in from origin/Notifications (not yet
+  // merged to main) to resolve migration drift against the shared dev DB -
+  // see BACKLOG.md.
+  receivedNotifications Notification[] @relation("NotificationRecipient")
+  actedNotifications    Notification[] @relation("NotificationActor")
+
   @@unique([email])
   @@map("user")
 }
@@ -376,6 +382,7 @@ model ChatMessage {
   replies      ChatMessage[]         @relation("ChatMessageReplies")
   receipts     ChatMessageReceipt[]
   reactions    ChatMessageReaction[]
+  media        ChatMessageMedia[]
 
   @@unique([senderId, clientMessageId])
   @@index([conversationId, createdAt])
@@ -383,6 +390,35 @@ model ChatMessage {
   @@index([senderId])
   @@index([replyToId])
   @@map("chat_messages")
+}
+
+model ChatMessageMedia {
+  id            String @id @default(cuid())
+  messageId     String
+  mediaUploadId String @unique
+
+  assetId      String
+  publicId     String
+  url          String
+  resourceType MediaResourceType
+
+  sortOrder Int @default(0)
+
+  width    Int?
+  height   Int?
+  duration Float?
+  bytes    Int?
+  format   String?
+
+  createdAt DateTime @default(now())
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  // Restrict, not Cascade: a media upload attached to a sent message must
+  // never be deleted out from under it, same guarantee PostMedia gives posts.
+  mediaUpload MediaUpload @relation(fields: [mediaUploadId], references: [id], onDelete: Restrict)
+
+  @@index([messageId, sortOrder])
+  @@map("chat_message_media")
 }
 
 model ChatMessageReceipt {
@@ -654,6 +690,11 @@ enum MediaUploadStatus {
   ATTACHED
   DELETED
   FAILED
+  /// An ATTACHED upload whose parent (e.g. a chat message) was deleted, but
+  /// releasing its Cloudinary asset failed. Retried on a backoff by the
+  /// owning feature (see ChatMediaReleaseRetryService) instead of leaking
+  /// forever, since ATTACHED itself is permanently excluded from cleanup.
+  RELEASE_FAILED
 }
 
 model MediaUpload {
@@ -691,8 +732,9 @@ model MediaUpload {
   attachedAt DateTime?
   deletedAt  DateTime?
 
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  postMedia PostMedia?
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postMedia        PostMedia?
+  chatMessageMedia ChatMessageMedia?
 
   @@index([userId, status, createdAt])
   @@index([status, createdAt])
@@ -736,4 +778,57 @@ model Comment {
   @@index([authorId])
   @@index([parentId, createdAt])
   @@map("comments")
+}
+
+// Pulled in from origin/Notifications (not yet merged to main) to resolve
+// migration drift: that branch already ran this migration against the
+// shared dev DB, so our local history and schema need to match it too.
+// See BACKLOG.md.
+enum NotificationType {
+  POST_LIKED
+  POST_COMMENTED
+  COMMENT_REPLIED
+
+  USER_FOLLOWED
+  USER_MENTIONED
+
+  MESSAGE_RECEIVED
+  MESSAGE_REPLIED
+
+  GROUP_ADDED
+  GROUP_INVITE_PENDING
+}
+
+enum NotificationEntityType {
+  POST
+  COMMENT
+  MESSAGE
+  CONVERSATION
+  USER
+}
+
+model Notification {
+  id String @id @default(cuid())
+
+  recipientId String
+  actorId     String?
+
+  type NotificationType
+
+  entityType NotificationEntityType
+  entityId   String
+
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recipient User @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  actor User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([recipientId, createdAt])
+  @@index([recipientId, readAt])
+  @@index([actorId])
+  @@map("notifications")
 }

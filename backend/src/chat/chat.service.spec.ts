@@ -19,6 +19,9 @@ jest.mock('../game-moderators/game-moderators.service', () => ({
 jest.mock('../blocks/blocks.service', () => ({
   BlocksService: class {},
 }));
+jest.mock('../media/media.service', () => ({
+  MediaService: class {},
+}));
 // real Prisma namespace, not a stub - chat.service.ts checks `instanceof`
 // Prisma.PrismaClientKnownRequestError, which only works against the same class
 function loadActualPrisma() {
@@ -75,6 +78,8 @@ describe('ChatService', () => {
     findMessages: jest.fn(),
     softDeleteConversationForParticipant: jest.fn(),
     restoreDeletedParticipants: jest.fn(),
+    deleteMessageMediaByUploadId: jest.fn(),
+    finalizeReleasedMedia: jest.fn(),
   };
 
   const followsService = {
@@ -104,6 +109,13 @@ describe('ChatService', () => {
     assertNotRateLimited: jest.fn(),
   };
 
+  const mediaService = {
+    resolveAttachableMedia: jest.fn(),
+    releaseAttachedUpload: jest.fn(),
+    destroyAttachedCloudinaryAsset: jest.fn(),
+    markReleaseFailed: jest.fn().mockResolvedValue(undefined),
+  };
+
   const chatDelivery = {
     publishMessageCreated: jest.fn(),
     publishMessageEdited: jest.fn(),
@@ -123,6 +135,7 @@ describe('ChatService', () => {
       gamesService as any,
       gameModeratorsService as any,
       chatMessageRateLimiter as any,
+      mediaService as any,
       messageEncryption,
       chatDelivery,
     );
@@ -948,6 +961,125 @@ describe('ChatService', () => {
       });
     });
 
+    describe('media attachments', () => {
+      const uploadFixture = (overrides: Record<string, unknown> = {}) => ({
+        id: 'upload-1',
+        assetId: 'asset-1',
+        publicId: 'public-1',
+        secureUrl: 'https://cdn/upload-1',
+        resourceType: 'IMAGE',
+        width: 100,
+        height: 100,
+        duration: null,
+        bytes: 1234,
+        format: 'png',
+        ...overrides,
+      });
+
+      beforeEach(() => {
+        repository.findUserById.mockResolvedValue({
+          id: 'user-2',
+          status: 'ACTIVE',
+        });
+        blocksService.isBlocked.mockResolvedValue(false);
+        repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+        repository.findDirectPair.mockResolvedValue(null);
+      });
+
+      it('resolves and attaches media to a new direct message', async () => {
+        mediaService.resolveAttachableMedia.mockResolvedValue([
+          uploadFixture(),
+        ]);
+        repository.createDirectConversationWithMessage.mockResolvedValue({
+          conversation: { id: 'conversation-1' },
+          message: { id: 'message-1' },
+        });
+
+        await service.createDirectMessage('user-1', {
+          recipientUserId: 'user-2',
+          message: {
+            clientMessageId: 'client-1',
+            media: [{ mediaUploadId: 'upload-1', sortOrder: 0 }],
+          },
+        } as any);
+
+        expect(mediaService.resolveAttachableMedia).toHaveBeenCalledWith({
+          ids: ['upload-1'],
+          userId: 'user-1',
+          purpose: 'CHAT',
+          maxImages: 4,
+          maxVideos: 1,
+          entityLabel: 'chat message',
+        });
+        expect(
+          repository.createDirectConversationWithMessage,
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({
+            media: [
+              {
+                mediaUploadId: 'upload-1',
+                assetId: 'asset-1',
+                publicId: 'public-1',
+                url: 'https://cdn/upload-1',
+                resourceType: 'IMAGE',
+                sortOrder: 0,
+                width: 100,
+                height: 100,
+                duration: null,
+                bytes: 1234,
+                format: 'png',
+              },
+            ],
+          }),
+        );
+      });
+
+      // Count/mix/missing-upload policy is enforced by, and tested directly
+      // against, MediaService.resolveAttachableMedia. This just checks
+      // createDirectMessage propagates a rejection instead of swallowing it.
+      it('propagates a media resolution rejection and creates nothing', async () => {
+        mediaService.resolveAttachableMedia.mockRejectedValue(
+          new BadRequestException(
+            'A chat message supports at most 4 images',
+          ),
+        );
+
+        await expect(
+          service.createDirectMessage('user-1', {
+            recipientUserId: 'user-2',
+            message: {
+              clientMessageId: 'client-1',
+              media: [{ mediaUploadId: 'upload-1' }],
+            },
+          } as any),
+        ).rejects.toThrow(BadRequestException);
+
+        expect(
+          repository.createDirectConversationWithMessage,
+        ).not.toHaveBeenCalled();
+      });
+
+      it('treats an explicit null media field the same as no attachments', async () => {
+        repository.createDirectConversationWithMessage.mockResolvedValue({
+          conversation: { id: 'conversation-1' },
+          message: { id: 'message-1' },
+        });
+
+        await service.createDirectMessage('user-1', {
+          recipientUserId: 'user-2',
+          message: {
+            clientMessageId: 'client-1',
+            media: null,
+          },
+        } as any);
+
+        expect(mediaService.resolveAttachableMedia).not.toHaveBeenCalled();
+        expect(
+          repository.createDirectConversationWithMessage,
+        ).toHaveBeenCalledWith(expect.objectContaining({ media: [] }));
+      });
+    });
+
     it('rejects a new conversation when the recipient accepts no messages', async () => {
       repository.findUserById.mockResolvedValue({
         id: 'user-2',
@@ -1537,6 +1669,56 @@ describe('ChatService', () => {
       );
     });
 
+    it('does not notify a group member who has blocked the sender', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          {
+            userId: 'user-1',
+            role: 'OWNER',
+            state: 'ACTIVE',
+            notificationLevel: 'ALL',
+          },
+          {
+            userId: 'user-2',
+            role: 'MEMBER',
+            state: 'ACTIVE',
+            notificationLevel: 'ALL',
+          },
+          {
+            userId: 'user-3',
+            role: 'MEMBER',
+            state: 'ACTIVE',
+            notificationLevel: 'ALL',
+          },
+        ]),
+      );
+      blocksService.isBlocked.mockImplementation((blockerId, blockedId) =>
+        Promise.resolve(blockerId === 'user-2' && blockedId === 'user-1'),
+      );
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserIds: ['user-3'],
+          shouldNotify: true,
+        }),
+      );
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserIds: ['user-2'],
+          shouldNotify: false,
+        }),
+      );
+    });
+
     it('still suppresses notification while a timed mute has not expired', async () => {
       repository.findParticipant.mockResolvedValue({
         userId: 'user-1',
@@ -1681,6 +1863,86 @@ describe('ChatService', () => {
           participantUserIds: ['user-1', 'user-2'],
         }),
       );
+    });
+
+    it('resolves and attaches media when sending into an existing conversation', async () => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE' },
+        ]),
+      );
+      mediaService.resolveAttachableMedia.mockResolvedValue([
+        {
+          id: 'upload-1',
+          assetId: 'asset-1',
+          publicId: 'public-1',
+          secureUrl: 'https://cdn/upload-1',
+          resourceType: 'IMAGE',
+          width: 100,
+          height: 100,
+          duration: null,
+          bytes: 1234,
+          format: 'png',
+        },
+      ]);
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'conversation-1', {
+        message: {
+          clientMessageId: 'client-1',
+          media: [{ mediaUploadId: 'upload-1', sortOrder: 0 }],
+        },
+      } as any);
+
+      expect(mediaService.resolveAttachableMedia).toHaveBeenCalledWith({
+        ids: ['upload-1'],
+        userId: 'user-1',
+        purpose: 'CHAT',
+        maxImages: 4,
+        maxVideos: 1,
+        entityLabel: 'chat message',
+      });
+      expect(repository.createMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          media: [
+            {
+              mediaUploadId: 'upload-1',
+              assetId: 'asset-1',
+              publicId: 'public-1',
+              url: 'https://cdn/upload-1',
+              resourceType: 'IMAGE',
+              sortOrder: 0,
+              width: 100,
+              height: 100,
+              duration: null,
+              bytes: 1234,
+              format: 'png',
+            },
+          ],
+        }),
+      );
+    });
+
+    it('does not resurrect a deleted participant when media validation rejects the send', async () => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE', deletedAt: new Date() },
+        ]),
+      );
+      mediaService.resolveAttachableMedia.mockRejectedValue(
+        new BadRequestException('A chat message supports at most 4 images'),
+      );
+
+      await expect(
+        service.sendMessage('user-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1', media: [{ mediaUploadId: 'upload-1' }] },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(repository.restoreDeletedParticipants).not.toHaveBeenCalled();
+      expect(repository.createMessage).not.toHaveBeenCalled();
     });
 
     it('rejects a duplicate clientMessageId that belongs to a different conversation', async () => {
@@ -2586,6 +2848,7 @@ describe('ChatService', () => {
         id: 'message-1',
         status: 'SENT',
         senderId: 'user-1',
+        media: [],
         conversation: {
           participants: [{ userId: 'user-1', state: 'ACTIVE' }],
         },
@@ -2604,6 +2867,7 @@ describe('ChatService', () => {
         conversationId: 'conversation-1',
         status: 'SENT',
         senderId: 'user-1',
+        media: [],
         conversation: {
           type: 'DIRECT',
           participants: [
@@ -2622,6 +2886,91 @@ describe('ChatService', () => {
         actorId: 'user-1',
         recipientUserIds: ['user-2'],
       });
+    });
+
+    it('releases every attached upload and finalizes it atomically', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        status: 'SENT',
+        senderId: 'user-1',
+        media: [{ mediaUploadId: 'upload-1' }, { mediaUploadId: 'upload-2' }],
+        conversation: {
+          participants: [{ userId: 'user-1', state: 'ACTIVE' }],
+        },
+      });
+      repository.softDeleteMessage.mockResolvedValue({ id: 'message-1' });
+      mediaService.destroyAttachedCloudinaryAsset.mockResolvedValue(true);
+
+      await service.deleteMessage('user-1', 'message-1');
+
+      expect(mediaService.destroyAttachedCloudinaryAsset).toHaveBeenCalledWith(
+        'upload-1',
+      );
+      expect(mediaService.destroyAttachedCloudinaryAsset).toHaveBeenCalledWith(
+        'upload-2',
+      );
+      expect(repository.finalizeReleasedMedia).toHaveBeenCalledWith(
+        'upload-1',
+      );
+      expect(repository.finalizeReleasedMedia).toHaveBeenCalledWith(
+        'upload-2',
+      );
+      expect(repository.deleteMessageMediaByUploadId).not.toHaveBeenCalled();
+    });
+
+    it('just unlinks an upload that never needed releasing', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        status: 'SENT',
+        senderId: 'user-1',
+        media: [{ mediaUploadId: 'upload-1' }],
+        conversation: {
+          participants: [{ userId: 'user-1', state: 'ACTIVE' }],
+        },
+      });
+      repository.softDeleteMessage.mockResolvedValue({ id: 'message-1' });
+      mediaService.destroyAttachedCloudinaryAsset.mockResolvedValue(false);
+
+      await service.deleteMessage('user-1', 'message-1');
+
+      expect(repository.deleteMessageMediaByUploadId).toHaveBeenCalledWith(
+        'upload-1',
+      );
+      expect(repository.finalizeReleasedMedia).not.toHaveBeenCalled();
+    });
+
+    it('does not unlink an upload whose release failed, and still processes the rest', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        status: 'SENT',
+        senderId: 'user-1',
+        media: [{ mediaUploadId: 'upload-1' }, { mediaUploadId: 'upload-2' }],
+        conversation: {
+          participants: [{ userId: 'user-1', state: 'ACTIVE' }],
+        },
+      });
+      repository.softDeleteMessage.mockResolvedValue({ id: 'message-1' });
+      mediaService.destroyAttachedCloudinaryAsset.mockImplementation(
+        (mediaUploadId: string) =>
+          mediaUploadId === 'upload-1'
+            ? Promise.reject(new Error('cloudinary down'))
+            : Promise.resolve(true),
+      );
+
+      const result = await service.deleteMessage('user-1', 'message-1');
+
+      // the failed release must not block the message delete itself
+      expect(result).toEqual({ message: 'Message deleted successfully' });
+      expect(repository.finalizeReleasedMedia).not.toHaveBeenCalledWith(
+        'upload-1',
+      );
+      expect(repository.finalizeReleasedMedia).toHaveBeenCalledWith(
+        'upload-2',
+      );
+      expect(mediaService.markReleaseFailed).toHaveBeenCalledWith('upload-1');
+      expect(mediaService.markReleaseFailed).not.toHaveBeenCalledWith(
+        'upload-2',
+      );
     });
   });
 
