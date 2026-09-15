@@ -62,6 +62,31 @@ vi.mock("../lib/api", () => ({
 }));
 
 describe("PostList", () => {
+  it("uses the QuickTime MIME type for MOV videos", () => {
+    const { container } = render(
+      <PostList
+        posts={[
+          {
+            id: "post-with-mov",
+            title: "MOV preview",
+            author: "Author",
+            authorId: "author",
+            media: [
+              {
+                id: "media-1",
+                mediaType: "VIDEO",
+                format: "mov",
+                url: "https://example.com/preview.mov",
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(container.querySelector("video source")).toHaveAttribute("type", "video/quicktime");
+  });
+
   it("submits a reply when Enter is pressed", () => {
     mocks.createReply.mockClear();
     const { container } = render(

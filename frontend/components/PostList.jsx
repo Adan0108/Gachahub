@@ -24,6 +24,12 @@ function relativeTime(value) {
   return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
 }
 
+function videoMimeType(format) {
+  if (!format) return undefined;
+  const normalizedFormat = format.toLowerCase().replace(/^\./, "");
+  return normalizedFormat === "mov" ? "video/quicktime" : `video/${normalizedFormat}`;
+}
+
 function CommentItem({ comment }) {
   const queryClient = useQueryClient();
   const { isAuthenticated } = useCurrentUser();
@@ -127,7 +133,7 @@ function PostMedia({ media, title }) {
       {media.map((item) =>
         item.mediaType === "VIDEO" ? (
           <video controls key={item.id || item.url} preload="metadata">
-            <source src={item.url} type={item.format ? `video/${item.format}` : undefined} />
+            <source src={item.url} type={videoMimeType(item.format)} />
             Your browser does not support this video.
           </video>
         ) : (
