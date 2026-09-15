@@ -104,7 +104,15 @@ export class ChatDevicesRepository {
       }
 
       const claimed = await this.prisma.mlsKeyPackage.updateMany({
-        where: { id: candidate.id, claimedAt: null },
+        // re-checking device.revokedAt here, not just on the earlier
+        // findFirst, closes the window where a revocation landing between
+        // the read and this write would otherwise still let the claim
+        // through
+        where: {
+          id: candidate.id,
+          claimedAt: null,
+          device: { revokedAt: null },
+        },
         data: { claimedAt: new Date(), claimedByUserId },
       });
 
