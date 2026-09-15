@@ -22,12 +22,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@noble/hashes": "^2.4.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.6.0",
     "prettier": "^3.9.6",
+    "ts-mls": "^1.6.4",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"
   }
