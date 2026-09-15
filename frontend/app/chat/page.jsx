@@ -3,7 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FiCheck, FiInbox, FiLock, FiMessageCircle, FiShield, FiX } from "react-icons/fi";
+import {
+  FiArchive,
+  FiCheck,
+  FiInbox,
+  FiLock,
+  FiMessageCircle,
+  FiSearch,
+  FiSend,
+  FiShield,
+  FiX,
+} from "react-icons/fi";
 import { QueryNotice } from "../../components/QueryNotice";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useDeviceIdentity } from "../../hooks/useDeviceIdentity";
@@ -24,15 +34,40 @@ function conversationPeer(conversation, userId) {
   return conversation?.participants?.find((participant) => participant.userId !== userId)?.user;
 }
 
+function initialOf(name) {
+  return name?.trim()?.charAt(0).toUpperCase() || "?";
+}
+
+const VIEWS = [
+  { key: "inbox", label: "All Chats", icon: FiInbox },
+  { key: "requests", label: "Requests", icon: FiShield },
+  { key: "archived", label: "Archived", icon: FiArchive },
+];
+
 export default function ChatPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
   const [view, setView] = useState("inbox");
   const [selectedId, setSelectedId] = useState("");
+  const [search, setSearch] = useState("");
   const conversations = useQuery({ ...queries.chatConversations(), enabled: isAuthenticated });
   const requests = useQuery({ ...queries.chatRequests(), enabled: isAuthenticated });
-  const currentList = view === "requests" ? requests.data || [] : conversations.data || [];
+  const archived = useQuery({
+    ...queries.chatArchivedConversations(),
+    enabled: isAuthenticated && view === "archived",
+  });
+  const listByView = { inbox: conversations, requests, archived };
+  const listQuery = listByView[view];
+  const rawList = listQuery.data || [];
+  const searchTerm = search.trim().toLowerCase();
+  const currentList = searchTerm
+    ? rawList.filter((conversation) =>
+        (conversationPeer(conversation, user?.id)?.name || "gachahub member")
+          .toLowerCase()
+          .includes(searchTerm),
+      )
+    : rawList;
   const activeId = currentList.some((conversation) => conversation.id === selectedId)
     ? selectedId
     : currentList[0]?.id || "";
@@ -112,7 +147,6 @@ export default function ChatPage() {
   }
 
   const peer = conversationPeer(activeConversation, user?.id);
-  const listQuery = view === "requests" ? requests : conversations;
   const actionError = acceptRequest.error || declineRequest.error || blockConversation.error;
 
   return (
@@ -128,34 +162,51 @@ export default function ChatPage() {
 
       <div className="chat-layout">
         <aside className="panel chat-sidebar">
+          <div className="chat-sidebar-search">
+            <FiSearch aria-hidden="true" />
+            <input
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search conversations..."
+              type="text"
+              value={search}
+            />
+          </div>
           <div className="chat-tabs" role="tablist" aria-label="Message views">
-            <button
-              aria-selected={view === "inbox"}
-              className={view === "inbox" ? "active" : ""}
-              onClick={() => setView("inbox")}
-              role="tab"
-              type="button"
-            >
-              <FiInbox /> Inbox
-              <span>
-                {conversations.data?.reduce((total, item) => total + item.unreadCount, 0) || 0}
-              </span>
-            </button>
-            <button
-              aria-selected={view === "requests"}
-              className={view === "requests" ? "active" : ""}
-              onClick={() => setView("requests")}
-              role="tab"
-              type="button"
-            >
-              <FiShield /> Requests <span>{requests.data?.length || 0}</span>
-            </button>
+            {VIEWS.map(({ key, label, icon: Icon }) => (
+              <button
+                aria-selected={view === key}
+                className={view === key ? "active" : ""}
+                key={key}
+                onClick={() => setView(key)}
+                role="tab"
+                type="button"
+              >
+                <Icon />
+                <span>{label}</span>
+                {key !== "archived" && (
+                  <b>
+                    {key === "inbox"
+                      ? conversations.data?.reduce((total, item) => total + item.unreadCount, 0) ||
+                        0
+                      : requests.data?.length || 0}
+                  </b>
+                )}
+              </button>
+            ))}
           </div>
           <QueryNotice
             isLoading={listQuery.isLoading}
             isError={listQuery.isError}
             isEmpty={!currentList.length}
-            emptyText={view === "requests" ? "No pending requests." : "No conversations yet."}
+            emptyText={
+              searchTerm
+                ? "No conversations match your search."
+                : view === "requests"
+                  ? "No pending requests."
+                  : view === "archived"
+                    ? "No archived conversations."
+                    : "No conversations yet."
+            }
           />
           <div className="chat-conversation-list">
             {currentList.map((conversation) => {
@@ -167,9 +218,7 @@ export default function ChatPage() {
                   onClick={() => setSelectedId(conversation.id)}
                   type="button"
                 >
-                  <span className="chat-avatar">
-                    {itemPeer?.name?.charAt(0).toUpperCase() || "?"}
-                  </span>
+                  <span className="chat-avatar">{initialOf(itemPeer?.name)}</span>
                   <span>
                     <b>{itemPeer?.name || "GachaHub member"}</b>
                     <small>
@@ -191,10 +240,12 @@ export default function ChatPage() {
             <>
               <header className="chat-thread-head">
                 <div>
-                  <span className="chat-avatar">{peer?.name?.charAt(0).toUpperCase() || "?"}</span>
+                  <span className="chat-avatar">{initialOf(peer?.name)}</span>
                   <span>
                     <b>{peer?.name || "GachaHub member"}</b>
-                    <small>End-to-end encrypted payloads</small>
+                    <small>
+                      <FiLock /> End-to-end encrypted
+                    </small>
                   </span>
                 </div>
                 <div className="chat-thread-actions">
@@ -232,35 +283,38 @@ export default function ChatPage() {
                   const mine = message.senderId === user?.id;
                   const decrypted = decryptedMessages[message.id];
                   return (
-                    <article className={`chat-message ${mine ? "mine" : ""}`} key={message.id}>
-                      {decrypted?.status === "ok" ? (
-                        <div>
-                          <p>
-                            {typeof decrypted.envelope.body === "string"
-                              ? decrypted.envelope.body
-                              : JSON.stringify(decrypted.envelope.body)}
-                          </p>
-                          <small>{relativeTime(message.createdAt)}</small>
-                        </div>
-                      ) : decrypted?.status === "unavailable" ? (
-                        <>
-                          <FiLock aria-hidden="true" />
+                    <div className={`chat-message-row ${mine ? "mine" : ""}`} key={message.id}>
+                      {!mine && <span className="chat-avatar small">{initialOf(peer?.name)}</span>}
+                      <article className={`chat-message ${mine ? "mine" : ""}`}>
+                        {decrypted?.status === "ok" ? (
                           <div>
-                            <b>Message unavailable</b>
-                            <p>This device can&apos;t decrypt this message.</p>
+                            <p>
+                              {typeof decrypted.envelope.body === "string"
+                                ? decrypted.envelope.body
+                                : JSON.stringify(decrypted.envelope.body)}
+                            </p>
                             <small>{relativeTime(message.createdAt)}</small>
                           </div>
-                        </>
-                      ) : (
-                        <>
-                          <FiLock aria-hidden="true" />
-                          <div>
-                            <b>Decrypting…</b>
-                            <small>{relativeTime(message.createdAt)}</small>
-                          </div>
-                        </>
-                      )}
-                    </article>
+                        ) : decrypted?.status === "unavailable" ? (
+                          <>
+                            <FiLock aria-hidden="true" />
+                            <div>
+                              <b>Message unavailable</b>
+                              <p>This device can&apos;t decrypt this message.</p>
+                              <small>{relativeTime(message.createdAt)}</small>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <FiLock aria-hidden="true" />
+                            <div>
+                              <b>Decrypting…</b>
+                              <small>{relativeTime(message.createdAt)}</small>
+                            </div>
+                          </>
+                        )}
+                      </article>
+                    </div>
                   );
                 })}
                 {!messages.isLoading && !messages.isError && !messages.data?.items?.length && (
@@ -286,8 +340,12 @@ export default function ChatPage() {
                     placeholder="Send an encrypted message..."
                     value={draft}
                   />
-                  <button disabled={!draft.trim() || sendMessage.isPending} type="submit">
-                    Send
+                  <button
+                    aria-label="Send"
+                    disabled={!draft.trim() || sendMessage.isPending}
+                    type="submit"
+                  >
+                    <FiSend />
                   </button>
                 </form>
               ) : (

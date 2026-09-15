@@ -15,6 +15,7 @@ export const queryKeys = {
   comments: (postId) => ["comments", postId],
   replies: (commentId) => ["comment-replies", commentId],
   chatConversations: ["chat", "conversations"],
+  chatArchivedConversations: ["chat", "archived"],
   chatRequests: ["chat", "requests"],
   chatMessages: (conversationId) => ["chat", "messages", conversationId],
 };
@@ -102,6 +103,12 @@ export const queries = {
   chatConversations: () => ({
     queryKey: queryKeys.chatConversations,
     queryFn: api.getChatConversations,
+    retry: 1,
+    staleTime: 10_000,
+  }),
+  chatArchivedConversations: () => ({
+    queryKey: queryKeys.chatArchivedConversations,
+    queryFn: api.getArchivedChatConversations,
     retry: 1,
     staleTime: 10_000,
   }),

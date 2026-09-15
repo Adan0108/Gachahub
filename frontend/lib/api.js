@@ -27,6 +27,7 @@ export const backendRoutes = {
   mediaSignatures: "/media/uploads/signatures",
   mediaConfirm: "/media/uploads/confirm",
   chatConversations: "/chat/conversations",
+  chatArchivedConversations: "/chat/conversations/archived",
   chatRequests: "/chat/requests",
   chatDirect: "/chat/direct",
   chatMessages: (conversationId) =>
@@ -454,6 +455,7 @@ export const api = {
     };
   },
   getChatConversations: () => request(backendRoutes.chatConversations),
+  getArchivedChatConversations: () => request(backendRoutes.chatArchivedConversations),
   getChatRequests: () => request(backendRoutes.chatRequests),
   getChatMessages: (conversationId, query = {}) =>
     request(withQuery(backendRoutes.chatMessages(conversationId), query)),
