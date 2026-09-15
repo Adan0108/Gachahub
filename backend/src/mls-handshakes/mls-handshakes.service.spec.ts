@@ -18,7 +18,6 @@ describe('MlsHandshakesService', () => {
 
   const chatDevicesService = {
     assertOwnActiveDevice: jest.fn(),
-    deviceExists: jest.fn(),
   };
 
   let service: MlsHandshakesService;
@@ -31,7 +30,6 @@ describe('MlsHandshakesService', () => {
       userId: 'user-1',
       revokedAt: null,
     });
-    chatDevicesService.deviceExists.mockResolvedValue(true);
     service = new MlsHandshakesService(
       repository as any,
       chatDevicesService as any,
@@ -152,26 +150,21 @@ describe('MlsHandshakesService', () => {
       ).rejects.toThrow(ConflictException);
     });
 
-    it('rejects a welcome addressed to a device that does not exist, before reaching the repository', async () => {
-      const { epoch, commitPayload, welcomePayload } =
+    it('propagates an authorization rejection from the repository (e.g. an unauthorized welcome recipient)', async () => {
+      const { epoch, commitPayload } =
         await buildTestCommitWithWelcome('conv-1');
-      chatDevicesService.deviceExists.mockResolvedValue(false);
+      repository.acceptHandshake.mockRejectedValue(
+        new ForbiddenException('User user-2 is not an active participant'),
+      );
 
       await expect(
         service.submitHandshake('user-1', 'conv-1', {
           deviceId: 'device-1',
           epoch,
           payload: Buffer.from(commitPayload).toString('base64'),
-          welcomes: [
-            {
-              recipientDeviceId: 'no-such-device',
-              payload: Buffer.from(welcomePayload).toString('base64'),
-            },
-          ],
+          welcomes: [],
         }),
-      ).rejects.toThrow('Unknown recipient device');
-
-      expect(repository.acceptHandshake).not.toHaveBeenCalled();
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('rejects when the caller is not an active participant in the conversation', async () => {

@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
+import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 interface HandshakeRow {
@@ -44,6 +49,13 @@ export class MlsHandshakesRepository {
    * back whatever handshake DID win, so it can tell a harmless retry (same
    * payload) from a real conflict (someone else's Commit) it must catch up
    * on - the server never resolves crypto conflicts itself, only ordering.
+   *
+   * The epoch bump, the membership sync (below), and the handshake/welcome
+   * rows all happen in one transaction (threat-model §3: "the two must be
+   * kept in sync in the same transaction") - if a welcome targets a user the
+   * server never authorized into this conversation, the whole commit is
+   * rejected and rolled back, including the epoch bump, rather than leaving
+   * an epoch advanced with no matching handshake row.
    */
   async acceptHandshake(params: {
     conversationId: string;
@@ -62,37 +74,49 @@ export class MlsHandshakesRepository {
       welcomes,
     } = params;
 
-    const advanced = await this.prisma.chatConversation.updateMany({
-      where: { id: conversationId, mlsEpoch: expectedEpoch },
-      data: { mlsEpoch: { increment: 1 } },
-    });
-
-    if (advanced.count === 1) {
-      const handshake = await this.prisma.$transaction(async (tx) => {
-        const created = await tx.mlsHandshake.create({
-          data: {
-            conversationId,
-            epoch: expectedEpoch,
-            senderDeviceId,
-            payload: payload.slice(),
-            payloadSha256,
-          },
-        });
-
-        if (welcomes.length > 0) {
-          await tx.mlsWelcome.createMany({
-            data: welcomes.map((welcome) => ({
-              conversationId,
-              recipientDeviceId: welcome.recipientDeviceId,
-              payload: welcome.payload.slice(),
-            })),
-          });
-        }
-
-        return created;
+    const accepted = await this.prisma.$transaction(async (tx) => {
+      const advanced = await tx.chatConversation.updateMany({
+        where: { id: conversationId, mlsEpoch: expectedEpoch },
+        data: { mlsEpoch: { increment: 1 } },
       });
 
-      return { outcome: 'accepted', handshake };
+      if (advanced.count === 0) {
+        return null;
+      }
+
+      for (const welcome of welcomes) {
+        await this.assertWelcomedIntoAuthorizedConversation(
+          tx,
+          conversationId,
+          welcome.recipientDeviceId,
+        );
+      }
+
+      const handshake = await tx.mlsHandshake.create({
+        data: {
+          conversationId,
+          epoch: expectedEpoch,
+          senderDeviceId,
+          payload: payload.slice(),
+          payloadSha256,
+        },
+      });
+
+      if (welcomes.length > 0) {
+        await tx.mlsWelcome.createMany({
+          data: welcomes.map((welcome) => ({
+            conversationId,
+            recipientDeviceId: welcome.recipientDeviceId,
+            payload: welcome.payload.slice(),
+          })),
+        });
+      }
+
+      return handshake;
+    });
+
+    if (accepted) {
+      return { outcome: 'accepted', handshake: accepted };
     }
 
     const winner = await this.prisma.mlsHandshake.findUnique({
@@ -112,6 +136,44 @@ export class MlsHandshakesRepository {
         winner.payloadSha256 === payloadSha256 ? 'duplicate' : 'conflict',
       handshake: winner,
     };
+  }
+
+  /**
+   * MLS Add is only ever the cryptographic side effect of a membership
+   * decision the server already authorized elsewhere - mutual-follow/
+   * message-request checks (chat.service.ts) or an explicit acceptRequest
+   * (threat-model §3). This never CREATES or flips participant state; it
+   * only asserts the state that decision already produced is ACTIVE, so an
+   * MLS commit can never be the thing that first grants conversation
+   * membership.
+   */
+  private async assertWelcomedIntoAuthorizedConversation(
+    tx: Prisma.TransactionClient,
+    conversationId: string,
+    recipientDeviceId: string,
+  ): Promise<void> {
+    const device = await tx.chatDevice.findUnique({
+      where: { id: recipientDeviceId },
+      select: { userId: true },
+    });
+
+    if (!device) {
+      throw new BadRequestException(
+        `Unknown recipient device: ${recipientDeviceId}`,
+      );
+    }
+
+    const participant = await tx.chatParticipant.findUnique({
+      where: {
+        conversationId_userId: { conversationId, userId: device.userId },
+      },
+    });
+
+    if (!participant || participant.state !== 'ACTIVE') {
+      throw new ForbiddenException(
+        `User ${device.userId} is not an active participant of this conversation`,
+      );
+    }
   }
 
   findHandshakesSince(conversationId: string, fromEpoch: number) {

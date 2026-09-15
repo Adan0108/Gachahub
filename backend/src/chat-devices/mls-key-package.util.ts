@@ -32,7 +32,6 @@ function getImpl(): Promise<CiphersuiteImpl> {
   return cachedImpl;
 }
 
-
 export interface ExpectedKeyPackageIdentity {
   userId: string;
   deviceId: string;

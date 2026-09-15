@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -54,7 +53,6 @@ export class MlsHandshakesService {
         payload: welcomePayload,
       };
     });
-    await this.assertWelcomeRecipientsExist(welcomes);
 
     const payloadSha256 = createHash('sha256').update(payload).digest('hex');
 
@@ -129,28 +127,6 @@ export class MlsHandshakesService {
         'Not an active participant in this conversation',
       );
     }
-  }
-
-  /**
-   * MlsWelcome.recipientDeviceId is a foreign key - without this check, an
-   * unknown device id would only surface as a raw constraint-violation 500
-   * once the repository tries to insert it, instead of a clean 400 here.
-   */
-  private async assertWelcomeRecipientsExist(
-    welcomes: { recipientDeviceId: string }[],
-  ) {
-    await Promise.all(
-      welcomes.map(async (welcome) => {
-        const exists = await this.chatDevicesService.deviceExists(
-          welcome.recipientDeviceId,
-        );
-        if (!exists) {
-          throw new BadRequestException(
-            `Unknown recipient device: ${welcome.recipientDeviceId}`,
-          );
-        }
-      }),
-    );
   }
 
   private toSubmitResponse(result: HandshakeAcceptResult) {

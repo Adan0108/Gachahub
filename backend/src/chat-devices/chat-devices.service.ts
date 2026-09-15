@@ -223,17 +223,6 @@ export class ChatDevicesService {
     return device;
   }
 
-  /**
-   * Public: stage 4 uses this to validate a Welcome's recipientDeviceId
-   * before inserting it - MlsWelcome.recipientDeviceId is a foreign key, so
-   * an unknown id would otherwise surface as a raw constraint-violation 500
-   * instead of a clean 400.
-   */
-  async deviceExists(deviceId: string): Promise<boolean> {
-    const device = await this.chatDevicesRepository.findById(deviceId);
-    return device !== null;
-  }
-
   private async verifyKeyPackages(
     userId: string,
     deviceId: string,
