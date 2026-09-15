@@ -45,6 +45,12 @@ model User {
   blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
   blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
 
+  // Notification model/migration pulled in from origin/Notifications (not yet
+  // merged to main) to resolve migration drift against the shared dev DB -
+  // see BACKLOG.md.
+  receivedNotifications Notification[] @relation("NotificationRecipient")
+  actedNotifications    Notification[] @relation("NotificationActor")
+
   @@unique([email])
   @@map("user")
 }
@@ -772,4 +778,57 @@ model Comment {
   @@index([authorId])
   @@index([parentId, createdAt])
   @@map("comments")
+}
+
+// Pulled in from origin/Notifications (not yet merged to main) to resolve
+// migration drift: that branch already ran this migration against the
+// shared dev DB, so our local history and schema need to match it too.
+// See BACKLOG.md.
+enum NotificationType {
+  POST_LIKED
+  POST_COMMENTED
+  COMMENT_REPLIED
+
+  USER_FOLLOWED
+  USER_MENTIONED
+
+  MESSAGE_RECEIVED
+  MESSAGE_REPLIED
+
+  GROUP_ADDED
+  GROUP_INVITE_PENDING
+}
+
+enum NotificationEntityType {
+  POST
+  COMMENT
+  MESSAGE
+  CONVERSATION
+  USER
+}
+
+model Notification {
+  id String @id @default(cuid())
+
+  recipientId String
+  actorId     String?
+
+  type NotificationType
+
+  entityType NotificationEntityType
+  entityId   String
+
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recipient User @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  actor User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([recipientId, createdAt])
+  @@index([recipientId, readAt])
+  @@index([actorId])
+  @@map("notifications")
 }
