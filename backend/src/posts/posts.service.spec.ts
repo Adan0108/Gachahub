@@ -38,7 +38,7 @@ describe('PostsService', () => {
   const postsRepository = {
     findMany: jest.fn(),
     count: jest.fn(),
-    findPublishedById: jest.fn(),
+    findViewableById: jest.fn(),
     findByAuthorId: jest.fn(),
 
     findGameById: jest.fn(),
@@ -229,11 +229,11 @@ describe('PostsService', () => {
 
   describe('findOne', () => {
     it('returns published post', async () => {
-      postsRepository.findPublishedById.mockResolvedValue(basePost);
+      postsRepository.findViewableById.mockResolvedValue(basePost);
 
       const result = await service.findOne('post-1', 'user-1');
 
-      expect(postsRepository.findPublishedById).toHaveBeenCalledWith(
+      expect(postsRepository.findViewableById).toHaveBeenCalledWith(
         'post-1',
         'user-1',
       );
@@ -247,7 +247,7 @@ describe('PostsService', () => {
     });
 
     it('throws when post does not exist', async () => {
-      postsRepository.findPublishedById.mockResolvedValue(null);
+      postsRepository.findViewableById.mockResolvedValue(null);
 
       await expect(service.findOne('missing-post', 'user-1')).rejects.toThrow(
         NotFoundException,
