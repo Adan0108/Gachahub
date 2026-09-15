@@ -24,10 +24,10 @@ import {
 } from 'ts-mls';
 // Not re-exported from the package root - internal but reachable via the
 // package's own "./*.js" subpath export map (see ts-mls's package.json).
-import { encodeRatchetTree, decodeRatchetTree } from 'ts-mls/ratchetTree.js';
 import { toNodeIndex, nodeToLeafIndex } from 'ts-mls/treemath.js';
 import { defaultClientConfig } from 'ts-mls/clientConfig.js';
 import { decryptSenderData } from 'ts-mls/privateMessage.js';
+import { makeKeyPackageRef } from 'ts-mls/keyPackage.js';
 import type {
   DeviceIdentityStore,
   GroupSession,
@@ -50,7 +50,6 @@ import {
   type DeviceIdentityStorage,
   type StoredKeyPackage,
 } from './deviceIdentityStorage';
-import { bytesToBase64, base64ToBytes } from './base64';
 
 /**
  * ts-mls adapter for the step 2 bake-off. Real crypto, real wire format -
@@ -91,31 +90,20 @@ function decodeIdentity(identity: Uint8Array): { userId: UserId; deviceId: Devic
   return JSON.parse(new TextDecoder().decode(identity));
 }
 
-/** This adapter's own envelope around ts-mls wire bytes - opaque from the contract's point of view. */
-interface Envelope {
-  conversationId: ConversationId;
-  mls: string; // base64 encodeMlsMessage(...) bytes
-  ratchetTree?: string; // base64, only present on a Welcome envelope
-  keyPackageId?: string; // only present on a Welcome envelope
+function encodeConversationId(conversationId: ConversationId): Uint8Array {
+  return new TextEncoder().encode(conversationId);
 }
 
-function packEnvelope(envelope: Envelope): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify(envelope));
-}
-
-function unpackEnvelope(bytes: Uint8Array): Envelope {
-  return JSON.parse(new TextDecoder().decode(bytes));
-}
-
-/**
- * Extracts the raw base64 MLS KeyPackage wire bytes from an envelope
- * produced by generateKeyPackages(), for uploading to the backend's
- * chat-devices endpoints - the envelope's conversationId/keyPackageId
- * fields are this adapter's own local bookkeeping, not part of what the
- * server needs (KeyPackageItemDto.payload wants exactly this base64 string).
- */
-export function extractKeyPackagePayload(envelope: Uint8Array): string {
-  return unpackEnvelope(envelope).mls;
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
@@ -176,6 +164,15 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
     return this.credential;
   }
 
+  /**
+   * Returns raw base64-free encodeMlsMessage(mls_key_package) bytes - no
+   * adapter-specific wrapping. This is exactly what the backend's
+   * KeyPackageItemDto.payload expects once base64-encoded, and exactly what
+   * stageCommit's offer.keyPackage expects on the other end - a real
+   * KeyPackageRef (computed from the key package itself, see
+   * findMatchingKeyPackage below) is what lets a joiner recognize a Welcome
+   * addressed to it, not an out-of-band id.
+   */
   async generateKeyPackages(count: number): Promise<Uint8Array[]> {
     await this.ensureHydrated();
     if (!this.credential || !this.signatureKeyPair || !this.deviceId) {
@@ -197,18 +194,12 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
         this.signatureKeyPair,
         impl,
       );
-      const id = this.storeKeyPackage(kp.publicPackage, kp.privatePackage);
+      this.storeKeyPackage(kp.publicPackage, kp.privatePackage);
       out.push(
-        packEnvelope({
-          conversationId: '',
-          mls: bytesToBase64(
-            encodeMlsMessage({
-              keyPackage: kp.publicPackage,
-              wireformat: 'mls_key_package',
-              version: 'mls10',
-            }),
-          ),
-          keyPackageId: id,
+        encodeMlsMessage({
+          keyPackage: kp.publicPackage,
+          wireformat: 'mls_key_package',
+          version: 'mls10',
         }),
       );
     }
@@ -311,16 +302,16 @@ class TsMlsGroupSession implements GroupSession {
   }
 
   async process(wireBytes: Uint8Array): Promise<ProcessResult> {
-    const envelope = unpackEnvelope(wireBytes);
-    if (envelope.conversationId !== this.conversationId) {
+    const decoded = decodeMlsMessage(wireBytes, 0)?.[0];
+    if (!decoded || decoded.wireformat !== 'mls_private_message') {
+      return { kind: 'rejected', reason: 'malformed' };
+    }
+
+    if (!bytesEqual(decoded.privateMessage.groupId, encodeConversationId(this.conversationId))) {
       return { kind: 'rejected', reason: 'wrong-conversation' };
     }
 
     const impl = await getImpl();
-    const decoded = decodeMlsMessage(base64ToBytes(envelope.mls), 0)?.[0];
-    if (!decoded || decoded.wireformat !== 'mls_private_message') {
-      return { kind: 'rejected', reason: 'malformed' };
-    }
 
     let incomingKind: 'commit' | 'proposal' | undefined;
     let proposalInfo: { proposal: Proposal; proposer: DeviceCredential } | undefined;
@@ -403,15 +394,10 @@ class TsMlsGroupSession implements GroupSession {
     const plaintext = new TextEncoder().encode(JSON.stringify(envelope));
     const result = await createApplicationMessage(this.state, plaintext, impl);
     this.state = result.newState;
-    return packEnvelope({
-      conversationId: this.conversationId,
-      mls: bytesToBase64(
-        encodeMlsMessage({
-          privateMessage: result.privateMessage,
-          wireformat: 'mls_private_message',
-          version: 'mls10',
-        }),
-      ),
+    return encodeMlsMessage({
+      privateMessage: result.privateMessage,
+      wireformat: 'mls_private_message',
+      version: 'mls10',
     });
   }
 
@@ -423,21 +409,13 @@ class TsMlsGroupSession implements GroupSession {
     const impl = await getImpl();
     const expectedEpoch = Number(this.state.groupContext.epoch);
 
-    const addedKeyPackages: Array<{
-      deviceId: DeviceId;
-      keyPackage: KeyPackage;
-      keyPackageId: string;
-    }> = [];
+    const addedDeviceIds: DeviceId[] = [];
     const extraProposals: Proposal[] = [];
 
     for (const offer of change.added) {
-      const envelope = unpackEnvelope(offer.keyPackage);
-      const decoded = decodeMlsMessage(base64ToBytes(envelope.mls), 0)?.[0];
+      const decoded = decodeMlsMessage(offer.keyPackage, 0)?.[0];
       if (!decoded || decoded.wireformat !== 'mls_key_package') {
         throw new CredentialMismatchError('Offered bytes are not a valid key package');
-      }
-      if (!envelope.keyPackageId) {
-        throw new CredentialMismatchError('Offered key package is missing its id');
       }
       const embeddedCredential = decoded.keyPackage.leafNode.credential;
       if (embeddedCredential.credentialType !== 'basic') {
@@ -452,11 +430,7 @@ class TsMlsGroupSession implements GroupSession {
           `Key package identity (${identity.userId}/${identity.deviceId}) does not match the offered credential (${offer.credential.userId}/${offer.credential.deviceId})`,
         );
       }
-      addedKeyPackages.push({
-        deviceId: offer.credential.deviceId,
-        keyPackage: decoded.keyPackage,
-        keyPackageId: envelope.keyPackageId,
-      });
+      addedDeviceIds.push(offer.credential.deviceId);
       extraProposals.push({ proposalType: 'add', add: { keyPackage: decoded.keyPackage } });
     }
 
@@ -481,37 +455,24 @@ class TsMlsGroupSession implements GroupSession {
 
     this.staged = { newState: commitResult.newState, welcome: undefined };
 
-    const wireBytes = packEnvelope({
-      conversationId: this.conversationId,
-      mls: bytesToBase64(encodeMlsMessage(commitResult.commit)),
-    });
+    const wireBytes = encodeMlsMessage(commitResult.commit);
 
     const welcomes: Array<{ deviceId: DeviceId; welcomeBytes: Uint8Array }> = [];
-    if (commitResult.welcome && addedKeyPackages.length > 0) {
-      const encodedWelcome = bytesToBase64(
-        encodeMlsMessage({
-          welcome: commitResult.welcome,
-          wireformat: 'mls_welcome',
-          version: 'mls10',
-        }),
-      );
-      const encodedTree = bytesToBase64(encodeRatchetTree(commitResult.newState.ratchetTree));
-
-      for (const added of addedKeyPackages) {
-        welcomes.push({
-          deviceId: added.deviceId,
-          welcomeBytes: packEnvelope({
-            conversationId: this.conversationId,
-            mls: encodedWelcome,
-            ratchetTree: encodedTree,
-            // the joiner resolves this against ITS OWN keyPackagesById map -
-            // round-tripped from the same id generateKeyPackages() tagged the
-            // offer with. Cannot be signaturePublicKey: that's now shared
-            // across all of a device's key packages (see the identity-key
-            // reuse fix above), so it can no longer identify *which* one.
-            keyPackageId: added.keyPackageId,
-          }),
-        });
+    if (commitResult.welcome && addedDeviceIds.length > 0) {
+      // One Welcome message carries secrets for every newly-added device at
+      // once (Welcome.secrets[], each entry a KeyPackageRef) - the same
+      // bytes go to every added device, and each recognizes its own entry
+      // itself (joinFromWelcome/findMatchingKeyPackage), same as a real MLS
+      // client would. ratchetTreeExtension: true above means the tree
+      // travels inside this Welcome's own GroupInfo - joinGroup recovers it
+      // from there, no separate out-of-band tree needed.
+      const welcomeBytes = encodeMlsMessage({
+        welcome: commitResult.welcome,
+        wireformat: 'mls_welcome',
+        version: 'mls10',
+      });
+      for (const deviceId of addedDeviceIds) {
+        welcomes.push({ deviceId, welcomeBytes });
       }
     }
 
@@ -543,7 +504,7 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
     const credential = await this.store.getOwnCredential();
     const own = this.pickOwnKeyPackage();
     const state = await createGroup(
-      new TextEncoder().encode(conversationId),
+      encodeConversationId(conversationId),
       own.publicPackage,
       own.privatePackage,
       [],
@@ -570,50 +531,55 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
     conversationId: ConversationId,
     welcomeBytes: Uint8Array,
   ): Promise<GroupSession> {
-    const envelope = unpackEnvelope(welcomeBytes);
-    if (envelope.conversationId !== conversationId) {
-      throw new CredentialMismatchError(
-        `Welcome is for conversation "${envelope.conversationId}", not "${conversationId}"`,
-      );
-    }
-    if (!envelope.ratchetTree || !envelope.keyPackageId) {
-      throw new CredentialMismatchError('Malformed Welcome envelope');
+    const decoded = decodeMlsMessage(welcomeBytes, 0)?.[0];
+    if (!decoded || decoded.wireformat !== 'mls_welcome') {
+      throw new CredentialMismatchError('Bytes do not contain an MLS Welcome message');
     }
 
     // getOwnCredential() is also what triggers the store's lazy hydration
     // from persistent storage - must run before keyPackagesById is read
-    // directly below, or a freshly-constructed (not yet hydrated) store
-    // would always report "no matching key package" after a reload.
+    // below, or a freshly-constructed (not yet hydrated) store would always
+    // report "no matching key package" right after a reload.
     const credential = await this.store.getOwnCredential();
-    const matching = this.store.keyPackagesById.get(envelope.keyPackageId);
+    const impl = await getImpl();
+    const matching = await this.findMatchingKeyPackage(decoded.welcome, impl);
     if (!matching) {
       throw new CredentialMismatchError(
         'This Welcome is not addressed to any key package this device holds',
       );
     }
 
-    const impl = await getImpl();
-    const decoded = decodeMlsMessage(base64ToBytes(envelope.mls), 0)?.[0];
-    if (!decoded || decoded.wireformat !== 'mls_welcome') {
-      throw new CredentialMismatchError('Envelope does not contain a Welcome message');
-    }
-    const tree = decodeRatchetTree(base64ToBytes(envelope.ratchetTree), 0)?.[0] as
-      | RatchetTree
-      | undefined;
-    if (!tree) {
-      throw new CredentialMismatchError('Malformed ratchet tree in Welcome envelope');
-    }
-
+    // No explicit ratchetTree argument - stageCommit sets
+    // ratchetTreeExtension: true, so joinGroup recovers the tree from the
+    // Welcome's own GroupInfo extension.
     const state = await joinGroup(
       decoded.welcome,
       matching.publicPackage,
       matching.privatePackage,
       emptyPskIndex,
       impl,
-      tree,
     );
 
+    if (!bytesEqual(state.groupContext.groupId, encodeConversationId(conversationId))) {
+      throw new CredentialMismatchError(
+        `Welcome is for a different conversation than "${conversationId}"`,
+      );
+    }
+
     return new TsMlsGroupSession(conversationId, state, credential);
+  }
+
+  private async findMatchingKeyPackage(
+    welcome: Parameters<typeof joinGroup>[0],
+    impl: CiphersuiteImpl,
+  ) {
+    for (const stored of this.store.keyPackagesById.values()) {
+      const ref = await makeKeyPackageRef(stored.publicPackage, impl.hash);
+      if (welcome.secrets.some((secret) => bytesEqual(secret.newMember, ref))) {
+        return stored;
+      }
+    }
+    return undefined;
   }
 
   private pickOwnKeyPackage() {

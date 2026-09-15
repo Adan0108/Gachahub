@@ -1,9 +1,5 @@
 import { api } from '../api';
-import {
-  CIPHERSUITE_NAME,
-  TsMlsDeviceIdentityStore,
-  extractKeyPackagePayload,
-} from './tsMlsAdapter';
+import { CIPHERSUITE_NAME, TsMlsDeviceIdentityStore } from './tsMlsAdapter';
 import { bytesToBase64 } from './base64';
 import type { DeviceCredential, UserId } from './types';
 
@@ -46,11 +42,11 @@ async function provisionAndRegister(
   userId: UserId,
 ): Promise<DeviceCredential> {
   const credential = await store.provision(userId);
-  const envelopes = await store.generateKeyPackages(
+  const keyPackages = await store.generateKeyPackages(
     INITIAL_SINGLE_USE_KEY_PACKAGE_COUNT + 1,
   );
-  const [lastResortEnvelope, ...singleUseEnvelopes] = envelopes;
-  if (!lastResortEnvelope) {
+  const [lastResortKeyPackage, ...singleUseKeyPackages] = keyPackages;
+  if (!lastResortKeyPackage) {
     throw new Error('generateKeyPackages returned no key packages');
   }
 
@@ -59,10 +55,10 @@ async function provisionAndRegister(
     signaturePublicKey: bytesToBase64(credential.signatureKey),
     ciphersuite: CIPHERSUITE_NAME,
     keyPackages: [
-      { kind: 'LAST_RESORT', payload: extractKeyPackagePayload(lastResortEnvelope) },
-      ...singleUseEnvelopes.map((envelope) => ({
+      { kind: 'LAST_RESORT', payload: bytesToBase64(lastResortKeyPackage) },
+      ...singleUseKeyPackages.map((keyPackage) => ({
         kind: 'SINGLE_USE',
-        payload: extractKeyPackagePayload(envelope),
+        payload: bytesToBase64(keyPackage),
       })),
     ],
   });
