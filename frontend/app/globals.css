@@ -5452,6 +5452,46 @@ body {
   font-size: 12px;
 }
 
+.chat-composer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 16px 16px;
+}
+
+.chat-composer input {
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 10px 12px;
+  outline: 0;
+  background: var(--panel2);
+  color: var(--text);
+}
+
+.chat-composer input:focus {
+  border-color: var(--purple);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--purple), transparent 80%);
+}
+
+.chat-composer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 10px 18px;
+  background: var(--purple);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.chat-composer button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 @media (max-width: 900px) {
   .chat-layout {
     grid-template-columns: 1fr;

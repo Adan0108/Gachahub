@@ -10,8 +10,10 @@ import type { DeviceCredential } from '../lib/mls/types';
 // One store per browser tab, reused across renders/hook instances - the
 // underlying identity is still one-per-browser-profile (persisted in
 // IndexedDB), this just avoids re-hydrating it from storage on every call.
+// Exported so useSyncEngine.ts can build its GroupSessionFactory on top of
+// the SAME store this hook already provisioned, not a second, unprovisioned one.
 let sharedStore: TsMlsDeviceIdentityStore | undefined;
-function getSharedDeviceIdentityStore(): TsMlsDeviceIdentityStore {
+export function getSharedDeviceIdentityStore(): TsMlsDeviceIdentityStore {
   sharedStore ??= new TsMlsDeviceIdentityStore(new EncryptedIndexedDbDeviceIdentityStorage());
   return sharedStore;
 }

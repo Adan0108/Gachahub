@@ -6,6 +6,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FiCheck, FiInbox, FiLock, FiMessageCircle, FiShield, FiX } from "react-icons/fi";
 import { QueryNotice } from "../../components/QueryNotice";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
+import { useDeviceIdentity } from "../../hooks/useDeviceIdentity";
+import { useSyncEngine } from "../../hooks/useSyncEngine";
+import { useDecryptedMessages } from "../../hooks/useDecryptedMessages";
+import { sendEncryptedChatMessage } from "../../lib/mls/sendEncryptedMessage";
 import { api } from "../../lib/api";
 import { queries, queryKeys } from "../../lib/queries";
 
@@ -45,6 +49,19 @@ export default function ChatPage() {
     [messages.data?.items, user?.id],
   );
   const messageIdsKey = messageIds.join(",");
+
+  const { credential: deviceCredential, isReady: isDeviceReady } = useDeviceIdentity();
+  const syncEngine = useSyncEngine();
+  const decryptedMessages = useDecryptedMessages(activeId, messages.data?.items || [], user?.id);
+  const [draft, setDraft] = useState("");
+  const sendMessage = useMutation({
+    mutationFn: () =>
+      sendEncryptedChatMessage(syncEngine, deviceCredential.deviceId, activeId, draft.trim()),
+    onSuccess: async () => {
+      setDraft("");
+      await queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(activeId) });
+    },
+  });
 
   useEffect(() => {
     if (!isSessionLoading && !isAuthenticated) router.replace("/login");
@@ -213,17 +230,36 @@ export default function ChatPage() {
                 <QueryNotice isLoading={messages.isLoading} isError={messages.isError} />
                 {(messages.data?.items || []).map((message) => {
                   const mine = message.senderId === user?.id;
+                  const decrypted = decryptedMessages[message.id];
                   return (
                     <article className={`chat-message ${mine ? "mine" : ""}`} key={message.id}>
-                      <FiLock aria-hidden="true" />
-                      <div>
-                        <b>Encrypted message</b>
-                        <p>
-                          This client cannot decrypt the payload until secure key exchange is
-                          available.
-                        </p>
-                        <small>{relativeTime(message.createdAt)}</small>
-                      </div>
+                      {decrypted?.status === "ok" ? (
+                        <div>
+                          <p>
+                            {typeof decrypted.envelope.body === "string"
+                              ? decrypted.envelope.body
+                              : JSON.stringify(decrypted.envelope.body)}
+                          </p>
+                          <small>{relativeTime(message.createdAt)}</small>
+                        </div>
+                      ) : decrypted?.status === "unavailable" ? (
+                        <>
+                          <FiLock aria-hidden="true" />
+                          <div>
+                            <b>Message unavailable</b>
+                            <p>This device can&apos;t decrypt this message.</p>
+                            <small>{relativeTime(message.createdAt)}</small>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <FiLock aria-hidden="true" />
+                          <div>
+                            <b>Decrypting…</b>
+                            <small>{relativeTime(message.createdAt)}</small>
+                          </div>
+                        </>
+                      )}
                     </article>
                   );
                 })}
@@ -235,17 +271,39 @@ export default function ChatPage() {
                 )}
               </div>
 
-              <div className="chat-composer-disabled">
-                <FiLock />
-                <div>
-                  <b>Sending is temporarily unavailable</b>
-                  <small>
-                    Secure recipient key exchange must be added before this client can encrypt
-                    messages.
-                  </small>
+              {isDeviceReady && syncEngine ? (
+                <form
+                  className="chat-composer"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (!draft.trim() || sendMessage.isPending) return;
+                    sendMessage.mutate();
+                  }}
+                >
+                  <input
+                    disabled={sendMessage.isPending}
+                    onChange={(event) => setDraft(event.target.value)}
+                    placeholder="Send an encrypted message..."
+                    value={draft}
+                  />
+                  <button disabled={!draft.trim() || sendMessage.isPending} type="submit">
+                    Send
+                  </button>
+                </form>
+              ) : (
+                <div className="chat-composer-disabled">
+                  <FiLock />
+                  <div>
+                    <b>Setting up secure messaging</b>
+                    <small>This only takes a moment on a new device.</small>
+                  </div>
                 </div>
-              </div>
-              {actionError && <small className="post-action-error">{actionError.message}</small>}
+              )}
+              {(actionError || sendMessage.error) && (
+                <small className="post-action-error">
+                  {(actionError || sendMessage.error).message}
+                </small>
+              )}
             </>
           ) : (
             <div className="chat-empty-thread">

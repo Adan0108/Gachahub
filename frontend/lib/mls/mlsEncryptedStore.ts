@@ -11,7 +11,7 @@ const ENCRYPTION_KEY_RECORD = 'local-encryption-key';
  * wipeAllLocalMlsSecrets always clears every one of them, not just whichever
  * store a particular caller happens to know about.
  */
-const DATA_STORE_NAMES = ['deviceIdentity', 'groupSessions'] as const;
+const DATA_STORE_NAMES = ['deviceIdentity', 'groupSessions', 'decryptedMessages'] as const;
 export type DataStoreName = (typeof DATA_STORE_NAMES)[number];
 
 interface TaggedBytes {

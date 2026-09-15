@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { FiX } from "react-icons/fi";
 import { useTheme } from "../hooks/useTheme";
+import { useDeviceIdentity } from "../hooks/useDeviceIdentity";
 import { glyph, navItems } from "./constants";
 import { Topbar } from "./Topbar";
 
@@ -74,6 +75,11 @@ function Sidebar({ open, close, closeButtonRef }) {
 export function AppShell({ children, initialTheme = "dark" }) {
   const [menu, setMenu] = useState(false);
   const { theme, toggleTheme } = useTheme(initialTheme);
+  // Provisions this browser device's MLS identity once signed in - runs
+  // app-wide so it's ready before the user ever opens chat, not just when
+  // they land on it. useDeviceIdentity no-ops until useCurrentUser resolves
+  // an authenticated user, so this is harmless on /login and /register too.
+  useDeviceIdentity();
   const menuButtonRef = useRef(null);
   const menuCloseButtonRef = useRef(null);
   const wasMenuOpenRef = useRef(false);
