@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { buildTestKeyPackage as buildKeyPackage } from './test-support/build-key-package';
 import {
   decodeAndVerifyKeyPackage,
@@ -68,6 +69,21 @@ describe('decodeAndVerifyKeyPackage', () => {
         deviceId: 'device-1',
       }),
     ).rejects.toThrow(/signature is invalid|Not a valid MLS key package/);
+  });
+
+  // regression: ts-mls's decoder throws (CodecError) on truncated
+  // variable-length fields instead of returning undefined - this must
+  // still surface as a clean BadRequestException, not an unhandled 500
+  it('rejects a truncated real key package as a BadRequestException, not an unhandled throw', async () => {
+    const payload = await buildKeyPackage('user-1', 'device-1');
+    const truncated = payload.slice(0, Math.floor(payload.length * 0.4));
+
+    await expect(
+      decodeAndVerifyKeyPackage(truncated, {
+        userId: 'user-1',
+        deviceId: 'device-1',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects a key package with an out-of-bounds lifetime', async () => {

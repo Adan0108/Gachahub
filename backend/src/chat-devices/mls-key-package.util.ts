@@ -44,6 +44,26 @@ export async function decodeAndVerifyKeyPackage(
   payload: Uint8Array,
   expected: ExpectedKeyPackageIdentity,
 ): Promise<KeyPackage> {
+  try {
+    return await decodeAndVerifyKeyPackageUnsafe(payload, expected);
+  } catch (error) {
+    if (error instanceof BadRequestException) {
+      throw error;
+    }
+
+    // ts-mls's decoder throws (CodecError and friends) on truncated/
+    // malformed binary input instead of returning undefined - without this,
+    // adversarial bytes on this endpoint surface as an unhandled 500
+    // (and fire the Discord error alert) instead of a clean 400. Never
+    // include the raw error/stack in the response - threat-model §7.
+    throw new BadRequestException('Not a valid MLS key package');
+  }
+}
+
+async function decodeAndVerifyKeyPackageUnsafe(
+  payload: Uint8Array,
+  expected: ExpectedKeyPackageIdentity,
+): Promise<KeyPackage> {
   const decoded = decodeMlsMessage(payload, 0)?.[0];
   if (!decoded || decoded.wireformat !== 'mls_key_package') {
     throw new BadRequestException('Not a valid MLS key package');
