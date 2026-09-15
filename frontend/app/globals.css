@@ -1344,6 +1344,30 @@ button {
   font-style: italic;
 }
 
+.profile-user-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-user-id code {
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--panel2);
+  color: var(--muted-strong);
+  font-size: 9px;
+}
+
+.profile-user-id button {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--purple);
+  font-size: 9px;
+  font-weight: 700;
+}
+
 .social {
   display: flex;
   gap: 12px;
@@ -5226,6 +5250,87 @@ body {
 .chat-sidebar {
   display: flex;
   flex-direction: column;
+}
+
+.chat-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 14px 14px 0;
+}
+
+.chat-sidebar-head > span {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
+.chat-sidebar-head > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--purple);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chat-new-form {
+  display: grid;
+  gap: 6px;
+  margin: 10px 14px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.chat-new-form label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.chat-new-form input {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  outline: 0;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.chat-new-form input:focus {
+  border-color: var(--purple);
+}
+
+.chat-new-form button {
+  justify-self: start;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 14px;
+  background: var(--purple);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chat-new-form button:disabled {
+  opacity: 0.5;
+}
+
+.chat-new-form small {
+  color: var(--pink);
+  font-size: 11px;
 }
 
 /* Search box */

@@ -71,6 +71,15 @@ export default function ProfilePage() {
     }
   };
 
+  const copyUserId = async () => {
+    try {
+      await navigator.clipboard.writeText(profile.data.id);
+      flashNotice("User ID copied");
+    } catch {
+      flashNotice("Could not copy your user ID");
+    }
+  };
+
   const openEditor = () => {
     setDraftName(displayName);
     setDraftBio(bio);
@@ -178,6 +187,12 @@ export default function ProfilePage() {
                 {displayName} <span className="verified">{glyph.check}</span>
               </h1>
               <p>{profile.data.email}</p>
+              <p className="profile-user-id">
+                User ID: <code>{profile.data.id}</code>
+                <button onClick={copyUserId} type="button">
+                  Copy
+                </button>
+              </p>
               <blockquote>&quot;{bio}&quot;</blockquote>
               <div className="social" aria-label="Profile actions">
                 <button aria-label="Copy profile link" onClick={shareProfile} type="button">

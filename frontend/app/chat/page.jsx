@@ -9,6 +9,7 @@ import {
   FiInbox,
   FiLock,
   FiMessageCircle,
+  FiPlus,
   FiSearch,
   FiSend,
   FiShield,
@@ -91,10 +92,40 @@ export default function ChatPage() {
   const [draft, setDraft] = useState("");
   const sendMessage = useMutation({
     mutationFn: () =>
-      sendEncryptedChatMessage(syncEngine, deviceCredential.deviceId, activeId, draft.trim()),
+      sendEncryptedChatMessage(
+        syncEngine,
+        deviceCredential.deviceId,
+        activeId,
+        peer?.id,
+        draft.trim(),
+      ),
     onSuccess: async () => {
       setDraft("");
       await queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(activeId) });
+    },
+  });
+
+  const [isComposingNewChat, setIsComposingNewChat] = useState(false);
+  const [newChatRecipientId, setNewChatRecipientId] = useState("");
+  const startNewChat = useMutation({
+    mutationFn: () =>
+      api.createDirectMessage({
+        recipientUserId: newChatRecipientId.trim(),
+        // Placeholder only - a real conversationId doesn't exist until this
+        // call creates one, so the actual encrypted MLS group can't be set
+        // up until afterward (see sendEncryptedChatMessage's
+        // ensureConversationGroup call, which finishes the job on the first
+        // real send below). This placeholder message stays permanently
+        // undecryptable and shows as "Message unavailable" - a known,
+        // accepted rough edge, not a bug.
+        message: { ciphertext: "placeholder-pending-mls-setup", contentType: "TEXT" },
+      }),
+    onSuccess: async (result) => {
+      await refreshChat();
+      setIsComposingNewChat(false);
+      setNewChatRecipientId("");
+      setView("inbox");
+      setSelectedId(result.conversationId);
     },
   });
 
@@ -162,6 +193,44 @@ export default function ChatPage() {
 
       <div className="chat-layout">
         <aside className="panel chat-sidebar">
+          <div className="chat-sidebar-head">
+            <span>Conversations</span>
+            <button
+              aria-label="New chat"
+              onClick={() => setIsComposingNewChat((current) => !current)}
+              type="button"
+            >
+              <FiPlus /> New Chat
+            </button>
+          </div>
+          {isComposingNewChat && (
+            <form
+              className="chat-new-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!newChatRecipientId.trim() || startNewChat.isPending) return;
+                startNewChat.mutate();
+              }}
+            >
+              <label htmlFor="new-chat-recipient">Recipient user ID</label>
+              <input
+                autoFocus
+                disabled={startNewChat.isPending}
+                id="new-chat-recipient"
+                onChange={(event) => setNewChatRecipientId(event.target.value)}
+                placeholder="Paste their GachaHub user ID..."
+                type="text"
+                value={newChatRecipientId}
+              />
+              <button
+                disabled={!newChatRecipientId.trim() || startNewChat.isPending}
+                type="submit"
+              >
+                {startNewChat.isPending ? "Starting..." : "Start Chat"}
+              </button>
+              {startNewChat.error && <small>{startNewChat.error.message}</small>}
+            </form>
+          )}
           <div className="chat-sidebar-search">
             <FiSearch aria-hidden="true" />
             <input
