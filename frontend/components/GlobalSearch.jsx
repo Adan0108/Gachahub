@@ -46,6 +46,8 @@ export function GlobalSearch() {
     ...suggestedPosts.map((post) => ({ type: "post", value: post })),
   ];
   const suggestionsOpen = focused && search.length >= 2;
+  const searchPending =
+    suggestionsOpen && (search !== debouncedSearch || (canSearch && gameSuggestions.isFetching));
   const activeSuggestionId = suggestions[activeSuggestion]
     ? `search-suggestion-${suggestions[activeSuggestion].type}-${suggestions[activeSuggestion].value.id}`
     : undefined;
@@ -156,59 +158,63 @@ export function GlobalSearch() {
           id="global-search-suggestions"
           role="listbox"
         >
-          {canSearch && gameSuggestions.isLoading && (
-            <div className="search-empty">Searching communities...</div>
+          {searchPending && (
+            <div className="search-loading" role="status" aria-label="Searching">
+              <span className="search-spinner" aria-hidden="true" />
+            </div>
           )}
-          {canSearch && gameSuggestions.isError && !canUseLocalSearch && (
+          {!searchPending && canSearch && gameSuggestions.isError && !canUseLocalSearch && (
             <div className="search-empty">
               Search needs the backend. Try again when the API is connected.
             </div>
           )}
-          {suggestedGames.map((game, index) => (
-            <button
-              aria-selected={activeSuggestion === index}
-              className={activeSuggestion === index ? "active" : ""}
-              id={`search-suggestion-community-${game.id}`}
-              key={game.slug}
-              role="option"
-              tabIndex={-1}
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onMouseEnter={() => setActiveSuggestion(index)}
-              onClick={() => openCommunity(game.slug)}
-            >
-              <span>{game.symbol}</span>
-              <div>
-                <b>{game.name}</b>
-                <small>{game.members} members</small>
-              </div>
-            </button>
-          ))}
-          {suggestedPosts.map((post, index) => {
-            const resultIndex = suggestedGames.length + index;
-            return (
+          {!searchPending &&
+            suggestedGames.map((game, index) => (
               <button
-                aria-selected={activeSuggestion === resultIndex}
-                className={activeSuggestion === resultIndex ? "active" : ""}
-                id={`search-suggestion-post-${post.id}`}
-                key={post.id}
+                aria-selected={activeSuggestion === index}
+                className={activeSuggestion === index ? "active" : ""}
+                id={`search-suggestion-community-${game.id}`}
+                key={game.slug}
                 role="option"
                 tabIndex={-1}
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
-                onMouseEnter={() => setActiveSuggestion(resultIndex)}
-                onClick={() => openPostSearch(post.title)}
+                onMouseEnter={() => setActiveSuggestion(index)}
+                onClick={() => openCommunity(game.slug)}
               >
-                <span>#</span>
+                <span>{game.symbol}</span>
                 <div>
-                  <b>{post.title}</b>
-                  <small>{post.gameName}</small>
+                  <b>{game.name}</b>
+                  <small>{game.members} members</small>
                 </div>
               </button>
-            );
-          })}
+            ))}
+          {!searchPending &&
+            suggestedPosts.map((post, index) => {
+              const resultIndex = suggestedGames.length + index;
+              return (
+                <button
+                  aria-selected={activeSuggestion === resultIndex}
+                  className={activeSuggestion === resultIndex ? "active" : ""}
+                  id={`search-suggestion-post-${post.id}`}
+                  key={post.id}
+                  role="option"
+                  tabIndex={-1}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setActiveSuggestion(resultIndex)}
+                  onClick={() => openPostSearch(post.title)}
+                >
+                  <span>#</span>
+                  <div>
+                    <b>{post.title}</b>
+                    <small>{post.gameName}</small>
+                  </div>
+                </button>
+              );
+            })}
           {canSearch &&
-            !gameSuggestions.isLoading &&
+            !searchPending &&
             !gameSuggestions.isError &&
             !suggestedGames.length &&
             !suggestedPosts.length && (

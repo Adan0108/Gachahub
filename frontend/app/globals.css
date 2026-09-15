@@ -3431,6 +3431,33 @@ body {
   font-size: 13px;
 }
 
+.search-loading {
+  display: grid;
+  min-height: 64px;
+  place-items: center;
+}
+
+.search-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid #8f98b133;
+  border-top-color: var(--purple);
+  border-radius: 50%;
+  animation: search-spin 0.7s linear infinite;
+}
+
+@keyframes search-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-spinner {
+    animation-duration: 1.4s;
+  }
+}
+
 :root[data-theme="light"] .topbar {
   background: #ffffffea;
 }

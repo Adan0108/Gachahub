@@ -4,7 +4,12 @@ import { GlobalSearch } from "../components/GlobalSearch";
 
 const mocks = vi.hoisted(() => ({
   push: vi.fn(),
-  useQuery: vi.fn(() => ({ data: { items: [] }, isLoading: false, isError: false })),
+  useQuery: vi.fn(() => ({
+    data: { items: [] },
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+  })),
 }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push }) }));
@@ -34,9 +39,11 @@ describe("GlobalSearch", () => {
 
     fireEvent.change(input, { target: { value: "ab" } });
     expect(mocks.useQuery.mock.calls.at(-1)[0].enabled).toBe(false);
+    expect(screen.getByRole("status", { name: /searching/i })).toBeInTheDocument();
 
     act(() => vi.advanceTimersByTime(350));
     expect(mocks.useQuery.mock.calls.at(-1)[0].enabled).toBe(true);
+    expect(screen.queryByRole("status", { name: /searching/i })).not.toBeInTheDocument();
     expect(screen.getByText(/no matches found/i)).toBeInTheDocument();
   });
 });

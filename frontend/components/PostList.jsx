@@ -45,6 +45,11 @@ function CommentItem({ comment }) {
     },
   });
 
+  const submitReply = () => {
+    if (!reply.trim() || createReply.isPending) return;
+    createReply.mutate();
+  };
+
   const startReply = () => {
     if (!isAuthenticated) {
       router.push("/login");
@@ -75,13 +80,18 @@ function CommentItem({ comment }) {
           className="post-reply-form"
           onSubmit={(event) => {
             event.preventDefault();
-            if (reply.trim()) createReply.mutate();
+            submitReply();
           }}
         >
           <input
             aria-label={`Reply to ${comment.author?.name || "comment"}`}
             maxLength={2000}
             onChange={(event) => setReply(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+              event.preventDefault();
+              submitReply();
+            }}
             placeholder="Write a reply..."
             value={reply}
           />
