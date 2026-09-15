@@ -421,6 +421,7 @@ export const api = {
     const confirmedById = new Map(
       confirmed.successful.map(({ uploadId, result }) => [uploadId, result]),
     );
+    const uploadedFileById = new Map(uploaded.map(({ file, payload }) => [payload.uploadId, file]));
     const confirmationErrors = new Map(
       confirmed.failed.map(({ uploadId, error }) => [uploadId, error]),
     );
@@ -428,7 +429,8 @@ export const api = {
     return {
       successful: uploaded.flatMap(({ payload }) => {
         const result = confirmedById.get(payload.uploadId);
-        return result ? [result] : [];
+        const file = uploadedFileById.get(payload.uploadId);
+        return result ? [{ ...result, fileName: file?.name || "Uploaded media" }] : [];
       }),
       failed: [
         ...failed,

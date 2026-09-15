@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { buildPostPayload, getPostTagError, parsePostTags } from "../lib/postComposer";
+import {
+  buildPostPayload,
+  getPostMediaError,
+  getPostTagError,
+  parsePostTags,
+} from "../lib/postComposer";
 
 describe("post composer", () => {
+  it("rejects a new video when an image is already confirmed", () => {
+    const video = new File(["video"], "clip.mp4", { type: "video/mp4" });
+
+    expect(getPostMediaError([video], [{ mediaUploadId: "upload-1", resourceType: "IMAGE" }])).toBe(
+      "Images and video cannot be mixed in the same post.",
+    );
+  });
+
   it("rejects tags longer than the backend limit before upload", () => {
     const tags = parsePostTags(`Build,${"x".repeat(81)}`);
     expect(getPostTagError(tags)).toBe("Each tag must be 80 characters or fewer.");

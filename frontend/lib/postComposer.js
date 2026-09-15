@@ -11,6 +11,26 @@ export function getPostTagError(tags) {
   return "";
 }
 
+export function getPostMediaError(files, confirmedUploads = []) {
+  const mediaTypes = [
+    ...confirmedUploads.map((upload) => upload.resourceType),
+    ...files.map((file) => (file.type.startsWith("video/") ? "VIDEO" : "IMAGE")),
+  ];
+  const videoCount = mediaTypes.filter((type) => type === "VIDEO").length;
+
+  if (mediaTypes.length > 10) return "A post supports up to 10 files.";
+  if (videoCount > 1) return "A post supports one video at most.";
+  if (videoCount && mediaTypes.length > 1)
+    return "Images and video cannot be mixed in the same post.";
+
+  const oversized = files.find((file) => {
+    const limit = file.type.startsWith("video/") ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+    return file.size > limit;
+  });
+
+  return oversized ? `${oversized.name} exceeds the upload size limit.` : "";
+}
+
 export function buildPostPayload(form, tags, uploads) {
   return {
     gameId: form.gameId,

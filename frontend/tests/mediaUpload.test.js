@@ -79,7 +79,9 @@ describe("uploadPostMedia", () => {
       new File(["two"], "two.png", { type: "image/png" }),
     ]);
 
-    expect(result.successful).toEqual([{ mediaUploadId: "upload-1", resourceType: "IMAGE" }]);
+    expect(result.successful).toEqual([
+      { mediaUploadId: "upload-1", resourceType: "IMAGE", fileName: "one.png" },
+    ]);
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0].file.name).toBe("two.png");
     expect(result.failed[0].error).toBe("Upload rejected");
