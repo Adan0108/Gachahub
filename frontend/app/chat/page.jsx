@@ -88,7 +88,11 @@ export default function ChatPage() {
 
   const { credential: deviceCredential, isReady: isDeviceReady } = useDeviceIdentity();
   const syncEngine = useSyncEngine();
-  const decryptedMessages = useDecryptedMessages(activeId, messages.data?.items || [], user?.id);
+  const decryptableMessages = useMemo(
+    () => (messages.data?.items || []).filter((message) => message.contentType !== "SYSTEM"),
+    [messages.data?.items],
+  );
+  const decryptedMessages = useDecryptedMessages(activeId, decryptableMessages, user?.id);
   const [draft, setDraft] = useState("");
   const sendMessage = useMutation({
     mutationFn: () =>
@@ -116,9 +120,10 @@ export default function ChatPage() {
         // up until afterward (see sendEncryptedChatMessage's
         // ensureConversationGroup call, which finishes the job on the first
         // real send below). This placeholder message stays permanently
-        // undecryptable and shows as "Message unavailable" - a known,
-        // accepted rough edge, not a bug.
-        message: { ciphertext: "placeholder-pending-mls-setup", contentType: "TEXT" },
+        // undecryptable - contentType SYSTEM tells the thread to render it
+        // as a "Conversation started" divider instead of a chat bubble, so
+        // it never looks like a message someone sent and failed to decrypt.
+        message: { ciphertext: "placeholder-pending-mls-setup", contentType: "SYSTEM" },
       }),
     onSuccess: async (result) => {
       await refreshChat();
@@ -349,6 +354,13 @@ export default function ChatPage() {
               <div className="chat-messages" aria-live="polite">
                 <QueryNotice isLoading={messages.isLoading} isError={messages.isError} />
                 {(messages.data?.items || []).map((message) => {
+                  if (message.contentType === "SYSTEM") {
+                    return (
+                      <div className="chat-system-message" key={message.id}>
+                        <span>Conversation started</span>
+                      </div>
+                    );
+                  }
                   const mine = message.senderId === user?.id;
                   const decrypted = decryptedMessages[message.id];
                   return (

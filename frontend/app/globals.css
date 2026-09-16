@@ -5643,6 +5643,15 @@ body {
   font-size: 10px;
 }
 
+.chat-system-message {
+  align-self: center;
+  padding: 4px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .chat-empty-thread {
   display: grid;
   place-items: center;
