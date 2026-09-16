@@ -5238,38 +5238,52 @@ body {
   background: var(--bg);
 }
 
-/* Flat override for the chat page's hero banner only - .hero-polish itself
-   (used on other pages) keeps its gradient, out of scope for this pass. */
-.hero-polish.chat-hero {
-  background: var(--panel2);
-  box-shadow: none;
-}
-
-.hero-polish.chat-hero:before {
-  content: none;
-}
-
-.chat-hero > svg {
-  width: 54px;
-  height: 54px;
-  color: var(--purple);
+/* .page centers itself with a width/margin:auto combo (not literal side
+   padding - see the two .page rules earlier in this file), leaving a big
+   gap between the fixed left nav rail and the page content on wide
+   screens. Chat is meant to feel like its own dedicated area (server-rail-
+   to-channel-list, Discord-style) rather than a centered card floating
+   next to the nav, so it spans the full remaining width and sits flush
+   against the rail - .page.chat-page (two classes) beats the single-class
+   .page rules regardless of source order.
+   No hero banner above it anymore either, so this fills the full height
+   below the 72px topbar (.topbar's own fixed height) and never scrolls
+   itself - only .chat-conversation-list and .chat-messages inside it do. */
+.page.chat-page {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  height: calc(100vh - 72px);
+  padding: 16px 16px 16px 0;
+  display: flex;
+  overflow: hidden;
 }
 
 .chat-layout {
   display: grid;
   grid-template-columns: minmax(280px, 0.36fr) minmax(0, 1fr);
   gap: 16px;
-  min-height: 620px;
-  margin-top: 20px;
+  flex: 1;
+  min-height: 0;
 }
 
 .chat-sidebar,
 .chat-thread {
   min-width: 0;
+  min-height: 0;
   padding: 0;
   overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--line);
+}
+
+/* Both also carry the shared .panel class, which has its own border-radius
+   in three separate places - .panel.chat-sidebar/.panel.chat-thread (two
+   classes) beats every single-class .panel rule regardless of source
+   order, same trick used for .page.chat-page and .hero-polish.chat-hero. */
+.panel.chat-sidebar,
+.panel.chat-thread {
+  border-radius: 0;
 }
 
 .chat-sidebar {
@@ -5298,7 +5312,7 @@ body {
   align-items: center;
   gap: 5px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 0;
   padding: 6px 10px;
   background: var(--purple);
   color: #fff;
@@ -5312,7 +5326,7 @@ body {
   margin: 10px 14px 0;
   padding: 12px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--bg);
 }
 
@@ -5326,7 +5340,7 @@ body {
 
 .chat-new-form input {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 0;
   padding: 8px 10px;
   outline: 0;
   background: var(--panel2);
@@ -5341,7 +5355,7 @@ body {
 .chat-new-form button {
   justify-self: start;
   border: 0;
-  border-radius: 8px;
+  border-radius: 0;
   padding: 7px 14px;
   background: var(--purple);
   color: #fff;
@@ -5366,7 +5380,7 @@ body {
   margin: 14px 14px 0;
   padding: 9px 12px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--bg);
 }
 
@@ -5396,7 +5410,7 @@ body {
   gap: 4px;
   margin: 10px 14px 0;
   padding: 4px;
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--bg);
 }
 
@@ -5407,7 +5421,7 @@ body {
   justify-content: center;
   gap: 4px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 0;
   padding: 8px 4px;
   background: transparent;
   color: var(--muted);
@@ -5444,7 +5458,7 @@ body {
   min-width: 16px;
   height: 16px;
   padding: 0 3px;
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--pink);
   color: #1a1438;
   font-size: 9px;
@@ -5477,8 +5491,95 @@ body {
 
 .chat-conversation-list {
   display: grid;
+  align-content: start;
+  flex: 1;
+  min-height: 0;
   margin-top: 8px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+/* Skeleton loading state - mirrors .chat-layout's real shape (sidebar rows
+   + an empty thread) instead of a generic "loading" message, so the page
+   doesn't visibly restructure once real data replaces it. Flat pulsing
+   opacity, no gradient/shimmer sweep, matching the rest of chat. */
+@keyframes chat-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.chat-skeleton-bar,
+.chat-skeleton-pill,
+.chat-skeleton-avatar {
+  display: block;
+  background: var(--panel2);
+  animation: chat-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.chat-skeleton-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 14px 14px 0;
+}
+
+.chat-skeleton-bar {
+  height: 12px;
+}
+
+.chat-skeleton-bar.title {
+  width: 90px;
+  height: 18px;
+}
+
+.chat-skeleton-bar.block {
+  height: 36px;
+  margin: 10px 14px 0;
+}
+
+.chat-skeleton-pill {
+  width: 84px;
+  height: 30px;
+}
+
+.chat-skeleton-list {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+  padding: 0 8px;
+}
+
+.chat-skeleton-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+}
+
+.chat-skeleton-avatar {
+  width: 40px;
+  height: 40px;
+}
+
+.chat-skeleton-lines {
+  display: grid;
+  gap: 6px;
+}
+
+.chat-skeleton-lines .chat-skeleton-bar {
+  width: 70%;
+}
+
+.chat-skeleton-lines .chat-skeleton-bar.short {
+  width: 40%;
 }
 
 .chat-conversation-list > button {
@@ -5488,7 +5589,7 @@ body {
   gap: 10px;
   margin: 0 8px 3px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 0;
   padding: 11px;
   background: transparent;
   color: var(--text);
@@ -5527,7 +5628,7 @@ body {
   height: 40px;
   flex: 0 0 auto;
   border: 1px solid color-mix(in srgb, var(--purple), white 15%);
-  border-radius: 12px;
+  border-radius: 0;
   background: var(--purple);
   color: #fff;
   font-family: var(--font-display);
@@ -5537,7 +5638,7 @@ body {
 .chat-avatar.small {
   width: 28px;
   height: 28px;
-  border-radius: 9px;
+  border-radius: 0;
   font-size: 12px;
 }
 
@@ -5550,7 +5651,7 @@ body {
   place-items: center;
   min-width: 19px;
   height: 19px;
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--pink);
   color: #1a1438;
   font-size: 10px;
@@ -5599,7 +5700,7 @@ body {
   justify-content: center;
   gap: 6px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 0;
   padding: 8px 10px;
   background: var(--bg);
   color: var(--muted);
@@ -5637,11 +5738,33 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  min-height: 420px;
-  max-height: 540px;
+  min-height: 0;
   overflow-y: auto;
   padding: 18px;
   background: var(--bg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.chat-messages::-webkit-scrollbar,
+.chat-conversation-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-messages::-webkit-scrollbar-track,
+.chat-conversation-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-messages::-webkit-scrollbar-thumb,
+.chat-conversation-list::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 0;
+}
+
+.chat-messages::-webkit-scrollbar-thumb:hover,
+.chat-conversation-list::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
 }
 
 .chat-message-row {
@@ -5663,13 +5786,13 @@ body {
   min-width: 0;
   padding: 11px 13px;
   border: 1px solid var(--line);
-  border-radius: 4px 14px 14px 14px;
+  border-radius: 0;
   background: var(--panel2);
 }
 
 .chat-message.mine {
   border-color: color-mix(in srgb, var(--purple), transparent 30%);
-  border-radius: 14px 4px 14px 14px;
+  border-radius: 0;
   background: var(--purple);
 }
 
@@ -5738,10 +5861,10 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  margin: 0 16px 16px;
-  padding: 12px 14px;
-  border: 1px dashed var(--line);
-  border-radius: 10px;
+  margin: 0;
+  padding: 12px 16px;
+  border: 0;
+  border-top: 1px dashed var(--line);
   color: var(--muted);
 }
 
@@ -5783,7 +5906,7 @@ body {
   flex: 0 0 auto;
   align-self: center;
   border: 1px solid color-mix(in srgb, var(--pink), transparent 40%);
-  border-radius: 8px;
+  border-radius: 0;
   padding: 7px 12px;
   background: var(--bg);
   color: var(--pink);
@@ -5799,17 +5922,17 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 16px 16px;
-  padding: 6px 6px 6px 14px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
+  margin: 0;
+  padding: 12px 16px;
+  border: 0;
+  border-top: 1px solid var(--line);
   background: var(--panel2);
   transition: border-color 0.15s ease;
 }
 
 .chat-composer:focus-within {
-  border-color: var(--purple);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--purple), transparent 80%);
+  border-top-color: var(--purple);
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--purple), transparent 80%);
 }
 
 .chat-composer input {
@@ -5834,7 +5957,7 @@ body {
   width: 36px;
   height: 36px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--purple);
   color: #fff;
 }
@@ -5872,7 +5995,7 @@ body {
 .archive-toolbar input {
   min-height: 42px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 0;
   padding: 0 12px;
   background: var(--panel2);
 }

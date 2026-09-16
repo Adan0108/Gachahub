@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -44,6 +44,47 @@ const VIEWS = [
   { key: "requests", label: "Requests", icon: FiShield },
   { key: "archived", label: "Archived", icon: FiArchive },
 ];
+
+function ChatSkeletonRow() {
+  return (
+    <div className="chat-skeleton-row">
+      <span className="chat-skeleton-avatar" />
+      <span className="chat-skeleton-lines">
+        <span className="chat-skeleton-bar" />
+        <span className="chat-skeleton-bar short" />
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Shown instead of the real layout while the session is still resolving -
+ * mirrors .chat-layout's actual shape (sidebar rows + an empty thread) so
+ * the page doesn't visibly restructure once real data replaces it, unlike
+ * a generic "Checking your session..." message in an unrelated-looking box.
+ */
+function ChatSkeleton() {
+  return (
+    <div className="page chat-page" aria-busy="true" aria-label="Loading conversations">
+      <div className="chat-layout">
+        <aside className="panel chat-sidebar">
+          <div className="chat-skeleton-head">
+            <span className="chat-skeleton-bar title" />
+            <span className="chat-skeleton-pill" />
+          </div>
+          <span className="chat-skeleton-bar block" />
+          <span className="chat-skeleton-bar block" />
+          <div className="chat-skeleton-list">
+            {[0, 1, 2, 3, 4].map((index) => (
+              <ChatSkeletonRow key={index} />
+            ))}
+          </div>
+        </aside>
+        <section className="panel chat-thread" />
+      </div>
+    </div>
+  );
+}
 
 export default function ChatPage() {
   const router = useRouter();
@@ -98,6 +139,7 @@ export default function ChatPage() {
     [messages.data?.items],
   );
   const decryptedMessages = useDecryptedMessages(activeId, decryptableMessages, user?.id);
+  const messagesEndRef = useRef(null);
   const [draft, setDraft] = useState("");
   const sendMessage = useMutation({
     mutationFn: () =>
@@ -149,6 +191,14 @@ export default function ChatPage() {
     api.markChatRead(activeId, messageIds.at(-1)).catch(() => {});
   }, [activeId, messageIds, messageIdsKey]);
 
+  const decryptedCount = Object.keys(decryptedMessages).length;
+  // Follows the latest message - re-runs both when the message list grows
+  // (a send, or a new one arriving) and as messages individually finish
+  // decrypting and pop in, since those don't change the list's length.
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end" });
+  }, [activeId, messages.data?.items?.length, decryptedCount]);
+
   const refreshChat = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations }),
@@ -180,11 +230,7 @@ export default function ChatPage() {
   });
 
   if (isSessionLoading || !isAuthenticated) {
-    return (
-      <div className="page chat-page">
-        <div className="state-card">Checking your session...</div>
-      </div>
-    );
+    return <ChatSkeleton />;
   }
 
   const peer = conversationPeer(activeConversation, user?.id);
@@ -192,15 +238,6 @@ export default function ChatPage() {
 
   return (
     <div className="page chat-page">
-      <section className="welcome hero-polish chat-hero">
-        <div>
-          <span className="eyebrow">Messages</span>
-          <h1>Your conversations</h1>
-          <p>Manage conversations and message requests from other GachaHub members.</p>
-        </div>
-        <FiMessageCircle aria-hidden="true" />
-      </section>
-
       <div className="chat-layout">
         <aside className="panel chat-sidebar">
           <div className="chat-sidebar-head">
@@ -370,11 +407,18 @@ export default function ChatPage() {
                   }
                   const mine = message.senderId === user?.id;
                   const decrypted = decryptedMessages[message.id];
+                  // Not decrypted yet - render nothing rather than a
+                  // "Decrypting..." placeholder bubble, so the message pops
+                  // in fully formed once it's actually ready instead of
+                  // changing content right after appearing.
+                  if (!decrypted) {
+                    return null;
+                  }
                   return (
                     <div className={`chat-message-row ${mine ? "mine" : ""}`} key={message.id}>
                       {!mine && <span className="chat-avatar small">{initialOf(peer?.name)}</span>}
                       <article className={`chat-message ${mine ? "mine" : ""}`}>
-                        {decrypted?.status === "ok" ? (
+                        {decrypted.status === "ok" ? (
                           <div>
                             <p>
                               {typeof decrypted.envelope.body === "string"
@@ -383,20 +427,12 @@ export default function ChatPage() {
                             </p>
                             <small>{relativeTime(message.createdAt)}</small>
                           </div>
-                        ) : decrypted?.status === "unavailable" ? (
+                        ) : (
                           <>
                             <FiLock aria-hidden="true" />
                             <div>
                               <b>Message unavailable</b>
                               <p>This device can&apos;t decrypt this message.</p>
-                              <small>{relativeTime(message.createdAt)}</small>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <FiLock aria-hidden="true" />
-                            <div>
-                              <b>Decrypting…</b>
                               <small>{relativeTime(message.createdAt)}</small>
                             </div>
                           </>
@@ -411,6 +447,7 @@ export default function ChatPage() {
                     <b>No messages in this conversation</b>
                   </div>
                 )}
+                <div ref={messagesEndRef} />
               </div>
 
               {isDeviceReady && syncEngine ? (
