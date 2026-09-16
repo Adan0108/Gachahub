@@ -100,11 +100,16 @@ export const queries = {
     retry: 1,
     staleTime: 15_000,
   }),
+  // These three poll: refetchOnWindowFocus is off app-wide (Providers.jsx),
+  // and there's no live push for new messages/requests/conversations yet -
+  // without polling, nothing shows up until the tab is reloaded, even if
+  // the other person is actively messaging you right now.
   chatConversations: () => ({
     queryKey: queryKeys.chatConversations,
     queryFn: api.getChatConversations,
     retry: 1,
-    staleTime: 10_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   }),
   chatArchivedConversations: () => ({
     queryKey: queryKeys.chatArchivedConversations,
@@ -116,14 +121,16 @@ export const queries = {
     queryKey: queryKeys.chatRequests,
     queryFn: api.getChatRequests,
     retry: 1,
-    staleTime: 10_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
   }),
   chatMessages: (conversationId) => ({
     queryKey: queryKeys.chatMessages(conversationId),
     queryFn: () => api.getChatMessages(conversationId, { limit: 50 }),
     enabled: Boolean(conversationId),
     retry: 1,
-    staleTime: 5_000,
+    staleTime: 4_000,
+    refetchInterval: 4_000,
   }),
 };
 
