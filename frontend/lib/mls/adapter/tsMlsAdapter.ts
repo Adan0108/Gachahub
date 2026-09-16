@@ -314,7 +314,9 @@ class TsMlsGroupSession implements GroupSession {
     const impl = await getImpl();
 
     let incomingKind: 'commit' | 'proposal' | undefined;
-    let proposalInfo: { proposal: Proposal; proposer: DeviceCredential } | undefined;
+    let proposalInfo:
+      | { proposal: Proposal; proposer: DeviceCredential; isExternal: boolean }
+      | undefined;
     const treeBeforeCommit = this.state.ratchetTree;
 
     // SenderData is encrypted separately from the actual message content
@@ -343,8 +345,12 @@ class TsMlsGroupSession implements GroupSession {
         incomingKind = incoming.kind;
         if (incoming.kind === 'proposal') {
           const senderLeaf = incoming.proposal.senderLeafIndex;
-          const senderNode =
-            senderLeaf !== undefined ? treeBeforeCommit[senderLeaf * 2] : undefined;
+          // Only a "member" sender has a leaf index (sender.d.ts) - a
+          // standalone proposal with none came through some other channel
+          // (external_senders, a new-member self-proposal/commit), none of
+          // which this app configures anywhere today.
+          const isExternal = senderLeaf === undefined;
+          const senderNode = !isExternal ? treeBeforeCommit[senderLeaf * 2] : undefined;
           const proposerCredential =
             senderNode?.nodeType === 'leaf' && senderNode.leaf.credential.credentialType === 'basic'
               ? decodeIdentity(senderNode.leaf.credential.identity)
@@ -354,7 +360,18 @@ class TsMlsGroupSession implements GroupSession {
             proposer: proposerCredential
               ? { ...proposerCredential, signatureKey: new Uint8Array() }
               : { userId: 'unknown', deviceId: 'unknown', signatureKey: new Uint8Array() },
+            isExternal,
           };
+
+          // types.ts's ProcessResult.isExternal doc: a GroupSession MUST
+          // reject an external proposal whose proposalType is 'add' - a
+          // compromised server could otherwise insert an attacker's device
+          // through this channel. Returning 'reject' here stops ts-mls from
+          // ever applying it to local state (processProposal is skipped);
+          // the caller still learns about it via the isExternal flag above.
+          if (isExternal && incoming.proposal.proposal.proposalType === 'add') {
+            return 'reject';
+          }
         }
         return 'accept';
       },
@@ -378,7 +395,7 @@ class TsMlsGroupSession implements GroupSession {
         epoch: Number(this.state.groupContext.epoch),
         proposalType: proposalInfo.proposal.proposalType === 'add' ? 'add' : 'remove',
         proposer: proposalInfo.proposer,
-        isExternal: false,
+        isExternal: proposalInfo.isExternal,
       };
     }
 
