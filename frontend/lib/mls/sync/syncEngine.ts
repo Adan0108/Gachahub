@@ -232,6 +232,33 @@ export class SyncEngine {
     return session.currentEpoch();
   }
 
+  /**
+   * Whether `wireBytes` was framed under this session's current epoch -
+   * purely local (no network), safe to call before deciding if
+   * syncCommits is actually needed before processIncoming. False for
+   * anything that doesn't parse as this conversation's current epoch,
+   * including a message from a later epoch (a real missed commit), an
+   * unrecognizable payload, or this device not even having a local session
+   * yet (e.g. its Welcome hasn't been processed yet, at the very start of
+   * a conversation) - either way the caller should sync/process normally
+   * and get the real outcome there rather than assume anything. Never
+   * throws, by design: a "should I skip the network call" check has no
+   * business surfacing GroupStateUnavailableError itself.
+   */
+  async isAtCurrentEpoch(conversationId: ConversationId, wireBytes: Uint8Array): Promise<boolean> {
+    let session: GroupSession;
+    try {
+      session = await this.getSession(conversationId);
+    } catch {
+      return false;
+    }
+    const [current, incoming] = await Promise.all([
+      session.currentEpoch(),
+      session.peekEpoch(wireBytes),
+    ]);
+    return incoming !== undefined && incoming === current;
+  }
+
   /** Drops a conversation's cached and persisted session - e.g. after leaving or deleting it. */
   async forgetConversation(conversationId: ConversationId): Promise<void> {
     this.sessions.delete(conversationId);

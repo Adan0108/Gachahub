@@ -75,6 +75,23 @@ export interface GroupSession {
   currentEpoch(): Promise<Epoch>;
 
   /**
+   * Reads the epoch a wire item was framed under, without decrypting or
+   * advancing any state - RFC 9420 puts groupId/epoch in PrivateMessage's
+   * cleartext header specifically so this kind of routing check doesn't
+   * need the ciphertext opened first. Returns undefined for bytes that
+   * aren't a recognizable private message for this group; the caller
+   * should fall back to process() and get a real error there instead of
+   * trying to interpret that as any particular epoch.
+   *
+   * Exists so a caller with several incoming items can tell up front
+   * whether any of them were encrypted under a later epoch than this
+   * session's current one - the only case where catching up on missed
+   * commits first is actually necessary - instead of always paying that
+   * round trip before every single process() call.
+   */
+  peekEpoch(wireBytes: Uint8Array): Promise<Epoch | undefined>;
+
+  /**
    * Decrypts and applies one incoming wire item - application message,
    * proposal, or commit - in arrival order. Must be called serially per
    * conversation; the caller (SyncEngine) is responsible for never calling

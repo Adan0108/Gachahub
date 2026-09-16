@@ -301,6 +301,17 @@ class TsMlsGroupSession implements GroupSession {
     return Number(this.state.groupContext.epoch);
   }
 
+  async peekEpoch(wireBytes: Uint8Array): Promise<Epoch | undefined> {
+    const decoded = decodeMlsMessage(wireBytes, 0)?.[0];
+    if (!decoded || decoded.wireformat !== 'mls_private_message') {
+      return undefined;
+    }
+    if (!bytesEqual(decoded.privateMessage.groupId, encodeConversationId(this.conversationId))) {
+      return undefined;
+    }
+    return Number(decoded.privateMessage.epoch);
+  }
+
   async process(wireBytes: Uint8Array): Promise<ProcessResult> {
     const decoded = decodeMlsMessage(wireBytes, 0)?.[0];
     if (!decoded || decoded.wireformat !== 'mls_private_message') {

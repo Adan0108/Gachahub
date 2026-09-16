@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSyncEngine } from './useSyncEngine';
 import { base64ToBytes } from '../lib/mls/storage/base64';
 import { EncryptedIndexedDbMessagePlaintextStore } from '../lib/mls/storage/messagePlaintextStore';
@@ -37,6 +37,15 @@ export function useDecryptedMessages(
 ): Record<string, DecryptedMessageState> {
   const syncEngine = useSyncEngine();
   const [decrypted, setDecrypted] = useState<Record<string, DecryptedMessageState>>({});
+  // Message ids some still-running effect invocation has already claimed.
+  // A ref (not per-invocation state) so it survives across re-runs: a new
+  // message arriving while an older one is still mid-decrypt (a real
+  // network round trip) re-triggers this effect before the older
+  // invocation has saved its result to plaintextStore, so a fresh scan
+  // would otherwise see that message as "not yet cached" and decrypt it a
+  // second time - each MLS application message key is single-use, so the
+  // second attempt fails and permanently reports "unavailable".
+  const inFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!syncEngine || !conversationId || messages.length === 0) {
@@ -76,6 +85,13 @@ export function useDecryptedMessages(
             return;
           }
 
+          if (inFlightRef.current.has(message.id)) {
+            // Another still-running invocation already claimed this one -
+            // its own setDecrypted call will resolve it; reprocessing here
+            // would just burn the message's one-time key for nothing.
+            return;
+          }
+
           pendingIncoming.push(message);
         }),
       );
@@ -84,10 +100,34 @@ export function useDecryptedMessages(
         return;
       }
 
-      try {
-        await syncEngine.syncCommits(conversationId);
-      } catch (error) {
-        console.warn('Could not sync MLS commits before decrypting messages', error);
+      for (const message of pendingIncoming) {
+        inFlightRef.current.add(message.id);
+      }
+
+      const wireBytesByMessageId = new Map(
+        pendingIncoming.map((message) => [message.id, base64ToBytes(message.ciphertext)]),
+      );
+
+      // syncCommits is a real network round trip whose only job is to catch
+      // this device up on commits it missed - unnecessary (and, on the hot
+      // path of ordinary chatting, the common case) whenever every pending
+      // message was already framed under the epoch this session is at.
+      // Skipping it here doesn't skip anything MLS-meaningful: it only
+      // takes effect when there was nothing to catch up on in the first
+      // place, and falls back to the exact previous behavior otherwise.
+      const atCurrentEpoch = await Promise.all(
+        pendingIncoming.map((message) =>
+          syncEngine.isAtCurrentEpoch(conversationId, wireBytesByMessageId.get(message.id)!),
+        ),
+      );
+      const needsSync = atCurrentEpoch.some((isCurrent) => !isCurrent);
+
+      if (needsSync) {
+        try {
+          await syncEngine.syncCommits(conversationId);
+        } catch (error) {
+          console.warn('Could not sync MLS commits before decrypting messages', error);
+        }
       }
 
       await Promise.all(
@@ -95,7 +135,7 @@ export function useDecryptedMessages(
           try {
             const result = await syncEngine.processIncoming(
               conversationId,
-              base64ToBytes(message.ciphertext),
+              wireBytesByMessageId.get(message.id)!,
             );
             if (result.kind !== 'application') {
               if (!cancelled) {
@@ -121,6 +161,8 @@ export function useDecryptedMessages(
             if (!cancelled) {
               setDecrypted((prev) => ({ ...prev, [message.id]: { status: 'unavailable' } }));
             }
+          } finally {
+            inFlightRef.current.delete(message.id);
           }
         }),
       );

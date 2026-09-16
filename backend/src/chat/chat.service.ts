@@ -86,34 +86,28 @@ export class ChatService {
       throw new BadRequestException('You cannot message yourself');
     }
 
-    const recipient = await this.chatRepository.findUserById(
-      dto.recipientUserId,
-    );
-
-    if (!recipient || recipient.status !== 'ACTIVE') {
-      throw new NotFoundException('Recipient not found');
-    }
-
-    await this.assertSenderHasNotBlockedRecipient(
-      senderId,
-      dto.recipientUserId,
-    );
-
     const [userIdA, userIdB] = this.normalizeDirectPair(
       senderId,
       dto.recipientUserId,
     );
 
-    const existingPair = await this.chatRepository.findDirectPair(
-      userIdA,
-      userIdB,
-    );
-
-    const existingMessage =
-      await this.chatRepository.findMessageBySenderClientMessageId(
+    // Four independent reads - none needs any of the others' results, just
+    // senderId/recipientUserId/clientMessageId which are already known -
+    // so they run concurrently instead of stacking into four round trips
+    // before any actual validation can happen.
+    const [recipient, , existingPair, existingMessage] = await Promise.all([
+      this.chatRepository.findUserById(dto.recipientUserId),
+      this.assertSenderHasNotBlockedRecipient(senderId, dto.recipientUserId),
+      this.chatRepository.findDirectPair(userIdA, userIdB),
+      this.chatRepository.findMessageBySenderClientMessageId(
         senderId,
         dto.message.clientMessageId,
-      );
+      ),
+    ]);
+
+    if (!recipient || recipient.status !== 'ACTIVE') {
+      throw new NotFoundException('Recipient not found');
+    }
 
     if (existingMessage) {
       if (existingMessage.conversationId !== existingPair?.conversation.id) {
@@ -1148,11 +1142,16 @@ export class ChatService {
       encryptionMeta?: Record<string, unknown>;
     },
   ) {
-    const existingMessage =
-      await this.chatRepository.findMessageBySenderClientMessageId(
+    // Independent reads (neither depends on the other's result) - run
+    // concurrently instead of back-to-back to save one full DB round trip
+    // per send, which is real added latency against a remote database.
+    const [existingMessage, conversation] = await Promise.all([
+      this.chatRepository.findMessageBySenderClientMessageId(
         senderId,
         dto.message.clientMessageId,
-      );
+      ),
+      this.chatRepository.findConversationWithParticipants(conversationId),
+    ]);
 
     if (existingMessage) {
       if (existingMessage.conversationId !== conversationId) {
@@ -1167,11 +1166,6 @@ export class ChatService {
         duplicate: true,
       };
     }
-
-    const conversation =
-      await this.chatRepository.findConversationWithParticipants(
-        conversationId,
-      );
 
     if (!conversation) {
       throw new NotFoundException('Conversation not found');
@@ -1250,6 +1244,19 @@ export class ChatService {
       );
     }
 
+    const recipientParticipants = deliverableParticipants.filter(
+      (participant) => participant.userId !== senderId,
+    );
+
+    // Doesn't depend on the message row at all (just sender + participant
+    // state) - fired here instead of after createMessage so its DB round
+    // trip overlaps with the insert instead of stacking after it.
+    const notifiableFlagsPromise = Promise.all(
+      recipientParticipants.map((participant) =>
+        this.isRecipientNotifiable(senderId, participant),
+      ),
+    );
+
     let message: Awaited<ReturnType<typeof this.chatRepository.createMessage>>;
     try {
       message = await this.chatRepository.createMessage({
@@ -1272,6 +1279,11 @@ export class ChatService {
         throw error;
       }
 
+      // Unneeded on this path - a duplicate was already delivered by its
+      // original send. Acknowledged explicitly so firing the promise above
+      // eagerly can't surface as an unhandled rejection here.
+      notifiableFlagsPromise.catch(() => undefined);
+
       return this.recoverDuplicateMessage(
         senderId,
         conversationId,
@@ -1279,15 +1291,7 @@ export class ChatService {
       );
     }
 
-    const recipientParticipants = deliverableParticipants.filter(
-      (participant) => participant.userId !== senderId,
-    );
-
-    const notifiableFlags = await Promise.all(
-      recipientParticipants.map((participant) =>
-        this.isRecipientNotifiable(senderId, participant),
-      ),
-    );
+    const notifiableFlags = await notifiableFlagsPromise;
 
     const notifiableRecipientIds = recipientParticipants
       .filter((_, index) => notifiableFlags[index])
