@@ -5224,6 +5224,20 @@ body {
   }
 }
 
+/* .page itself has no background anywhere in the app (it's centered and
+   capped at max-width:1500px, narrower than the viewport), so the shared
+   .app-shell gradient behind it always shows on the sides - and .page's
+   own height is content-based, not viewport height, so it never reaches
+   the bottom either. .main-column is the actual full-width/full-height
+   container (wraps the topbar + page content, spans the remaining grid
+   column next to the sidebar), so putting the flat fill there covers the
+   whole visible area with no gaps on any edge. :has() scopes it to only
+   fire when .chat-page is somewhere inside - every other page's
+   .main-column keeps the shared gradient exactly as before. */
+.main-column:has(.chat-page) {
+  background: var(--bg);
+}
+
 /* Flat override for the chat page's hero banner only - .hero-polish itself
    (used on other pages) keeps its gradient, out of scope for this pass. */
 .hero-polish.chat-hero {
@@ -5417,7 +5431,6 @@ body {
 .chat-tabs button.active {
   background: var(--purple);
   color: #fff;
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--purple), transparent 55%);
 }
 
 .chat-tabs button:hover:not(.active) {
@@ -5440,6 +5453,26 @@ body {
 
 .chat-tabs button.active b {
   background: rgba(255, 255, 255, 0.9);
+}
+
+/* The shared QueryNotice/.state-card bubble has no horizontal margin, so it
+   spans edge-to-edge in the sidebar instead of sitting inset like every
+   other sidebar element - flattened into plain inset text here instead of
+   fixing the margin, since a borderless label reads cleaner for a one-line
+   "no chats/requests/archived conversations" message. Scoped to the chat
+   sidebar only - QueryNotice elsewhere on the site keeps its bubble look. */
+.chat-sidebar .state-card {
+  margin: 10px 14px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chat-sidebar .state-card.warning {
+  color: var(--pink);
 }
 
 .chat-conversation-list {
@@ -5703,7 +5736,7 @@ body {
 
 .chat-composer-disabled {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   margin: 0 16px 16px;
   padding: 12px 14px;
@@ -5712,14 +5745,54 @@ body {
   color: var(--muted);
 }
 
+/* Matches .chat-message > svg's alignment - flex-start plus a small top
+   nudge lines the icon up with the bold title's baseline instead of
+   centering it against the title+subtitle block as a whole, which reads as
+   the icon sitting slightly too low/offset. */
+.chat-composer-disabled > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
 .chat-composer-disabled > div {
   display: grid;
   gap: 3px;
+  min-width: 0;
 }
 
 .chat-composer-disabled b {
   color: var(--text);
   font-size: 12px;
+}
+
+.chat-composer-disabled.error {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--pink), transparent 40%);
+}
+
+.chat-composer-disabled.error > svg {
+  color: var(--pink);
+}
+
+.chat-composer-disabled.error small {
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.chat-composer-disabled button {
+  flex: 0 0 auto;
+  align-self: center;
+  border: 1px solid color-mix(in srgb, var(--pink), transparent 40%);
+  border-radius: 8px;
+  padding: 7px 12px;
+  background: var(--bg);
+  color: var(--pink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chat-composer-disabled button:hover {
+  border-color: var(--pink);
 }
 
 .chat-composer {
@@ -5764,13 +5837,11 @@ body {
   border-radius: 10px;
   background: var(--purple);
   color: #fff;
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--purple), transparent 60%);
 }
 
 .chat-composer button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  box-shadow: none;
 }
 
 @media (max-width: 900px) {
@@ -5853,4 +5924,195 @@ body {
     top: 68px;
     right: 14px;
   }
+}
+
+/* Dev tools panel - bottom-left, so it never overlaps Next.js's own dev
+   overlay bubble (bottom-right). Flat colors throughout, no gradients. */
+.dev-tools {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 100;
+}
+
+.dev-tools-toggle {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 18px;
+  box-shadow: 0 8px 20px #00000040;
+}
+
+.dev-tools-toggle:hover {
+  border-color: var(--purple);
+  color: var(--purple);
+}
+
+.dev-tools-panel {
+  position: absolute;
+  bottom: 52px;
+  left: 0;
+  display: grid;
+  gap: 10px;
+  width: 320px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.dev-tools-head {
+  display: grid;
+  gap: 2px;
+}
+
+.dev-tools-head > span {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.dev-tools-head > small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.dev-tools-spawn {
+  display: flex;
+  gap: 6px;
+}
+
+.dev-tools-spawn input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 9px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.dev-tools-spawn button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: var(--purple);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.dev-tools-spawn button:disabled {
+  opacity: 0.5;
+}
+
+.dev-tools-error {
+  color: var(--pink);
+  font-size: 11px;
+}
+
+.dev-tools-list {
+  display: grid;
+  gap: 6px;
+}
+
+.dev-tools-list > small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.dev-tools-user {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.dev-tools-user > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dev-tools-user b {
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-tools-user > div:first-child > span {
+  color: var(--muted);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-tools-user-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.dev-tools-user-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 1;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 6px;
+  background: var(--panel2);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.dev-tools-user-actions button:hover:not(:disabled) {
+  border-color: var(--purple);
+  color: var(--text);
+}
+
+.dev-tools-user-actions button.danger {
+  flex: 0 0 auto;
+}
+
+.dev-tools-user-actions button.danger:hover:not(:disabled) {
+  border-color: var(--pink);
+  color: var(--pink);
+}
+
+.dev-tools-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--pink), transparent 40%);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--bg);
+  color: var(--pink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dev-tools-clear:disabled {
+  opacity: 0.5;
 }

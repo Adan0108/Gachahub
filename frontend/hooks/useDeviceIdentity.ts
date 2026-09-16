@@ -24,6 +24,8 @@ interface UseDeviceIdentityResult {
   error: Error | undefined;
   /** "Log out this device everywhere" - irreversible, never call this on an ordinary logout. */
   revokeDevice: () => Promise<void>;
+  /** Re-attempts provisioning after a failure, without needing a full page reload. */
+  retry: () => void;
 }
 
 /**
@@ -36,6 +38,10 @@ export function useDeviceIdentity(): UseDeviceIdentityResult {
   const { user, isAuthenticated } = useCurrentUser();
   const [credential, setCredential] = useState<DeviceCredential | undefined>(undefined);
   const [error, setError] = useState<Error | undefined>(undefined);
+  // Bumping this forces the effect below to run again for the same user id,
+  // which a plain [isAuthenticated, user?.id] dependency list can't do on
+  // its own - needed so a failed attempt can be retried without a reload.
+  const [attempt, setAttempt] = useState(0);
   const provisioningUserIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
@@ -52,6 +58,7 @@ export function useDeviceIdentity(): UseDeviceIdentityResult {
       return;
     }
     provisioningUserIdRef.current = user.id;
+    setError(undefined);
 
     ensureDeviceProvisioned(getSharedDeviceIdentityStore(), user.id)
       .then(setCredential)
@@ -59,7 +66,8 @@ export function useDeviceIdentity(): UseDeviceIdentityResult {
         provisioningUserIdRef.current = undefined;
         setError(caughtError instanceof Error ? caughtError : new Error(String(caughtError)));
       });
-  }, [isAuthenticated, user?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- attempt is a pure retry trigger, not a real dependency
+  }, [isAuthenticated, user?.id, attempt]);
 
   async function revokeDevice(): Promise<void> {
     await revokeDeviceEverywhere(getSharedDeviceIdentityStore());
@@ -67,5 +75,10 @@ export function useDeviceIdentity(): UseDeviceIdentityResult {
     setCredential(undefined);
   }
 
-  return { credential, isReady: credential !== undefined, error, revokeDevice };
+  function retry(): void {
+    provisioningUserIdRef.current = undefined;
+    setAttempt((current) => current + 1);
+  }
+
+  return { credential, isReady: credential !== undefined, error, revokeDevice, retry };
 }

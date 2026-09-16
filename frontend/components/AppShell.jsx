@@ -7,6 +7,7 @@ import { FiX } from "react-icons/fi";
 import { useTheme } from "../hooks/useTheme";
 import { useDeviceIdentity } from "../hooks/useDeviceIdentity";
 import { glyph, navItems } from "./constants";
+import { DevToolsPanel } from "./DevToolsPanel";
 import { Topbar } from "./Topbar";
 
 function Logo() {
@@ -106,7 +107,12 @@ export function AppShell({ children, initialTheme = "dark" }) {
   }, [menu]);
 
   if (auth) {
-    return <div className="auth-shell">{children}</div>;
+    return (
+      <div className="auth-shell">
+        {children}
+        {process.env.NODE_ENV !== "production" && <DevToolsPanel />}
+      </div>
+    );
   }
 
   return (
@@ -123,6 +129,7 @@ export function AppShell({ children, initialTheme = "dark" }) {
         )}
         {children}
       </div>
+      {process.env.NODE_ENV !== "production" && <DevToolsPanel />}
     </div>
   );
 }

@@ -13,6 +13,11 @@ import type { DeviceCredential, UserId } from '../contract/types';
  */
 const INITIAL_SINGLE_USE_KEY_PACKAGE_COUNT = 10;
 
+/** lib/api.js (plain JS, untyped) attaches the HTTP status to every thrown request error. */
+interface ApiError extends Error {
+  status?: number;
+}
+
 // Keyed by store instance (not userId alone) so unrelated store instances -
 // e.g. in tests - never share an in-flight entry. Without this, several
 // hook instances (useDeviceIdentity is mounted independently from AppShell,
@@ -103,11 +108,26 @@ async function provisionAndRegister(
  * local keys are destroyed - the reverse order would strand the device as
  * "revoked" locally while the backend still treats it as active and
  * claimable, with no way to use this device's identity again to fix it.
+ *
+ * A 404 is the one exception: it means the backend already has no record of
+ * this device (e.g. the account it belonged to was deleted outright, taking
+ * the device with it via cascade - routine with the dev test-user tooling).
+ * There is nothing left to notify the backend about, so this is a success
+ * case for "everywhere," not a failure - treating it as an error would
+ * permanently wedge ensureDeviceProvisioned's user-switch path, since the
+ * stale local credential this browser still holds can never be revoked
+ * again through a device row that no longer exists.
  */
 export async function revokeDeviceEverywhere(
   store: TsMlsDeviceIdentityStore,
 ): Promise<void> {
   const credential = await store.getOwnCredential();
-  await api.revokeChatDevice(credential.deviceId);
+  try {
+    await api.revokeChatDevice(credential.deviceId);
+  } catch (error) {
+    if (!(error instanceof Error) || (error as ApiError).status !== 404) {
+      throw error;
+    }
+  }
   await store.revoke();
 }

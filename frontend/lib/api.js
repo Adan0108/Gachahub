@@ -49,6 +49,9 @@ export const backendRoutes = {
   mlsPendingWelcomes: (deviceId) => `/mls-handshakes/devices/${encodePathParam(deviceId)}/welcomes`,
   mlsConsumeWelcome: (deviceId, welcomeId) =>
     `/mls-handshakes/devices/${encodePathParam(deviceId)}/welcomes/${encodePathParam(welcomeId)}/consume`,
+  devTestUsers: "/dev/test-users",
+  devTestUser: (id) => `/dev/test-users/${encodePathParam(id)}`,
+  devTestUserImpersonate: (id) => `/dev/test-users/${encodePathParam(id)}/impersonate`,
 };
 
 function encodePathParam(value) {
@@ -203,7 +206,9 @@ async function request(path, options = {}) {
     } catch {
       message = await response.text().catch(() => "");
     }
-    throw new Error(message || `API request failed: ${response.status}`);
+    const error = new Error(message || `API request failed: ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
 
   return response.status === 204 ? null : response.json();
@@ -491,4 +496,13 @@ export const api = {
   getMlsPendingWelcomes: (deviceId) => request(backendRoutes.mlsPendingWelcomes(deviceId)),
   consumeMlsWelcome: (deviceId, welcomeId) =>
     mutation(backendRoutes.mlsConsumeWelcome(deviceId, welcomeId)),
+  // Dev tools only - the backend only registers these routes at all when
+  // NODE_ENV === 'development' (DevModule in app.module.ts), so these calls
+  // 404 in any other environment.
+  listDevTestUsers: () => request(backendRoutes.devTestUsers),
+  createDevTestUser: (label) => mutation(backendRoutes.devTestUsers, label ? { label } : {}),
+  impersonateDevTestUser: (id) => mutation(backendRoutes.devTestUserImpersonate(id)),
+  deleteDevTestUser: (id) => mutation(backendRoutes.devTestUser(id), undefined, { method: "DELETE" }),
+  deleteAllDevTestUsers: () =>
+    mutation(backendRoutes.devTestUsers, undefined, { method: "DELETE" }),
 };

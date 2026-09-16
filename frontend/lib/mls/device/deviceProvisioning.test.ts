@@ -57,6 +57,23 @@ describe('ensureDeviceProvisioned', () => {
     expect(api.revokeChatDevice).toHaveBeenCalledWith(first.deviceId);
   });
 
+  // regression: this used to throw and permanently block provisioning for
+  // the new user whenever the old device was already gone server-side -
+  // see the 404 test on revokeDeviceEverywhere below for the root cause.
+  it('still provisions the new user when the old device is already gone server-side (404)', async () => {
+    const { api } = await import('../../api');
+    const store = new TsMlsDeviceIdentityStore();
+    await ensureDeviceProvisioned(store, 'user-1');
+    const notFound = new Error('Device not found');
+    (notFound as Error & { status?: number }).status = 404;
+    vi.mocked(api.revokeChatDevice).mockRejectedValueOnce(notFound);
+
+    const second = await ensureDeviceProvisioned(store, 'user-2');
+
+    expect(second.userId).toBe('user-2');
+    expect(await store.isProvisioned()).toBe(true);
+  });
+
   // regression: several hook instances mounting at once (AppShell,
   // chat/page.jsx, useSyncEngine) used to each independently provision a
   // distinct device for the same user, since there was no shared in-flight
@@ -102,5 +119,24 @@ describe('revokeDeviceEverywhere', () => {
     await expect(revokeDeviceEverywhere(store)).rejects.toThrow('network error');
 
     expect(await store.isProvisioned()).toBe(true);
+  });
+
+  // regression: a 404 (the device row is already gone server-side - e.g.
+  // its whole account was deleted, taking the device with it via cascade)
+  // used to be treated as a real failure and block local cleanup forever,
+  // permanently wedging ensureDeviceProvisioned's user-switch path since
+  // this browser's stale credential could never be revoked again through a
+  // device that no longer exists.
+  it('clears local state anyway when the backend device is already gone (404)', async () => {
+    const { api } = await import('../../api');
+    const notFound = new Error('Device not found');
+    (notFound as Error & { status?: number }).status = 404;
+    vi.mocked(api.revokeChatDevice).mockRejectedValueOnce(notFound);
+    const store = new TsMlsDeviceIdentityStore();
+    await ensureDeviceProvisioned(store, 'user-1');
+
+    await expect(revokeDeviceEverywhere(store)).resolves.toBeUndefined();
+
+    expect(await store.isProvisioned()).toBe(false);
   });
 });

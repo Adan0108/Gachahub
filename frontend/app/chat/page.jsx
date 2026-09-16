@@ -86,7 +86,12 @@ export default function ChatPage() {
   );
   const messageIdsKey = messageIds.join(",");
 
-  const { credential: deviceCredential, isReady: isDeviceReady } = useDeviceIdentity();
+  const {
+    credential: deviceCredential,
+    isReady: isDeviceReady,
+    error: deviceError,
+    retry: retryDeviceSetup,
+  } = useDeviceIdentity();
   const syncEngine = useSyncEngine();
   const decryptableMessages = useMemo(
     () => (messages.data?.items || []).filter((message) => message.contentType !== "SYSTEM"),
@@ -431,6 +436,17 @@ export default function ChatPage() {
                     <FiSend />
                   </button>
                 </form>
+              ) : deviceError ? (
+                <div className="chat-composer-disabled error">
+                  <FiLock />
+                  <div>
+                    <b>Couldn&apos;t set up secure messaging</b>
+                    <small>{deviceError.message}</small>
+                  </div>
+                  <button onClick={retryDeviceSetup} type="button">
+                    Retry
+                  </button>
+                </div>
               ) : (
                 <div className="chat-composer-disabled">
                   <FiLock />
