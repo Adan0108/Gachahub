@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ensureConversationGroup } from './ensureConversationGroup';
-import { GroupStateUnavailableError } from '../contract/errors';
+import { EpochConflictError, GroupStateUnavailableError } from '../contract/errors';
 
 function fakeSyncEngine() {
   return {
@@ -64,5 +64,25 @@ describe('ensureConversationGroup', () => {
     await expect(ensureConversationGroup(engine as any, 'conv-1', 'user-bob')).rejects.toThrow();
 
     expect(engine.forgetConversation).toHaveBeenCalledWith('conv-1');
+  });
+
+  // regression: an EpochConflictError means SyncEngine.submitMembershipChange
+  // already caught local state up to the winning commit and persisted it
+  // before throwing - forgetting the conversation here used to discard that
+  // valid state, forcing every retry to recreate a fresh epoch-0 local group
+  // that the server (already past epoch 0) rejects the exact same way,
+  // forever. Once triggered, sending to that conversation could never
+  // recover on its own.
+  it('does not forget the conversation on an epoch conflict, since local state is already caught up', async () => {
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockRejectedValue(new GroupStateUnavailableError('conv-1'));
+    engine.createGroup.mockResolvedValue(undefined);
+    engine.addUserToConversation.mockRejectedValue(new EpochConflictError('conv-1', 0));
+
+    await expect(ensureConversationGroup(engine as any, 'conv-1', 'user-bob')).rejects.toThrow(
+      EpochConflictError,
+    );
+
+    expect(engine.forgetConversation).not.toHaveBeenCalled();
   });
 });

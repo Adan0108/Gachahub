@@ -1,4 +1,4 @@
-import { GroupStateUnavailableError } from '../contract/errors';
+import { EpochConflictError, GroupStateUnavailableError } from '../contract/errors';
 import type { SyncEngine } from '../sync/syncEngine';
 import type { ConversationId, UserId } from '../contract/types';
 
@@ -36,13 +36,25 @@ export async function ensureConversationGroup(
   try {
     await syncEngine.addUserToConversation(conversationId, recipientUserId);
   } catch (error) {
-    // createGroup succeeded but adding the recipient didn't (e.g. they
-    // haven't accepted the request yet) - without this, the next attempt
-    // would see a local group already exists (from the line above) and
-    // skip straight to encrypting, silently sending a message only this
-    // device could ever read. Dropping it here means the next call starts
-    // clean and genuinely retries adding the recipient.
-    await syncEngine.forgetConversation(conversationId);
+    // An EpochConflictError means the commit lost the race, NOT that
+    // adding the recipient was rejected - SyncEngine.submitMembershipChange
+    // already caught local state up to the winning commit and persisted it
+    // before throwing this. Forgetting the conversation here would discard
+    // that valid, resynced state and force every retry to recreate a fresh
+    // local group at epoch 0 - which the server (already past epoch 0) will
+    // reject again the exact same way, forever. Leaving it alone lets a
+    // retry's getCurrentEpoch succeed immediately against the caught-up
+    // state instead of repeating this same conflict indefinitely.
+    if (!(error instanceof EpochConflictError)) {
+      // createGroup succeeded but adding the recipient didn't for some
+      // other reason (e.g. they haven't accepted the request yet) - without
+      // this, the next attempt would see a local group already exists (from
+      // the line above) and skip straight to encrypting, silently sending a
+      // message only this device could ever read. Dropping it here means
+      // the next call starts clean and genuinely retries adding the
+      // recipient.
+      await syncEngine.forgetConversation(conversationId);
+    }
     throw error;
   }
 }
