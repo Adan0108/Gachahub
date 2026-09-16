@@ -5224,6 +5224,17 @@ body {
   }
 }
 
+/* Flat override for the chat page's hero banner only - .hero-polish itself
+   (used on other pages) keeps its gradient, out of scope for this pass. */
+.hero-polish.chat-hero {
+  background: var(--panel2);
+  box-shadow: none;
+}
+
+.hero-polish.chat-hero:before {
+  content: none;
+}
+
 .chat-hero > svg {
   width: 54px;
   height: 54px;
@@ -5484,11 +5495,7 @@ body {
   flex: 0 0 auto;
   border: 1px solid color-mix(in srgb, var(--purple), white 15%);
   border-radius: 12px;
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--purple), transparent 25%),
-    color-mix(in srgb, var(--cyan), transparent 45%)
-  );
+  background: var(--purple);
   color: #fff;
   font-family: var(--font-display);
   font-weight: 800;
@@ -5570,6 +5577,27 @@ body {
 .chat-thread-actions button:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--purple), transparent 40%);
   color: var(--text);
+}
+
+.chat-thread-actions button.accept {
+  border-color: var(--purple);
+  background: var(--purple);
+  color: #fff;
+}
+
+.chat-thread-actions button.accept:hover:not(:disabled) {
+  border-color: var(--purple);
+  color: #fff;
+}
+
+.chat-thread-actions button.danger {
+  border-color: color-mix(in srgb, var(--pink), transparent 40%);
+  color: var(--pink);
+}
+
+.chat-thread-actions button.danger:hover:not(:disabled) {
+  border-color: var(--pink);
+  color: var(--pink);
 }
 
 .chat-messages {

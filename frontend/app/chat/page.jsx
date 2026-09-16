@@ -326,6 +326,7 @@ export default function ChatPage() {
                   {view === "requests" && (
                     <>
                       <button
+                        className="accept"
                         disabled={acceptRequest.isPending}
                         onClick={() => acceptRequest.mutate()}
                         type="button"
@@ -342,6 +343,7 @@ export default function ChatPage() {
                     </>
                   )}
                   <button
+                    className="danger"
                     disabled={blockConversation.isPending}
                     onClick={() => blockConversation.mutate()}
                     type="button"
