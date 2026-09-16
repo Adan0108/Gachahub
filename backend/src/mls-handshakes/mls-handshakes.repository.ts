@@ -154,12 +154,24 @@ export class MlsHandshakesRepository {
   ): Promise<void> {
     const device = await tx.chatDevice.findUnique({
       where: { id: recipientDeviceId },
-      select: { userId: true },
+      select: { userId: true, revokedAt: true },
     });
 
     if (!device) {
       throw new BadRequestException(
         `Unknown recipient device: ${recipientDeviceId}`,
+      );
+    }
+
+    // The consumption side (assertOwnActiveDevice, called from
+    // getPendingWelcomes/consumeWelcome) already blocks a revoked device
+    // from ever fetching or consuming a Welcome addressed to it - this is
+    // defense-in-depth so a Welcome row for an already-revoked device is
+    // never created in the first place (e.g. revocation landing between
+    // the key-package claim and this commit's submission).
+    if (device.revokedAt) {
+      throw new BadRequestException(
+        `Recipient device is revoked: ${recipientDeviceId}`,
       );
     }
 

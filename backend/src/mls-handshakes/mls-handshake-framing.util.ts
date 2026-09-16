@@ -18,6 +18,7 @@ import { bytesEqual } from '../common/utils/bytes';
 export function assertIsCommitForConversation(
   payload: Uint8Array,
   conversationId: string,
+  expectedEpoch: number,
 ): void {
   const decoded = decodeAndDescribe(payload);
 
@@ -37,6 +38,17 @@ export function assertIsCommitForConversation(
   if (!bytesEqual(decoded.privateMessage.groupId, expectedGroupId)) {
     throw new BadRequestException(
       'Handshake payload group_id does not match this conversation',
+    );
+  }
+
+  // The caller-declared epoch drives the epoch compare-and-set
+  // (MlsHandshakesRepository.acceptHandshake) - without cross-checking it
+  // against the epoch actually embedded in this commit's plaintext framing,
+  // a mislabeled epoch would be accepted and stored, permanently
+  // desynchronizing every other member's local MLS state at that slot.
+  if (decoded.privateMessage.epoch !== BigInt(expectedEpoch)) {
+    throw new BadRequestException(
+      'Handshake payload epoch does not match the declared epoch',
     );
   }
 }

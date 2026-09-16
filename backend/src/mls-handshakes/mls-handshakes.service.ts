@@ -41,7 +41,7 @@ export class MlsHandshakesService {
     await this.chatDevicesService.assertOwnActiveDevice(userId, dto.deviceId);
 
     const payload = new Uint8Array(Buffer.from(dto.payload, 'base64'));
-    assertIsCommitForConversation(payload, conversationId);
+    assertIsCommitForConversation(payload, conversationId, dto.epoch);
 
     const welcomes = dto.welcomes.map((item) => {
       const welcomePayload = new Uint8Array(

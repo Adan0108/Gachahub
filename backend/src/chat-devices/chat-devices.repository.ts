@@ -79,15 +79,20 @@ export class ChatDevicesRepository {
    * find-then-guarded-updateMany pattern already established for
    * MediaUpload claims (see MediaRepository/claimUploadsForAttachment).
    *
-   * Bounded retry: if a concurrent request wins the race for the row this
-   * call picked, it tries the next-oldest candidate instead of failing
-   * outright - a real but rare case (two adds targeting the same user at
-   * the same instant), not worth a raw-SQL FOR UPDATE SKIP LOCKED for v1.
+   * Retries against the next-oldest untried candidate whenever a concurrent
+   * request wins the race for the row this call picked, until the pool is
+   * genuinely exhausted (each attempt permanently excludes one id via
+   * triedIds, so this always terminates) - a fixed retry cap would let
+   * ordinary contention on a popular user's pool silently fall back to the
+   * reused LAST_RESORT package while real unclaimed SINGLE_USE packages
+   * still existed. MAX_CLAIM_ATTEMPTS is a defensive ceiling against a
+   * runaway loop, not an expected limit.
    */
   async claimSingleUseKeyPackage(userId: string, claimedByUserId: string) {
     const triedIds: string[] = [];
+    const MAX_CLAIM_ATTEMPTS = 1000;
 
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt += 1) {
       const candidate = await this.prisma.mlsKeyPackage.findFirst({
         where: {
           kind: 'SINGLE_USE',

@@ -144,14 +144,18 @@ async function decodeAndVerifyKeyPackageUnsafe(
   }
 
   // Duration alone isn't enough: a package with an 89-day span starting
-  // 300 days from now would pass that check but isn't valid yet. Once this
-  // holds, notAfter is automatically bounded too (notAfter = notBefore +
-  // duration <= (now + skew) + MAX), so no separate absolute-notAfter
-  // check is needed on top of it.
+  // 300 days from now would pass that check but isn't valid yet.
   if (notBefore > nowSeconds + BigInt(CLOCK_SKEW_TOLERANCE_SECONDS)) {
     throw new BadRequestException(
       'Key package is not valid yet (notBefore is in the future)',
     );
+  }
+
+  // Bounding the duration and rejecting a future notBefore doesn't stop a
+  // window that's already fully elapsed (e.g. notBefore 100 days ago,
+  // notAfter 70 days ago) - that needs its own check against "now".
+  if (notAfter <= nowSeconds) {
+    throw new BadRequestException('Key package has already expired');
   }
 
   return keyPackage;

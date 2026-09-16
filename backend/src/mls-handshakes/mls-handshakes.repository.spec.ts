@@ -130,6 +130,29 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
     ).rejects.toThrow(ForbiddenException);
   });
 
+  it('rejects a welcome addressed to a revoked device, even if its user is active', async () => {
+    const { prisma, tx } = buildPrismaMock();
+    tx.chatConversation.updateMany.mockResolvedValue({ count: 1 });
+    tx.chatDevice.findUnique.mockResolvedValue({
+      userId: 'user-2',
+      revokedAt: new Date(),
+    });
+
+    const repository = new MlsHandshakesRepository(prisma as any);
+
+    await expect(
+      repository.acceptHandshake({
+        ...baseParams,
+        welcomes: [
+          { recipientDeviceId: 'device-2', payload: new Uint8Array() },
+        ],
+      }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(tx.chatParticipant.findUnique).not.toHaveBeenCalled();
+    expect(tx.mlsHandshake.create).not.toHaveBeenCalled();
+  });
+
   it('accepts a welcome for a user who is an active participant', async () => {
     const { prisma, tx } = buildPrismaMock();
     tx.chatConversation.updateMany.mockResolvedValue({ count: 1 });

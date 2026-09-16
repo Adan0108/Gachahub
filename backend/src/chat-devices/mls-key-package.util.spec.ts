@@ -164,4 +164,26 @@ describe('decodeAndVerifyKeyPackage', () => {
       }),
     ).rejects.toThrow(/not valid yet/);
   });
+
+  // regression: a window that already fully elapsed before it was ever
+  // uploaded (both notBefore and notAfter in the past) used to pass, since
+  // only the duration and notBefore-in-the-future cases were checked
+  it('rejects a key package whose lifetime has already fully elapsed', async () => {
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    const notBefore = now - BigInt(100 * 24 * 60 * 60);
+    const notAfter = notBefore + BigInt(30 * 24 * 60 * 60);
+    const { payload, signaturePublicKey } = await buildTestKeyPackage(
+      'user-1',
+      'device-1',
+      { lifetime: { notBefore, notAfter } },
+    );
+
+    await expect(
+      decodeAndVerifyKeyPackage(payload, {
+        userId: 'user-1',
+        deviceId: 'device-1',
+        signaturePublicKey,
+      }),
+    ).rejects.toThrow(/already expired/);
+  });
 });
