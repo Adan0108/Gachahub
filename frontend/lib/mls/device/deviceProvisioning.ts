@@ -13,13 +13,42 @@ import type { DeviceCredential, UserId } from '../contract/types';
  */
 const INITIAL_SINGLE_USE_KEY_PACKAGE_COUNT = 10;
 
+// Keyed by store instance (not userId alone) so unrelated store instances -
+// e.g. in tests - never share an in-flight entry. Without this, several
+// hook instances (useDeviceIdentity is mounted independently from AppShell,
+// chat/page.jsx, and useSyncEngine) can all observe "not yet provisioned"
+// before the first call resolves and each provision + register a distinct
+// device with the backend, silently orphaning every loser.
+const inFlightProvisioning = new WeakMap<
+  TsMlsDeviceIdentityStore,
+  { userId: UserId; promise: Promise<DeviceCredential> }
+>();
+
 /**
  * Ensures this browser device has a provisioned, backend-registered MLS
  * identity for `userId` - provisioning a new one only when needed. Not
  * exported as a hook itself (that's useDeviceIdentity.ts) so this can be
  * unit-tested without React.
  */
-export async function ensureDeviceProvisioned(
+export function ensureDeviceProvisioned(
+  store: TsMlsDeviceIdentityStore,
+  userId: UserId,
+): Promise<DeviceCredential> {
+  const inFlight = inFlightProvisioning.get(store);
+  if (inFlight && inFlight.userId === userId) {
+    return inFlight.promise;
+  }
+
+  const promise = ensureDeviceProvisionedUnsafe(store, userId).finally(() => {
+    if (inFlightProvisioning.get(store)?.promise === promise) {
+      inFlightProvisioning.delete(store);
+    }
+  });
+  inFlightProvisioning.set(store, { userId, promise });
+  return promise;
+}
+
+async function ensureDeviceProvisionedUnsafe(
   store: TsMlsDeviceIdentityStore,
   userId: UserId,
 ): Promise<DeviceCredential> {
@@ -30,8 +59,11 @@ export async function ensureDeviceProvisioned(
     }
     // A different user signed into this browser profile - device identity
     // is per-user (client.ts: "one instance per logged-in user per browser
-    // profile"), so the old identity can't be reused for the new one.
-    await store.revoke();
+    // profile"), so the old identity can't be reused for the new one. Must
+    // go through the backend-then-local revoke, not a local-only wipe -
+    // otherwise the old device stays ACTIVE and claimable on the backend
+    // forever, with nothing left in this browser profile able to revoke it.
+    await revokeDeviceEverywhere(store);
   }
 
   return provisionAndRegister(store, userId);

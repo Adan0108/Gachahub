@@ -42,10 +42,12 @@ export function useDeviceIdentity(): UseDeviceIdentityResult {
     if (!isAuthenticated || !user?.id) {
       return;
     }
-    // Guards against duplicate provisioning attempts for the same user
-    // (e.g. a second render before the first ensureDeviceProvisioned call
-    // resolves) - not a lock against a second browser tab doing the same
-    // thing concurrently, which the underlying storage already handles.
+    // Avoids an unnecessary re-render-triggered call for the same user on
+    // this hook instance. ensureDeviceProvisioned itself also dedupes
+    // concurrent calls sharing the same store (deviceProvisioning.ts) -
+    // needed because this hook is mounted independently from several
+    // places at once (AppShell, chat/page.jsx, useSyncEngine), so this ref
+    // alone can't prevent every instance from calling it simultaneously.
     if (provisioningUserIdRef.current === user.id) {
       return;
     }

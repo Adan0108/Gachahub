@@ -177,6 +177,15 @@ export class SyncEngine {
    * rather than silently discarded. Not device-conversation-scoped like the
    * other methods, since a device doesn't know which conversationIds it's
    * being welcomed into until it asks.
+   *
+   * A Welcome can be re-delivered for a conversation this device already
+   * joined (e.g. the join succeeded but the consumeMlsWelcome call that
+   * follows it failed - a crash, a dropped connection - leaving the
+   * Welcome pending for the next call, by which point this device may have
+   * advanced the group well past epoch 0). Re-joining unconditionally would
+   * silently rewind/clobber that already-advanced session, so an existing
+   * session for the conversation is left untouched and the stale Welcome is
+   * just consumed without acting on it.
    */
   async processPendingWelcomes(): Promise<{
     joined: ConversationId[];
@@ -190,12 +199,14 @@ export class SyncEngine {
       try {
         // eslint-disable-next-line no-await-in-loop -- each Welcome is joined and consumed independently; no benefit to parallelizing sequential backend calls
         await this.runExclusive(welcome.conversationId, async () => {
-          const session = await this.factory.joinFromWelcome(
-            welcome.conversationId,
-            base64ToBytes(welcome.payload),
-          );
-          this.sessions.set(welcome.conversationId, session);
-          await this.persistSession(welcome.conversationId, session);
+          if (!(await this.hasSession(welcome.conversationId))) {
+            const session = await this.factory.joinFromWelcome(
+              welcome.conversationId,
+              base64ToBytes(welcome.payload),
+            );
+            this.sessions.set(welcome.conversationId, session);
+            await this.persistSession(welcome.conversationId, session);
+          }
           await api.consumeMlsWelcome(this.deviceId, welcome.id);
         });
         joined.push(welcome.conversationId);
@@ -205,6 +216,14 @@ export class SyncEngine {
     }
 
     return { joined, failures };
+  }
+
+  /** Whether this device already has a session (cached or persisted) for `conversationId` - used to avoid rejoining a stale/re-delivered Welcome over an already-advanced session. */
+  private async hasSession(conversationId: ConversationId): Promise<boolean> {
+    if (this.sessions.has(conversationId)) {
+      return true;
+    }
+    return (await this.storage.load(conversationId)) !== undefined;
   }
 
   /** The conversation's current local epoch - throws GroupStateUnavailableError if this device has no session for it. */

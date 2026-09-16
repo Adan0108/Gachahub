@@ -52,6 +52,28 @@ describe('ensureDeviceProvisioned', () => {
     expect(second.userId).toBe('user-2');
     expect(second.deviceId).not.toBe(first.deviceId);
     expect(api.registerChatDevice).toHaveBeenCalledTimes(1);
+    // regression: this used to wipe the old device's local state without
+    // ever revoking it on the backend, leaving it permanently ACTIVE there
+    expect(api.revokeChatDevice).toHaveBeenCalledWith(first.deviceId);
+  });
+
+  // regression: several hook instances mounting at once (AppShell,
+  // chat/page.jsx, useSyncEngine) used to each independently provision a
+  // distinct device for the same user, since there was no shared in-flight
+  // guard - only whichever one persisted last "won" locally.
+  it('dedupes concurrent calls for the same store and user into a single provisioning', async () => {
+    const { api } = await import('../../api');
+    const store = new TsMlsDeviceIdentityStore();
+
+    const [first, second, third] = await Promise.all([
+      ensureDeviceProvisioned(store, 'user-1'),
+      ensureDeviceProvisioned(store, 'user-1'),
+      ensureDeviceProvisioned(store, 'user-1'),
+    ]);
+
+    expect(second).toEqual(first);
+    expect(third).toEqual(first);
+    expect(api.registerChatDevice).toHaveBeenCalledTimes(1);
   });
 });
 

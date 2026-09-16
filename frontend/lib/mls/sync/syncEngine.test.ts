@@ -262,6 +262,42 @@ describe('SyncEngine', () => {
       await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(1);
     });
 
+    // regression: a Welcome can be re-delivered for a conversation this
+    // device already joined and advanced past epoch 0 (e.g. the earlier
+    // join succeeded but consumeMlsWelcome then failed, leaving the
+    // Welcome pending) - rejoining it used to silently rewind the session.
+    it('does not rejoin (rewind) an already-advanced session when a stale Welcome for the same conversation is re-delivered', async () => {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      const bob = await setUpDevice('user-bob');
+
+      const bobSession = await bob.engine.createGroup('conv-1');
+      await bobSession.stageCommit({
+        added: [await offerFor(alice)],
+        removed: [],
+      });
+      await bobSession.commitAccepted();
+      await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(1);
+
+      vi.mocked(api.getMlsPendingWelcomes).mockResolvedValue([
+        {
+          id: 'welcome-stale',
+          conversationId: 'conv-1',
+          // Never actually decoded - hasSession() must short-circuit
+          // before joinFromWelcome is ever attempted on this garbage.
+          payload: bytesToBase64(new TextEncoder().encode('stale-welcome')),
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+
+      const result = await bob.engine.processPendingWelcomes();
+
+      expect(result.joined).toEqual(['conv-1']);
+      expect(result.failures).toEqual([]);
+      expect(api.consumeMlsWelcome).toHaveBeenCalledWith(bob.deviceId, 'welcome-stale');
+      await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(1);
+    });
+
     it('records a failure and does not consume a Welcome that fails to join, without aborting the batch', async () => {
       const { api } = await import('../../api');
       const bob = await setUpDevice('user-bob');
