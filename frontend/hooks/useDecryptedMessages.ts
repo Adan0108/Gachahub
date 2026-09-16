@@ -45,12 +45,13 @@ export function useDecryptedMessages(
     let cancelled = false;
 
     void (async () => {
-      try {
-        await syncEngine.syncCommits(conversationId);
-      } catch (error) {
-        console.warn('Could not sync MLS commits before decrypting messages', error);
-      }
-
+      // Cache hits - including a message this device just sent and cached
+      // at send time - never needed a network round trip to resolve at
+      // all. Checking them all up front, before syncCommits below, means
+      // the sender's own message (and anything already decrypted before)
+      // shows up immediately instead of flashing "Decrypting..." while
+      // waiting on a sync that has nothing to do with it.
+      const pendingIncoming: ChatMessageRow[] = [];
       await Promise.all(
         messages.map(async (message) => {
           const cached = await plaintextStore.get(message.id);
@@ -75,6 +76,22 @@ export function useDecryptedMessages(
             return;
           }
 
+          pendingIncoming.push(message);
+        }),
+      );
+
+      if (pendingIncoming.length === 0 || cancelled) {
+        return;
+      }
+
+      try {
+        await syncEngine.syncCommits(conversationId);
+      } catch (error) {
+        console.warn('Could not sync MLS commits before decrypting messages', error);
+      }
+
+      await Promise.all(
+        pendingIncoming.map(async (message) => {
           try {
             const result = await syncEngine.processIncoming(
               conversationId,
