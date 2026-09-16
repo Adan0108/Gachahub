@@ -141,20 +141,48 @@ export default function ChatPage() {
   const decryptedMessages = useDecryptedMessages(activeId, decryptableMessages, user?.id);
   const messagesEndRef = useRef(null);
   const [draft, setDraft] = useState("");
+  // Sent messages waiting on the network - shown immediately as their own
+  // bubble instead of leaving the composer stuck for however long the send
+  // actually takes (MLS encrypt + a real round trip). Keyed by a client-side
+  // id since the server hasn't assigned one yet.
+  const [pendingMessages, setPendingMessages] = useState([]);
   const sendMessage = useMutation({
-    mutationFn: () =>
+    mutationFn: ({ text }) =>
       sendEncryptedChatMessage(
         syncEngine,
         deviceCredential.deviceId,
         activeId,
         peer?.id,
-        draft.trim(),
+        text,
       ),
-    onSuccess: async () => {
-      setDraft("");
-      await queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(activeId) });
+    onSuccess: (response, variables) => {
+      setPendingMessages((prev) => prev.filter((pending) => pending.clientId !== variables.clientId));
+      // Merge the sent message straight into the cache instead of
+      // invalidating - a refetch is a second full round trip the sender
+      // gains nothing from, since the plaintext is already cached locally
+      // from the send itself (see useDecryptedMessages).
+      queryClient.setQueryData(queryKeys.chatMessages(activeId), (old) => {
+        if (!old || old.items.some((item) => item.id === response.message.id)) {
+          return old;
+        }
+        return { ...old, items: [...old.items, response.message] };
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
+    },
+    onError: (error, variables) => {
+      setPendingMessages((prev) =>
+        prev.map((pending) =>
+          pending.clientId === variables.clientId ? { ...pending, failed: true } : pending,
+        ),
+      );
     },
   });
+  const retryPendingMessage = (pending) => {
+    setPendingMessages((prev) =>
+      prev.map((item) => (item.clientId === pending.clientId ? { ...item, failed: false } : item)),
+    );
+    sendMessage.mutate({ text: pending.text, clientId: pending.clientId });
+  };
 
   const [isComposingNewChat, setIsComposingNewChat] = useState(false);
   const [newChatRecipientId, setNewChatRecipientId] = useState("");
@@ -441,12 +469,39 @@ export default function ChatPage() {
                     </div>
                   );
                 })}
-                {!messages.isLoading && !messages.isError && !messages.data?.items?.length && (
-                  <div className="chat-empty-thread">
-                    <FiMessageCircle />
-                    <b>No messages in this conversation</b>
-                  </div>
-                )}
+                {pendingMessages
+                  .filter((pending) => pending.conversationId === activeId)
+                  .map((pending) => (
+                    <div className="chat-message-row mine" key={pending.clientId}>
+                      <article className={`chat-message mine pending ${pending.failed ? "failed" : ""}`}>
+                        <div>
+                          <p>{pending.text}</p>
+                          <small>
+                            {pending.failed ? (
+                              <button
+                                className="chat-message-retry"
+                                onClick={() => retryPendingMessage(pending)}
+                                type="button"
+                              >
+                                Failed to send - tap to retry
+                              </button>
+                            ) : (
+                              "Sending..."
+                            )}
+                          </small>
+                        </div>
+                      </article>
+                    </div>
+                  ))}
+                {!messages.isLoading &&
+                  !messages.isError &&
+                  !messages.data?.items?.length &&
+                  pendingMessages.length === 0 && (
+                    <div className="chat-empty-thread">
+                      <FiMessageCircle />
+                      <b>No messages in this conversation</b>
+                    </div>
+                  )}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -455,21 +510,26 @@ export default function ChatPage() {
                   className="chat-composer"
                   onSubmit={(event) => {
                     event.preventDefault();
-                    if (!draft.trim() || sendMessage.isPending) return;
-                    sendMessage.mutate();
+                    const text = draft.trim();
+                    if (!text) return;
+                    const clientId = crypto.randomUUID();
+                    // Show the bubble and free up the input immediately -
+                    // the actual send (MLS encrypt + network) keeps running
+                    // in the background and reconciles onSuccess/onError.
+                    setPendingMessages((prev) => [
+                      ...prev,
+                      { clientId, text, conversationId: activeId },
+                    ]);
+                    setDraft("");
+                    sendMessage.mutate({ text, clientId });
                   }}
                 >
                   <input
-                    disabled={sendMessage.isPending}
                     onChange={(event) => setDraft(event.target.value)}
                     placeholder="Send an encrypted message..."
                     value={draft}
                   />
-                  <button
-                    aria-label="Send"
-                    disabled={!draft.trim() || sendMessage.isPending}
-                    type="submit"
-                  >
+                  <button aria-label="Send" disabled={!draft.trim()} type="submit">
                     <FiSend />
                   </button>
                 </form>

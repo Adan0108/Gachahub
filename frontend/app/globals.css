@@ -5827,6 +5827,26 @@ body {
   font-size: 10px;
 }
 
+.chat-message.pending {
+  opacity: 0.6;
+}
+
+.chat-message.failed {
+  opacity: 1;
+  border-color: var(--danger, #e5484d);
+}
+
+.chat-message-retry {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 10px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .chat-system-message {
   align-self: center;
   padding: 4px 12px;
