@@ -159,13 +159,26 @@ export class SyncEngine {
     });
   }
 
-  /** Encrypts a plaintext envelope for the current epoch and persists the advanced ratchet state immediately (key reuse on a crash-before-persist would be a real forward-secrecy violation, not just a lost message). */
-  async encryptMessage(conversationId: ConversationId, envelope: PlaintextEnvelope): Promise<Uint8Array> {
+  /**
+   * Encrypts a plaintext envelope for the current epoch and persists the
+   * advanced ratchet state immediately (key reuse on a crash-before-persist
+   * would be a real forward-secrecy violation, not just a lost message).
+   * Returns the epoch it was encrypted under, read from this same locked
+   * session right after encrypt() rather than via a separate
+   * getCurrentEpoch() call afterward - the lock releases between two
+   * separate calls, so a commit processed in that gap could advance the
+   * epoch before the second call reads it, mislabeling which epoch this
+   * message actually went out under.
+   */
+  async encryptMessage(
+    conversationId: ConversationId,
+    envelope: PlaintextEnvelope,
+  ): Promise<{ wireBytes: Uint8Array; epoch: Epoch }> {
     return this.runExclusive(conversationId, async () => {
       const session = await this.getSession(conversationId);
       const wireBytes = await session.encrypt(envelope);
       await this.persistSession(conversationId, session);
-      return wireBytes;
+      return { wireBytes, epoch: await session.currentEpoch() };
     });
   }
 
@@ -198,18 +211,26 @@ export class SyncEngine {
     for (const welcome of pending) {
       try {
         // eslint-disable-next-line no-await-in-loop -- each Welcome is joined and consumed independently; no benefit to parallelizing sequential backend calls
-        await this.runExclusive(welcome.conversationId, async () => {
-          if (!(await this.hasSession(welcome.conversationId))) {
-            const session = await this.factory.joinFromWelcome(
-              welcome.conversationId,
-              base64ToBytes(welcome.payload),
-            );
-            this.sessions.set(welcome.conversationId, session);
-            await this.persistSession(welcome.conversationId, session);
+        const didJoin = await this.runExclusive(welcome.conversationId, async () => {
+          if (await this.hasSession(welcome.conversationId)) {
+            // Stale/re-delivered Welcome for a conversation already joined
+            // - still consume it so it stops being handed back, but this
+            // isn't a new join.
+            await api.consumeMlsWelcome(this.deviceId, welcome.id);
+            return false;
           }
+          const session = await this.factory.joinFromWelcome(
+            welcome.conversationId,
+            base64ToBytes(welcome.payload),
+          );
+          this.sessions.set(welcome.conversationId, session);
+          await this.persistSession(welcome.conversationId, session);
           await api.consumeMlsWelcome(this.deviceId, welcome.id);
+          return true;
         });
-        joined.push(welcome.conversationId);
+        if (didJoin) {
+          joined.push(welcome.conversationId);
+        }
       } catch (error) {
         failures.push({ welcomeId: welcome.id, error });
       }
@@ -226,10 +247,22 @@ export class SyncEngine {
     return (await this.storage.load(conversationId)) !== undefined;
   }
 
-  /** The conversation's current local epoch - throws GroupStateUnavailableError if this device has no session for it. */
+  /**
+   * The conversation's current local epoch - throws
+   * GroupStateUnavailableError if this device has no session for it.
+   * Routed through runExclusive even though it's a pure read: getSession's
+   * cache-miss path awaits storage.load + factory.restore before caching
+   * the result, and an unlocked caller landing in that gap alongside a
+   * locked operation's own first getSession call would each independently
+   * restore and cache their own GroupSession instance from the same
+   * bytes - whichever's persistSession runs last then silently overwrites
+   * the other's advanced state in storage with a stale snapshot.
+   */
   async getCurrentEpoch(conversationId: ConversationId): Promise<Epoch> {
-    const session = await this.getSession(conversationId);
-    return session.currentEpoch();
+    return this.runExclusive(conversationId, async () => {
+      const session = await this.getSession(conversationId);
+      return session.currentEpoch();
+    });
   }
 
   /**
@@ -246,24 +279,44 @@ export class SyncEngine {
    * business surfacing GroupStateUnavailableError itself.
    */
   async isAtCurrentEpoch(conversationId: ConversationId, wireBytes: Uint8Array): Promise<boolean> {
-    let session: GroupSession;
-    try {
-      session = await this.getSession(conversationId);
-    } catch {
-      return false;
-    }
-    const [current, incoming] = await Promise.all([
-      session.currentEpoch(),
-      session.peekEpoch(wireBytes),
-    ]);
-    return incoming !== undefined && incoming === current;
+    // Same reasoning as getCurrentEpoch above - getSession's cache-miss
+    // path isn't safe to race against a locked operation's own.
+    return this.runExclusive(conversationId, async () => {
+      let session: GroupSession;
+      try {
+        session = await this.getSession(conversationId);
+      } catch {
+        return false;
+      }
+      const [current, incoming] = await Promise.all([
+        session.currentEpoch(),
+        session.peekEpoch(wireBytes),
+      ]);
+      return incoming !== undefined && incoming === current;
+    });
   }
 
-  /** Drops a conversation's cached and persisted session - e.g. after leaving or deleting it. */
+  /**
+   * Drops a conversation's cached and persisted session - e.g. after
+   * leaving or deleting it. Routed through runExclusive so it waits its
+   * turn behind whatever's already in flight for this conversationId
+   * instead of clearing state out from under it - deleting the lock map
+   * entry directly used to let a call arriving right after this one start
+   * a brand-new chain from scratch, running concurrently with whatever
+   * this call's own task was still doing instead of waiting for it.
+   * Deliberately does NOT also delete the `locks` map entry itself once
+   * done: a later runExclusive call for this same conversationId may
+   * already be queued behind this one by the time this task runs, and
+   * removing the entry here could delete that later call's own bookkeeping
+   * instead of this one's. `locks` growing by one entry per
+   * conversationId ever touched is an accepted, purely cosmetic trade for
+   * not risking that.
+   */
   async forgetConversation(conversationId: ConversationId): Promise<void> {
-    this.sessions.delete(conversationId);
-    this.locks.delete(conversationId);
-    await this.storage.delete(conversationId);
+    return this.runExclusive(conversationId, async () => {
+      this.sessions.delete(conversationId);
+      await this.storage.delete(conversationId);
+    });
   }
 
   private async applyIncoming(

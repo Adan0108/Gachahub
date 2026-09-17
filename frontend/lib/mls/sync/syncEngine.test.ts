@@ -292,7 +292,9 @@ describe('SyncEngine', () => {
 
       const result = await bob.engine.processPendingWelcomes();
 
-      expect(result.joined).toEqual(['conv-1']);
+      // Not a new join - the session already existed before this call, so
+      // this stale Welcome is only ever consumed, never counted as joined.
+      expect(result.joined).toEqual([]);
       expect(result.failures).toEqual([]);
       expect(api.consumeMlsWelcome).toHaveBeenCalledWith(bob.deviceId, 'welcome-stale');
       await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(1);
@@ -373,7 +375,7 @@ describe('SyncEngine', () => {
       // If these ran concurrently against the same mutable ClientState,
       // ts-mls would either throw or silently corrupt the ratchet - getting
       // 3 distinct, valid ciphertexts back is the real assertion here.
-      expect(new Set(results.map((r) => bytesToBase64(r))).size).toBe(3);
+      expect(new Set(results.map((r) => bytesToBase64(r.wireBytes))).size).toBe(3);
       await expect(alice.engine.getCurrentEpoch('conv-1')).resolves.toBe(0);
     });
   });

@@ -28,8 +28,7 @@ export async function sendEncryptedChatMessage(
   await ensureConversationGroup(syncEngine, conversationId, recipientUserId);
 
   const envelope = { v: 1 as const, type: 'text' as const, body: text };
-  const wireBytes = await syncEngine.encryptMessage(conversationId, envelope);
-  const epoch = await syncEngine.getCurrentEpoch(conversationId);
+  const { wireBytes, epoch } = await syncEngine.encryptMessage(conversationId, envelope);
 
   const response = await api.sendChatMessage(conversationId, {
     ciphertext: bytesToBase64(wireBytes),
