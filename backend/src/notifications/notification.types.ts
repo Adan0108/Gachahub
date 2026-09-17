@@ -1,14 +1,14 @@
-export enum NotificationType {
-  POST_LIKED = 'POST_LIKED',
-  POST_COMMENTED = 'POST_COMMENTED',
-  COMMENT_REPLIED = 'COMMENT_REPLIED',
+import {
+  NotificationEntityType,
+  NotificationType,
+} from '../generated/prisma/client';
 
-  USER_FOLLOWED = 'USER_FOLLOWED',
-  USER_MENTIONED = 'USER_MENTIONED',
+export type CreateNotificationInput = {
+  recipientId: string;
+  actorId?: string | null;
 
-  MESSAGE_RECEIVED = 'MESSAGE_RECEIVED',
-  MESSAGE_REPLIED = 'MESSAGE_REPLIED',
+  type: NotificationType;
 
-  GROUP_ADDED = 'GROUP_ADDED',
-  GROUP_INVITE_PENDING = 'GROUP_INVITE_PENDING',
-}
+  entityType: NotificationEntityType;
+  entityId: string;
+};

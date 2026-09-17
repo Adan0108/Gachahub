@@ -32,6 +32,15 @@ export class NotificationRepository {
       where: {
         recipientId,
       },
+      include: {
+        actor: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+          },
+        },
+      },
       orderBy: [
         {
           createdAt: 'desc',
