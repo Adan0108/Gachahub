@@ -1,6 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
-import { buildTestCommitWithWelcome } from './test-support/build-test-commit';
 import {
+  buildTestApplicationMessage,
+  buildTestCommitWithWelcome,
+} from './test-support/build-test-commit';
+import {
+  assertIsApplicationMessage,
   assertIsCommitForConversation,
   assertIsWelcomeMessage,
 } from './mls-handshake-framing.util';
@@ -79,5 +83,37 @@ describe('assertIsWelcomeMessage', () => {
     const garbage = new TextEncoder().encode('not an mls message');
 
     expect(() => assertIsWelcomeMessage(garbage)).toThrow(BadRequestException);
+  });
+});
+
+describe('assertIsApplicationMessage', () => {
+  it('accepts a real application message', async () => {
+    const applicationPayload = await buildTestApplicationMessage('conv-1');
+
+    expect(() => assertIsApplicationMessage(applicationPayload)).not.toThrow();
+  });
+
+  it('rejects a commit submitted as if it were a chat message', async () => {
+    const { commitPayload } = await buildTestCommitWithWelcome('conv-1');
+
+    expect(() => assertIsApplicationMessage(commitPayload)).toThrow(
+      'must have contentType "application"',
+    );
+  });
+
+  it('rejects a Welcome submitted as if it were a chat message', async () => {
+    const { welcomePayload } = await buildTestCommitWithWelcome('conv-1');
+
+    expect(() => assertIsApplicationMessage(welcomePayload)).toThrow(
+      'must be an MLS private message',
+    );
+  });
+
+  it('rejects malformed bytes as a BadRequestException', () => {
+    const garbage = new TextEncoder().encode('not an mls message');
+
+    expect(() => assertIsApplicationMessage(garbage)).toThrow(
+      BadRequestException,
+    );
   });
 });

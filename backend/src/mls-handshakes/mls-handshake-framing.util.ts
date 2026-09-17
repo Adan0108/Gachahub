@@ -53,6 +53,33 @@ export function assertIsCommitForConversation(
   }
 }
 
+/**
+ * Same class of check as assertIsCommitForConversation, for the one place
+ * that argument doesn't cover: an application (chat) message's ciphertext,
+ * which is currently accepted with no shape validation at all - only a
+ * length cap. Catches a client mislabeling a commit/proposal as a chat
+ * message, or sending non-MLS bytes outright. Deliberately skips the
+ * group_id cross-check assertIsCommitForConversation does: a brand-new
+ * conversation's first message is prepared before that conversation's id
+ * even exists, so there's nothing yet to cross-check it against - same
+ * reason assertIsWelcomeMessage above doesn't do it either.
+ */
+export function assertIsApplicationMessage(payload: Uint8Array): void {
+  const decoded = decodeAndDescribe(payload);
+
+  if (decoded.wireformat !== 'mls_private_message') {
+    throw new BadRequestException(
+      'Message ciphertext must be an MLS private message',
+    );
+  }
+
+  if (decoded.privateMessage.contentType !== 'application') {
+    throw new BadRequestException(
+      'Message ciphertext must have contentType "application"',
+    );
+  }
+}
+
 export function assertIsWelcomeMessage(payload: Uint8Array): void {
   const decoded = decodeAndDescribe(payload);
 

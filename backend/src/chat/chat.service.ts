@@ -91,13 +91,17 @@ export class ChatService {
       dto.recipientUserId,
     );
 
-    // Four independent reads - none needs any of the others' results, just
+    // Three independent reads - none needs any of the others' results, just
     // senderId/recipientUserId/clientMessageId which are already known -
-    // so they run concurrently instead of stacking into four round trips
-    // before any actual validation can happen.
-    const [recipient, , existingPair, existingMessage] = await Promise.all([
+    // so they run concurrently instead of stacking into three round trips
+    // before any actual validation can happen. The block check stays a
+    // separate, sequential step after the recipient-exists check: batching
+    // it in here too would let Promise.all surface a "you're blocked"
+    // rejection before a "recipient not found" one even gets checked,
+    // silently reordering which error a caller sees for a
+    // doesn't-exist-and-blocked-me combination.
+    const [recipient, existingPair, existingMessage] = await Promise.all([
       this.chatRepository.findUserById(dto.recipientUserId),
-      this.assertSenderHasNotBlockedRecipient(senderId, dto.recipientUserId),
       this.chatRepository.findDirectPair(userIdA, userIdB),
       this.chatRepository.findMessageBySenderClientMessageId(
         senderId,
@@ -108,6 +112,11 @@ export class ChatService {
     if (!recipient || recipient.status !== 'ACTIVE') {
       throw new NotFoundException('Recipient not found');
     }
+
+    await this.assertSenderHasNotBlockedRecipient(
+      senderId,
+      dto.recipientUserId,
+    );
 
     if (existingMessage) {
       if (existingMessage.conversationId !== existingPair?.conversation.id) {

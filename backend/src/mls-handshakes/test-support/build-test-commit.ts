@@ -1,4 +1,5 @@
 import {
+  createApplicationMessage,
   createCommit,
   createGroup,
   defaultCapabilities,
@@ -89,4 +90,36 @@ export async function buildTestCommitWithWelcome(
       version: 'mls10',
     }),
   };
+}
+
+/**
+ * Builds a real, validly-encrypted MLS application message for
+ * `conversationId` - used to exercise assertIsApplicationMessage against
+ * real wire bytes instead of a hand-rolled fixture.
+ */
+export async function buildTestApplicationMessage(
+  conversationId: string,
+): Promise<Uint8Array> {
+  const impl = await getImpl();
+  const sender = await generateTestMember('sender');
+
+  const state = await createGroup(
+    new TextEncoder().encode(conversationId),
+    sender.publicPackage,
+    sender.privatePackage,
+    [],
+    impl,
+  );
+
+  const result = await createApplicationMessage(
+    state,
+    new TextEncoder().encode('hello'),
+    impl,
+  );
+
+  return encodeMlsMessage({
+    privateMessage: result.privateMessage,
+    wireformat: 'mls_private_message',
+    version: 'mls10',
+  });
 }

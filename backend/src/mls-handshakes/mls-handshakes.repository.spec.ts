@@ -12,8 +12,8 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
   function buildTx() {
     return {
       chatConversation: { updateMany: jest.fn() },
-      chatDevice: { findUnique: jest.fn() },
-      chatParticipant: { findUnique: jest.fn() },
+      chatDevice: { findMany: jest.fn().mockResolvedValue([]) },
+      chatParticipant: { findMany: jest.fn().mockResolvedValue([]) },
       mlsHandshake: { create: jest.fn() },
       mlsWelcome: { createMany: jest.fn() },
     };
@@ -58,7 +58,7 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
   it('rejects a welcome addressed to an unknown device, without creating a handshake', async () => {
     const { prisma, tx } = buildPrismaMock();
     tx.chatConversation.updateMany.mockResolvedValue({ count: 1 });
-    tx.chatDevice.findUnique.mockResolvedValue(null);
+    tx.chatDevice.findMany.mockResolvedValue([]);
 
     const repository = new MlsHandshakesRepository(prisma as any);
 
@@ -77,8 +77,10 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
   it('rejects a welcome for a user with no participant row at all', async () => {
     const { prisma, tx } = buildPrismaMock();
     tx.chatConversation.updateMany.mockResolvedValue({ count: 1 });
-    tx.chatDevice.findUnique.mockResolvedValue({ userId: 'user-2' });
-    tx.chatParticipant.findUnique.mockResolvedValue(null);
+    tx.chatDevice.findMany.mockResolvedValue([
+      { id: 'device-2', userId: 'user-2', revokedAt: null },
+    ]);
+    tx.chatParticipant.findMany.mockResolvedValue([]);
 
     const repository = new MlsHandshakesRepository(prisma as any);
 
@@ -97,8 +99,12 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
   it('rejects a welcome for a user who is only PENDING, not yet ACTIVE', async () => {
     const { prisma, tx } = buildPrismaMock();
     tx.chatConversation.updateMany.mockResolvedValue({ count: 1 });
-    tx.chatDevice.findUnique.mockResolvedValue({ userId: 'user-2' });
-    tx.chatParticipant.findUnique.mockResolvedValue({ state: 'PENDING' });
+    tx.chatDevice.findMany.mockResolvedValue([
+      { id: 'device-2', userId: 'user-2', revokedAt: null },
+    ]);
+    tx.chatParticipant.findMany.mockResolvedValue([
+      { userId: 'user-2', state: 'PENDING' },
+    ]);
 
     const repository = new MlsHandshakesRepository(prisma as any);
 
@@ -115,8 +121,12 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
   it('rejects a welcome for a user who has blocked/declined/left the conversation', async () => {
     const { prisma, tx } = buildPrismaMock();
     tx.chatConversation.updateMany.mockResolvedValue({ count: 1 });
-    tx.chatDevice.findUnique.mockResolvedValue({ userId: 'user-2' });
-    tx.chatParticipant.findUnique.mockResolvedValue({ state: 'BLOCKED' });
+    tx.chatDevice.findMany.mockResolvedValue([
+      { id: 'device-2', userId: 'user-2', revokedAt: null },
+    ]);
+    tx.chatParticipant.findMany.mockResolvedValue([
+      { userId: 'user-2', state: 'BLOCKED' },
+    ]);
 
     const repository = new MlsHandshakesRepository(prisma as any);
 
@@ -133,10 +143,9 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
   it('rejects a welcome addressed to a revoked device, even if its user is active', async () => {
     const { prisma, tx } = buildPrismaMock();
     tx.chatConversation.updateMany.mockResolvedValue({ count: 1 });
-    tx.chatDevice.findUnique.mockResolvedValue({
-      userId: 'user-2',
-      revokedAt: new Date(),
-    });
+    tx.chatDevice.findMany.mockResolvedValue([
+      { id: 'device-2', userId: 'user-2', revokedAt: new Date() },
+    ]);
 
     const repository = new MlsHandshakesRepository(prisma as any);
 
@@ -149,15 +158,18 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
       }),
     ).rejects.toThrow(BadRequestException);
 
-    expect(tx.chatParticipant.findUnique).not.toHaveBeenCalled();
     expect(tx.mlsHandshake.create).not.toHaveBeenCalled();
   });
 
   it('accepts a welcome for a user who is an active participant', async () => {
     const { prisma, tx } = buildPrismaMock();
     tx.chatConversation.updateMany.mockResolvedValue({ count: 1 });
-    tx.chatDevice.findUnique.mockResolvedValue({ userId: 'user-2' });
-    tx.chatParticipant.findUnique.mockResolvedValue({ state: 'ACTIVE' });
+    tx.chatDevice.findMany.mockResolvedValue([
+      { id: 'device-2', userId: 'user-2', revokedAt: null },
+    ]);
+    tx.chatParticipant.findMany.mockResolvedValue([
+      { userId: 'user-2', state: 'ACTIVE' },
+    ]);
     tx.mlsHandshake.create.mockResolvedValue({
       id: 'hs-1',
       ...baseParams,
