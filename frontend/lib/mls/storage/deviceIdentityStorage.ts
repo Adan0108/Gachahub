@@ -5,9 +5,14 @@ import { openMlsDatabase, encryptAndStore, loadAndDecrypt, wipeAllLocalMlsSecret
 /**
  * One device's key package, kept locally so joinFromWelcome can match an
  * incoming Welcome back to the private half generateKeyPackages() created.
+ * `kind` mirrors the backend's MlsKeyPackageKind: a SINGLE_USE package is
+ * removed once it's used to join a group (see
+ * TsMlsDeviceIdentityStore.consumeKeyPackage); LAST_RESORT is kept
+ * indefinitely since it's meant to satisfy more than one Welcome.
  */
 export interface StoredKeyPackage {
   id: string;
+  kind: 'SINGLE_USE' | 'LAST_RESORT';
   publicPackage: KeyPackage;
   privatePackage: PrivateKeyPackage;
 }

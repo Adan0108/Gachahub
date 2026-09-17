@@ -79,10 +79,11 @@ async function provisionAndRegister(
   userId: UserId,
 ): Promise<DeviceCredential> {
   const credential = await store.provision(userId);
-  const keyPackages = await store.generateKeyPackages(
-    INITIAL_SINGLE_USE_KEY_PACKAGE_COUNT + 1,
+  const [lastResortKeyPackage] = await store.generateKeyPackages(1, 'LAST_RESORT');
+  const singleUseKeyPackages = await store.generateKeyPackages(
+    INITIAL_SINGLE_USE_KEY_PACKAGE_COUNT,
+    'SINGLE_USE',
   );
-  const [lastResortKeyPackage, ...singleUseKeyPackages] = keyPackages;
   if (!lastResortKeyPackage) {
     throw new Error('generateKeyPackages returned no key packages');
   }

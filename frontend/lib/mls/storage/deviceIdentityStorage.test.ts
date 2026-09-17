@@ -24,6 +24,7 @@ function samplePersistedIdentity(): PersistedDeviceIdentity {
     keyPackages: [
       {
         id: 'kp-0',
+        kind: 'SINGLE_USE',
         // Real StoredKeyPackage entries nest ts-mls's KeyPackage/
         // PrivateKeyPackage shapes - a plain stand-in with a bigint field is
         // enough to exercise the Uint8Array/bigint round-trip without

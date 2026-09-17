@@ -86,12 +86,48 @@ function encodeIdentity(userId: UserId, deviceId: DeviceId): Uint8Array {
   return new TextEncoder().encode(JSON.stringify({ userId, deviceId }));
 }
 
-function decodeIdentity(identity: Uint8Array): { userId: UserId; deviceId: DeviceId } {
-  return JSON.parse(new TextDecoder().decode(identity));
+/**
+ * Parses a ratchet-tree leaf's credential identity - bytes that arrived
+ * over the wire (via a Welcome or Commit from the server, which never
+ * inspects Welcome contents) rather than something this device produced
+ * itself. Returns undefined instead of throwing for anything malformed, so
+ * one bad credential can be rejected as data (a normal ProcessResult) by
+ * the caller instead of crashing out of process() with a raw SyntaxError -
+ * which would otherwise repeat identically on every retry, permanently
+ * wedging that conversation's sync.
+ */
+function decodeIdentity(identity: Uint8Array): { userId: UserId; deviceId: DeviceId } | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(identity));
+  } catch {
+    return undefined;
+  }
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    typeof (parsed as { userId?: unknown }).userId !== 'string' ||
+    typeof (parsed as { deviceId?: unknown }).deviceId !== 'string'
+  ) {
+    return undefined;
+  }
+  return parsed as { userId: UserId; deviceId: DeviceId };
 }
 
 function encodeConversationId(conversationId: ConversationId): Uint8Array {
   return new TextEncoder().encode(conversationId);
+}
+
+const PLAINTEXT_ENVELOPE_TYPES = new Set(['text', 'edit', 'delete', 'reaction']);
+
+/** Guards against a malformed or version-mismatched decrypted payload rather than trusting contract/types.ts's shape via a bare cast. */
+function isPlaintextEnvelope(value: unknown): value is PlaintextEnvelope {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { v?: unknown }).v === 1 &&
+    PLAINTEXT_ENVELOPE_TYPES.has((value as { type?: unknown }).type as string)
+  );
 }
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
@@ -146,7 +182,7 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
       this.signatureKeyPair,
       impl,
     );
-    this.storeKeyPackage(kp.publicPackage, kp.privatePackage);
+    this.storeKeyPackage(kp.publicPackage, kp.privatePackage, 'SINGLE_USE');
     this.credential = {
       userId,
       deviceId: this.deviceId,
@@ -173,7 +209,10 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
    * findMatchingKeyPackage below) is what lets a joiner recognize a Welcome
    * addressed to it, not an out-of-band id.
    */
-  async generateKeyPackages(count: number): Promise<Uint8Array[]> {
+  async generateKeyPackages(
+    count: number,
+    kind: 'SINGLE_USE' | 'LAST_RESORT' = 'SINGLE_USE',
+  ): Promise<Uint8Array[]> {
     await this.ensureHydrated();
     if (!this.credential || !this.signatureKeyPair || !this.deviceId) {
       throw new Error('Device not provisioned yet');
@@ -194,7 +233,7 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
         this.signatureKeyPair,
         impl,
       );
-      this.storeKeyPackage(kp.publicPackage, kp.privatePackage);
+      this.storeKeyPackage(kp.publicPackage, kp.privatePackage, kind);
       out.push(
         encodeMlsMessage({
           keyPackage: kp.publicPackage,
@@ -205,6 +244,25 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
     }
     await this.persist();
     return out;
+  }
+
+  /**
+   * Removes a used SINGLE_USE key package's private key from local storage
+   * - its one-time secret has already been spent by the join it was
+   * matched to, so keeping it around only extends how long that key
+   * material sits on disk for no benefit, and lets a replayed/duplicated
+   * Welcome for a different conversation be satisfied by it again.
+   * LAST_RESORT packages are exempt: the whole point of that kind is to
+   * satisfy more than one Welcome when a device has no SINGLE_USE packages
+   * left (see client.ts's DeviceIdentityStore doc).
+   */
+  async consumeKeyPackage(id: string): Promise<void> {
+    const stored = this.keyPackagesById.get(id);
+    if (!stored || stored.kind === 'LAST_RESORT') {
+      return;
+    }
+    this.keyPackagesById.delete(id);
+    await this.persist();
   }
 
   async revoke(): Promise<void> {
@@ -260,10 +318,11 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
   private storeKeyPackage(
     publicPackage: KeyPackage,
     privatePackage: PrivateKeyPackage,
+    kind: 'SINGLE_USE' | 'LAST_RESORT',
   ): string {
     const id = `kp-${this.nextKeyPackageId}`;
     this.nextKeyPackageId += 1;
-    this.keyPackagesById.set(id, { id, publicPackage, privatePackage });
+    this.keyPackagesById.set(id, { id, kind, publicPackage, privatePackage });
     return id;
   }
 }
@@ -279,7 +338,7 @@ function findLeafIndexByIdentity(
     const credential = node.leaf.credential;
     if (credential.credentialType !== 'basic') continue;
     const identity = decodeIdentity(credential.identity);
-    if (identity.userId === userId && identity.deviceId === deviceId) {
+    if (identity && identity.userId === userId && identity.deviceId === deviceId) {
       return nodeToLeafIndex(toNodeIndex(i));
     }
   }
@@ -328,6 +387,9 @@ class TsMlsGroupSession implements GroupSession {
     let proposalInfo:
       | { proposal: Proposal; proposer: DeviceCredential; isExternal: boolean }
       | undefined;
+    // A member-sent proposal whose credential didn't decode - distinct from
+    // proposalInfo being absent (e.g. this was a commit, not a proposal).
+    let proposalCredentialMismatch = false;
     const treeBeforeCommit = this.state.ratchetTree;
 
     // SenderData is encrypted separately from the actual message content
@@ -346,6 +408,15 @@ class TsMlsGroupSession implements GroupSession {
       senderNode?.nodeType === 'leaf' && senderNode.leaf.credential.credentialType === 'basic'
         ? decodeIdentity(senderNode.leaf.credential.identity)
         : undefined;
+
+    // Resolved from the tree as it stood BEFORE this message - no
+    // one-time key consumed yet - so an application message with an
+    // unidentifiable sender can be rejected here instead of after
+    // decrypting it, where there'd be no way to "undo" that consumption
+    // just to report the failure.
+    if (decoded.privateMessage.contentType === 'application' && !senderIdentity) {
+      return { kind: 'rejected', reason: 'credential-mismatch' };
+    }
 
     const result = await processPrivateMessage(
       this.state,
@@ -366,6 +437,18 @@ class TsMlsGroupSession implements GroupSession {
             senderNode?.nodeType === 'leaf' && senderNode.leaf.credential.credentialType === 'basic'
               ? decodeIdentity(senderNode.leaf.credential.identity)
               : undefined;
+
+          // A real member sent this (not external) but its credential
+          // isn't decodable - reporting it under a fabricated 'unknown'
+          // identity would silently defeat any pinning/safety-number check
+          // built on DeviceCredential.signatureKey. Reject it outright
+          // instead; 'external' proposals genuinely have no member
+          // identity to report, which 'unknown' below still covers.
+          if (!isExternal && !proposerCredential) {
+            proposalCredentialMismatch = true;
+            return 'reject';
+          }
+
           proposalInfo = {
             proposal: incoming.proposal.proposal,
             proposer: proposerCredential
@@ -390,15 +473,30 @@ class TsMlsGroupSession implements GroupSession {
 
     if (result.kind === 'applicationMessage') {
       this.state = result.newState;
+      let envelope: unknown;
+      try {
+        envelope = JSON.parse(new TextDecoder().decode(result.message));
+      } catch {
+        return { kind: 'rejected', reason: 'malformed' };
+      }
+      if (!isPlaintextEnvelope(envelope)) {
+        return { kind: 'rejected', reason: 'malformed' };
+      }
       return {
         kind: 'application',
-        senderDeviceId: senderIdentity?.deviceId ?? 'unknown',
+        // Guaranteed resolved: the early return above already rejected
+        // this message before processPrivateMessage ran if it weren't.
+        senderDeviceId: senderIdentity!.deviceId,
         epoch: Number(this.state.groupContext.epoch),
-        envelope: JSON.parse(new TextDecoder().decode(result.message)) as PlaintextEnvelope,
+        envelope,
       };
     }
 
     this.state = result.newState;
+
+    if (proposalCredentialMismatch) {
+      return { kind: 'rejected', reason: 'credential-mismatch' };
+    }
 
     if (incomingKind === 'proposal' && proposalInfo) {
       return {
@@ -451,11 +549,14 @@ class TsMlsGroupSession implements GroupSession {
       }
       const identity = decodeIdentity(embeddedCredential.identity);
       if (
+        !identity ||
         identity.userId !== offer.credential.userId ||
         identity.deviceId !== offer.credential.deviceId
       ) {
         throw new CredentialMismatchError(
-          `Key package identity (${identity.userId}/${identity.deviceId}) does not match the offered credential (${offer.credential.userId}/${offer.credential.deviceId})`,
+          identity
+            ? `Key package identity (${identity.userId}/${identity.deviceId}) does not match the offered credential (${offer.credential.userId}/${offer.credential.deviceId})`
+            : 'Key package identity is not decodable',
         );
       }
       addedDeviceIds.push(offer.credential.deviceId);
@@ -547,6 +648,14 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
     if (!groupState) {
       throw new Error('Could not decode serialized group state');
     }
+    if (!bytesEqual(groupState.groupContext.groupId, encodeConversationId(conversationId))) {
+      // Same check joinFromWelcome already makes on a Welcome - a storage
+      // bug or key collision handing this conversationId the wrong bytes
+      // should fail loudly here, not silently resume as the wrong group.
+      throw new CredentialMismatchError(
+        `Restored state is for a different conversation than "${conversationId}"`,
+      );
+    }
     // encodeGroupState only serializes GroupState, not the clientConfig half
     // of ClientState (it's static config, not group state) - reattach the
     // defaults on restore, same as createGroup/joinGroup do when the caller
@@ -593,6 +702,11 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
         `Welcome is for a different conversation than "${conversationId}"`,
       );
     }
+
+    // Only after the join actually succeeds - a failed joinGroup or a
+    // wrong-conversation Welcome above should leave the package available
+    // for a genuine retry, not consume it on a doomed attempt.
+    await this.store.consumeKeyPackage(matching.id);
 
     return new TsMlsGroupSession(conversationId, state, credential);
   }
