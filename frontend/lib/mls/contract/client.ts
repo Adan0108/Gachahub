@@ -48,11 +48,24 @@ export interface DeviceIdentityStore {
   getOwnCredential(): Promise<DeviceCredential>;
 
   /**
-   * Generates `count` fresh single-use key packages for upload to the
-   * server, refreshing the one reusable last-resort package if it's
-   * missing or expired (critique C1).
+   * Generates `count` fresh key packages of the given kind for upload to
+   * the server - SINGLE_USE (the default) for ordinary supply, or
+   * LAST_RESORT for the one reusable fallback package a device offers
+   * when it has no SINGLE_USE packages left (critique C1).
    */
-  generateKeyPackages(count: number): Promise<Uint8Array[]>;
+  generateKeyPackages(
+    count: number,
+    kind?: 'SINGLE_USE' | 'LAST_RESORT',
+  ): Promise<Uint8Array[]>;
+
+  /**
+   * Marks a SINGLE_USE key package as spent once it's been matched to a
+   * Welcome and used to join a group, so its private key doesn't linger
+   * locally past that one use and a replayed/duplicated Welcome can't be
+   * satisfied by it again. A no-op for any other kind, or an id this store
+   * doesn't recognize.
+   */
+  consumeKeyPackage(id: string): Promise<void>;
 
   /**
    * Revokes this device's identity and destroys its local keys.

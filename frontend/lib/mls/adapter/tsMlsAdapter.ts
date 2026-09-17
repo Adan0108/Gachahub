@@ -182,7 +182,12 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
       this.signatureKeyPair,
       impl,
     );
-    this.storeKeyPackage(kp.publicPackage, kp.privatePackage, 'SINGLE_USE');
+    // Never uploaded, never offered to anyone - this device's own package
+    // for founding groups it creates itself (TsMlsGroupSessionFactory.
+    // create/pickOwnKeyPackage). Tagged FOUNDER, not SINGLE_USE, so it's
+    // found by that explicit kind rather than by happening to be the
+    // first entry generateKeyPackages() hasn't added yet.
+    this.storeKeyPackage(kp.publicPackage, kp.privatePackage, 'FOUNDER');
     this.credential = {
       userId,
       deviceId: this.deviceId,
@@ -251,14 +256,18 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
    * - its one-time secret has already been spent by the join it was
    * matched to, so keeping it around only extends how long that key
    * material sits on disk for no benefit, and lets a replayed/duplicated
-   * Welcome for a different conversation be satisfied by it again.
-   * LAST_RESORT packages are exempt: the whole point of that kind is to
-   * satisfy more than one Welcome when a device has no SINGLE_USE packages
-   * left (see client.ts's DeviceIdentityStore doc).
+   * Welcome for a different conversation be satisfied by it again. Only
+   * SINGLE_USE is ever actually consumed here (an allow-list, not a
+   * LAST_RESORT deny-list): LAST_RESORT is meant to satisfy more than one
+   * Welcome when a device has no SINGLE_USE packages left, and FOUNDER is
+   * never uploaded or offered to begin with, so findMatchingKeyPackage
+   * could never legitimately match either kind anyway - this is defense
+   * in depth against that assumption ever breaking, not the thing
+   * currently preventing it.
    */
   async consumeKeyPackage(id: string): Promise<void> {
     const stored = this.keyPackagesById.get(id);
-    if (!stored || stored.kind === 'LAST_RESORT') {
+    if (!stored || stored.kind !== 'SINGLE_USE') {
       return;
     }
     this.keyPackagesById.delete(id);
@@ -318,7 +327,7 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
   private storeKeyPackage(
     publicPackage: KeyPackage,
     privatePackage: PrivateKeyPackage,
-    kind: 'SINGLE_USE' | 'LAST_RESORT',
+    kind: StoredKeyPackage['kind'],
   ): string {
     const id = `kp-${this.nextKeyPackageId}`;
     this.nextKeyPackageId += 1;
@@ -724,12 +733,23 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
     return undefined;
   }
 
+  /**
+   * Looked up by its FOUNDER kind, not by map/insertion order - it used to
+   * just grab the first entry in keyPackagesById, relying on provision()
+   * always running (and storing its package) before generateKeyPackages()
+   * ever does. That worked only because the package it happened to grab
+   * was never actually uploaded or claimable; an explicit kind means this
+   * can't silently start returning a claimable SINGLE_USE/LAST_RESORT
+   * package instead if that insertion order ever changed.
+   */
   private pickOwnKeyPackage() {
-    const first = [...this.store.keyPackagesById.values()][0];
-    if (!first) {
+    const founder = [...this.store.keyPackagesById.values()].find(
+      (stored) => stored.kind === 'FOUNDER',
+    );
+    if (!founder) {
       throw new Error('Device has no key packages - call provision() first');
     }
-    return first;
+    return founder;
   }
 }
 
