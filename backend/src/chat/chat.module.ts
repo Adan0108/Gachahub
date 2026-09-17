@@ -3,7 +3,11 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { WebsocketModule } from '../websocket/websocket.module';
 import { ChatController } from './chat.controller';
 import { ChatRepository } from './chat.repository';
-import { ChatService } from './chat.service';
+import { ChatAccessService } from './chat-access.service';
+import { ChatMessagingService } from './chat-messaging.service';
+import { ChatGroupService } from './chat-group.service';
+import { ChatInboxService } from './chat-inbox.service';
+import { ChatMessageActionsService } from './chat-message-actions.service';
 import { ChatMediaReleaseRetryService } from './chat-media-release-retry.service';
 import { ChatTypingGateway } from './realtime/chat-typing.gateway';
 import { ChatTypingService } from './realtime/chat-typing.service';
@@ -22,8 +26,10 @@ import { MediaModule } from '../media/media.module';
 /**
  * Chat feature module.
  *
- * This module wires the HTTP controller, business service, database repository,
- * and replaceable adapter ports used by the chat system.
+ * This module wires the HTTP controller, business services (split by
+ * concern: access/permissions, messaging, group management, inbox, and
+ * message actions), database repository, and replaceable adapter ports
+ * used by the chat system.
  */
 @Module({
   imports: [
@@ -39,7 +45,11 @@ import { MediaModule } from '../media/media.module';
   controllers: [ChatController],
   providers: [
     ChatRepository,
-    ChatService,
+    ChatAccessService,
+    ChatMessagingService,
+    ChatGroupService,
+    ChatInboxService,
+    ChatMessageActionsService,
     ChatMediaReleaseRetryService,
     ChatTypingGateway,
     ChatTypingService,
