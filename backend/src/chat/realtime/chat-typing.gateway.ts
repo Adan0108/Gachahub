@@ -12,7 +12,7 @@ import { userRoom } from '../../websocket/socket.util';
 import { websocketGatewayOptions } from '../../websocket/websocket-gateway.options';
 import type { AppSocket } from '../../websocket/websocket.gateway';
 import { DiscordLoggerService } from '../../common/discord/discord-logger.service';
-import { ChatService } from '../chat.service';
+import { ChatMessageActionsService } from '../chat-message-actions.service';
 import { ChatTypingService, TypingEventName } from './chat-typing.service';
 
 interface TypingPayload {
@@ -35,7 +35,7 @@ export class ChatTypingGateway implements OnGatewayDisconnect {
   private readonly logger = new Logger(ChatTypingGateway.name);
 
   constructor(
-    private readonly chatService: ChatService,
+    private readonly chatMessageActionsService: ChatMessageActionsService,
     private readonly chatTypingService: ChatTypingService,
     private readonly discordLogger: DiscordLoggerService,
   ) {}
@@ -109,10 +109,11 @@ export class ChatTypingGateway implements OnGatewayDisconnect {
     }
 
     try {
-      const recipientUserIds = await this.chatService.getTypingRecipients(
-        payload.conversationId,
-        userId,
-      );
+      const recipientUserIds =
+        await this.chatMessageActionsService.getTypingRecipients(
+          payload.conversationId,
+          userId,
+        );
 
       for (const recipientUserId of recipientUserIds) {
         this.server.to(userRoom(recipientUserId)).emit(event, {

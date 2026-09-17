@@ -1,11 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FiCheck, FiInbox, FiLock, FiMessageCircle, FiShield, FiX } from "react-icons/fi";
+import {
+  FiArchive,
+  FiCheck,
+  FiInbox,
+  FiLock,
+  FiMessageCircle,
+  FiPlus,
+  FiSearch,
+  FiSend,
+  FiShield,
+  FiX,
+} from "react-icons/fi";
 import { QueryNotice } from "../../components/QueryNotice";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
+import { useDeviceIdentity } from "../../hooks/useDeviceIdentity";
+import { useSyncEngine } from "../../hooks/useSyncEngine";
+import { useDecryptedMessages } from "../../hooks/useDecryptedMessages";
+import { sendEncryptedChatMessage } from "../../lib/mls/messaging/sendEncryptedMessage";
 import { api } from "../../lib/api";
 import { queries, queryKeys } from "../../lib/queries";
 
@@ -20,15 +35,81 @@ function conversationPeer(conversation, userId) {
   return conversation?.participants?.find((participant) => participant.userId !== userId)?.user;
 }
 
+function initialOf(name) {
+  return name?.trim()?.charAt(0).toUpperCase() || "?";
+}
+
+const VIEWS = [
+  { key: "inbox", label: "All Chats", icon: FiInbox },
+  { key: "requests", label: "Requests", icon: FiShield },
+  { key: "archived", label: "Archived", icon: FiArchive },
+];
+
+function ChatSkeletonRow() {
+  return (
+    <div className="chat-skeleton-row">
+      <span className="chat-skeleton-avatar" />
+      <span className="chat-skeleton-lines">
+        <span className="chat-skeleton-bar" />
+        <span className="chat-skeleton-bar short" />
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Shown instead of the real layout while the session is still resolving -
+ * mirrors .chat-layout's actual shape (sidebar rows + an empty thread) so
+ * the page doesn't visibly restructure once real data replaces it, unlike
+ * a generic "Checking your session..." message in an unrelated-looking box.
+ */
+function ChatSkeleton() {
+  return (
+    <div className="page chat-page" aria-busy="true" aria-label="Loading conversations">
+      <div className="chat-layout">
+        <aside className="panel chat-sidebar">
+          <div className="chat-skeleton-head">
+            <span className="chat-skeleton-bar title" />
+            <span className="chat-skeleton-pill" />
+          </div>
+          <span className="chat-skeleton-bar block" />
+          <span className="chat-skeleton-bar block" />
+          <div className="chat-skeleton-list">
+            {[0, 1, 2, 3, 4].map((index) => (
+              <ChatSkeletonRow key={index} />
+            ))}
+          </div>
+        </aside>
+        <section className="panel chat-thread" />
+      </div>
+    </div>
+  );
+}
+
 export default function ChatPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
   const [view, setView] = useState("inbox");
   const [selectedId, setSelectedId] = useState("");
+  const [search, setSearch] = useState("");
   const conversations = useQuery({ ...queries.chatConversations(), enabled: isAuthenticated });
   const requests = useQuery({ ...queries.chatRequests(), enabled: isAuthenticated });
-  const currentList = view === "requests" ? requests.data || [] : conversations.data || [];
+  const archived = useQuery({
+    ...queries.chatArchivedConversations(),
+    enabled: isAuthenticated && view === "archived",
+  });
+  const listByView = { inbox: conversations, requests, archived };
+  const listQuery = listByView[view];
+  const rawList = listQuery.data || [];
+  const searchTerm = search.trim().toLowerCase();
+  const currentList = searchTerm
+    ? rawList.filter((conversation) =>
+        (conversationPeer(conversation, user?.id)?.name || "gachahub member")
+          .toLowerCase()
+          .includes(searchTerm),
+      )
+    : rawList;
   const activeId = currentList.some((conversation) => conversation.id === selectedId)
     ? selectedId
     : currentList[0]?.id || "";
@@ -46,6 +127,88 @@ export default function ChatPage() {
   );
   const messageIdsKey = messageIds.join(",");
 
+  const {
+    credential: deviceCredential,
+    isReady: isDeviceReady,
+    error: deviceError,
+    retry: retryDeviceSetup,
+  } = useDeviceIdentity();
+  const syncEngine = useSyncEngine();
+  const decryptableMessages = useMemo(
+    () => (messages.data?.items || []).filter((message) => message.contentType !== "SYSTEM"),
+    [messages.data?.items],
+  );
+  const decryptedMessages = useDecryptedMessages(activeId, decryptableMessages, user?.id);
+  const messagesEndRef = useRef(null);
+  const [draft, setDraft] = useState("");
+  // Sent messages waiting on the network - shown immediately as their own
+  // bubble instead of leaving the composer stuck for however long the send
+  // actually takes (MLS encrypt + a real round trip). Keyed by a client-side
+  // id since the server hasn't assigned one yet.
+  const [pendingMessages, setPendingMessages] = useState([]);
+  const sendMessage = useMutation({
+    mutationFn: ({ text }) =>
+      sendEncryptedChatMessage(
+        syncEngine,
+        deviceCredential.deviceId,
+        activeId,
+        peer?.id,
+        text,
+      ),
+    onSuccess: (response, variables) => {
+      setPendingMessages((prev) => prev.filter((pending) => pending.clientId !== variables.clientId));
+      // Merge the sent message straight into the cache instead of
+      // invalidating - a refetch is a second full round trip the sender
+      // gains nothing from, since the plaintext is already cached locally
+      // from the send itself (see useDecryptedMessages).
+      queryClient.setQueryData(queryKeys.chatMessages(activeId), (old) => {
+        if (!old || old.items.some((item) => item.id === response.message.id)) {
+          return old;
+        }
+        return { ...old, items: [...old.items, response.message] };
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
+    },
+    onError: (error, variables) => {
+      setPendingMessages((prev) =>
+        prev.map((pending) =>
+          pending.clientId === variables.clientId ? { ...pending, failed: true } : pending,
+        ),
+      );
+    },
+  });
+  const retryPendingMessage = (pending) => {
+    setPendingMessages((prev) =>
+      prev.map((item) => (item.clientId === pending.clientId ? { ...item, failed: false } : item)),
+    );
+    sendMessage.mutate({ text: pending.text, clientId: pending.clientId });
+  };
+
+  const [isComposingNewChat, setIsComposingNewChat] = useState(false);
+  const [newChatRecipientId, setNewChatRecipientId] = useState("");
+  const startNewChat = useMutation({
+    mutationFn: () =>
+      api.createDirectMessage({
+        recipientUserId: newChatRecipientId.trim(),
+        // Placeholder only - a real conversationId doesn't exist until this
+        // call creates one, so the actual encrypted MLS group can't be set
+        // up until afterward (see sendEncryptedChatMessage's
+        // ensureConversationGroup call, which finishes the job on the first
+        // real send below). This placeholder message stays permanently
+        // undecryptable - contentType SYSTEM tells the thread to render it
+        // as a "Conversation started" divider instead of a chat bubble, so
+        // it never looks like a message someone sent and failed to decrypt.
+        message: { ciphertext: "placeholder-pending-mls-setup", contentType: "SYSTEM" },
+      }),
+    onSuccess: async (result) => {
+      await refreshChat();
+      setIsComposingNewChat(false);
+      setNewChatRecipientId("");
+      setView("inbox");
+      setSelectedId(result.conversationId);
+    },
+  });
+
   useEffect(() => {
     if (!isSessionLoading && !isAuthenticated) router.replace("/login");
   }, [isAuthenticated, isSessionLoading, router]);
@@ -55,6 +218,14 @@ export default function ChatPage() {
     api.markChatDelivered(messageIds).catch(() => {});
     api.markChatRead(activeId, messageIds.at(-1)).catch(() => {});
   }, [activeId, messageIds, messageIdsKey]);
+
+  const decryptedCount = Object.keys(decryptedMessages).length;
+  // Follows the latest message - re-runs both when the message list grows
+  // (a send, or a new one arriving) and as messages individually finish
+  // decrypting and pop in, since those don't change the list's length.
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end" });
+  }, [activeId, messages.data?.items?.length, decryptedCount]);
 
   const refreshChat = async () => {
     await Promise.all([
@@ -87,58 +258,99 @@ export default function ChatPage() {
   });
 
   if (isSessionLoading || !isAuthenticated) {
-    return (
-      <div className="page chat-page">
-        <div className="state-card">Checking your session...</div>
-      </div>
-    );
+    return <ChatSkeleton />;
   }
 
   const peer = conversationPeer(activeConversation, user?.id);
-  const listQuery = view === "requests" ? requests : conversations;
   const actionError = acceptRequest.error || declineRequest.error || blockConversation.error;
 
   return (
     <div className="page chat-page">
-      <section className="welcome hero-polish chat-hero">
-        <div>
-          <span className="eyebrow">Messages</span>
-          <h1>Your conversations</h1>
-          <p>Manage conversations and message requests from other GachaHub members.</p>
-        </div>
-        <FiMessageCircle aria-hidden="true" />
-      </section>
-
       <div className="chat-layout">
         <aside className="panel chat-sidebar">
+          <div className="chat-sidebar-head">
+            <span>Conversations</span>
+            <button
+              aria-label="New chat"
+              onClick={() => setIsComposingNewChat((current) => !current)}
+              type="button"
+            >
+              <FiPlus /> New Chat
+            </button>
+          </div>
+          {isComposingNewChat && (
+            <form
+              className="chat-new-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!newChatRecipientId.trim() || startNewChat.isPending) return;
+                startNewChat.mutate();
+              }}
+            >
+              <label htmlFor="new-chat-recipient">Recipient user ID</label>
+              <input
+                autoFocus
+                disabled={startNewChat.isPending}
+                id="new-chat-recipient"
+                onChange={(event) => setNewChatRecipientId(event.target.value)}
+                placeholder="Paste their GachaHub user ID..."
+                type="text"
+                value={newChatRecipientId}
+              />
+              <button
+                disabled={!newChatRecipientId.trim() || startNewChat.isPending}
+                type="submit"
+              >
+                {startNewChat.isPending ? "Starting..." : "Start Chat"}
+              </button>
+              {startNewChat.error && <small>{startNewChat.error.message}</small>}
+            </form>
+          )}
+          <div className="chat-sidebar-search">
+            <FiSearch aria-hidden="true" />
+            <input
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search conversations..."
+              type="text"
+              value={search}
+            />
+          </div>
           <div className="chat-tabs" role="tablist" aria-label="Message views">
-            <button
-              aria-selected={view === "inbox"}
-              className={view === "inbox" ? "active" : ""}
-              onClick={() => setView("inbox")}
-              role="tab"
-              type="button"
-            >
-              <FiInbox /> Inbox
-              <span>
-                {conversations.data?.reduce((total, item) => total + item.unreadCount, 0) || 0}
-              </span>
-            </button>
-            <button
-              aria-selected={view === "requests"}
-              className={view === "requests" ? "active" : ""}
-              onClick={() => setView("requests")}
-              role="tab"
-              type="button"
-            >
-              <FiShield /> Requests <span>{requests.data?.length || 0}</span>
-            </button>
+            {VIEWS.map(({ key, label, icon: Icon }) => (
+              <button
+                aria-selected={view === key}
+                className={view === key ? "active" : ""}
+                key={key}
+                onClick={() => setView(key)}
+                role="tab"
+                type="button"
+              >
+                <Icon />
+                <span>{label}</span>
+                {key !== "archived" && (
+                  <b>
+                    {key === "inbox"
+                      ? conversations.data?.reduce((total, item) => total + item.unreadCount, 0) ||
+                        0
+                      : requests.data?.length || 0}
+                  </b>
+                )}
+              </button>
+            ))}
           </div>
           <QueryNotice
             isLoading={listQuery.isLoading}
             isError={listQuery.isError}
             isEmpty={!currentList.length}
-            emptyText={view === "requests" ? "No pending requests." : "No conversations yet."}
+            emptyText={
+              searchTerm
+                ? "No conversations match your search."
+                : view === "requests"
+                  ? "No pending requests."
+                  : view === "archived"
+                    ? "No archived conversations."
+                    : "No conversations yet."
+            }
           />
           <div className="chat-conversation-list">
             {currentList.map((conversation) => {
@@ -150,9 +362,7 @@ export default function ChatPage() {
                   onClick={() => setSelectedId(conversation.id)}
                   type="button"
                 >
-                  <span className="chat-avatar">
-                    {itemPeer?.name?.charAt(0).toUpperCase() || "?"}
-                  </span>
+                  <span className="chat-avatar">{initialOf(itemPeer?.name)}</span>
                   <span>
                     <b>{itemPeer?.name || "GachaHub member"}</b>
                     <small>
@@ -174,16 +384,19 @@ export default function ChatPage() {
             <>
               <header className="chat-thread-head">
                 <div>
-                  <span className="chat-avatar">{peer?.name?.charAt(0).toUpperCase() || "?"}</span>
+                  <span className="chat-avatar">{initialOf(peer?.name)}</span>
                   <span>
                     <b>{peer?.name || "GachaHub member"}</b>
-                    <small>End-to-end encrypted payloads</small>
+                    <small>
+                      <FiLock /> End-to-end encrypted
+                    </small>
                   </span>
                 </div>
                 <div className="chat-thread-actions">
                   {view === "requests" && (
                     <>
                       <button
+                        className="accept"
                         disabled={acceptRequest.isPending}
                         onClick={() => acceptRequest.mutate()}
                         type="button"
@@ -200,6 +413,7 @@ export default function ChatPage() {
                     </>
                   )}
                   <button
+                    className="danger"
                     disabled={blockConversation.isPending}
                     onClick={() => blockConversation.mutate()}
                     type="button"
@@ -212,40 +426,138 @@ export default function ChatPage() {
               <div className="chat-messages" aria-live="polite">
                 <QueryNotice isLoading={messages.isLoading} isError={messages.isError} />
                 {(messages.data?.items || []).map((message) => {
-                  const mine = message.senderId === user?.id;
-                  return (
-                    <article className={`chat-message ${mine ? "mine" : ""}`} key={message.id}>
-                      <FiLock aria-hidden="true" />
-                      <div>
-                        <b>Encrypted message</b>
-                        <p>
-                          This client cannot decrypt the payload until secure key exchange is
-                          available.
-                        </p>
-                        <small>{relativeTime(message.createdAt)}</small>
+                  if (message.contentType === "SYSTEM") {
+                    return (
+                      <div className="chat-system-message" key={message.id}>
+                        <span>Conversation started</span>
                       </div>
-                    </article>
+                    );
+                  }
+                  const mine = message.senderId === user?.id;
+                  const decrypted = decryptedMessages[message.id];
+                  // Not decrypted yet - render nothing rather than a
+                  // "Decrypting..." placeholder bubble, so the message pops
+                  // in fully formed once it's actually ready instead of
+                  // changing content right after appearing.
+                  if (!decrypted) {
+                    return null;
+                  }
+                  return (
+                    <div className={`chat-message-row ${mine ? "mine" : ""}`} key={message.id}>
+                      {!mine && <span className="chat-avatar small">{initialOf(peer?.name)}</span>}
+                      <article className={`chat-message ${mine ? "mine" : ""}`}>
+                        {decrypted.status === "ok" ? (
+                          <div>
+                            <p>
+                              {typeof decrypted.envelope.body === "string"
+                                ? decrypted.envelope.body
+                                : JSON.stringify(decrypted.envelope.body)}
+                            </p>
+                            <small>{relativeTime(message.createdAt)}</small>
+                          </div>
+                        ) : (
+                          <>
+                            <FiLock aria-hidden="true" />
+                            <div>
+                              <b>Message unavailable</b>
+                              <p>This device can&apos;t decrypt this message.</p>
+                              <small>{relativeTime(message.createdAt)}</small>
+                            </div>
+                          </>
+                        )}
+                      </article>
+                    </div>
                   );
                 })}
-                {!messages.isLoading && !messages.isError && !messages.data?.items?.length && (
-                  <div className="chat-empty-thread">
-                    <FiMessageCircle />
-                    <b>No messages in this conversation</b>
-                  </div>
-                )}
+                {pendingMessages
+                  .filter((pending) => pending.conversationId === activeId)
+                  .map((pending) => (
+                    <div className="chat-message-row mine" key={pending.clientId}>
+                      <article className={`chat-message mine pending ${pending.failed ? "failed" : ""}`}>
+                        <div>
+                          <p>{pending.text}</p>
+                          <small>
+                            {pending.failed ? (
+                              <button
+                                className="chat-message-retry"
+                                onClick={() => retryPendingMessage(pending)}
+                                type="button"
+                              >
+                                Failed to send - tap to retry
+                              </button>
+                            ) : (
+                              "Sending..."
+                            )}
+                          </small>
+                        </div>
+                      </article>
+                    </div>
+                  ))}
+                {!messages.isLoading &&
+                  !messages.isError &&
+                  !messages.data?.items?.length &&
+                  pendingMessages.length === 0 && (
+                    <div className="chat-empty-thread">
+                      <FiMessageCircle />
+                      <b>No messages in this conversation</b>
+                    </div>
+                  )}
+                <div ref={messagesEndRef} />
               </div>
 
-              <div className="chat-composer-disabled">
-                <FiLock />
-                <div>
-                  <b>Sending is temporarily unavailable</b>
-                  <small>
-                    Secure recipient key exchange must be added before this client can encrypt
-                    messages.
-                  </small>
+              {isDeviceReady && syncEngine ? (
+                <form
+                  className="chat-composer"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const text = draft.trim();
+                    if (!text) return;
+                    const clientId = crypto.randomUUID();
+                    // Show the bubble and free up the input immediately -
+                    // the actual send (MLS encrypt + network) keeps running
+                    // in the background and reconciles onSuccess/onError.
+                    setPendingMessages((prev) => [
+                      ...prev,
+                      { clientId, text, conversationId: activeId },
+                    ]);
+                    setDraft("");
+                    sendMessage.mutate({ text, clientId });
+                  }}
+                >
+                  <input
+                    onChange={(event) => setDraft(event.target.value)}
+                    placeholder="Send an encrypted message..."
+                    value={draft}
+                  />
+                  <button aria-label="Send" disabled={!draft.trim()} type="submit">
+                    <FiSend />
+                  </button>
+                </form>
+              ) : deviceError ? (
+                <div className="chat-composer-disabled error">
+                  <FiLock />
+                  <div>
+                    <b>Couldn&apos;t set up secure messaging</b>
+                    <small>{deviceError.message}</small>
+                  </div>
+                  <button onClick={retryDeviceSetup} type="button">
+                    Retry
+                  </button>
                 </div>
-              </div>
-              {actionError && <small className="post-action-error">{actionError.message}</small>}
+              ) : (
+                <div className="chat-composer-disabled">
+                  <FiLock />
+                  <div>
+                    <b>Setting up secure messaging</b>
+                    <small>This only takes a moment on a new device.</small>
+                  </div>
+                </div>
+              )}
+              {(actionError || sendMessage.error) && (
+                <small className="post-action-error">
+                  {(actionError || sendMessage.error).message}
+                </small>
+              )}
             </>
           ) : (
             <div className="chat-empty-thread">

@@ -19,6 +19,10 @@ import { CommentsModule } from './comments/comments.module';
 import { FollowsModule } from './follows/follows.module';
 import { FeedModule } from './feed/feed.module';
 import { CommonModule } from './common/common.module';
+import { ChatDevicesModule } from './chat-devices/chat-devices.module';
+import { MlsHandshakesModule } from './mls-handshakes/mls-handshakes.module';
+import { DevModule } from './dev/dev.module';
+import { env } from './config/env';
 
 /**
  * Root application module.
@@ -42,11 +46,18 @@ import { CommonModule } from './common/common.module';
     GameCategoriesModule,
     GameModeratorsModule,
     ChatModule,
+    ChatDevicesModule,
+    MlsHandshakesModule,
     MediaModule,
     PostsModule,
     CommentsModule,
     FollowsModule,
     FeedModule,
+    // Test-user spawn/impersonate/delete tooling - registered only in
+    // development so the routes don't exist at all (not just guarded) once
+    // NODE_ENV is anything else. Fail-closed on purpose: this module can
+    // mint a session for any user id with no password check.
+    ...(env.nodeEnv === 'development' ? [DevModule] : []),
   ],
   controllers: [AppController],
   providers: [AppService],
