@@ -30,10 +30,13 @@ export class DevService {
     // Defense in depth - DevModule should never even be registered outside
     // development (see app.module.ts), but a service that can mint a
     // session for any user id and mass-delete accounts is exactly the kind
-    // of thing that deserves a second, independent check.
-    if (env.nodeEnv === 'production') {
+    // of thing that deserves a second, independent check. Allow-lists
+    // 'development' rather than blocking 'production' specifically - any
+    // other value (an unset NODE_ENV, 'staging', a typo) must fail closed
+    // too, not just the one literal string.
+    if (env.nodeEnv !== 'development') {
       throw new InternalServerErrorException(
-        'DevService must never be instantiated in production',
+        'DevService must never be instantiated outside development',
       );
     }
   }
