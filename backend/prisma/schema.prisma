@@ -902,6 +902,9 @@ model MlsKeyPackage {
   device ChatDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
   @@index([deviceId, kind, claimedAt])
+  /// MlsKeyPackageCleanupService's hourly deleteExpiredKeyPackages filters
+  /// on expiresAt alone across the whole table - a full scan without this.
+  @@index([expiresAt])
   @@map("mls_key_packages")
 }
 
@@ -920,7 +923,15 @@ model MlsHandshake {
   /// to epoch+1. @@unique below is the actual guarantee: at most one
   /// Commit may ever resolve a given epoch.
   epoch          Int
-  senderDeviceId String
+  /// Nullable, and SetNull on delete - this Commit's payload is shared
+  /// group state every member still needs to reach the current epoch, not
+  /// the sender's property. Cascading it away with the sender's device
+  /// (e.g. their account gets deleted) would leave a permanent gap in the
+  /// handshake log: any member who hadn't caught up past it could never
+  /// reach a later epoch, since process() must apply every Commit in
+  /// order. Losing the sender's identity on this one row is an acceptable
+  /// trade for keeping the conversation recoverable for everyone else.
+  senderDeviceId String?
 
   /// Opaque encoded MLS Commit bytes - the server never inspects the
   /// content, only routes and orders it (threat-model: server is a relay).
@@ -932,7 +943,7 @@ model MlsHandshake {
   createdAt DateTime @default(now())
 
   conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  senderDevice ChatDevice       @relation(fields: [senderDeviceId], references: [id], onDelete: Cascade)
+  senderDevice ChatDevice?      @relation(fields: [senderDeviceId], references: [id], onDelete: SetNull)
 
   @@unique([conversationId, epoch])
   @@map("mls_handshakes")

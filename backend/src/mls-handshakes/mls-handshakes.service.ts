@@ -20,7 +20,8 @@ interface SerializableHandshake {
   id: string;
   conversationId: string;
   epoch: number;
-  senderDeviceId: string;
+  /** Null once the sending device (and its owning account) has been deleted - the Commit itself is kept regardless (see schema.prisma's MlsHandshake.senderDeviceId doc). */
+  senderDeviceId: string | null;
   payload: Uint8Array;
   createdAt: Date;
 }
