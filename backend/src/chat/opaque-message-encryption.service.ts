@@ -8,17 +8,24 @@ import {
 } from './ports/message-encryption.port';
 
 /**
+ * The frontend's "start a new chat" flow sends this exact literal as
+ * ciphertext for its placeholder SYSTEM message (see chat/page.jsx),
+ * before any real MLS group exists yet to encrypt under. Matched
+ * literally, not just by contentType: contentType is a client-supplied,
+ * unrestricted enum field (EncryptedMessagePayloadDto), so exempting all
+ * of SYSTEM from framing validation would let any client send
+ * contentType: 'SYSTEM' with arbitrary non-MLS bytes as a real message,
+ * which is exactly what this validation exists to block.
+ */
+const PENDING_MLS_SETUP_PLACEHOLDER = 'placeholder-pending-mls-setup';
+
+/**
  * Preserves true client-side encryption - never decrypts or transforms the
  * payload. Does check that it's actually shaped like an MLS application
  * message, the protocol validation this port exists for: without it, a
  * commit/proposal mislabeled as chat content, or outright non-MLS bytes,
  * would be accepted and stored with only a length cap, unlike a handshake
  * commit (see mls-handshake-framing.util.ts).
- *
- * SYSTEM is the one contentType this deliberately skips: the frontend's
- * "start a new chat" flow sends a literal placeholder string as ciphertext
- * for it (see chat/page.jsx), before any real MLS group exists yet to
- * encrypt under.
  */
 @Injectable()
 export class OpaqueMessageEncryptionService implements MessageEncryptionPort {
@@ -29,8 +36,13 @@ export class OpaqueMessageEncryptionService implements MessageEncryptionPort {
   // eslint-disable-next-line @typescript-eslint/require-await
   async preparePayload(
     payload: EncryptedMessagePayloadDto,
+    conversationId?: string,
   ): Promise<PreparedEncryptedMessage> {
-    if (payload.contentType !== ChatMessageContentType.SYSTEM) {
+    const isPendingSetupPlaceholder =
+      payload.contentType === ChatMessageContentType.SYSTEM &&
+      payload.ciphertext === PENDING_MLS_SETUP_PLACEHOLDER;
+
+    if (!isPendingSetupPlaceholder) {
       // Same base64-decode-then-frame-check pattern as
       // MlsHandshakesService.submitHandshake - Buffer.from(_, 'base64')
       // doesn't throw on invalid input, it just decodes best-effort, so
@@ -39,7 +51,7 @@ export class OpaqueMessageEncryptionService implements MessageEncryptionPort {
       const ciphertextBytes = new Uint8Array(
         Buffer.from(payload.ciphertext, 'base64'),
       );
-      assertIsApplicationMessage(ciphertextBytes);
+      assertIsApplicationMessage(ciphertextBytes, conversationId);
     }
 
     return {

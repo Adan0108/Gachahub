@@ -132,8 +132,13 @@ export class ChatService {
       };
     }
 
+    // conversationId is only known here when this direct pair already
+    // exists (existingPair) - a genuinely brand-new conversation doesn't
+    // have one yet for the ciphertext's group_id to be cross-checked
+    // against.
     const preparedPayload = await this.messageEncryption.preparePayload(
       dto.message,
+      existingPair?.conversation.id,
     );
 
     if (existingPair) {
@@ -628,6 +633,7 @@ export class ChatService {
 
     const preparedPayload = await this.messageEncryption.preparePayload(
       dto.message,
+      conversationId,
     );
 
     return this.sendMessageToExistingConversation(
@@ -1236,7 +1242,10 @@ export class ChatService {
 
     const payload =
       preparedPayload ??
-      (await this.messageEncryption.preparePayload(dto.message));
+      (await this.messageEncryption.preparePayload(
+        dto.message,
+        conversationId,
+      ));
 
     const media = await this.resolveChatMessageMedia(
       senderId,

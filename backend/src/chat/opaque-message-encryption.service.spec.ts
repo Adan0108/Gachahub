@@ -54,4 +54,47 @@ describe('OpaqueMessageEncryptionService', () => {
 
     expect(result.ciphertext).toBe('placeholder-pending-mls-setup');
   });
+
+  // regression: contentType is client-supplied and otherwise unrestricted -
+  // exempting all of SYSTEM from framing validation would let any client
+  // send contentType: 'SYSTEM' with arbitrary non-MLS bytes as a real
+  // message, exactly what this validation exists to block.
+  it('still validates ciphertext for a SYSTEM message that is not the exact placeholder', async () => {
+    await expect(
+      service.preparePayload(
+        payload({
+          ciphertext: Buffer.from('arbitrary garbage').toString('base64'),
+          contentType: 'SYSTEM',
+        }),
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  // regression: assertIsApplicationMessage used to skip the group_id
+  // cross-check unconditionally - fine for a brand-new conversation (no id
+  // yet), wrong for an existing one, where a participant could otherwise
+  // relay another conversation's ciphertext into this one.
+  it('rejects ciphertext framed for a different conversation when conversationId is known', async () => {
+    const message = await buildTestApplicationMessage('conv-1');
+    const ciphertext = Buffer.from(message).toString('base64');
+
+    await expect(
+      service.preparePayload(
+        payload({ ciphertext, contentType: 'TEXT' }),
+        'conv-2',
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('accepts ciphertext framed for the conversation it is actually sent to', async () => {
+    const message = await buildTestApplicationMessage('conv-1');
+    const ciphertext = Buffer.from(message).toString('base64');
+
+    const result = await service.preparePayload(
+      payload({ ciphertext, contentType: 'TEXT' }),
+      'conv-1',
+    );
+
+    expect(result.ciphertext).toBe(ciphertext);
+  });
 });

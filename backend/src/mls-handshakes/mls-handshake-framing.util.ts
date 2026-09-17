@@ -58,13 +58,21 @@ export function assertIsCommitForConversation(
  * that argument doesn't cover: an application (chat) message's ciphertext,
  * which is currently accepted with no shape validation at all - only a
  * length cap. Catches a client mislabeling a commit/proposal as a chat
- * message, or sending non-MLS bytes outright. Deliberately skips the
- * group_id cross-check assertIsCommitForConversation does: a brand-new
- * conversation's first message is prepared before that conversation's id
- * even exists, so there's nothing yet to cross-check it against - same
- * reason assertIsWelcomeMessage above doesn't do it either.
+ * message, or sending non-MLS bytes outright.
+ *
+ * The group_id cross-check is optional (pass conversationId when it's
+ * known) rather than mandatory like assertIsCommitForConversation's: a
+ * brand-new conversation's first message is prepared before that
+ * conversation's id even exists, so there's nothing yet to cross-check it
+ * against there. Every other call site DOES know the conversationId and
+ * must pass it - skipping it there would let a participant relay one
+ * conversation's ciphertext into another (caught client-side as
+ * "wrong-conversation" today, but the server shouldn't rely on that).
  */
-export function assertIsApplicationMessage(payload: Uint8Array): void {
+export function assertIsApplicationMessage(
+  payload: Uint8Array,
+  conversationId?: string,
+): void {
   const decoded = decodeAndDescribe(payload);
 
   if (decoded.wireformat !== 'mls_private_message') {
@@ -77,6 +85,15 @@ export function assertIsApplicationMessage(payload: Uint8Array): void {
     throw new BadRequestException(
       'Message ciphertext must have contentType "application"',
     );
+  }
+
+  if (conversationId !== undefined) {
+    const expectedGroupId = new TextEncoder().encode(conversationId);
+    if (!bytesEqual(decoded.privateMessage.groupId, expectedGroupId)) {
+      throw new BadRequestException(
+        'Message ciphertext group_id does not match this conversation',
+      );
+    }
   }
 }
 

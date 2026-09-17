@@ -93,6 +93,22 @@ describe('assertIsApplicationMessage', () => {
     expect(() => assertIsApplicationMessage(applicationPayload)).not.toThrow();
   });
 
+  it('accepts a real application message when the conversationId matches', async () => {
+    const applicationPayload = await buildTestApplicationMessage('conv-1');
+
+    expect(() =>
+      assertIsApplicationMessage(applicationPayload, 'conv-1'),
+    ).not.toThrow();
+  });
+
+  it('rejects a real application message framed for a different conversation', async () => {
+    const applicationPayload = await buildTestApplicationMessage('conv-1');
+
+    expect(() =>
+      assertIsApplicationMessage(applicationPayload, 'conv-2'),
+    ).toThrow('group_id does not match this conversation');
+  });
+
   it('rejects a commit submitted as if it were a chat message', async () => {
     const { commitPayload } = await buildTestCommitWithWelcome('conv-1');
 
