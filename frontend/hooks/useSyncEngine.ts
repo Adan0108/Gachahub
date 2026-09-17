@@ -8,10 +8,12 @@ import type { DeviceId } from '../lib/mls/contract/types';
 
 // One engine per browser tab per device, reused across hook instances - a
 // second SyncEngine wrapping the same store would just duplicate the
-// in-memory session cache/locks for no benefit. Getting/creating it is
-// synchronous and side-effect-free (same lazy-singleton shape as
-// getSharedDeviceIdentityStore) - safe to call directly from render,
-// unlike the polling setup below.
+// in-memory session cache/locks for no benefit. Getting/creating it does
+// mutate this module-level state, but only that - no network, no timers,
+// no DOM - so it's safe to call directly from render the way a lazy
+// singleton normally is (same shape as getSharedDeviceIdentityStore),
+// unlike the polling setup below, which is a real side effect and belongs
+// in the effect further down.
 let sharedEngine: SyncEngine | undefined;
 let sharedEngineDeviceId: DeviceId | undefined;
 
@@ -61,7 +63,15 @@ function startWelcomePolling(engine: SyncEngine): void {
   pollIntervalId = setInterval(() => checkForPendingWelcomes(engine), WELCOME_POLL_INTERVAL_MS);
 }
 
-function stopWelcomePollingConsumer(): void {
+// Takes the engine it registered for (not just "one fewer consumer") so
+// this is correct by construction rather than by relying on React always
+// running effect cleanups/re-setups in a particular order: a stale
+// consumer cleaning up after a newer engine has already taken over
+// polling has nothing to do here, whatever pollConsumerCount currently is.
+function stopWelcomePollingConsumer(engine: SyncEngine): void {
+  if (pollingEngine !== engine) {
+    return;
+  }
   pollConsumerCount = Math.max(0, pollConsumerCount - 1);
   if (pollConsumerCount === 0 && pollIntervalId !== undefined) {
     clearInterval(pollIntervalId);
@@ -86,7 +96,7 @@ export function useSyncEngine(): SyncEngine | undefined {
       return undefined;
     }
     startWelcomePolling(engine);
-    return stopWelcomePollingConsumer;
+    return () => stopWelcomePollingConsumer(engine);
   }, [engine]);
 
   return engine;
