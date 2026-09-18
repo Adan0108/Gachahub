@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { AdminGuard } from './guards/admin.guard';
-import { GameModeratorGuard } from './guards/game-moderator.guard';
 import { DiscordLoggerService } from './discord/discord-logger.service';
 import { HttpExceptionFilter } from './filters/http-exception.filter';
 
@@ -9,10 +8,9 @@ import { HttpExceptionFilter } from './filters/http-exception.filter';
 @Module({
   providers: [
     AdminGuard,
-    GameModeratorGuard,
     DiscordLoggerService,
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],
-  exports: [AdminGuard, GameModeratorGuard, DiscordLoggerService],
+  exports: [AdminGuard, DiscordLoggerService],
 })
 export class CommonModule {}

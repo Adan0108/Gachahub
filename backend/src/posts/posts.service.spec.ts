@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 
 import { PostSortDto } from './dto/query-posts.dto';
+import { CreatePostStatusDto } from './dto/create-post.dto';
 import type { PostsRepository } from './posts.repository';
 import type { MediaService } from '../media/media.service';
 import type { FollowsService } from '../follows/follows.service';
@@ -38,7 +39,7 @@ describe('PostsService', () => {
   const postsRepository = {
     findMany: jest.fn(),
     count: jest.fn(),
-    findPublishedById: jest.fn(),
+    findViewableById: jest.fn(),
     findByAuthorId: jest.fn(),
 
     findGameById: jest.fn(),
@@ -229,11 +230,11 @@ describe('PostsService', () => {
 
   describe('findOne', () => {
     it('returns published post', async () => {
-      postsRepository.findPublishedById.mockResolvedValue(basePost);
+      postsRepository.findViewableById.mockResolvedValue(basePost);
 
       const result = await service.findOne('post-1', 'user-1');
 
-      expect(postsRepository.findPublishedById).toHaveBeenCalledWith(
+      expect(postsRepository.findViewableById).toHaveBeenCalledWith(
         'post-1',
         'user-1',
       );
@@ -247,7 +248,7 @@ describe('PostsService', () => {
     });
 
     it('throws when post does not exist', async () => {
-      postsRepository.findPublishedById.mockResolvedValue(null);
+      postsRepository.findViewableById.mockResolvedValue(null);
 
       await expect(service.findOne('missing-post', 'user-1')).rejects.toThrow(
         NotFoundException,
@@ -585,6 +586,44 @@ describe('PostsService', () => {
 
       expect(postsRepository.update).not.toHaveBeenCalled();
     });
+
+    it('rejects a post that has deletedAt set even if its status has not caught up', async () => {
+      postsRepository.findById.mockResolvedValue({
+        ...basePost,
+        deletedAt: new Date(),
+      });
+
+      await expect(
+        service.update(
+          'post-1',
+          {
+            title: 'Changed',
+          },
+          'author-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(postsRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects the author editing a moderator-hidden post, including trying to un-hide it', async () => {
+      postsRepository.findById.mockResolvedValue({
+        ...basePost,
+        status: 'HIDDEN',
+      });
+
+      await expect(
+        service.update(
+          'post-1',
+          {
+            status: CreatePostStatusDto.PUBLISHED,
+          },
+          'author-1',
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(postsRepository.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('remove', () => {
@@ -620,6 +659,39 @@ describe('PostsService', () => {
       postsRepository.findById.mockResolvedValue({
         ...basePost,
         status: 'DELETED',
+      });
+
+      await expect(service.remove('post-1', 'author-1')).rejects.toThrow(
+        NotFoundException,
+      );
+
+      expect(postsRepository.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('allows the author to delete a moderator-hidden post - delete does not undo moderation, it goes further', async () => {
+      postsRepository.findById.mockResolvedValue({
+        ...basePost,
+        status: 'HIDDEN',
+      });
+
+      postsRepository.softDelete.mockResolvedValue({
+        ...basePost,
+        status: 'DELETED',
+        deletedAt: new Date(),
+      });
+
+      const result = await service.remove('post-1', 'author-1');
+
+      expect(postsRepository.softDelete).toHaveBeenCalledWith('post-1');
+      expect(result).toEqual({
+        message: 'Post deleted successfully',
+      });
+    });
+
+    it('rejects a post that has deletedAt set even if its status has not caught up', async () => {
+      postsRepository.findById.mockResolvedValue({
+        ...basePost,
+        deletedAt: new Date(),
       });
 
       await expect(service.remove('post-1', 'author-1')).rejects.toThrow(

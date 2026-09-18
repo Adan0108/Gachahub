@@ -7,7 +7,6 @@ import {
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 import {
   ApiCookieAuth,
@@ -17,7 +16,6 @@ import {
 } from '@nestjs/swagger';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
-import { GameModeratorGuard } from '../common/guards/game-moderator.guard';
 import { ChatService } from './chat.service';
 import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
@@ -609,13 +607,14 @@ export class ChatController {
   }
 
   /**
-   * Creates a custom game emote.
-   *
-   * GameModeratorGuard allows app admins and moderators assigned to this game.
-   * The service keeps the same permission check as a second safety layer.
+   * Creates a custom game emote. Admin or an assigned moderator of this
+   * game only - enforced entirely in ChatService.createGameEmote via
+   * gameModeratorsService.assertCanModerateGame. No guard here: a guard in
+   * front would repeat that exact check (same three queries) before the
+   * controller even runs, and it can't also verify the game exists the way
+   * the service already does.
    */
   @Post('games/:gameId/emotes')
-  @UseGuards(GameModeratorGuard)
   @ApiCookieAuth('better-auth.session_token')
   @ApiOperation({
     summary: 'Create custom game chat emote. Admin or game moderator only.',

@@ -138,6 +138,53 @@ export class PostsRepository {
     };
   }
 
+  /**
+   * Posts a moderator hid in their game, for the "restore" workflow -
+   * mirrors findByAuthorId's shape (where/pagination owned here, not by the
+   * caller) rather than having callers hand-build a Prisma where clause.
+   */
+  async findHiddenByGame(
+    gameId: string,
+    params: {
+      page: number;
+      limit: number;
+    },
+  ) {
+    const skip = (params.page - 1) * params.limit;
+
+    const where: Prisma.PostWhereInput = {
+      gameId,
+      status: 'HIDDEN',
+      deletedAt: null,
+    };
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.post.findMany({
+        where,
+        include: postInclude,
+        orderBy: [
+          {
+            updatedAt: 'desc',
+          },
+          {
+            id: 'desc',
+          },
+        ],
+        skip,
+        take: params.limit,
+      }),
+
+      this.prisma.post.count({
+        where,
+      }),
+    ]);
+
+    return {
+      items,
+      total,
+    };
+  }
+
   count(where: Prisma.PostWhereInput) {
     return this.prisma.post.count({
       where,
@@ -418,6 +465,62 @@ export class PostsRepository {
       }
 
       return updated;
+    });
+  }
+
+  /**
+   * Moves a post from one status to another only if it's still at `from`
+   * when the write happens - unlike update(), which reads then writes with
+   * no guarantee the row hasn't changed in between. Used by moderation
+   * hide/restore, where two moderators (or a moderator and the author)
+   * racing the same post would otherwise silently lose one side's change.
+   * Returns null when the row was no longer at `from` (someone else moved
+   * it first), instead of throwing, so the caller decides what that means.
+   */
+  transitionStatus(params: {
+    id: string;
+    gameId: string;
+    from: Prisma.PostWhereInput['status'];
+    to: Prisma.PostUpdateInput['status'];
+  }) {
+    return this.prisma.$transaction(async (tx) => {
+      const result = await tx.post.updateMany({
+        where: {
+          id: params.id,
+          gameId: params.gameId,
+          status: params.from,
+        },
+        data: {
+          status: params.to,
+        },
+      });
+
+      if (result.count === 0) {
+        return null;
+      }
+
+      const delta =
+        params.to === 'PUBLISHED' ? 1 : params.from === 'PUBLISHED' ? -1 : 0;
+
+      if (delta !== 0) {
+        await tx.game.update({
+          where: {
+            id: params.gameId,
+          },
+          data: {
+            postCount: {
+              increment: delta,
+            },
+          },
+        });
+      }
+
+      return tx.post.findUniqueOrThrow({
+        where: {
+          id: params.id,
+        },
+        include: postInclude,
+      });
     });
   }
 

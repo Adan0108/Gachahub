@@ -1,9 +1,13 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { UserRole } from '../generated/prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { loadActiveUser } from '../common/guards/active-user.util';
 import { AssignGameModeratorDto } from './dto/assign-game-moderator.dto';
 import { GameModeratorsRepository } from './game-moderators.repository';
 
@@ -22,6 +26,7 @@ import { GameModeratorsRepository } from './game-moderators.repository';
 export class GameModeratorsService {
   constructor(
     private readonly gameModeratorsRepository: GameModeratorsRepository,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -43,16 +48,57 @@ export class GameModeratorsService {
   }
 
   /**
-   * Check if a user moderates a game, by id.
+   * Check if a user moderates a game, by id. Private - assertCanModerateGame
+   * is the only caller now that chat delegates to it instead of calling this
+   * directly.
    */
-
-  async isModerator(gameId: string, userId: string): Promise<boolean> {
+  private async isModerator(gameId: string, userId: string): Promise<boolean> {
     const moderator = await this.gameModeratorsRepository.findByGameIdAndUserId(
       gameId,
       userId,
     );
 
     return moderator !== null;
+  }
+
+  /**
+   * Asserts the user can moderate the given game: either an ADMIN, or an
+   * assigned moderator of that game. Shared so callers outside chat (posts,
+   * comments) don't each duplicate the same admin-or-moderator check.
+   *
+   * Delegates the "does this account exist and is it ACTIVE" gate to
+   * loadActiveUser - the same function AdminGuard uses - rather than
+   * re-checking it here, so a caller invoking this with no guard in front
+   * of it (or a banned account whose session predates the ban) is rejected
+   * the same way, with the same 401-vs-403 split, everywhere in the app.
+   */
+  async assertCanModerateGame(gameId: string, userId: string): Promise<void> {
+    const user = await loadActiveUser(this.prisma, userId);
+
+    if (user.role === UserRole.ADMIN) {
+      return;
+    }
+
+    const isModerator = await this.isModerator(gameId, userId);
+
+    if (!isModerator) {
+      throw new ForbiddenException('You cannot moderate this game');
+    }
+  }
+
+  /**
+   * Resolves a game slug (as it appears in moderation routes) to its id, so
+   * callers can compare it against a resource's own gameId - e.g. checking
+   * a post actually belongs to the game named in the route.
+   */
+  async resolveGameId(gameSlug: string): Promise<string> {
+    const game = await this.gameModeratorsRepository.findGameBySlug(gameSlug);
+
+    if (!game) {
+      throw new NotFoundException('Game not found');
+    }
+
+    return game.id;
   }
 
   /**

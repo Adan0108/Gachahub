@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { Prisma } from '../generated/prisma/client';
+import { PostStatus, type Prisma } from '../generated/prisma/client';
 import { slugify } from '../common/utils/slugify';
 import { CreatePostDto } from './dto/create-post.dto';
 import { PostSortDto, QueryPostsDto } from './dto/query-posts.dto';
@@ -342,12 +342,20 @@ export class PostsService {
   async update(id: string, dto: UpdatePostDto, userId: string) {
     const existingPost = await this.postsRepository.findById(id);
 
-    if (!existingPost || existingPost.status === 'DELETED') {
+    if (
+      !existingPost ||
+      existingPost.deletedAt ||
+      existingPost.status === PostStatus.DELETED
+    ) {
       throw new NotFoundException('Post not found');
     }
 
     if (existingPost.authorId !== userId) {
       throw new ForbiddenException('You can only update your own post');
+    }
+
+    if (existingPost.status === PostStatus.HIDDEN) {
+      throw new ForbiddenException('This post was hidden by a moderator');
     }
 
     if (dto.categoryId) {
@@ -429,10 +437,17 @@ export class PostsService {
     return formatPost(post);
   }
 
+  /**
+   * Deleting is intentionally allowed even when a moderator hid the post -
+   * unlike update(), delete doesn't undo the moderation decision, it goes
+   * further in the same direction (the content becomes fully inaccessible
+   * instead of just hidden). Blocking it would make hidden content
+   * permanently undeletable through the API.
+   */
   async remove(id: string, userId: string) {
     const post = await this.postsRepository.findById(id);
 
-    if (!post || post.status === 'DELETED') {
+    if (!post || post.deletedAt || post.status === PostStatus.DELETED) {
       throw new NotFoundException('Post not found');
     }
 

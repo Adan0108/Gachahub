@@ -10,7 +10,6 @@ import {
   ChatMessageContentType,
   ChatParticipantState,
   Prisma,
-  UserRole,
   MessageRequestSetting,
 } from '../generated/prisma/client';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
@@ -912,7 +911,7 @@ export class ChatService {
       throw new NotFoundException('Game not found');
     }
 
-    await this.assertCanManageGameEmotes(userId, gameId);
+    await this.gameModeratorsService.assertCanModerateGame(gameId, userId);
 
     if (!dto.unicode && !dto.imageUrl && !dto.animationUrl) {
       throw new BadRequestException(
@@ -1352,29 +1351,6 @@ export class ChatService {
     }
 
     return emote;
-  }
-
-  /**
-   * Verifies the caller can create custom emotes for a game.
-   *
-   * App admins can manage every game. Game moderators can manage only their
-   * assigned game.
-   */
-  private async assertCanManageGameEmotes(userId: string, gameId: string) {
-    const user = await this.chatRepository.findUserById(userId);
-
-    if (user?.role === UserRole.ADMIN) {
-      return;
-    }
-
-    const isModerator = await this.gameModeratorsService.isModerator(
-      gameId,
-      userId,
-    );
-
-    if (!isModerator) {
-      throw new ForbiddenException('You cannot manage emotes for this game');
-    }
   }
 
   /**
