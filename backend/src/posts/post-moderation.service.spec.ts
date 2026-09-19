@@ -7,6 +7,7 @@ import {
 
 import type { PostsRepository } from './posts.repository';
 import type { GameModeratorsService } from '../game-moderators/game-moderators.service';
+import type { AuditLogService } from '../audit-log/audit-log.service';
 
 /*
  * Unit test only mocks service dependencies. Do not load their real
@@ -14,6 +15,10 @@ import type { GameModeratorsService } from '../game-moderators/game-moderators.s
  */
 jest.mock('./posts.repository', () => ({
   PostsRepository: class {},
+}));
+
+jest.mock('../audit-log/audit-log.service', () => ({
+  AuditLogService: class {},
 }));
 
 jest.mock('../game-moderators/game-moderators.service', () => ({
@@ -34,6 +39,8 @@ describe('PostModerationService', () => {
     loadModeratableResource: jest.fn(),
   };
 
+  const auditLogService = { record: jest.fn() };
+
   let service: PostModerationService;
 
   const basePost = {
@@ -41,6 +48,7 @@ describe('PostModerationService', () => {
     authorId: 'author-1',
     gameId: 'game-1',
     status: 'PUBLISHED',
+    title: 'A post',
     deletedAt: null,
     tags: [],
     postLikes: [],
@@ -71,6 +79,7 @@ describe('PostModerationService', () => {
     service = new PostModerationService(
       postsRepository as unknown as PostsRepository,
       gameModeratorsService as unknown as GameModeratorsService,
+      auditLogService as unknown as AuditLogService,
     );
   });
 
@@ -104,6 +113,15 @@ describe('PostModerationService', () => {
         to: 'HIDDEN',
       });
       expect(result.status).toBe('HIDDEN');
+      expect(auditLogService.record).toHaveBeenCalledWith({
+        action: 'POST_HIDDEN',
+        actorId: 'mod-1',
+        targetType: 'POST',
+        targetId: 'post-1',
+        gameId: 'game-1',
+        gameSlug: 'wuthering-waves',
+        metadata: { authorId: 'author-1', postTitle: 'A post' },
+      });
     });
 
     it('is idempotent when the post is already hidden', async () => {
@@ -115,6 +133,7 @@ describe('PostModerationService', () => {
       const result = await service.hideAsModerator('game-1', 'post-1', 'mod-1');
 
       expect(postsRepository.transitionStatus).not.toHaveBeenCalled();
+      expect(auditLogService.record).not.toHaveBeenCalled();
       expect(result.status).toBe('HIDDEN');
     });
 
@@ -213,6 +232,12 @@ describe('PostModerationService', () => {
         to: 'PUBLISHED',
       });
       expect(result.status).toBe('PUBLISHED');
+      expect(auditLogService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'POST_RESTORED',
+          targetId: 'post-1',
+        }),
+      );
     });
 
     it('is idempotent when the post is already published', async () => {

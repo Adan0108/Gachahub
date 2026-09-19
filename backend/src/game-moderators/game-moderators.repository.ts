@@ -128,8 +128,11 @@ export class GameModeratorsRepository {
    *
    * This means the selected user can moderate content inside the selected game.
    */
-  create(data: Prisma.GameModeratorCreateInput) {
-    return this.prisma.gameModerator.create({
+  create(
+    data: Prisma.GameModeratorCreateInput,
+    db: Prisma.TransactionClient = this.prisma,
+  ) {
+    return db.gameModerator.create({
       data,
       include: {
         user: {
@@ -157,14 +160,13 @@ export class GameModeratorsRepository {
    *
    * This removes game-scoped moderation permission from the user.
    */
-  deleteByGameIdAndUserId(gameId: string, userId: string) {
-    return this.prisma.gameModerator.delete({
-      where: {
-        gameId_userId: {
-          gameId,
-          userId,
-        },
-      },
+  deleteByGameIdAndUserId(
+    gameId: string,
+    userId: string,
+    db: Prisma.TransactionClient = this.prisma,
+  ) {
+    return db.gameModerator.deleteMany({
+      where: { gameId, userId },
     });
   }
 }

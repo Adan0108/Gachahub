@@ -6,6 +6,7 @@ import {
 
 import type { ReportsRepository } from './reports.repository';
 import type { GameModeratorsService } from '../game-moderators/game-moderators.service';
+import type { AuditLogService } from '../audit-log/audit-log.service';
 
 /*
  * Unit test only mocks service dependencies. Do not load their real
@@ -13,6 +14,10 @@ import type { GameModeratorsService } from '../game-moderators/game-moderators.s
  */
 jest.mock('./reports.repository', () => ({
   ReportsRepository: class {},
+}));
+
+jest.mock('../audit-log/audit-log.service', () => ({
+  AuditLogService: class {},
 }));
 
 jest.mock('../game-moderators/game-moderators.service', () => ({
@@ -34,6 +39,8 @@ describe('ReportModerationService', () => {
     resolveModeratableGameId: jest.fn(),
     loadModeratableResource: jest.fn(),
   };
+
+  const auditLogService = { record: jest.fn() };
 
   let service: ReportModerationService;
 
@@ -73,6 +80,7 @@ describe('ReportModerationService', () => {
     service = new ReportModerationService(
       reportsRepository as unknown as ReportsRepository,
       gameModeratorsService as unknown as GameModeratorsService,
+      auditLogService as unknown as AuditLogService,
     );
   });
 
@@ -172,6 +180,15 @@ describe('ReportModerationService', () => {
       );
       expect(reportsRepository.claim).toHaveBeenCalledWith('report-1', 'mod-1');
       expect(result.status).toBe('IN_REVIEW');
+      expect(auditLogService.record).toHaveBeenCalledWith({
+        action: 'REPORT_CLAIMED',
+        actorId: 'mod-1',
+        targetType: 'REPORT',
+        targetId: 'report-1',
+        gameId: 'game-1',
+        gameSlug: 'game-1',
+        metadata: { reportedTargetType: 'POST', reportedTargetId: 'post-1' },
+      });
     });
 
     it('answers 409 for a report that is not claimable - one code whether it was already claimed before this request or mid-request', async () => {
@@ -184,6 +201,8 @@ describe('ReportModerationService', () => {
       await expect(
         service.claim('game-1', 'report-1', 'mod-1'),
       ).rejects.toThrow(ConflictException);
+
+      expect(auditLogService.record).not.toHaveBeenCalled();
     });
 
     it('rejects when the report belongs to a different game than the route', async () => {
@@ -240,6 +259,12 @@ describe('ReportModerationService', () => {
         resolutionNote: 'Hid the post',
       });
       expect(result.status).toBe('RESOLVED');
+      expect(auditLogService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'REPORT_RESOLVED',
+          targetId: 'report-1',
+        }),
+      );
     });
 
     it('dismisses an open report and drops a whitespace-only note', async () => {
@@ -259,6 +284,9 @@ describe('ReportModerationService', () => {
         resolvedById: 'mod-1',
         resolutionNote: undefined,
       });
+      expect(auditLogService.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'REPORT_DISMISSED' }),
+      );
     });
 
     it('answers 409 for an already-closed report, from either action', async () => {

@@ -1,3 +1,4 @@
+import { AuditLogModule } from '../audit-log/audit-log.module';
 import { Module } from '@nestjs/common';
 import { PostsController } from './posts.controller';
 import { PostModerationController } from './post-moderation.controller';
@@ -15,6 +16,7 @@ import { GameModeratorsModule } from '../game-moderators/game-moderators.module'
     PostVisibilityModule,
     RecommendationModule,
     GameModeratorsModule,
+    AuditLogModule,
   ],
   controllers: [PostsController, PostModerationController],
   providers: [PostsService, PostsRepository, PostModerationService],

@@ -10,6 +10,7 @@ import { UpdateCommentDto } from './dto/update-comment.dto';
 import { CommentsRepository } from './comments.repository';
 import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import { UserInterestService } from '../recommendation/user-interest.service';
+import { resolvePagination, toPaginated } from '../common/utils/paginated';
 
 @Injectable()
 export class CommentsService {
@@ -22,23 +23,17 @@ export class CommentsService {
   async findByPost(postId: string, query: PaginationQueryDto, userId?: string) {
     await this.ensurePostCanBeViewed(postId, userId);
 
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const { page, limit } = resolvePagination(query);
 
     const result = await this.commentsRepository.findByPostId(postId, {
       page,
       limit,
     });
 
-    return {
-      items: result.items.map((comment) => this.formatComment(comment)),
-      meta: {
-        page,
-        limit,
-        total: result.total,
-        totalPages: Math.ceil(result.total / limit),
-      },
-    };
+    return toPaginated(
+      result.items.map((comment) => this.formatComment(comment)),
+      { page, limit, total: result.total },
+    );
   }
 
   async findReplies(
@@ -59,23 +54,17 @@ export class CommentsService {
 
     await this.ensurePostCanBeViewed(parent.postId, userId);
 
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const { page, limit } = resolvePagination(query);
 
     const result = await this.commentsRepository.findReplies(commentId, {
       page,
       limit,
     });
 
-    return {
-      items: result.items.map((comment) => this.formatComment(comment)),
-      meta: {
-        page,
-        limit,
-        total: result.total,
-        totalPages: Math.ceil(result.total / limit),
-      },
-    };
+    return toPaginated(
+      result.items.map((comment) => this.formatComment(comment)),
+      { page, limit, total: result.total },
+    );
   }
 
   async create(postId: string, dto: CreateCommentDto, userId: string) {

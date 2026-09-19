@@ -4,10 +4,13 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { PostStatus } from '../generated/prisma/client';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import type { PostAuditAction } from '../audit-log/audit-log.types';
 import { GameModeratorsService } from '../game-moderators/game-moderators.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { formatPost } from './post.mapper';
 import { PostsRepository } from './posts.repository';
+import { resolvePagination, toPaginated } from '../common/utils/paginated';
 
 /**
  * Moderator/admin actions on posts: hide, restore, and list what's hidden
@@ -21,6 +24,7 @@ export class PostModerationService {
   constructor(
     private readonly postsRepository: PostsRepository,
     private readonly gameModeratorsService: GameModeratorsService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async hideAsModerator(gameSlug: string, postId: string, moderatorId: string) {
@@ -30,6 +34,7 @@ export class PostModerationService {
       moderatorId,
       from: PostStatus.PUBLISHED,
       to: PostStatus.HIDDEN,
+      auditAction: 'POST_HIDDEN',
       rejectionMessage: 'Only published posts can be hidden',
     });
   }
@@ -45,6 +50,7 @@ export class PostModerationService {
       moderatorId,
       from: PostStatus.HIDDEN,
       to: PostStatus.PUBLISHED,
+      auditAction: 'POST_RESTORED',
       rejectionMessage: 'Only hidden posts can be restored',
     });
   }
@@ -65,23 +71,17 @@ export class PostModerationService {
       moderatorId,
     );
 
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const { page, limit } = resolvePagination(query);
 
     const result = await this.postsRepository.findHiddenByGame(gameId, {
       page,
       limit,
     });
 
-    return {
-      items: result.items.map((post) => formatPost(post)),
-      meta: {
-        page,
-        limit,
-        total: result.total,
-        totalPages: Math.ceil(result.total / limit),
-      },
-    };
+    return toPaginated(
+      result.items.map((post) => formatPost(post)),
+      { page, limit, total: result.total },
+    );
   }
 
   /**
@@ -100,10 +100,18 @@ export class PostModerationService {
     moderatorId: string;
     from: PostStatus;
     to: PostStatus;
+    auditAction: PostAuditAction;
     rejectionMessage: string;
   }) {
-    const { gameSlug, postId, moderatorId, from, to, rejectionMessage } =
-      params;
+    const {
+      gameSlug,
+      postId,
+      moderatorId,
+      from,
+      to,
+      auditAction,
+      rejectionMessage,
+    } = params;
 
     const { gameId, resource: post } =
       await this.gameModeratorsService.loadModeratableResource({
@@ -135,6 +143,16 @@ export class PostModerationService {
         'This post was changed by someone else - please retry',
       );
     }
+
+    await this.auditLogService.record({
+      action: auditAction,
+      actorId: moderatorId,
+      targetType: 'POST',
+      targetId: postId,
+      gameId,
+      gameSlug,
+      metadata: { authorId: post.authorId, postTitle: post.title },
+    });
 
     return formatPost(updated);
   }

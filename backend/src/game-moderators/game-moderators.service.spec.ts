@@ -6,9 +6,14 @@ import {
 
 import type { GameModeratorsRepository } from './game-moderators.repository';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { AuditLogService } from '../audit-log/audit-log.service';
 
 jest.mock('./game-moderators.repository', () => ({
   GameModeratorsRepository: class {},
+}));
+
+jest.mock('../audit-log/audit-log.service', () => ({
+  AuditLogService: class {},
 }));
 
 jest.mock('../prisma/prisma.service', () => ({
@@ -22,22 +27,35 @@ describe('GameModeratorsService', () => {
     findUserById: jest.fn(),
     findByGameIdAndUserId: jest.fn(),
     findGameBySlug: jest.fn(),
+    findUserByEmail: jest.fn(),
+    create: jest.fn(),
+    deleteByGameIdAndUserId: jest.fn(),
   };
+
+  const auditLogService = { record: jest.fn(), recordOrThrow: jest.fn() };
+
+  const tx = { tx: true };
 
   const prisma = {
     user: {
       findUnique: jest.fn(),
     },
+    $transaction: jest.fn(),
   };
 
   let service: GameModeratorsService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    auditLogService.recordOrThrow.mockResolvedValue(undefined);
+    prisma.$transaction.mockImplementation((cb: (t: unknown) => unknown) =>
+      cb(tx),
+    );
 
     service = new GameModeratorsService(
       gameModeratorsRepository as unknown as GameModeratorsRepository,
       prisma as unknown as PrismaService,
+      auditLogService as unknown as AuditLogService,
     );
   });
 
@@ -252,6 +270,130 @@ describe('GameModeratorsService', () => {
       expect(
         gameModeratorsRepository.findByGameIdAndUserId,
       ).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('assignModerator', () => {
+    it('creates the assignment and audits it', async () => {
+      gameModeratorsRepository.findGameBySlug.mockResolvedValue({
+        id: 'game-1',
+        slug: 'wuthering-waves',
+      });
+      gameModeratorsRepository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+      });
+      gameModeratorsRepository.findByGameIdAndUserId.mockResolvedValue(null);
+      gameModeratorsRepository.create.mockResolvedValue({ id: 'assignment-1' });
+
+      await expect(
+        service.assignModerator(
+          'wuthering-waves',
+          { userId: 'user-2' },
+          'admin-1',
+        ),
+      ).resolves.toEqual({ id: 'assignment-1' });
+
+      expect(gameModeratorsRepository.create).toHaveBeenCalledWith(
+        expect.anything(),
+        tx,
+      );
+      expect(auditLogService.recordOrThrow).toHaveBeenCalledWith(
+        {
+          action: 'MODERATOR_ASSIGNED',
+          actorId: 'admin-1',
+          targetType: 'USER',
+          targetId: 'user-2',
+          gameId: 'game-1',
+          gameSlug: 'wuthering-waves',
+        },
+        tx,
+      );
+    });
+
+    it('fails the assignment when its audit entry cannot be written', async () => {
+      gameModeratorsRepository.findGameBySlug.mockResolvedValue({
+        id: 'game-1',
+      });
+      gameModeratorsRepository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'ACTIVE',
+      });
+      gameModeratorsRepository.findByGameIdAndUserId.mockResolvedValue(null);
+      gameModeratorsRepository.create.mockResolvedValue({ id: 'assignment-1' });
+      auditLogService.recordOrThrow.mockRejectedValue(new Error('db down'));
+
+      await expect(
+        service.assignModerator(
+          'wuthering-waves',
+          { userId: 'user-2' },
+          'admin-1',
+        ),
+      ).rejects.toThrow('db down');
+    });
+
+    it('does not audit a rejected assignment', async () => {
+      gameModeratorsRepository.findGameBySlug.mockResolvedValue({
+        id: 'game-1',
+      });
+      gameModeratorsRepository.findUserById.mockResolvedValue({
+        id: 'user-2',
+        status: 'BANNED',
+      });
+
+      await expect(
+        service.assignModerator(
+          'wuthering-waves',
+          { userId: 'user-2' },
+          'admin-1',
+        ),
+      ).rejects.toThrow();
+
+      expect(auditLogService.recordOrThrow).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('removeModerator', () => {
+    beforeEach(() => {
+      gameModeratorsRepository.findGameBySlug.mockResolvedValue({
+        id: 'game-1',
+        slug: 'wuthering-waves',
+      });
+    });
+
+    it('deletes the assignment and audits it in one transaction', async () => {
+      gameModeratorsRepository.deleteByGameIdAndUserId.mockResolvedValue({
+        count: 1,
+      });
+
+      await service.removeModerator('wuthering-waves', 'user-2', 'admin-1');
+
+      expect(
+        gameModeratorsRepository.deleteByGameIdAndUserId,
+      ).toHaveBeenCalledWith('game-1', 'user-2', tx);
+      expect(auditLogService.recordOrThrow).toHaveBeenCalledWith(
+        {
+          action: 'MODERATOR_REMOVED',
+          actorId: 'admin-1',
+          targetType: 'USER',
+          targetId: 'user-2',
+          gameId: 'game-1',
+          gameSlug: 'wuthering-waves',
+        },
+        tx,
+      );
+    });
+
+    it('answers 404, not a 500, when a concurrent removal already deleted the assignment', async () => {
+      gameModeratorsRepository.deleteByGameIdAndUserId.mockResolvedValue({
+        count: 0,
+      });
+
+      await expect(
+        service.removeModerator('wuthering-waves', 'user-2', 'admin-1'),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(auditLogService.recordOrThrow).not.toHaveBeenCalled();
     });
   });
 

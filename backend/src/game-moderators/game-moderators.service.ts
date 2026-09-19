@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { UserRole } from '../generated/prisma/client';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { loadActiveUser } from '../common/guards/active-user.util';
 import { AssignGameModeratorDto } from './dto/assign-game-moderator.dto';
@@ -27,6 +28,7 @@ export class GameModeratorsService {
   constructor(
     private readonly gameModeratorsRepository: GameModeratorsRepository,
     private readonly prisma: PrismaService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   /**
@@ -200,22 +202,30 @@ export class GameModeratorsService {
       throw new ConflictException('User is already a moderator of this game');
     }
 
-    return this.gameModeratorsRepository.create({
-      game: {
-        connect: {
-          id: game.id,
+    // Privilege changes are audited in the same transaction: no grant without a record.
+    return this.prisma.$transaction(async (tx) => {
+      const assignment = await this.gameModeratorsRepository.create(
+        {
+          game: { connect: { id: game.id } },
+          user: { connect: { id: user.id } },
+          assigner: { connect: { id: assignedBy } },
         },
-      },
-      user: {
-        connect: {
-          id: user.id,
+        tx,
+      );
+
+      await this.auditLogService.recordOrThrow(
+        {
+          action: 'MODERATOR_ASSIGNED',
+          actorId: assignedBy,
+          targetType: 'USER',
+          targetId: user.id,
+          gameId: game.id,
+          gameSlug: game.slug,
         },
-      },
-      assigner: {
-        connect: {
-          id: assignedBy,
-        },
-      },
+        tx,
+      );
+
+      return assignment;
     });
   }
 
@@ -227,27 +237,39 @@ export class GameModeratorsService {
    * - Check the moderator assignment exists.
    * - Delete the assignment.
    */
-  async removeModerator(gameSlug: string, userId: string) {
+  async removeModerator(gameSlug: string, userId: string, removedBy: string) {
     const game = await this.gameModeratorsRepository.findGameBySlug(gameSlug);
 
     if (!game) {
       throw new NotFoundException('Game not found');
     }
 
-    const existingModerator =
-      await this.gameModeratorsRepository.findByGameIdAndUserId(
-        game.id,
-        userId,
+    // Conditional delete inside the transaction: a concurrent removal that wins
+    // the race leaves count 0 here, which is a 404, not a P2025 500.
+    await this.prisma.$transaction(async (tx) => {
+      const { count } =
+        await this.gameModeratorsRepository.deleteByGameIdAndUserId(
+          game.id,
+          userId,
+          tx,
+        );
+
+      if (count === 0) {
+        throw new NotFoundException('Moderator assignment not found');
+      }
+
+      await this.auditLogService.recordOrThrow(
+        {
+          action: 'MODERATOR_REMOVED',
+          actorId: removedBy,
+          targetType: 'USER',
+          targetId: userId,
+          gameId: game.id,
+          gameSlug: game.slug,
+        },
+        tx,
       );
-
-    if (!existingModerator) {
-      throw new NotFoundException('Moderator assignment not found');
-    }
-
-    await this.gameModeratorsRepository.deleteByGameIdAndUserId(
-      game.id,
-      userId,
-    );
+    });
 
     return {
       message: 'Moderator removed successfully',

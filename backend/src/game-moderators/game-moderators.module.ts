@@ -1,3 +1,4 @@
+import { AuditLogModule } from '../audit-log/audit-log.module';
 import { Module } from '@nestjs/common';
 import { CommonModule } from '../common/common.module';
 import { GameModeratorsController } from './game-moderators.controller';
@@ -13,7 +14,7 @@ import { GameModeratorsService } from './game-moderators.service';
  * - remove a moderator from a game
  */
 @Module({
-  imports: [CommonModule],
+  imports: [CommonModule, AuditLogModule],
   controllers: [GameModeratorsController],
   providers: [GameModeratorsService, GameModeratorsRepository],
   exports: [GameModeratorsService, GameModeratorsRepository],

@@ -9,6 +9,7 @@ import { CreateGameDto } from './dto/create-game.dto';
 import { QueryGamesDto } from './dto/query-games.dto';
 import { UpdateGameDto } from './dto/update-game.dto';
 import { GamesRepository } from './games.repository';
+import { resolvePagination, toPaginated } from '../common/utils/paginated';
 
 /**
  * Service responsible for game business logic.
@@ -29,9 +30,7 @@ export class GamesService {
    * - Supports basic search by name and slug
    */
   async findAll(query: QueryGamesDto) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = resolvePagination(query);
 
     const where: Prisma.GameWhereInput = {
       ...(query.status ? { status: query.status } : {}),
@@ -67,15 +66,7 @@ export class GamesService {
       this.gamesRepository.count(where),
     ]);
 
-    return {
-      items,
-      meta: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
+    return toPaginated(items, { page, limit, total: total });
   }
 
   /**

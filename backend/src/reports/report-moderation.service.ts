@@ -1,10 +1,13 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { normalizeText } from '../common/utils/normalize-text';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import type { ReportAuditAction } from '../audit-log/audit-log.types';
 import { GameModeratorsService } from '../game-moderators/game-moderators.service';
 import { QueryReportsAdminDto } from './dto/query-reports-admin.dto';
 import { QueryReportsDto } from './dto/query-reports.dto';
 import { ResolveReportDto } from './dto/resolve-report.dto';
 import { ReportsRepository } from './reports.repository';
+import { resolvePagination, toPaginated } from '../common/utils/paginated';
 
 /**
  * Moderator/admin actions on reports: listing a queue, and closing a report
@@ -17,6 +20,7 @@ export class ReportModerationService {
   constructor(
     private readonly reportsRepository: ReportsRepository,
     private readonly gameModeratorsService: GameModeratorsService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   /**
@@ -56,13 +60,24 @@ export class ReportModerationService {
    * IN_REVIEW before this request or got claimed by someone else mid-request.
    */
   async claim(gameSlug: string, reportId: string, moderatorId: string) {
-    await this.authorizeReport(gameSlug, reportId, moderatorId);
+    const { gameId } = await this.authorizeReport(
+      gameSlug,
+      reportId,
+      moderatorId,
+    );
 
     const claimed = await this.reportsRepository.claim(reportId, moderatorId);
 
     if (!claimed) {
       throw new ConflictException('This report is no longer pending');
     }
+
+    await this.recordAudit('REPORT_CLAIMED', {
+      gameId,
+      gameSlug,
+      moderatorId,
+      report: claimed,
+    });
 
     return claimed;
   }
@@ -106,7 +121,11 @@ export class ReportModerationService {
   }) {
     const { gameSlug, reportId, moderatorId, status, resolutionNote } = params;
 
-    await this.authorizeReport(gameSlug, reportId, moderatorId);
+    const { gameId } = await this.authorizeReport(
+      gameSlug,
+      reportId,
+      moderatorId,
+    );
 
     // Deliberately not restricted to report.assignedModeratorId: with no
     // "unclaim" path yet, locking resolve/dismiss to whoever claimed it
@@ -125,15 +144,52 @@ export class ReportModerationService {
       throw new ConflictException('This report is already closed');
     }
 
+    await this.recordAudit(
+      status === 'RESOLVED' ? 'REPORT_RESOLVED' : 'REPORT_DISMISSED',
+      { gameId, gameSlug, moderatorId, report: finalized },
+    );
+
     return finalized;
+  }
+
+  private recordAudit(
+    action: ReportAuditAction,
+    params: {
+      gameId: string;
+      gameSlug: string;
+      moderatorId: string;
+      report: {
+        id: string;
+        targetType: string;
+        targetId: string;
+        resolutionNote: string | null;
+      };
+    },
+  ) {
+    const { gameId, gameSlug, moderatorId, report } = params;
+
+    return this.auditLogService.record({
+      action,
+      actorId: moderatorId,
+      targetType: 'REPORT',
+      targetId: report.id,
+      gameId,
+      gameSlug,
+      metadata: {
+        reportedTargetType: report.targetType,
+        reportedTargetId: report.targetId,
+        ...(report.resolutionNote
+          ? { resolutionNote: report.resolutionNote }
+          : {}),
+      },
+    });
   }
 
   private async listByGameId(
     gameId: string | undefined,
     query: QueryReportsDto,
   ) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const { page, limit } = resolvePagination(query);
 
     const result = await this.reportsRepository.findMany({
       gameId,
@@ -143,15 +199,7 @@ export class ReportModerationService {
       limit,
     });
 
-    return {
-      items: result.items,
-      meta: {
-        page,
-        limit,
-        total: result.total,
-        totalPages: Math.ceil(result.total / limit),
-      },
-    };
+    return toPaginated(result.items, { page, limit, total: result.total });
   }
 
   /**

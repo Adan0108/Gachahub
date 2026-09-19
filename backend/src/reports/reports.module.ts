@@ -1,3 +1,4 @@
+import { AuditLogModule } from '../audit-log/audit-log.module';
 import { Module } from '@nestjs/common';
 import { PostVisibilityModule } from '../post-visibility/post-visibility.module';
 import { GameModeratorsModule } from '../game-moderators/game-moderators.module';
@@ -10,7 +11,7 @@ import { ReportsRepository } from './reports.repository';
 import { ReportsService } from './reports.service';
 
 @Module({
-  imports: [GameModeratorsModule, PostVisibilityModule],
+  imports: [GameModeratorsModule, PostVisibilityModule, AuditLogModule],
   controllers: [
     ReportsController,
     ReportModerationController,

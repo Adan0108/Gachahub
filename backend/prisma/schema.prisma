@@ -48,6 +48,7 @@ model User {
   reportsFiled    Report[] @relation("ReportsFiled")
   reportsAssigned Report[] @relation("ReportsAssigned")
   reportsResolved Report[] @relation("ReportsResolved")
+  auditLogsActed  AuditLog[] @relation("AuditLogActor")
 
   @@unique([email])
   @@map("user")
@@ -171,6 +172,7 @@ model Game {
   members    GameMember[]
   chatEmotes ChatEmote[]
   reports    Report[]
+  auditLogs  AuditLog[]
 
   @@index([status])
   @@index([createdAt])
@@ -806,4 +808,46 @@ model Report {
   @@index([status, createdAt])
   @@index([targetType, targetId])
   @@map("reports")
+}
+
+enum AuditAction {
+  POST_HIDDEN
+  POST_RESTORED
+  REPORT_CLAIMED
+  REPORT_RESOLVED
+  REPORT_DISMISSED
+  MODERATOR_ASSIGNED
+  MODERATOR_REMOVED
+}
+
+enum AuditTargetType {
+  POST
+  REPORT
+  USER
+}
+
+// Append-only record of moderator/admin actions. actorId and gameId are SetNull so the trail
+// outlives a deleted account or game; actorName/gameSlug are snapshotted at write time so an entry
+// stays readable after that happens. targetId is a plain string (polymorphic, no FK) for the same reason.
+model AuditLog {
+  id         String          @id @default(cuid())
+  gameId     String?
+  actorId    String?
+  actorName  String?
+  gameSlug   String?
+  action     AuditAction
+  targetType AuditTargetType
+  targetId   String
+  metadata   Json?
+
+  createdAt DateTime @default(now())
+
+  game  Game? @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  actor User? @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([gameId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+  @@map("audit_logs")
 }

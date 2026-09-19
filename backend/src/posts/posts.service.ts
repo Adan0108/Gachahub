@@ -16,6 +16,7 @@ import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { formatPost } from './post.mapper';
 import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import { UserInterestService } from '../recommendation/user-interest.service';
+import { resolvePagination, toPaginated } from '../common/utils/paginated';
 
 @Injectable()
 export class PostsService {
@@ -27,9 +28,7 @@ export class PostsService {
   ) {}
 
   async findAll(query: QueryPostsDto, userId?: string) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = resolvePagination(query);
 
     const where: Prisma.PostWhereInput = {
       status: 'PUBLISHED',
@@ -124,15 +123,10 @@ export class PostsService {
       this.postsRepository.count(where),
     ]);
 
-    return {
-      items: items.map((post) => formatPost(post)),
-      meta: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
+    return toPaginated(
+      items.map((post) => formatPost(post)),
+      { page, limit, total: total },
+    );
   }
 
   async findOne(id: string, userId?: string) {
@@ -163,8 +157,7 @@ export class PostsService {
     authorId: string,
     userId?: string,
   ) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const { page, limit } = resolvePagination(query);
 
     const result = await this.postsRepository.findByAuthorId(authorId, {
       page,
@@ -172,15 +165,10 @@ export class PostsService {
       userId,
     });
 
-    return {
-      items: result.items.map((post) => formatPost(post)),
-      meta: {
-        page,
-        limit,
-        total: result.total,
-        totalPages: Math.ceil(result.total / limit),
-      },
-    };
+    return toPaginated(
+      result.items.map((post) => formatPost(post)),
+      { page, limit, total: result.total },
+    );
   }
 
   async findByAuthorPublic(
@@ -188,8 +176,7 @@ export class PostsService {
     authorId: string,
     userId?: string,
   ) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const { page, limit } = resolvePagination(query);
 
     const result = await this.postsRepository.findByAuthorId(authorId, {
       page,
@@ -199,15 +186,10 @@ export class PostsService {
       userId,
     });
 
-    return {
-      items: result.items.map((post) => formatPost(post)),
-      meta: {
-        page,
-        limit,
-        total: result.total,
-        totalPages: Math.ceil(result.total / limit),
-      },
-    };
+    return toPaginated(
+      result.items.map((post) => formatPost(post)),
+      { page, limit, total: result.total },
+    );
   }
 
   async create(dto: CreatePostDto, authorId: string) {

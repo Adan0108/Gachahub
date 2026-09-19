@@ -101,7 +101,12 @@ export class GameModeratorsController {
   removeModerator(
     @Param('gameSlug') gameSlug: string,
     @Param('userId') userId: string,
+    @Session() session: UserSession,
   ) {
-    return this.gameModeratorsService.removeModerator(gameSlug, userId);
+    return this.gameModeratorsService.removeModerator(
+      gameSlug,
+      userId,
+      session.user.id,
+    );
   }
 }

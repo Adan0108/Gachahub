@@ -19,6 +19,7 @@ import { CommentsModule } from './comments/comments.module';
 import { FollowsModule } from './follows/follows.module';
 import { FeedModule } from './feed/feed.module';
 import { CommonModule } from './common/common.module';
+import { AuditLogQueryModule } from './audit-log/audit-log-query.module';
 import { ReportsModule } from './reports/reports.module';
 
 /**
@@ -49,6 +50,7 @@ import { ReportsModule } from './reports/reports.module';
     FollowsModule,
     FeedModule,
     ReportsModule,
+    AuditLogQueryModule,
   ],
   controllers: [AppController],
   providers: [AppService],
