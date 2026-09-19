@@ -45,6 +45,10 @@ model User {
   blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
   blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
 
+  reportsFiled    Report[] @relation("ReportsFiled")
+  reportsAssigned Report[] @relation("ReportsAssigned")
+  reportsResolved Report[] @relation("ReportsResolved")
+
   @@unique([email])
   @@map("user")
 }
@@ -166,6 +170,7 @@ model Game {
   posts      Post[]
   members    GameMember[]
   chatEmotes ChatEmote[]
+  reports    Report[]
 
   @@index([status])
   @@index([createdAt])
@@ -736,4 +741,69 @@ model Comment {
   @@index([authorId])
   @@index([parentId, createdAt])
   @@map("comments")
+}
+
+enum ReportTargetType {
+  POST
+  COMMENT
+}
+
+enum ReportReason {
+  UNMARKED_SPOILERS
+  HARASSMENT
+  COMMERCIAL_SPAM
+  MISINFORMATION
+  NSFW
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  IN_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+model Report {
+  id         String           @id @default(cuid())
+  gameId     String
+  reporterId String
+  targetType ReportTargetType
+  targetId   String
+  reasonCode ReportReason
+  details    String?
+  status     ReportStatus     @default(PENDING)
+
+  assignedModeratorId String?
+  resolutionNote      String?
+  resolvedById        String?
+  resolvedAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  game              Game  @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  reporter          User  @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  assignedModerator User? @relation("ReportsAssigned", fields: [assignedModeratorId], references: [id], onDelete: SetNull)
+  resolvedBy        User? @relation("ReportsResolved", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  // gameId is denormalized from the target (Post.gameId, or Comment -> Post.gameId) at creation
+  // time. A report's target is polymorphic (POST or COMMENT), and Prisma has no native way to
+  // join "whichever table targetType points at" - without gameId living here directly, listing
+  // "reports for game X" would mean two separate queries merged and paginated in application
+  // code. Denormalizing it once at write time keeps every read a plain indexed query.
+  //
+  // No @@unique here: uniqueness on (reporterId, targetType, targetId) is scoped to open
+  // (PENDING/IN_REVIEW) reports only, so a reporter can re-report the same target after an
+  // earlier report closes. Prisma cannot express a WHERE-scoped unique index, so the real
+  // constraint is a hand-written partial unique index in migration 20260918160000_add_reports
+  // ("reports_open_target_key") - same pattern as ChatEmote's global shortcode uniqueness.
+  // Keep that migration line when regenerating. ReportsService.create also does a plain
+  // pre-check query for a friendly 409 message; the partial index is what actually prevents
+  // the race between two concurrent requests both passing that check.
+  @@index([gameId, status, createdAt])
+  @@index([gameId, createdAt])
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@map("reports")
 }

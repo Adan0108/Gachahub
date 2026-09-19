@@ -102,6 +102,54 @@ export class GameModeratorsService {
   }
 
   /**
+   * Resolves the route's gameSlug and confirms the caller can moderate that
+   * game, in that order, returning the game's id. The entry point for any
+   * moderator action that doesn't target one specific resource (listings).
+   */
+  async resolveModeratableGameId(
+    gameSlug: string,
+    moderatorId: string,
+  ): Promise<string> {
+    const gameId = await this.resolveGameId(gameSlug);
+    await this.assertCanModerateGame(gameId, moderatorId);
+
+    return gameId;
+  }
+
+  /**
+   * The shared preamble for every moderation action on one game-scoped
+   * resource (a post, a report, ...): resolve the route's game -> authorize
+   * the caller for it -> load the resource -> cross-check it really belongs
+   * to that game.
+   *
+   * The order is the point. Authorizing before loading means a non-moderator
+   * always gets 403 whether or not the resource exists; loading first would
+   * let anyone with a session tell "exists in this game" (403) from "doesn't"
+   * (404) before they're allowed to know either. Callers supply only how to
+   * load their resource (return null for anything that shouldn't be
+   * moderatable, e.g. soft-deleted), so no caller can reorder these steps.
+   */
+  async loadModeratableResource<T extends { gameId: string }>(params: {
+    gameSlug: string;
+    moderatorId: string;
+    notFoundMessage: string;
+    load: () => Promise<T | null>;
+  }): Promise<{ gameId: string; resource: T }> {
+    const gameId = await this.resolveModeratableGameId(
+      params.gameSlug,
+      params.moderatorId,
+    );
+
+    const resource = await params.load();
+
+    if (!resource || resource.gameId !== gameId) {
+      throw new NotFoundException(params.notFoundMessage);
+    }
+
+    return { gameId, resource };
+  }
+
+  /**
    * Assigns a user as moderator of a game.
    *
    * Business behavior:

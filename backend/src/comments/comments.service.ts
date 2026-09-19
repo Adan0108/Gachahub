@@ -4,17 +4,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { CommentsRepository } from './comments.repository';
-import { FollowsService } from '../follows/follows.service';
+import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import { UserInterestService } from '../recommendation/user-interest.service';
 
 @Injectable()
 export class CommentsService {
   constructor(
     private readonly commentsRepository: CommentsRepository,
-    private readonly followsService: FollowsService,
+    private readonly postVisibility: PostVisibilityService,
     private readonly userInterestService: UserInterestService,
   ) {}
 
@@ -201,33 +202,17 @@ export class CommentsService {
   private async ensurePostCanBeViewed(postId: string, userId?: string) {
     const post = await this.commentsRepository.findPostById(postId);
 
-    if (!post || post.deletedAt || post.status !== 'PUBLISHED') {
+    if (!post) {
       throw new NotFoundException('Post not found');
     }
 
-    // Anonymous và logged-in đều đọc PUBLIC được.
-    if (post.visibility === 'PUBLIC') {
-      return post;
+    const viewable = await this.postVisibility.canView(post, userId);
+
+    if (!viewable) {
+      throw new NotFoundException('Post not found');
     }
 
-    // FOLLOWERS_ONLY cần đăng nhập.
-    if (post.visibility === 'FOLLOWERS_ONLY' && userId) {
-      // Author luôn đọc được post của mình.
-      if (post.authorId === userId) {
-        return post;
-      }
-
-      const followStatus = await this.followsService.isFollowing(
-        userId,
-        post.authorId,
-      );
-
-      if (followStatus.following) {
-        return post;
-      }
-    }
-
-    throw new NotFoundException('Post not found');
+    return post;
   }
 
   /**

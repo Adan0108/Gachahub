@@ -30,8 +30,8 @@ describe('PostModerationService', () => {
   };
 
   const gameModeratorsService = {
-    resolveGameId: jest.fn(),
-    assertCanModerateGame: jest.fn(),
+    resolveModeratableGameId: jest.fn(),
+    loadModeratableResource: jest.fn(),
   };
 
   let service: PostModerationService;
@@ -48,8 +48,25 @@ describe('PostModerationService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    gameModeratorsService.resolveGameId.mockResolvedValue('game-1');
-    gameModeratorsService.assertCanModerateGame.mockResolvedValue(undefined);
+    gameModeratorsService.resolveModeratableGameId.mockResolvedValue('game-1');
+    // A faithful fake of GameModeratorsService.loadModeratableResource's
+    // contract (load -> null or wrong game => NotFound). The real method's
+    // own behavior, including authorize-before-load ordering, is covered in
+    // game-moderators.service.spec.ts.
+    gameModeratorsService.loadModeratableResource.mockImplementation(
+      async (params: {
+        notFoundMessage: string;
+        load: () => Promise<{ gameId: string } | null>;
+      }) => {
+        const resource = await params.load();
+
+        if (!resource || resource.gameId !== 'game-1') {
+          throw new NotFoundException(params.notFoundMessage);
+        }
+
+        return { gameId: 'game-1', resource };
+      },
+    );
 
     service = new PostModerationService(
       postsRepository as unknown as PostsRepository,
@@ -58,7 +75,7 @@ describe('PostModerationService', () => {
   });
 
   describe('hideAsModerator', () => {
-    it('resolves the gameSlug, checks moderator permission, and hides a published post', async () => {
+    it('runs the shared moderation preamble for the routed game, then hides a published post', async () => {
       postsRepository.findById.mockResolvedValue(basePost);
       postsRepository.transitionStatus.mockResolvedValue({
         ...basePost,
@@ -71,12 +88,14 @@ describe('PostModerationService', () => {
         'mod-1',
       );
 
-      expect(gameModeratorsService.resolveGameId).toHaveBeenCalledWith(
-        'wuthering-waves',
-      );
-      expect(gameModeratorsService.assertCanModerateGame).toHaveBeenCalledWith(
-        'game-1',
-        'mod-1',
+      expect(
+        gameModeratorsService.loadModeratableResource,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          gameSlug: 'wuthering-waves',
+          moderatorId: 'mod-1',
+          notFoundMessage: 'Post not found',
+        }),
       );
       expect(postsRepository.transitionStatus).toHaveBeenCalledWith({
         id: 'post-1',
@@ -113,17 +132,19 @@ describe('PostModerationService', () => {
     });
 
     it('rejects when the post belongs to a different game than the route', async () => {
-      gameModeratorsService.resolveGameId.mockResolvedValue('other-game-id');
-      postsRepository.findById.mockResolvedValue(basePost);
+      postsRepository.findById.mockResolvedValue({
+        ...basePost,
+        gameId: 'other-game-id',
+      });
 
       await expect(
-        service.hideAsModerator('other-game-slug', 'post-1', 'mod-1'),
+        service.hideAsModerator('game-1', 'post-1', 'mod-1'),
       ).rejects.toThrow(NotFoundException);
 
       expect(postsRepository.transitionStatus).not.toHaveBeenCalled();
     });
 
-    it('rejects a post that has deletedAt set even if its status has not caught up', async () => {
+    it('treats a post that has deletedAt set as not found even if its status has not caught up', async () => {
       postsRepository.findById.mockResolvedValue({
         ...basePost,
         deletedAt: new Date(),
@@ -137,7 +158,7 @@ describe('PostModerationService', () => {
     });
 
     it('propagates a failed game slug lookup', async () => {
-      gameModeratorsService.resolveGameId.mockRejectedValue(
+      gameModeratorsService.loadModeratableResource.mockRejectedValue(
         new NotFoundException('Game not found'),
       );
 
@@ -145,14 +166,11 @@ describe('PostModerationService', () => {
         service.hideAsModerator('missing-game', 'post-1', 'mod-1'),
       ).rejects.toThrow(NotFoundException);
 
-      expect(
-        gameModeratorsService.assertCanModerateGame,
-      ).not.toHaveBeenCalled();
-      expect(postsRepository.findById).not.toHaveBeenCalled();
+      expect(postsRepository.transitionStatus).not.toHaveBeenCalled();
     });
 
     it('propagates the moderator permission check failure', async () => {
-      gameModeratorsService.assertCanModerateGame.mockRejectedValue(
+      gameModeratorsService.loadModeratableResource.mockRejectedValue(
         new ForbiddenException('You cannot moderate this game'),
       );
 
@@ -161,6 +179,7 @@ describe('PostModerationService', () => {
       ).rejects.toThrow(ForbiddenException);
 
       expect(postsRepository.findById).not.toHaveBeenCalled();
+      expect(postsRepository.transitionStatus).not.toHaveBeenCalled();
     });
 
     it('raises a conflict when another request changes the post between the read and the write', async () => {
@@ -245,7 +264,7 @@ describe('PostModerationService', () => {
   });
 
   describe('listHiddenForModerator', () => {
-    it('resolves the gameSlug, checks moderator permission, and lists hidden posts for the game', async () => {
+    it('resolves and authorizes the routed game, then lists hidden posts for it', async () => {
       const hiddenPost = { ...basePost, status: 'HIDDEN' };
       postsRepository.findHiddenByGame.mockResolvedValue({
         items: [hiddenPost],
@@ -258,13 +277,9 @@ describe('PostModerationService', () => {
         {},
       );
 
-      expect(gameModeratorsService.resolveGameId).toHaveBeenCalledWith(
-        'wuthering-waves',
-      );
-      expect(gameModeratorsService.assertCanModerateGame).toHaveBeenCalledWith(
-        'game-1',
-        'mod-1',
-      );
+      expect(
+        gameModeratorsService.resolveModeratableGameId,
+      ).toHaveBeenCalledWith('wuthering-waves', 'mod-1');
       expect(postsRepository.findHiddenByGame).toHaveBeenCalledWith('game-1', {
         page: 1,
         limit: 20,
@@ -279,7 +294,7 @@ describe('PostModerationService', () => {
     });
 
     it('propagates the moderator permission check failure', async () => {
-      gameModeratorsService.assertCanModerateGame.mockRejectedValue(
+      gameModeratorsService.resolveModeratableGameId.mockRejectedValue(
         new ForbiddenException('You cannot moderate this game'),
       );
 

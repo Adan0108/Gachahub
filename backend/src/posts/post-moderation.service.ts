@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  NotFoundException,
 } from '@nestjs/common';
 import { PostStatus } from '../generated/prisma/client';
 import { GameModeratorsService } from '../game-moderators/game-moderators.service';
@@ -61,8 +60,10 @@ export class PostModerationService {
     moderatorId: string,
     query: PaginationQueryDto,
   ) {
-    const gameId = await this.gameModeratorsService.resolveGameId(gameSlug);
-    await this.gameModeratorsService.assertCanModerateGame(gameId, moderatorId);
+    const gameId = await this.gameModeratorsService.resolveModeratableGameId(
+      gameSlug,
+      moderatorId,
+    );
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
@@ -84,10 +85,11 @@ export class PostModerationService {
   }
 
   /**
-   * Admin or an assigned moderator of the post's own game only - the route's
-   * gameSlug is resolved and cross-checked against the post's own gameId, so
-   * a moderator of one game can't hide a post in another just by swapping
-   * the URL. `from`/`to` collapse hide and restore into one implementation;
+   * Admin or an assigned moderator of the post's own game only - the shared
+   * preamble in GameModeratorsService.loadModeratableResource resolves the
+   * route's gameSlug, authorizes the caller, then cross-checks the post's own
+   * gameId, so a moderator of one game can't hide a post in another just by
+   * swapping the URL. `from`/`to` collapse hide and restore into one implementation;
    * they're each other's inverse. Takes a single options object rather than
    * positional args since `from`/`to` are the same type and adjacent -
    * transposing them would silently invert hide into restore.
@@ -103,10 +105,13 @@ export class PostModerationService {
     const { gameSlug, postId, moderatorId, from, to, rejectionMessage } =
       params;
 
-    const gameId = await this.gameModeratorsService.resolveGameId(gameSlug);
-    await this.gameModeratorsService.assertCanModerateGame(gameId, moderatorId);
-
-    const post = await this.findModeratablePost(gameId, postId);
+    const { gameId, resource: post } =
+      await this.gameModeratorsService.loadModeratableResource({
+        gameSlug,
+        moderatorId,
+        notFoundMessage: 'Post not found',
+        load: () => this.findLivePost(postId),
+      });
 
     if (post.status === to) {
       return formatPost(post);
@@ -134,18 +139,15 @@ export class PostModerationService {
     return formatPost(updated);
   }
 
-  private async findModeratablePost(gameId: string, postId: string) {
+  /**
+   * A post that's soft-deleted is not moderatable - null tells
+   * GameModeratorsService.loadModeratableResource to report it as not found.
+   */
+  private async findLivePost(postId: string) {
     const post = await this.postsRepository.findById(postId);
 
-    if (
-      !post ||
-      post.deletedAt ||
-      post.status === PostStatus.DELETED ||
-      post.gameId !== gameId
-    ) {
-      throw new NotFoundException('Post not found');
-    }
-
-    return post;
+    return post && !post.deletedAt && post.status !== PostStatus.DELETED
+      ? post
+      : null;
   }
 }

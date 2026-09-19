@@ -9,6 +9,7 @@ import { CreatePostStatusDto } from './dto/create-post.dto';
 import type { PostsRepository } from './posts.repository';
 import type { MediaService } from '../media/media.service';
 import type { FollowsService } from '../follows/follows.service';
+import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import type { UserInterestService } from '../recommendation/user-interest.service';
 
 /*
@@ -127,7 +128,7 @@ describe('PostsService', () => {
     service = new PostsService(
       postsRepository as unknown as PostsRepository,
       mediaService as unknown as MediaService,
-      followsService as unknown as FollowsService,
+      new PostVisibilityService(followsService as unknown as FollowsService),
       userInterestService as unknown as UserInterestService,
     );
   });

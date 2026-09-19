@@ -19,6 +19,7 @@ import { CommentsModule } from './comments/comments.module';
 import { FollowsModule } from './follows/follows.module';
 import { FeedModule } from './feed/feed.module';
 import { CommonModule } from './common/common.module';
+import { ReportsModule } from './reports/reports.module';
 
 /**
  * Root application module.
@@ -47,6 +48,7 @@ import { CommonModule } from './common/common.module';
     CommentsModule,
     FollowsModule,
     FeedModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

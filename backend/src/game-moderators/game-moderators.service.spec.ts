@@ -144,6 +144,117 @@ describe('GameModeratorsService', () => {
     });
   });
 
+  describe('resolveModeratableGameId', () => {
+    beforeEach(() => {
+      gameModeratorsRepository.findGameBySlug.mockResolvedValue({
+        id: 'game-1',
+      });
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'mod-1',
+        role: 'USER',
+        status: 'ACTIVE',
+      });
+    });
+
+    it('returns the game id for a moderator of that game', async () => {
+      gameModeratorsRepository.findByGameIdAndUserId.mockResolvedValue({
+        id: 'assignment-1',
+      });
+
+      await expect(
+        service.resolveModeratableGameId('wuthering-waves', 'mod-1'),
+      ).resolves.toBe('game-1');
+    });
+
+    it('rejects a non-moderator', async () => {
+      gameModeratorsRepository.findByGameIdAndUserId.mockResolvedValue(null);
+
+      await expect(
+        service.resolveModeratableGameId('wuthering-waves', 'mod-1'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects an unknown game before checking permission', async () => {
+      gameModeratorsRepository.findGameBySlug.mockResolvedValue(null);
+
+      await expect(
+        service.resolveModeratableGameId('missing', 'mod-1'),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('loadModeratableResource', () => {
+    const load = jest.fn();
+
+    const callHelper = () =>
+      service.loadModeratableResource({
+        gameSlug: 'wuthering-waves',
+        moderatorId: 'mod-1',
+        notFoundMessage: 'Thing not found',
+        load,
+      });
+
+    beforeEach(() => {
+      gameModeratorsRepository.findGameBySlug.mockResolvedValue({
+        id: 'game-1',
+      });
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'mod-1',
+        role: 'USER',
+        status: 'ACTIVE',
+      });
+      gameModeratorsRepository.findByGameIdAndUserId.mockResolvedValue({
+        id: 'assignment-1',
+      });
+    });
+
+    it('returns the resource and its game when it belongs to the routed game', async () => {
+      load.mockResolvedValue({ id: 'thing-1', gameId: 'game-1' });
+
+      await expect(callHelper()).resolves.toEqual({
+        gameId: 'game-1',
+        resource: { id: 'thing-1', gameId: 'game-1' },
+      });
+    });
+
+    it('authorizes the caller BEFORE loading the resource, so existence is never leaked to non-moderators', async () => {
+      gameModeratorsRepository.findByGameIdAndUserId.mockResolvedValue(null);
+
+      await expect(callHelper()).rejects.toThrow(ForbiddenException);
+
+      expect(load).not.toHaveBeenCalled();
+    });
+
+    it('rejects a resource that does not exist', async () => {
+      load.mockResolvedValue(null);
+
+      await expect(callHelper()).rejects.toThrow('Thing not found');
+    });
+
+    it('rejects a resource that belongs to a different game than the route', async () => {
+      load.mockResolvedValue({ id: 'thing-1', gameId: 'other-game' });
+
+      await expect(callHelper()).rejects.toThrow(NotFoundException);
+    });
+
+    it('lets an admin through without a moderator assignment', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'mod-1',
+        role: 'ADMIN',
+        status: 'ACTIVE',
+      });
+      load.mockResolvedValue({ id: 'thing-1', gameId: 'game-1' });
+
+      await expect(callHelper()).resolves.toBeDefined();
+
+      expect(
+        gameModeratorsRepository.findByGameIdAndUserId,
+      ).not.toHaveBeenCalled();
+    });
+  });
+
   describe('resolveGameId', () => {
     it('returns the id of the game matching the slug', async () => {
       gameModeratorsRepository.findGameBySlug.mockResolvedValue({

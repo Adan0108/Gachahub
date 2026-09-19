@@ -5,14 +5,14 @@ import { PostsRepository } from './posts.repository';
 import { PostsService } from './posts.service';
 import { PostModerationService } from './post-moderation.service';
 import { MediaModule } from '../media/media.module';
-import { FollowsModule } from '../follows/follows.module';
+import { PostVisibilityModule } from '../post-visibility/post-visibility.module';
 import { RecommendationModule } from '../recommendation/recommendation.module';
 import { GameModeratorsModule } from '../game-moderators/game-moderators.module';
 
 @Module({
   imports: [
     MediaModule,
-    FollowsModule,
+    PostVisibilityModule,
     RecommendationModule,
     GameModeratorsModule,
   ],

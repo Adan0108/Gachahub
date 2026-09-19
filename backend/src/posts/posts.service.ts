@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PostStatus, type Prisma } from '../generated/prisma/client';
 import { slugify } from '../common/utils/slugify';
+
 import { CreatePostDto } from './dto/create-post.dto';
 import { PostSortDto, QueryPostsDto } from './dto/query-posts.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
@@ -13,7 +14,7 @@ import { PostsRepository } from './posts.repository';
 import { MediaService } from '../media/media.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { formatPost } from './post.mapper';
-import { FollowsService } from '../follows/follows.service';
+import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import { UserInterestService } from '../recommendation/user-interest.service';
 
 @Injectable()
@@ -21,7 +22,7 @@ export class PostsService {
   constructor(
     private readonly postsRepository: PostsRepository,
     private readonly mediaService: MediaService,
-    private readonly followsService: FollowsService,
+    private readonly postVisibility: PostVisibilityService,
     private readonly userInterestService: UserInterestService,
   ) {}
 
@@ -147,27 +148,14 @@ export class PostsService {
       return formatPost(post);
     }
 
-    // Everyone else can only view published posts.
-    if (post.status !== 'PUBLISHED') {
+    // Everyone else follows the shared visibility rule.
+    const viewable = await this.postVisibility.canView(post, userId);
+
+    if (!viewable) {
       throw new NotFoundException('Post not found');
     }
 
-    if (post.visibility === 'PUBLIC') {
-      return formatPost(post);
-    }
-
-    if (post.visibility === 'FOLLOWERS_ONLY' && userId) {
-      const followStatus = await this.followsService.isFollowing(
-        userId,
-        post.authorId,
-      );
-
-      if (followStatus.following) {
-        return formatPost(post);
-      }
-    }
-
-    throw new NotFoundException('Post not found');
+    return formatPost(post);
   }
 
   async findByAuthor(
@@ -550,29 +538,16 @@ export class PostsService {
   private async ensurePostCanBeInteractedWith(postId: string, userId: string) {
     const post = await this.postsRepository.findPostForInteraction(postId);
 
-    if (!post || post.deletedAt || post.status !== 'PUBLISHED') {
+    if (!post) {
       throw new NotFoundException('Post not found');
     }
 
-    if (post.visibility === 'PUBLIC') {
-      return post;
+    const viewable = await this.postVisibility.canView(post, userId);
+
+    if (!viewable) {
+      throw new NotFoundException('Post not found');
     }
 
-    if (post.visibility === 'FOLLOWERS_ONLY') {
-      if (post.authorId === userId) {
-        return post;
-      }
-
-      const followStatus = await this.followsService.isFollowing(
-        userId,
-        post.authorId,
-      );
-
-      if (followStatus.following) {
-        return post;
-      }
-    }
-
-    throw new NotFoundException('Post not found');
+    return post;
   }
 }

@@ -2,6 +2,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
 import type { CommentsRepository } from './comments.repository';
 import type { FollowsService } from '../follows/follows.service';
+import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import type { UserInterestService } from '../recommendation/user-interest.service';
 
 /*
@@ -48,7 +49,7 @@ describe('CommentsService', () => {
 
     service = new CommentsService(
       commentsRepository as unknown as CommentsRepository,
-      followsService as unknown as FollowsService,
+      new PostVisibilityService(followsService as unknown as FollowsService),
       userInterestService as unknown as UserInterestService,
     );
   });
