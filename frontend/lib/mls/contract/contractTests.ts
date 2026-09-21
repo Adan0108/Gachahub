@@ -164,6 +164,125 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
       await expect(bobGroup.process(wireAfterRemoval)).rejects.toThrow();
     });
 
+    describe("membershipChange on a processed commit", () => {
+      it("reports the devices a commit added", async () => {
+        const alice = await setUpDevice(candidate, "user-alice");
+        const bob = await setUpDevice(candidate, "user-bob");
+        const carol = await setUpDevice(candidate, "user-carol");
+
+        const aliceGroup = await alice.factory.create(conversationId);
+        const bobGroup = await addDevice(aliceGroup, bob, conversationId);
+
+        const { wireBytes } = await aliceGroup.stageCommit({
+          added: [await offerKeyPackage(carol)],
+          removed: [],
+        });
+        await aliceGroup.commitAccepted();
+
+        const result = await bobGroup.process(wireBytes);
+
+        expect(result.kind).toBe("commit");
+        if (result.kind === "commit") {
+          expect(result.membershipChange?.removed).toEqual([]);
+          expect(result.membershipChange?.added).toEqual([carol.credential]);
+        }
+      });
+
+      it("reports the devices a commit removed", async () => {
+        const alice = await setUpDevice(candidate, "user-alice");
+        const bob = await setUpDevice(candidate, "user-bob");
+        const carol = await setUpDevice(candidate, "user-carol");
+
+        const aliceGroup = await alice.factory.create(conversationId);
+        const bobGroup = await addDevice(aliceGroup, bob, conversationId);
+        const { wireBytes: addCarolWire, welcomes } = await aliceGroup.stageCommit({
+          added: [await offerKeyPackage(carol)],
+          removed: [],
+        });
+        await aliceGroup.commitAccepted();
+        await bobGroup.process(addCarolWire);
+        await carol.factory.joinFromWelcome(conversationId, welcomes[0]!.welcomeBytes);
+
+        const { wireBytes } = await aliceGroup.stageCommit({
+          added: [],
+          removed: [carol.credential],
+        });
+        await aliceGroup.commitAccepted();
+
+        const result = await bobGroup.process(wireBytes);
+
+        expect(result.kind).toBe("commit");
+        if (result.kind === "commit") {
+          expect(result.membershipChange?.added).toEqual([]);
+          expect(result.membershipChange?.removed).toEqual([carol.credential]);
+        }
+      });
+
+      it("reports adds and removes from one commit together", async () => {
+        const alice = await setUpDevice(candidate, "user-alice");
+        const bob = await setUpDevice(candidate, "user-bob");
+        const carol = await setUpDevice(candidate, "user-carol");
+        const dave = await setUpDevice(candidate, "user-dave");
+
+        const aliceGroup = await alice.factory.create(conversationId);
+        const bobGroup = await addDevice(aliceGroup, bob, conversationId);
+        const { wireBytes: addCarolWire, welcomes } = await aliceGroup.stageCommit({
+          added: [await offerKeyPackage(carol)],
+          removed: [],
+        });
+        await aliceGroup.commitAccepted();
+        await bobGroup.process(addCarolWire);
+        await carol.factory.joinFromWelcome(conversationId, welcomes[0]!.welcomeBytes);
+
+        const { wireBytes } = await aliceGroup.stageCommit({
+          added: [await offerKeyPackage(dave)],
+          removed: [carol.credential],
+        });
+        await aliceGroup.commitAccepted();
+
+        const result = await bobGroup.process(wireBytes);
+
+        expect(result.kind).toBe("commit");
+        if (result.kind === "commit") {
+          expect(result.membershipChange?.added).toEqual([dave.credential]);
+          expect(result.membershipChange?.removed).toEqual([carol.credential]);
+        }
+      });
+
+      it("reports every device when one commit removes several", async () => {
+        const alice = await setUpDevice(candidate, "user-alice");
+        const bob = await setUpDevice(candidate, "user-bob");
+        const carol = await setUpDevice(candidate, "user-carol");
+        const dave = await setUpDevice(candidate, "user-dave");
+
+        const aliceGroup = await alice.factory.create(conversationId);
+        const bobGroup = await addDevice(aliceGroup, bob, conversationId);
+        const { wireBytes: addWire, welcomes } = await aliceGroup.stageCommit({
+          added: [await offerKeyPackage(carol), await offerKeyPackage(dave)],
+          removed: [],
+        });
+        await aliceGroup.commitAccepted();
+        await bobGroup.process(addWire);
+        expect(welcomes).toHaveLength(2);
+
+        const { wireBytes } = await aliceGroup.stageCommit({
+          added: [],
+          removed: [carol.credential, dave.credential],
+        });
+        await aliceGroup.commitAccepted();
+
+        const result = await bobGroup.process(wireBytes);
+
+        expect(result.kind).toBe("commit");
+        if (result.kind === "commit") {
+          expect(result.membershipChange?.removed).toHaveLength(2);
+          expect(result.membershipChange?.removed).toEqual(
+            expect.arrayContaining([carol.credential, dave.credential]),
+          );
+        }
+      });
+    });
+
     it('resolves concurrent commits: the losing device gets rejected and recovers', async () => {
       const alice = await setUpDevice(candidate, 'user-alice');
       const bob = await setUpDevice(candidate, 'user-bob');

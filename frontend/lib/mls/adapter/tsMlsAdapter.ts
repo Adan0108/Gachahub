@@ -44,6 +44,8 @@ import type {
   UserId,
 } from '../contract/types';
 import { CredentialMismatchError } from '../contract/errors';
+import { decodeIdentity, encodeIdentity } from './identityCodec';
+import { diffLeafMembership } from './leafMembership';
 import type { MlsClientCandidate } from '../contract/contractTests';
 import {
   InMemoryDeviceIdentityStorage,
@@ -80,38 +82,6 @@ let cachedImpl: Promise<CiphersuiteImpl> | undefined;
 function getImpl(): Promise<CiphersuiteImpl> {
   cachedImpl ??= getCiphersuiteImpl(getCiphersuiteFromName(CIPHERSUITE_NAME));
   return cachedImpl;
-}
-
-function encodeIdentity(userId: UserId, deviceId: DeviceId): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify({ userId, deviceId }));
-}
-
-/**
- * Parses a ratchet-tree leaf's credential identity - bytes that arrived
- * over the wire (via a Welcome or Commit from the server, which never
- * inspects Welcome contents) rather than something this device produced
- * itself. Returns undefined instead of throwing for anything malformed, so
- * one bad credential can be rejected as data (a normal ProcessResult) by
- * the caller instead of crashing out of process() with a raw SyntaxError -
- * which would otherwise repeat identically on every retry, permanently
- * wedging that conversation's sync.
- */
-function decodeIdentity(identity: Uint8Array): { userId: UserId; deviceId: DeviceId } | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(identity));
-  } catch {
-    return undefined;
-  }
-  if (
-    typeof parsed !== 'object' ||
-    parsed === null ||
-    typeof (parsed as { userId?: unknown }).userId !== 'string' ||
-    typeof (parsed as { deviceId?: unknown }).deviceId !== 'string'
-  ) {
-    return undefined;
-  }
-  return parsed as { userId: UserId; deviceId: DeviceId };
 }
 
 function encodeConversationId(conversationId: ConversationId): Uint8Array {
@@ -517,10 +487,15 @@ class TsMlsGroupSession implements GroupSession {
       };
     }
 
+    const membershipChange = diffLeafMembership(treeBeforeCommit, this.state.ratchetTree);
+    if (!membershipChange) {
+      return { kind: 'rejected', reason: 'credential-mismatch' };
+    }
+
     return {
       kind: 'commit',
       epoch: Number(this.state.groupContext.epoch),
-      membershipChange: null, // best-effort for this spike, see note in stageCommit
+      membershipChange,
     };
   }
 
