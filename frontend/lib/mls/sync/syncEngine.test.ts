@@ -20,6 +20,7 @@ vi.mock('../../api', () => ({
     consumeMlsWelcome: vi.fn(),
     reportMlsFault: vi.fn(),
     getMlsRoster: vi.fn(),
+    revokeChatDevice: vi.fn(),
   },
 }));
 
@@ -843,6 +844,28 @@ describe('SyncEngine', () => {
       await Promise.all([alice.engine.reconcileMembership(), alice.engine.reconcileMembership()]);
 
       expect(seen).toEqual(['start', 'end', 'start', 'end']);
+    });
+  });
+
+  describe('revokeOtherDevice', () => {
+    it('revokes the device, then looks for leftover devices in full straight away', async () => {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      const order: string[] = [];
+      vi.mocked(api.revokeChatDevice).mockImplementation(async () => {
+        order.push('revoke');
+      });
+      vi.mocked(api.getMlsMembershipWork).mockImplementation(
+        async (_device: string, options: { scope?: string } = {}) => {
+          order.push(`work:${options.scope}`);
+          return { items: [], nextCursor: null };
+        },
+      );
+
+      await alice.engine.revokeOtherDevice('old-phone');
+
+      expect(api.revokeChatDevice).toHaveBeenCalledWith('old-phone');
+      expect(order).toEqual(['revoke', 'work:full']);
     });
   });
 

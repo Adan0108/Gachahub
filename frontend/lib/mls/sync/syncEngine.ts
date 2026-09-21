@@ -110,6 +110,12 @@ export class SyncEngine {
     return run;
   }
 
+  /** Revokes one of this user's devices, then removes it from their groups right away instead of at the next scheduled scan. */
+  async revokeOtherDevice(deviceId: DeviceId): Promise<ReconcileSummary> {
+    await api.revokeChatDevice(deviceId);
+    return this.reconcileMembership({ scope: 'full' });
+  }
+
   /**
    * Lower-level primitive for seedNewGroup and the reconciler's
    * multi-add/remove Commits - the caller supplies already-resolved
