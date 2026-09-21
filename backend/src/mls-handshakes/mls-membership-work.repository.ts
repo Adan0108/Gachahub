@@ -80,6 +80,46 @@ export class MlsMembershipWorkRepository {
     }));
   }
 
+  /**
+   * Hands these conversations to `deviceId` for a while and returns the ones it
+   * now holds. A conversation another device holds a live lease on is left out,
+   * so only one member at a time claims key packages for the same change -
+   * otherwise every online member would, only one Commit could win, and the rest
+   * of the single-use packages would be burned. Asking again refreshes a lease
+   * this device already holds; an expired lease is up for grabs.
+   */
+  async leaseConversations(params: {
+    deviceId: string;
+    conversationIds: string[];
+    now: Date;
+    until: Date;
+  }): Promise<Set<string>> {
+    const { deviceId, conversationIds, now, until } = params;
+
+    await this.prisma.chatConversation.updateMany({
+      where: {
+        id: { in: conversationIds },
+        OR: [
+          { mlsWorkLeaseUntil: null },
+          { mlsWorkLeaseUntil: { lt: now } },
+          { mlsWorkLeaseDeviceId: deviceId },
+        ],
+      },
+      data: { mlsWorkLeaseDeviceId: deviceId, mlsWorkLeaseUntil: until },
+    });
+
+    const held = await this.prisma.chatConversation.findMany({
+      where: {
+        id: { in: conversationIds },
+        mlsWorkLeaseDeviceId: deviceId,
+        mlsWorkLeaseUntil: { gt: now },
+      },
+      select: { id: true },
+    });
+
+    return new Set(held.map((conversation) => conversation.id));
+  }
+
   /** Every device of these users, plus these devices wherever they belong - revoked ones included, so a revoked leaf can be told from a working one. */
   async findDevices(params: {
     userIds: string[];

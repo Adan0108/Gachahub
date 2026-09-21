@@ -47,17 +47,18 @@ export class ChatDevicesController {
   @Post('claim/:userId')
   @ApiOperation({
     summary:
-      'Claim one key package per active device of a user, to add all their devices to an MLS group. Pass excludeDeviceId when claiming your own devices, to skip the one creating the group.',
+      'Claim one key package per active device of a user, to add all their devices to an MLS group. Pass excludeDeviceId when claiming your own devices, to skip the one creating the group; pass conversationId when finishing a change to a group you are in.',
   })
   claimKeyPackages(
     @Session() session: UserSession,
     @Param('userId') userId: string,
     @Query('excludeDeviceId') excludeDeviceId?: string,
+    @Query('conversationId') conversationId?: string,
   ) {
     return this.chatDevicesService.claimKeyPackagesForUser(
       session.user.id,
       userId,
-      excludeDeviceId,
+      { excludeDeviceId, conversationId },
     );
   }
 }

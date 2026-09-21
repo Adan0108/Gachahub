@@ -17,7 +17,10 @@ describe('ChatDevicesService', () => {
     claimSingleUseKeyPackage: jest.fn(),
     findLastResortKeyPackage: jest.fn(),
     revokeDevice: jest.fn(),
+    findParticipantStates: jest.fn(),
   };
+
+  const roster = { findActiveLeaves: jest.fn() };
 
   const followsService = {
     isFollowing: jest.fn(),
@@ -46,6 +49,7 @@ describe('ChatDevicesService', () => {
       blocksService as any,
       fetchRateLimiter as any,
       uploadRateLimiter as any,
+      roster as any,
     );
   });
 
@@ -420,7 +424,7 @@ describe('ChatDevicesService', () => {
         const result = await service.claimKeyPackagesForUser(
           'user-1',
           'user-1',
-          'laptop',
+          { excludeDeviceId: 'laptop' },
         );
 
         expect(result.map((offer) => offer.deviceId)).toEqual(['phone']);
@@ -436,9 +440,181 @@ describe('ChatDevicesService', () => {
         ]);
 
         await expect(
-          service.claimKeyPackagesForUser('user-1', 'user-1', 'laptop'),
+          service.claimKeyPackagesForUser('user-1', 'user-1', {
+            excludeDeviceId: 'laptop',
+          }),
         ).resolves.toEqual([]);
       });
+    });
+  });
+
+  describe('claimKeyPackagesForUser for a change to a group', () => {
+    const device = (id: string) => ({
+      id,
+      ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
+      signaturePublicKey: Buffer.from(`sig-${id}`),
+    });
+
+    const claimForGroup = () =>
+      service.claimKeyPackagesForUser('user-1', 'user-2', {
+        conversationId: 'conv-1',
+      });
+
+    beforeEach(() => {
+      repository.findParticipantStates.mockResolvedValue(
+        new Map([
+          ['user-1', 'ACTIVE'],
+          ['user-2', 'JOINING'],
+        ]),
+      );
+      roster.findActiveLeaves.mockResolvedValue([]);
+      repository.findActiveDevicesForUser.mockResolvedValue([device('d2')]);
+      repository.claimSingleUseKeyPackage.mockResolvedValue({
+        payload: Buffer.from('kp'),
+      });
+    });
+
+    it('lets a member claim for someone whose privacy settings would refuse a stranger - they are already authorized to be in the group', async () => {
+      repository.findUserMessagingProfile.mockResolvedValue({
+        id: 'user-2',
+        messageRequestSetting: 'NO_ONE',
+      });
+
+      await expect(claimForGroup()).resolves.toEqual([
+        expect.objectContaining({ deviceId: 'd2' }),
+      ]);
+
+      expect(repository.findUserMessagingProfile).not.toHaveBeenCalled();
+      expect(blocksService.isBlocked).not.toHaveBeenCalled();
+    });
+
+    it('still applies the direct-message gates when no conversation is given', async () => {
+      repository.findUserMessagingProfile.mockResolvedValue({
+        id: 'user-2',
+        messageRequestSetting: 'NO_ONE',
+      });
+
+      await expect(
+        service.claimKeyPackagesForUser('user-1', 'user-2'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('refuses a caller who is not an ACTIVE member of the group', async () => {
+      repository.findParticipantStates.mockResolvedValue(
+        new Map([
+          ['user-1', 'PENDING'],
+          ['user-2', 'JOINING'],
+        ]),
+      );
+
+      await expect(claimForGroup()).rejects.toThrow(ForbiddenException);
+
+      expect(repository.claimSingleUseKeyPackage).not.toHaveBeenCalled();
+    });
+
+    it.each(['PENDING', 'DECLINED', 'LEAVING', 'MISSING'])(
+      'refuses to claim for someone who is %s in the group',
+      async (state) => {
+        repository.findParticipantStates.mockResolvedValue(
+          new Map(
+            state === 'MISSING'
+              ? [['user-1', 'ACTIVE']]
+              : [
+                  ['user-1', 'ACTIVE'],
+                  ['user-2', state],
+                ],
+          ),
+        );
+
+        await expect(claimForGroup()).rejects.toThrow(ForbiddenException);
+      },
+    );
+
+    it('claims only for devices not already in the group, so no package is burned on a device that cannot be added', async () => {
+      repository.findActiveDevicesForUser.mockResolvedValue([
+        device('d2-in'),
+        device('d2-new'),
+      ]);
+      roster.findActiveLeaves.mockResolvedValue([
+        { userId: 'user-2', deviceId: 'd2-in' },
+      ]);
+
+      const result = await claimForGroup();
+
+      expect(result.map((offer) => offer.deviceId)).toEqual(['d2-new']);
+      expect(repository.claimSingleUseKeyPackage).not.toHaveBeenCalledWith(
+        'd2-in',
+        expect.anything(),
+      );
+    });
+
+    it('returns an empty list, not a 404, when everything is already in the group', async () => {
+      roster.findActiveLeaves.mockResolvedValue([
+        { userId: 'user-2', deviceId: 'd2' },
+      ]);
+
+      await expect(claimForGroup()).resolves.toEqual([]);
+    });
+  });
+
+  describe('claiming charges the rate limit by packages handed out', () => {
+    const device = (id: string) => ({
+      id,
+      ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
+      signaturePublicKey: Buffer.from(`sig-${id}`),
+    });
+
+    beforeEach(() => {
+      repository.findUserMessagingProfile.mockResolvedValue({
+        id: 'user-2',
+        messageRequestSetting: 'EVERYONE',
+      });
+      repository.claimSingleUseKeyPackage.mockResolvedValue({
+        payload: Buffer.from('kp'),
+      });
+    });
+
+    it('charges once for a one-device claim', async () => {
+      repository.findActiveDevicesForUser.mockResolvedValue([device('d1')]);
+
+      await service.claimKeyPackagesForUser('user-1', 'user-2');
+
+      expect(fetchRateLimiter.assertNotRateLimited).toHaveBeenCalledTimes(1);
+    });
+
+    it('charges for every extra device, so claiming across many devices drains no faster than claiming one by one', async () => {
+      repository.findActiveDevicesForUser.mockResolvedValue([
+        device('d1'),
+        device('d2'),
+        device('d3'),
+      ]);
+
+      await service.claimKeyPackagesForUser('user-1', 'user-2');
+
+      expect(fetchRateLimiter.assertNotRateLimited).toHaveBeenNthCalledWith(
+        2,
+        'user-1',
+        'user-2',
+        2,
+      );
+    });
+
+    it('claims nothing if the extra charge is refused', async () => {
+      repository.findActiveDevicesForUser.mockResolvedValue([
+        device('d1'),
+        device('d2'),
+      ]);
+      fetchRateLimiter.assertNotRateLimited
+        .mockImplementationOnce(() => undefined)
+        .mockImplementationOnce(() => {
+          throw new RateLimitedException('slow down', 30);
+        });
+
+      await expect(
+        service.claimKeyPackagesForUser('user-1', 'user-2'),
+      ).rejects.toThrow(RateLimitedException);
+
+      expect(repository.claimSingleUseKeyPackage).not.toHaveBeenCalled();
     });
   });
 

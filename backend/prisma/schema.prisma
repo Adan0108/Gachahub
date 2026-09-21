@@ -323,6 +323,13 @@ model ChatConversation {
   /// plenty for any conversation's lifetime.
   mlsEpoch Int @default(0)
 
+  /// Who is currently finishing this conversation's membership changes, and until when. Every online
+  /// member gets the same work; without this each would claim single-use key packages for the same
+  /// joiner and only one Commit could win, burning the rest. The work endpoint hands a conversation
+  /// to one device at a time, and the lease clears when a Commit is accepted or simply expires.
+  mlsWorkLeaseDeviceId String?
+  mlsWorkLeaseUntil    DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

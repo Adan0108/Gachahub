@@ -81,7 +81,9 @@ describe('MembershipReconciler', () => {
     const summary = await new MembershipReconciler(engine, 'dev-1').reconcile();
 
     expect(engine.syncCommits).toHaveBeenCalledWith('conv-1');
-    expect(api.claimChatDeviceKeyPackages).toHaveBeenCalledWith('u2');
+    expect(api.claimChatDeviceKeyPackages).toHaveBeenCalledWith('u2', {
+      conversationId: 'conv-1',
+    });
     const [conversationId, change] = engine.submitMembershipChange.mock.calls[0]!;
     expect(conversationId).toBe('conv-1');
     expect(
@@ -215,16 +217,11 @@ describe('MembershipReconciler', () => {
       expect(api.claimChatDeviceKeyPackages).toHaveBeenCalledTimes(1);
     });
 
-    it('stops before a user whose devices would push the Commit past the server limit', async () => {
+    it('leaves out a user whose devices would push the Commit past the server limit, without claiming - claiming would burn packages that then go unused', async () => {
+      const devicesOf = (userId: string, n: number) =>
+        Array.from({ length: n }, (_, i) => ({ userId, deviceId: `${userId}-d${i}` }));
       await serveWork({
-        items: [
-          item({
-            add: [
-              { userId: 'u2', deviceId: 'x' },
-              { userId: 'u3', deviceId: 'y' },
-            ],
-          }),
-        ],
+        items: [item({ add: [...devicesOf('u2', 30), ...devicesOf('u3', 30)] })],
       });
       const api = await load();
       const many = (prefix: string, n: number) =>
@@ -236,8 +233,34 @@ describe('MembershipReconciler', () => {
 
       await new MembershipReconciler(engine, 'dev-1').reconcile();
 
+      expect(api.claimChatDeviceKeyPackages).toHaveBeenCalledTimes(1);
+      expect(api.claimChatDeviceKeyPackages).toHaveBeenCalledWith('u2', expect.anything());
       const [, change] = engine.submitMembershipChange.mock.calls[0]!;
       expect(change.added).toHaveLength(30);
+    });
+
+    it('fits a smaller user in after one that does not fit', async () => {
+      const devicesOf = (userId: string, n: number) =>
+        Array.from({ length: n }, (_, i) => ({ userId, deviceId: `${userId}-d${i}` }));
+      await serveWork({
+        items: [
+          item({ add: [...devicesOf('big', 45), ...devicesOf('u2', 10), ...devicesOf('u3', 3)] }),
+        ],
+      });
+      const api = await load();
+      vi.mocked(api.claimChatDeviceKeyPackages).mockImplementation(async (userId: string) =>
+        Array.from({ length: userId === 'big' ? 45 : userId === 'u2' ? 10 : 3 }, (_, i) =>
+          claimed(`${userId}-${i}`),
+        ),
+      );
+
+      await new MembershipReconciler(fakeEngine(), 'dev-1').reconcile();
+
+      // 45 fits, u2 (10) would make 55, u3 (3) makes 48
+      expect(vi.mocked(api.claimChatDeviceKeyPackages).mock.calls.map(([user]) => user)).toEqual([
+        'big',
+        'u3',
+      ]);
     });
   });
 

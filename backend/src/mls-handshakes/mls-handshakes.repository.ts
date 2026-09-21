@@ -91,7 +91,12 @@ export class MlsHandshakesRepository {
     const accepted = await this.prisma.$transaction(async (tx) => {
       const advanced = await tx.chatConversation.updateMany({
         where: { id: conversationId, mlsEpoch: expectedEpoch },
-        data: { mlsEpoch: { increment: 1 } },
+        // The Commit is the work the lease was for, so the next round starts clean.
+        data: {
+          mlsEpoch: { increment: 1 },
+          mlsWorkLeaseDeviceId: null,
+          mlsWorkLeaseUntil: null,
+        },
       });
 
       if (advanced.count === 0) {

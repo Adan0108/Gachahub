@@ -6,6 +6,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { BlocksService } from '../blocks/blocks.service';
+import { isEntitledToLeaf } from '../chat/membership/leaf-entitlement';
+import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
 import { FollowsService } from '../follows/follows.service';
 import {
   ChatDevicesRepository,
@@ -29,6 +31,7 @@ export class ChatDevicesService {
     private readonly blocksService: BlocksService,
     private readonly fetchRateLimiter: KeyPackageFetchRateLimiterService,
     private readonly uploadRateLimiter: KeyPackageUploadRateLimiterService,
+    private readonly mlsGroupRosterRepository: MlsGroupRosterRepository,
   ) {}
 
   /**
@@ -124,45 +127,99 @@ export class ChatDevicesService {
    * Pass excludeDeviceId when claiming the caller's OWN devices, to leave
    * out the device that is creating the group (already a member).
    *
-   * Same authorization shape as chat's assertMessageRequestAllowed
-   * (mutual-block check, messageRequestSetting gate) - duplicated here
-   * rather than shared, since stage 5 (MLS-driven membership) will need to
-   * reconcile this against "already in a shared group" exceptions chat.
-   * service.ts's version doesn't need to consider. Unify then, not now.
-   * Those gates are for messaging someone else, so they're skipped when the
-   * caller claims their own devices.
+   * Two ways to be allowed, because there are two different reasons to claim:
+   * - Messaging someone (no conversationId): the same gates as chat's
+   *   assertMessageRequestAllowed - a block by the requester, and the target's
+   *   messageRequestSetting. Skipped when claiming your own devices.
+   * - Finishing a change to a group you are in (conversationId): the person is
+   *   already authorized to be in that group, so their DM privacy settings no
+   *   longer apply - they would otherwise leave someone stuck JOINING for good,
+   *   refused for every member. The caller must be an ACTIVE participant and
+   *   the target entitled to be in it. Devices already in the group are left
+   *   out, so a claim only ever burns packages that will actually be used.
    */
   async claimKeyPackagesForUser(
     requesterId: string,
     targetUserId: string,
-    excludeDeviceId?: string,
+    options: { excludeDeviceId?: string; conversationId?: string } = {},
   ) {
     this.fetchRateLimiter.assertNotRateLimited(requesterId, targetUserId);
 
     const isOwnDevices = requesterId === targetUserId;
+    const { excludeDeviceId, conversationId } = options;
 
-    if (!isOwnDevices) {
+    const devicesInGroup = conversationId
+      ? await this.assertMayClaimForGroup(
+          requesterId,
+          targetUserId,
+          conversationId,
+        )
+      : new Set<string>();
+
+    if (!isOwnDevices && !conversationId) {
       await this.assertMayFetchKeyPackage(requesterId, targetUserId);
     }
 
     const devices = (
       await this.chatDevicesRepository.findActiveDevicesForUser(targetUserId)
-    ).filter((device) => device.id !== excludeDeviceId);
+    ).filter(
+      (device) =>
+        device.id !== excludeDeviceId && !devicesInGroup.has(device.id),
+    );
+
+    // The request above counted once; every extra package handed out counts too.
+    if (devices.length > 1) {
+      this.fetchRateLimiter.assertNotRateLimited(
+        requesterId,
+        targetUserId,
+        devices.length - 1,
+      );
+    }
 
     const claims = await Promise.all(
       devices.map((device) => this.claimForDevice(device, requesterId)),
     );
     const offers = claims.filter((offer) => offer !== null);
 
-    // A user's own other devices can legitimately be none; someone else's
-    // account with nothing to claim means they can't be messaged yet.
-    if (offers.length === 0 && !isOwnDevices) {
+    // Own devices and devices for a group can legitimately be none (nothing new
+    // to add); someone else's account with nothing to claim means they can't be
+    // messaged yet.
+    if (offers.length === 0 && !isOwnDevices && !conversationId) {
       throw new NotFoundException(
         'This user has no available devices to message yet',
       );
     }
 
     return offers;
+  }
+
+  /** Returns the devices already in the group, which a claim must skip. */
+  private async assertMayClaimForGroup(
+    requesterId: string,
+    targetUserId: string,
+    conversationId: string,
+  ): Promise<Set<string>> {
+    const states = await this.chatDevicesRepository.findParticipantStates(
+      conversationId,
+      [requesterId, targetUserId],
+    );
+
+    if (states.get(requesterId) !== 'ACTIVE') {
+      throw new ForbiddenException(
+        'You are not an active member of this group',
+      );
+    }
+
+    if (!isEntitledToLeaf(states.get(targetUserId))) {
+      throw new ForbiddenException(
+        'This user is not entitled to join this group',
+      );
+    }
+
+    const leaves =
+      await this.mlsGroupRosterRepository.findActiveLeaves(conversationId);
+
+    return new Set(leaves.map((leaf) => leaf.deviceId));
   }
 
   private async claimForDevice(

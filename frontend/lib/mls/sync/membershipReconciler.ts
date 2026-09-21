@@ -151,28 +151,40 @@ export class MembershipReconciler {
   }
 
   /**
-   * One key package per device of everyone waiting to join. A user whose
+   * One key package per device to add, claimed user by user. A user whose
    * packages can't be claimed is skipped, not fatal: the rest still join, and
    * the missed user shows up as work again on the next pass.
+   *
+   * The Commit can carry only so many devices, and a claim burns single-use key
+   * packages, so the size is worked out from the work list BEFORE claiming: a
+   * user who would not fit is left for the next Commit, never claimed and
+   * thrown away.
    */
   private async claimOffers(item: MembershipWorkItem): Promise<KeyPackageOffer[]> {
+    const deviceCountByUser = new Map<UserId, number>();
+    for (const device of item.add) {
+      deviceCountByUser.set(device.userId, (deviceCountByUser.get(device.userId) ?? 0) + 1);
+    }
+
     const offers: KeyPackageOffer[] = [];
 
-    for (const userId of new Set(item.add.map((device) => device.userId))) {
+    for (const [userId, deviceCount] of deviceCountByUser) {
+      if (offers.length + deviceCount > MAX_DEVICES_PER_COMMIT) continue;
+
       let claimed: ClaimedKeyPackage[];
       try {
-        // eslint-disable-next-line no-await-in-loop -- claims are sequential so a cap is never overshot by parallel requests
-        claimed = (await api.claimChatDeviceKeyPackages(userId)) as ClaimedKeyPackage[];
+        // eslint-disable-next-line no-await-in-loop -- claims are sequential so the limit is never overshot by parallel requests
+        claimed = (await api.claimChatDeviceKeyPackages(userId, {
+          conversationId: item.conversationId,
+        })) as ClaimedKeyPackage[];
       } catch (error) {
         console.warn(`Could not claim key packages for ${userId}`, error);
         continue;
       }
 
-      if (offers.length + claimed.length > MAX_DEVICES_PER_COMMIT) break;
-
       offers.push(...claimed.map((keyPackage) => toKeyPackageOffer(userId, keyPackage)));
     }
 
-    return offers;
+    return offers.slice(0, MAX_DEVICES_PER_COMMIT);
   }
 }

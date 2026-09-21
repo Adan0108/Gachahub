@@ -45,4 +45,35 @@ describe('KeyPackageFetchRateLimiterService', () => {
       limiter.assertNotRateLimited('someone-else', 'a-different-user'),
     ).not.toThrow();
   });
+
+  describe('cost', () => {
+    it('counts a request that hands out several packages as that many fetches', () => {
+      // 6 requests x 3 packages = 18, then 2 more single fetches reach the limit of 20
+      for (let i = 0; i < 6; i += 1) {
+        limiter.assertNotRateLimited('requester-1', `target-${i}`, 3);
+      }
+      limiter.assertNotRateLimited('requester-1', 'target-x');
+      limiter.assertNotRateLimited('requester-1', 'target-y');
+
+      expect(() =>
+        limiter.assertNotRateLimited('requester-1', 'target-z'),
+      ).toThrow(RateLimitedException);
+    });
+
+    it('refuses one request whose cost alone exceeds the limit', () => {
+      expect(() =>
+        limiter.assertNotRateLimited('requester-1', 'target-1', 21),
+      ).toThrow(RateLimitedException);
+    });
+
+    it('counts the cost against the target too', () => {
+      for (let i = 0; i < 20; i += 1) {
+        limiter.assertNotRateLimited(`requester-${i}`, 'victim', 3);
+      }
+
+      expect(() =>
+        limiter.assertNotRateLimited('requester-99', 'victim'),
+      ).toThrow(RateLimitedException);
+    });
+  });
 });

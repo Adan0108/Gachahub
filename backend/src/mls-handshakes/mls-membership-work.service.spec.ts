@@ -15,6 +15,7 @@ describe('MlsMembershipWorkService', () => {
   const repository = {
     findConversationsNeedingWork: jest.fn(),
     findDevices: jest.fn(),
+    leaseConversations: jest.fn(),
   };
   const chatDevicesService = { assertOwnActiveDevice: jest.fn() };
 
@@ -42,6 +43,10 @@ describe('MlsMembershipWorkService', () => {
     chatDevicesService.assertOwnActiveDevice.mockResolvedValue({});
     repository.findConversationsNeedingWork.mockResolvedValue([]);
     repository.findDevices.mockResolvedValue([]);
+    repository.leaseConversations.mockImplementation(
+      ({ conversationIds }: { conversationIds: string[] }) =>
+        Promise.resolve(new Set(conversationIds)),
+    );
 
     service = new MlsMembershipWorkService(
       repository as unknown as MlsMembershipWorkRepository,
@@ -149,6 +154,53 @@ describe('MlsMembershipWorkService', () => {
     expect(result.items[0]?.add).toEqual([
       { userId: 'joiner', deviceId: 'joiner-device' },
     ]);
+  });
+
+  describe('handing work to one device at a time', () => {
+    const withLeaverWork = () => {
+      repository.findConversationsNeedingWork.mockResolvedValue([
+        conversation('conv-1'),
+        conversation('conv-2'),
+      ]);
+      repository.findDevices.mockResolvedValue([
+        { userId: 'me', deviceId: 'device-1', revoked: false },
+        { userId: 'leaver', deviceId: 'leaver-device', revoked: false },
+      ]);
+    };
+
+    it('leases the conversations that have work, for a minute', async () => {
+      withLeaverWork();
+
+      await service.getMembershipWork('user-1', 'device-1');
+
+      const [args] = repository.leaseConversations.mock.calls[0] as [
+        { deviceId: string; conversationIds: string[]; now: Date; until: Date },
+      ];
+      expect(args.deviceId).toBe('device-1');
+      expect(args.conversationIds).toEqual(['conv-1', 'conv-2']);
+      expect(args.until.getTime() - args.now.getTime()).toBe(60_000);
+    });
+
+    it('leaves out a conversation another device already holds', async () => {
+      withLeaverWork();
+      repository.leaseConversations.mockResolvedValue(new Set(['conv-2']));
+
+      const result = await service.getMembershipWork('user-1', 'device-1');
+
+      expect(result.items.map((item) => item.conversationId)).toEqual([
+        'conv-2',
+      ]);
+    });
+
+    it('does not take a lease for a conversation with nothing to do', async () => {
+      repository.findConversationsNeedingWork.mockResolvedValue([
+        conversation('conv-1', 'unreachable'),
+      ]);
+
+      await service.getMembershipWork('user-1', 'device-1');
+
+      expect(repository.leaseConversations).not.toHaveBeenCalled();
+    });
   });
 
   it('does not look up devices when there are no conversations', async () => {

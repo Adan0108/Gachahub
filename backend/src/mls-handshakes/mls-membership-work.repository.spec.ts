@@ -6,7 +6,7 @@ import { MlsMembershipWorkRepository } from './mls-membership-work.repository';
 
 describe('MlsMembershipWorkRepository', () => {
   const prisma = {
-    chatConversation: { findMany: jest.fn() },
+    chatConversation: { findMany: jest.fn(), updateMany: jest.fn() },
     chatDevice: { findMany: jest.fn() },
   };
 
@@ -152,6 +152,58 @@ describe('MlsMembershipWorkRepository', () => {
           activeLeaves: [{ userId: 'me', deviceId: 'my-device' }],
         },
       ]);
+    });
+  });
+
+  describe('leaseConversations', () => {
+    const now = new Date('2026-09-22T10:00:00Z');
+    const until = new Date('2026-09-22T10:01:00Z');
+
+    it('takes only conversations nobody else holds, refreshing one this device already holds', async () => {
+      prisma.chatConversation.updateMany.mockResolvedValue({ count: 1 });
+      prisma.chatConversation.findMany.mockResolvedValue([{ id: 'conv-1' }]);
+
+      const held = await repository.leaseConversations({
+        deviceId: 'device-1',
+        conversationIds: ['conv-1', 'conv-2'],
+        now,
+        until,
+      });
+
+      expect(prisma.chatConversation.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: { in: ['conv-1', 'conv-2'] },
+          OR: [
+            { mlsWorkLeaseUntil: null },
+            { mlsWorkLeaseUntil: { lt: now } },
+            { mlsWorkLeaseDeviceId: 'device-1' },
+          ],
+        },
+        data: { mlsWorkLeaseDeviceId: 'device-1', mlsWorkLeaseUntil: until },
+      });
+      expect([...held]).toEqual(['conv-1']);
+    });
+
+    it('reports as held only what this device holds a live lease on', async () => {
+      prisma.chatConversation.updateMany.mockResolvedValue({ count: 0 });
+      prisma.chatConversation.findMany.mockResolvedValue([]);
+
+      const held = await repository.leaseConversations({
+        deviceId: 'device-1',
+        conversationIds: ['conv-1'],
+        now,
+        until,
+      });
+
+      expect(prisma.chatConversation.findMany).toHaveBeenCalledWith({
+        where: {
+          id: { in: ['conv-1'] },
+          mlsWorkLeaseDeviceId: 'device-1',
+          mlsWorkLeaseUntil: { gt: now },
+        },
+        select: { id: true },
+      });
+      expect(held.size).toBe(0);
     });
   });
 

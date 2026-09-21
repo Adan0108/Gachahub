@@ -142,6 +142,21 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
     });
   });
 
+  it('ends the work lease when a Commit is accepted, since the Commit was the work', async () => {
+    participants(['user-1', 'ACTIVE']);
+
+    await repository.acceptHandshake(baseParams);
+
+    expect(tx.chatConversation.updateMany).toHaveBeenCalledWith({
+      where: { id: 'conv-1', mlsEpoch: 0 },
+      data: {
+        mlsEpoch: { increment: 1 },
+        mlsWorkLeaseDeviceId: null,
+        mlsWorkLeaseUntil: null,
+      },
+    });
+  });
+
   describe('a Commit that creates the group', () => {
     beforeEach(() => {
       roster.hasRoster.mockResolvedValue(false);

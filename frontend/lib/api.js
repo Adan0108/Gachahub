@@ -42,10 +42,8 @@ export const backendRoutes = {
   chatDevices: "/chat-devices",
   chatDeviceKeyPackages: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}/key-packages`,
   chatDevice: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}`,
-  chatDeviceClaim: (userId, excludeDeviceId) =>
-    `/chat-devices/claim/${encodePathParam(userId)}${
-      excludeDeviceId ? `?excludeDeviceId=${encodeURIComponent(excludeDeviceId)}` : ""
-    }`,
+  chatDeviceClaim: (userId, query) =>
+    withQuery(`/chat-devices/claim/${encodePathParam(userId)}`, query),
   mlsHandshakes: (conversationId) =>
     `/mls-handshakes/conversations/${encodePathParam(conversationId)}`,
   mlsPendingWelcomes: (deviceId) => `/mls-handshakes/devices/${encodePathParam(deviceId)}/welcomes`,
@@ -497,9 +495,11 @@ export const api = {
     mutation(backendRoutes.chatDeviceKeyPackages(deviceId), payload),
   revokeChatDevice: (deviceId) =>
     mutation(backendRoutes.chatDevice(deviceId), undefined, { method: "DELETE" }),
-  // One key package per active device of `userId` (an array). Pass excludeDeviceId when claiming your own devices.
-  claimChatDeviceKeyPackages: (userId, { excludeDeviceId } = {}) =>
-    mutation(backendRoutes.chatDeviceClaim(userId, excludeDeviceId)),
+  // One key package per active device of `userId` (an array). Pass excludeDeviceId when claiming your own
+  // devices, and conversationId when finishing a change to a group you are in - the server then skips
+  // devices already in that group and the DM privacy settings, which no longer apply.
+  claimChatDeviceKeyPackages: (userId, { excludeDeviceId, conversationId } = {}) =>
+    mutation(backendRoutes.chatDeviceClaim(userId, { excludeDeviceId, conversationId })),
   submitMlsHandshake: (conversationId, payload) => submitMlsHandshake(conversationId, payload),
   getMlsHandshakesSince: (conversationId, sinceEpoch = 0) =>
     request(withQuery(backendRoutes.mlsHandshakes(conversationId), { sinceEpoch })),

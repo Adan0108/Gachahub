@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ChatDevicesService } from '../chat-devices/chat-devices.service';
-import { buildMembershipWork } from './membership-work';
+import {
+  buildMembershipWork,
+  type MembershipWorkItem,
+} from './membership-work';
 import {
   MlsMembershipWorkRepository,
   type MembershipWorkScope,
@@ -8,6 +11,13 @@ import {
 
 /** Conversations examined per request; a client pages on with `nextCursor`. */
 const CONVERSATIONS_PER_PAGE = 50;
+
+/**
+ * How long a device keeps a conversation's work to itself. Long enough to claim
+ * key packages and submit a Commit; short enough that if the device goes away
+ * mid-way another member picks it up soon.
+ */
+const WORK_LEASE_MS = 60_000;
 
 /**
  * Tells a device which membership changes it can finish. The server can't
@@ -61,12 +71,14 @@ export class MlsMembershipWorkService {
           })
         : [];
 
+    const items = buildMembershipWork({
+      conversations,
+      devices,
+      requestingDeviceId: deviceId,
+    });
+
     return {
-      items: buildMembershipWork({
-        conversations,
-        devices,
-        requestingDeviceId: deviceId,
-      }),
+      items: await this.keepOnlyLeased(items, deviceId),
       // A full page means there may be more; a conversation with nothing the
       // device can act on is left out of `items` but still counts toward the page.
       nextCursor:
@@ -74,6 +86,21 @@ export class MlsMembershipWorkService {
           ? conversations[conversations.length - 1].id
           : null,
     };
+  }
+
+  /** Work is handed to one device at a time: drop what another member already holds. */
+  private async keepOnlyLeased(items: MembershipWorkItem[], deviceId: string) {
+    if (items.length === 0) return items;
+
+    const now = new Date();
+    const held = await this.mlsMembershipWorkRepository.leaseConversations({
+      deviceId,
+      conversationIds: items.map((item) => item.conversationId),
+      now,
+      until: new Date(now.getTime() + WORK_LEASE_MS),
+    });
+
+    return items.filter((item) => held.has(item.conversationId));
   }
 }
 

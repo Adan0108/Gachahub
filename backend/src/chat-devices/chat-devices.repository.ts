@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { MlsKeyPackageKind } from '../generated/prisma/client';
+import {
+  MlsKeyPackageKind,
+  type ChatParticipantState,
+} from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface NewKeyPackage {
@@ -21,6 +24,24 @@ export class ChatDevicesRepository {
       where: { id: userId },
       select: { id: true, messageRequestSetting: true },
     });
+  }
+
+  /** The participant state of each of these users in the conversation; users with no row are absent. */
+  async findParticipantStates(
+    conversationId: string,
+    userIds: string[],
+  ): Promise<Map<string, ChatParticipantState>> {
+    const participants = await this.prisma.chatParticipant.findMany({
+      where: { conversationId, userId: { in: userIds } },
+      select: { userId: true, state: true },
+    });
+
+    return new Map(
+      participants.map((participant) => [
+        participant.userId,
+        participant.state,
+      ]),
+    );
   }
 
   async createDeviceWithKeyPackages(params: {
