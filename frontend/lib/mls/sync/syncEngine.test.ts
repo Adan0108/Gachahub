@@ -8,7 +8,7 @@ import type { DeviceCredential, KeyPackageOffer } from '../contract/types';
 
 vi.mock('../../api', () => ({
   api: {
-    claimChatDeviceKeyPackage: vi.fn(),
+    claimChatDeviceKeyPackages: vi.fn(),
     submitMlsHandshake: vi.fn(),
     getMlsHandshakesSince: vi.fn(),
     getMlsPendingWelcomes: vi.fn(),
@@ -29,11 +29,16 @@ async function setUpDevice(userId: string): Promise<Device> {
   const store = new TsMlsDeviceIdentityStore();
   const credential = await store.provision(userId);
   const factory = new TsMlsGroupSessionFactory(store);
-  const engine = new SyncEngine(factory, credential.deviceId, new InMemoryGroupSessionStorage());
+  const engine = new SyncEngine(
+    factory,
+    credential.deviceId,
+    userId,
+    new InMemoryGroupSessionStorage(),
+  );
   return { store, factory, engine, deviceId: credential.deviceId, userId, credential };
 }
 
-/** Builds a claimChatDeviceKeyPackage-shaped response from a real key package `device` just generated. */
+/** Builds one entry of a claimChatDeviceKeyPackages response from a real key package `device` just generated. */
 async function claimResponseFor(device: Device) {
   const [keyPackage] = await device.store.generateKeyPackages(1);
   if (!keyPackage) throw new Error('generateKeyPackages(1) returned nothing');
@@ -43,6 +48,22 @@ async function claimResponseFor(device: Device) {
     signaturePublicKey: bytesToBase64(device.credential.signatureKey),
     payload: bytesToBase64(keyPackage),
   };
+}
+
+/** Makes claimChatDeviceKeyPackages answer per user id with one key package per listed device (none for unlisted users). */
+async function mockClaims(claims: Record<string, Device[]>) {
+  const { api } = await import('../../api');
+  const responses = new Map(
+    await Promise.all(
+      Object.entries(claims).map(
+        async ([userId, devices]) =>
+          [userId, await Promise.all(devices.map((device) => claimResponseFor(device)))] as const,
+      ),
+    ),
+  );
+  vi.mocked(api.claimChatDeviceKeyPackages).mockImplementation(
+    async (userId: string) => responses.get(userId) ?? [],
+  );
 }
 
 async function offerFor(device: Device): Promise<KeyPackageOffer> {
@@ -57,11 +78,7 @@ async function offerFor(device: Device): Promise<KeyPackageOffer> {
   };
 }
 
-function fakeHandshake(overrides: {
-  epoch: number;
-  senderDeviceId: string;
-  payload: Uint8Array;
-}) {
+function fakeHandshake(overrides: { epoch: number; senderDeviceId: string; payload: Uint8Array }) {
   return {
     id: `hs-${overrides.epoch}-${overrides.senderDeviceId}`,
     conversationId: 'conv-1',
@@ -95,7 +112,7 @@ describe('SyncEngine', () => {
       const bob = await setUpDevice('user-bob');
       await alice.engine.createGroup('conv-1');
 
-      vi.mocked(api.claimChatDeviceKeyPackage).mockResolvedValue(await claimResponseFor(bob));
+      await mockClaims({ 'user-bob': [bob] });
       vi.mocked(api.submitMlsHandshake).mockImplementation(async (_conversationId, payload) => ({
         outcome: 'accepted',
         handshake: fakeHandshake({
@@ -108,7 +125,10 @@ describe('SyncEngine', () => {
       const epoch = await alice.engine.addUserToConversation('conv-1', 'user-bob');
 
       expect(epoch).toBe(1);
-      expect(api.claimChatDeviceKeyPackage).toHaveBeenCalledWith('user-bob');
+      expect(api.claimChatDeviceKeyPackages).toHaveBeenCalledWith('user-bob');
+      expect(api.claimChatDeviceKeyPackages).toHaveBeenCalledWith('user-alice', {
+        excludeDeviceId: alice.deviceId,
+      });
       expect(api.submitMlsHandshake).toHaveBeenCalledWith(
         'conv-1',
         expect.objectContaining({
@@ -117,6 +137,35 @@ describe('SyncEngine', () => {
           welcomes: [expect.objectContaining({ recipientDeviceId: bob.deviceId })],
         }),
       );
+    });
+
+    it('adds every device of the recipient and every other device of the sender in one commit', async () => {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      const alicePhone = await setUpDevice('user-alice');
+      const bobLaptop = await setUpDevice('user-bob');
+      const bobPhone = await setUpDevice('user-bob');
+      await alice.engine.createGroup('conv-1');
+
+      await mockClaims({ 'user-bob': [bobLaptop, bobPhone], 'user-alice': [alicePhone] });
+      vi.mocked(api.submitMlsHandshake).mockImplementation(async (_conversationId, payload) => ({
+        outcome: 'accepted',
+        handshake: fakeHandshake({
+          epoch: payload.epoch,
+          senderDeviceId: payload.deviceId,
+          payload: base64ToBytes(payload.payload),
+        }),
+      }));
+
+      await alice.engine.addUserToConversation('conv-1', 'user-bob');
+
+      expect(api.submitMlsHandshake).toHaveBeenCalledTimes(1);
+      const [, submitted] = vi.mocked(api.submitMlsHandshake).mock.calls[0]!;
+      expect(
+        submitted.welcomes
+          .map((welcome: { recipientDeviceId: string }) => welcome.recipientDeviceId)
+          .sort(),
+      ).toEqual([bobLaptop.deviceId, bobPhone.deviceId, alicePhone.deviceId].sort());
     });
 
     it('throws EpochConflictError and catches the local session up when another commit wins the epoch race', async () => {
@@ -140,7 +189,7 @@ describe('SyncEngine', () => {
       await bob.engine.forgetConversation('conv-1'); // clear any stale cache before seeding storage directly
       const bobStorage = new InMemoryGroupSessionStorage();
       await bobStorage.save('conv-1', await bobSession.serialize());
-      const bobEngine = new SyncEngine(bob.factory, bob.deviceId, bobStorage);
+      const bobEngine = new SyncEngine(bob.factory, bob.deviceId, bob.userId, bobStorage);
 
       // Alice wins the race for epoch 1 by adding dave...
       const addDave = await aliceSession.stageCommit({
@@ -150,7 +199,7 @@ describe('SyncEngine', () => {
       await aliceSession.commitAccepted();
 
       // ...while bob, also at epoch 1, tries to add carol and loses.
-      vi.mocked(api.claimChatDeviceKeyPackage).mockResolvedValue(await claimResponseFor(carol));
+      await mockClaims({ 'user-carol': [carol] });
       vi.mocked(api.submitMlsHandshake).mockResolvedValue({
         outcome: 'conflict',
         handshake: fakeHandshake({
@@ -160,9 +209,9 @@ describe('SyncEngine', () => {
         }),
       });
 
-      await expect(
-        bobEngine.addUserToConversation('conv-1', 'user-carol'),
-      ).rejects.toThrow(EpochConflictError);
+      await expect(bobEngine.addUserToConversation('conv-1', 'user-carol')).rejects.toThrow(
+        EpochConflictError,
+      );
 
       // Bob's session should now be caught up on alice's winning commit.
       await expect(bobEngine.getCurrentEpoch('conv-1')).resolves.toBe(2);
@@ -188,7 +237,7 @@ describe('SyncEngine', () => {
       const bobSession = await bob.factory.joinFromWelcome('conv-1', bobWelcome.welcomeBytes);
       const bobStorage = new InMemoryGroupSessionStorage();
       await bobStorage.save('conv-1', await bobSession.serialize());
-      const bobEngine = new SyncEngine(bob.factory, bob.deviceId, bobStorage);
+      const bobEngine = new SyncEngine(bob.factory, bob.deviceId, bob.userId, bobStorage);
 
       // Bob goes offline from here - alice adds carol, then dave, without bob ever processing either.
       const addCarol = await aliceSession.stageCommit({
@@ -336,7 +385,7 @@ describe('SyncEngine', () => {
     it('persists after every call', async () => {
       const alice = await setUpDevice('user-alice');
       const storage = new InMemoryGroupSessionStorage();
-      const engine = new SyncEngine(alice.factory, alice.deviceId, storage);
+      const engine = new SyncEngine(alice.factory, alice.deviceId, alice.userId, storage);
       await engine.createGroup('conv-1');
       const saveSpy = vi.spyOn(storage, 'save');
 
@@ -351,7 +400,7 @@ describe('SyncEngine', () => {
     it('clears the cached session and deletes persisted state', async () => {
       const alice = await setUpDevice('user-alice');
       const storage = new InMemoryGroupSessionStorage();
-      const engine = new SyncEngine(alice.factory, alice.deviceId, storage);
+      const engine = new SyncEngine(alice.factory, alice.deviceId, alice.userId, storage);
       await engine.createGroup('conv-1');
 
       await engine.forgetConversation('conv-1');

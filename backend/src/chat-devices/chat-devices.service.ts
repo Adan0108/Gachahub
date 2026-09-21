@@ -113,44 +113,75 @@ export class ChatDevicesService {
   }
 
   /**
-   * Claims one key package for targetUserId, for the caller to use in
-   * adding a device to an MLS group. Prefers a SINGLE_USE package,
-   * falling back to the LAST_RESORT one (never consumed) only when no
-   * single-use package is available.
+   * Claims one key package for EACH of targetUserId's active devices, for
+   * the caller to add them all to an MLS group in a single commit - MLS
+   * membership is per device, so adding only one would leave the user's
+   * other devices unable to read the conversation. Per device, prefers a
+   * SINGLE_USE package and falls back to that device's LAST_RESORT one
+   * (never consumed) only when it has no single-use package left. A device
+   * with no usable package is skipped rather than failing the whole claim.
+   *
+   * Pass excludeDeviceId when claiming the caller's OWN devices, to leave
+   * out the device that is creating the group (already a member).
    *
    * Same authorization shape as chat's assertMessageRequestAllowed
    * (mutual-block check, messageRequestSetting gate) - duplicated here
    * rather than shared, since stage 5 (MLS-driven membership) will need to
    * reconcile this against "already in a shared group" exceptions chat.
    * service.ts's version doesn't need to consider. Unify then, not now.
+   * Those gates are for messaging someone else, so they're skipped when the
+   * caller claims their own devices.
    */
-  async claimKeyPackageForUser(requesterId: string, targetUserId: string) {
+  async claimKeyPackagesForUser(
+    requesterId: string,
+    targetUserId: string,
+    excludeDeviceId?: string,
+  ) {
     this.fetchRateLimiter.assertNotRateLimited(requesterId, targetUserId);
 
-    await this.assertMayFetchKeyPackage(requesterId, targetUserId);
+    const isOwnDevices = requesterId === targetUserId;
 
-    const claimed = await this.chatDevicesRepository.claimSingleUseKeyPackage(
-      targetUserId,
-      requesterId,
+    if (!isOwnDevices) {
+      await this.assertMayFetchKeyPackage(requesterId, targetUserId);
+    }
+
+    const devices = (
+      await this.chatDevicesRepository.findActiveDevicesForUser(targetUserId)
+    ).filter((device) => device.id !== excludeDeviceId);
+
+    const claims = await Promise.all(
+      devices.map((device) => this.claimForDevice(device, requesterId)),
     );
+    const offers = claims.filter((offer) => offer !== null);
 
-    const keyPackage =
-      claimed ??
-      (await this.chatDevicesRepository.findLastResortKeyPackage(targetUserId));
-
-    if (!keyPackage) {
+    // A user's own other devices can legitimately be none; someone else's
+    // account with nothing to claim means they can't be messaged yet.
+    if (offers.length === 0 && !isOwnDevices) {
       throw new NotFoundException(
         'This user has no available devices to message yet',
       );
     }
 
-    const device = await this.chatDevicesRepository.findById(
-      keyPackage.deviceId,
-    );
-    if (!device) {
-      throw new NotFoundException(
-        'This user has no available devices to message yet',
-      );
+    return offers;
+  }
+
+  private async claimForDevice(
+    device: {
+      id: string;
+      ciphersuite: string;
+      signaturePublicKey: Uint8Array;
+    },
+    requesterId: string,
+  ) {
+    const keyPackage =
+      (await this.chatDevicesRepository.claimSingleUseKeyPackage(
+        device.id,
+        requesterId,
+      )) ??
+      (await this.chatDevicesRepository.findLastResortKeyPackage(device.id));
+
+    if (!keyPackage) {
+      return null;
     }
 
     return {

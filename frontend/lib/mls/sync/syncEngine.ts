@@ -10,6 +10,7 @@ import type {
   ConversationId,
   DeviceId,
   Epoch,
+  KeyPackageOffer,
   MembershipChangeRequest,
   PlaintextEnvelope,
   ProcessResult,
@@ -39,6 +40,7 @@ export class SyncEngine {
   constructor(
     private readonly factory: GroupSessionFactory,
     private readonly deviceId: DeviceId,
+    private readonly ownUserId: UserId,
     private readonly storage: GroupSessionStorage = new EncryptedIndexedDbGroupSessionStorage(),
   ) {}
 
@@ -53,23 +55,25 @@ export class SyncEngine {
   }
 
   /**
-   * Claims a key package for `userId` and commits them into the
-   * conversation. Throws EpochConflictError if another device's commit won
-   * the race first - the group is already caught up on the winner by the
-   * time this throws, so the caller can decide whether to retry.
+   * Claims a key package for EVERY active device of `userId`, plus every
+   * other active device of this user (this device created the group, so it
+   * is already in), and commits them all into the conversation in one
+   * Commit. MLS membership is per device, so adding only one device would
+   * leave the rest unable to read the conversation. Throws
+   * EpochConflictError if another device's commit won the race first - the
+   * group is already caught up on the winner by the time this throws, so
+   * the caller can decide whether to retry.
    */
   async addUserToConversation(conversationId: ConversationId, userId: UserId): Promise<Epoch> {
-    const claimed = await api.claimChatDeviceKeyPackage(userId);
+    const [theirDevices, myOtherDevices] = (await Promise.all([
+      api.claimChatDeviceKeyPackages(userId),
+      api.claimChatDeviceKeyPackages(this.ownUserId, { excludeDeviceId: this.deviceId }),
+    ])) as [ClaimedKeyPackage[], ClaimedKeyPackage[]];
+
     return this.submitMembershipChange(conversationId, {
       added: [
-        {
-          credential: {
-            userId,
-            deviceId: claimed.deviceId,
-            signatureKey: base64ToBytes(claimed.signaturePublicKey),
-          },
-          keyPackage: base64ToBytes(claimed.payload),
-        },
+        ...theirDevices.map((claimed) => toKeyPackageOffer(userId, claimed)),
+        ...myOtherDevices.map((claimed) => toKeyPackageOffer(this.ownUserId, claimed)),
       ],
       removed: [],
     });
@@ -152,7 +156,10 @@ export class SyncEngine {
    * repeatable, so a crash between processing and persisting must not
    * force a retry.
    */
-  async processIncoming(conversationId: ConversationId, wireBytes: Uint8Array): Promise<ProcessResult> {
+  async processIncoming(
+    conversationId: ConversationId,
+    wireBytes: Uint8Array,
+  ): Promise<ProcessResult> {
     return this.runExclusive(conversationId, async () => {
       const session = await this.getSession(conversationId);
       return this.applyIncoming(conversationId, session, wireBytes);
@@ -350,7 +357,10 @@ export class SyncEngine {
     return session;
   }
 
-  private async persistSession(conversationId: ConversationId, session: GroupSession): Promise<void> {
+  private async persistSession(
+    conversationId: ConversationId,
+    session: GroupSession,
+  ): Promise<void> {
     const stateBytes = await session.serialize();
     await this.storage.save(conversationId, stateBytes);
   }
@@ -368,4 +378,21 @@ export class SyncEngine {
     );
     return result;
   }
+}
+
+interface ClaimedKeyPackage {
+  deviceId: DeviceId;
+  signaturePublicKey: string;
+  payload: string;
+}
+
+function toKeyPackageOffer(userId: UserId, claimed: ClaimedKeyPackage): KeyPackageOffer {
+  return {
+    credential: {
+      userId,
+      deviceId: claimed.deviceId,
+      signatureKey: base64ToBytes(claimed.signaturePublicKey),
+    },
+    keyPackage: base64ToBytes(claimed.payload),
+  };
 }

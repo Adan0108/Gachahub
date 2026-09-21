@@ -40,10 +40,12 @@ export const backendRoutes = {
   chatDelivered: "/chat/messages/delivered",
   chatRead: (conversationId) => `/chat/conversations/${encodePathParam(conversationId)}/read`,
   chatDevices: "/chat-devices",
-  chatDeviceKeyPackages: (deviceId) =>
-    `/chat-devices/${encodePathParam(deviceId)}/key-packages`,
+  chatDeviceKeyPackages: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}/key-packages`,
   chatDevice: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}`,
-  chatDeviceClaim: (userId) => `/chat-devices/claim/${encodePathParam(userId)}`,
+  chatDeviceClaim: (userId, excludeDeviceId) =>
+    `/chat-devices/claim/${encodePathParam(userId)}${
+      excludeDeviceId ? `?excludeDeviceId=${encodeURIComponent(excludeDeviceId)}` : ""
+    }`,
   mlsHandshakes: (conversationId) =>
     `/mls-handshakes/conversations/${encodePathParam(conversationId)}`,
   mlsPendingWelcomes: (deviceId) => `/mls-handshakes/devices/${encodePathParam(deviceId)}/welcomes`,
@@ -489,7 +491,9 @@ export const api = {
     mutation(backendRoutes.chatDeviceKeyPackages(deviceId), payload),
   revokeChatDevice: (deviceId) =>
     mutation(backendRoutes.chatDevice(deviceId), undefined, { method: "DELETE" }),
-  claimChatDeviceKeyPackage: (userId) => mutation(backendRoutes.chatDeviceClaim(userId)),
+  // One key package per active device of `userId` (an array). Pass excludeDeviceId when claiming your own devices.
+  claimChatDeviceKeyPackages: (userId, { excludeDeviceId } = {}) =>
+    mutation(backendRoutes.chatDeviceClaim(userId, excludeDeviceId)),
   submitMlsHandshake: (conversationId, payload) => submitMlsHandshake(conversationId, payload),
   getMlsHandshakesSince: (conversationId, sinceEpoch = 0) =>
     request(withQuery(backendRoutes.mlsHandshakes(conversationId), { sinceEpoch })),
@@ -502,7 +506,8 @@ export const api = {
   listDevTestUsers: () => request(backendRoutes.devTestUsers),
   createDevTestUser: (label) => mutation(backendRoutes.devTestUsers, label ? { label } : {}),
   impersonateDevTestUser: (id) => mutation(backendRoutes.devTestUserImpersonate(id)),
-  deleteDevTestUser: (id) => mutation(backendRoutes.devTestUser(id), undefined, { method: "DELETE" }),
+  deleteDevTestUser: (id) =>
+    mutation(backendRoutes.devTestUser(id), undefined, { method: "DELETE" }),
   deleteAllDevTestUsers: () =>
     mutation(backendRoutes.devTestUsers, undefined, { method: "DELETE" }),
 };

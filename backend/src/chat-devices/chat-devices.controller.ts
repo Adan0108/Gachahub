@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Param, Post, Query } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
@@ -47,15 +47,17 @@ export class ChatDevicesController {
   @Post('claim/:userId')
   @ApiOperation({
     summary:
-      'Claim one key package for a user, to add their device to an MLS group',
+      'Claim one key package per active device of a user, to add all their devices to an MLS group. Pass excludeDeviceId when claiming your own devices, to skip the one creating the group.',
   })
-  claimKeyPackage(
+  claimKeyPackages(
     @Session() session: UserSession,
     @Param('userId') userId: string,
+    @Query('excludeDeviceId') excludeDeviceId?: string,
   ) {
-    return this.chatDevicesService.claimKeyPackageForUser(
+    return this.chatDevicesService.claimKeyPackagesForUser(
       session.user.id,
       userId,
+      excludeDeviceId,
     );
   }
 }
