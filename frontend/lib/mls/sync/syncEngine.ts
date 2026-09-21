@@ -1,6 +1,8 @@
 import { api } from '../../api';
 import { bytesToBase64, base64ToBytes } from '../storage/base64';
 import type { GroupSession, GroupSessionFactory } from '../contract/client';
+import { toKeyPackageOffer, type ClaimedKeyPackage } from './keyPackageOffer';
+import { MembershipReconciler, type ReconcileSummary } from './membershipReconciler';
 import {
   EncryptedIndexedDbGroupSessionStorage,
   type GroupSessionStorage,
@@ -10,7 +12,6 @@ import type {
   ConversationId,
   DeviceId,
   Epoch,
-  KeyPackageOffer,
   MembershipChangeRequest,
   PlaintextEnvelope,
   ProcessResult,
@@ -36,6 +37,7 @@ export class SyncEngine {
   // open on the same conversation is a known, accepted gap (same class as
   // the one already noted for the device identity's AES key).
   private readonly locks = new Map<ConversationId, Promise<unknown>>();
+  private reconcileQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly factory: GroupSessionFactory,
@@ -77,6 +79,25 @@ export class SyncEngine {
       ],
       removed: [],
     });
+  }
+
+  /**
+   * Finishes the membership changes (adds and removals) the server has
+   * authorized for this device to carry out - see MembershipReconciler. Calls
+   * are queued one after another, so the poll and a send that just hit a
+   * pending removal never claim key packages for the same change twice.
+   */
+  reconcileMembership(
+    options: { conversationId?: ConversationId } = {},
+  ): Promise<ReconcileSummary> {
+    const run = this.reconcileQueue.then(() =>
+      new MembershipReconciler(this, this.deviceId).reconcile(options),
+    );
+    this.reconcileQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   /**
@@ -382,21 +403,4 @@ export class SyncEngine {
     );
     return result;
   }
-}
-
-interface ClaimedKeyPackage {
-  deviceId: DeviceId;
-  signaturePublicKey: string;
-  payload: string;
-}
-
-function toKeyPackageOffer(userId: UserId, claimed: ClaimedKeyPackage): KeyPackageOffer {
-  return {
-    credential: {
-      userId,
-      deviceId: claimed.deviceId,
-      signatureKey: base64ToBytes(claimed.signaturePublicKey),
-    },
-    keyPackage: base64ToBytes(claimed.payload),
-  };
 }

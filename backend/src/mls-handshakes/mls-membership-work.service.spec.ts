@@ -57,14 +57,27 @@ describe('MlsMembershipWorkService', () => {
   });
 
   it('asks for conversations this device and user can commit in, from the cursor', async () => {
-    await service.getMembershipWork('user-1', 'device-1', 'conv-9');
+    await service.getMembershipWork('user-1', 'device-1', {
+      after: 'conv-9',
+    });
 
     expect(repository.findConversationsNeedingWork).toHaveBeenCalledWith({
       deviceId: 'device-1',
       userId: 'user-1',
       after: 'conv-9',
+      conversationId: undefined,
       limit: 50,
     });
+  });
+
+  it('can be narrowed to one conversation', async () => {
+    await service.getMembershipWork('user-1', 'device-1', {
+      conversationId: 'conv-3',
+    });
+
+    expect(repository.findConversationsNeedingWork).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: 'conv-3' }),
+    );
   });
 
   it('turns a leaving member into devices to remove, without looking up any devices', async () => {

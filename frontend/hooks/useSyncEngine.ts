@@ -34,10 +34,15 @@ function ensureSharedSyncEngine(deviceId: DeviceId, userId: UserId): SyncEngine 
 // cheap enough for one lightweight GET per tab at this interval.
 const WELCOME_POLL_INTERVAL_MS = 5000;
 
-function checkForPendingWelcomes(engine: SyncEngine): void {
-  engine.processPendingWelcomes().catch((error: unknown) => {
-    console.warn('Could not process pending MLS welcomes', error);
-  });
+function checkForPendingWork(engine: SyncEngine): void {
+  // Welcomes first: joining a conversation is what makes this device able to
+  // carry out that conversation's pending membership changes.
+  engine
+    .processPendingWelcomes()
+    .then(() => engine.reconcileMembership())
+    .catch((error: unknown) => {
+      console.warn('Could not process pending MLS work', error);
+    });
 }
 
 // Reference-counted so several components can call useSyncEngine() for the
@@ -59,8 +64,8 @@ function startWelcomePolling(engine: SyncEngine): void {
     clearInterval(pollIntervalId);
   }
   pollingEngine = engine;
-  checkForPendingWelcomes(engine);
-  pollIntervalId = setInterval(() => checkForPendingWelcomes(engine), WELCOME_POLL_INTERVAL_MS);
+  checkForPendingWork(engine);
+  pollIntervalId = setInterval(() => checkForPendingWork(engine), WELCOME_POLL_INTERVAL_MS);
 }
 
 // Takes the engine it registered for (not just "one fewer consumer") so

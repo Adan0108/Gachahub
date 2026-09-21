@@ -49,6 +49,8 @@ export const backendRoutes = {
   mlsHandshakes: (conversationId) =>
     `/mls-handshakes/conversations/${encodePathParam(conversationId)}`,
   mlsPendingWelcomes: (deviceId) => `/mls-handshakes/devices/${encodePathParam(deviceId)}/welcomes`,
+  mlsMembershipWork: (deviceId) =>
+    `/mls-handshakes/devices/${encodePathParam(deviceId)}/membership-work`,
   mlsConsumeWelcome: (deviceId, welcomeId) =>
     `/mls-handshakes/devices/${encodePathParam(deviceId)}/welcomes/${encodePathParam(welcomeId)}/consume`,
   devTestUsers: "/dev/test-users",
@@ -202,14 +204,18 @@ async function request(path, options = {}) {
 
   if (!response.ok) {
     let message;
+    let code;
     try {
       const errorBody = await response.json();
       message = errorBody.message || errorBody.error || JSON.stringify(errorBody);
+      code = typeof errorBody.code === "string" ? errorBody.code : undefined;
     } catch {
       message = await response.text().catch(() => "");
     }
     const error = new Error(message || `API request failed: ${response.status}`);
     error.status = response.status;
+    // Machine-readable reason from the backend (e.g. MEMBERSHIP_CHANGE_PENDING), when it sent one.
+    error.code = code;
     throw error;
   }
 
@@ -498,6 +504,9 @@ export const api = {
   getMlsHandshakesSince: (conversationId, sinceEpoch = 0) =>
     request(withQuery(backendRoutes.mlsHandshakes(conversationId), { sinceEpoch })),
   getMlsPendingWelcomes: (deviceId) => request(backendRoutes.mlsPendingWelcomes(deviceId)),
+  // Membership changes (devices to add or remove) this device can finish; pass conversationId to look at one conversation only.
+  getMlsMembershipWork: (deviceId, { after, conversationId } = {}) =>
+    request(withQuery(backendRoutes.mlsMembershipWork(deviceId), { after, conversationId })),
   consumeMlsWelcome: (deviceId, welcomeId) =>
     mutation(backendRoutes.mlsConsumeWelcome(deviceId, welcomeId)),
   // Dev tools only - the backend only registers these routes at all when

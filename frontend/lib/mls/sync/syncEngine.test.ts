@@ -11,6 +11,7 @@ vi.mock('../../api', () => ({
     claimChatDeviceKeyPackages: vi.fn(),
     submitMlsHandshake: vi.fn(),
     getMlsHandshakesSince: vi.fn(),
+    getMlsMembershipWork: vi.fn(),
     getMlsPendingWelcomes: vi.fn(),
     consumeMlsWelcome: vi.fn(),
   },
@@ -251,6 +252,156 @@ describe('SyncEngine', () => {
           removedDeviceIds: [bob.deviceId],
         }),
       );
+    });
+  });
+
+  describe('reconcileMembership (real MLS)', () => {
+    async function acceptEverything() {
+      const { api } = await import('../../api');
+      vi.mocked(api.getMlsHandshakesSince).mockResolvedValue([]);
+      vi.mocked(api.submitMlsHandshake).mockImplementation(async (_conversationId, payload) => ({
+        outcome: 'accepted',
+        handshake: fakeHandshake({
+          epoch: payload.epoch,
+          senderDeviceId: payload.deviceId,
+          payload: base64ToBytes(payload.payload),
+        }),
+      }));
+      return api;
+    }
+
+    /** Serves this work once, then nothing - as the server would after the Commit is accepted. */
+    async function serveWorkOnce(items: unknown[]) {
+      const { api } = await import('../../api');
+      vi.mocked(api.getMlsMembershipWork)
+        .mockResolvedValueOnce({ items, nextCursor: null })
+        .mockResolvedValue({ items: [], nextCursor: null });
+    }
+
+    it('removes a leaving member so they cannot read what is sent next', async () => {
+      const api = await acceptEverything();
+      const alice = await setUpDevice('user-alice');
+      const bob = await setUpDevice('user-bob');
+      const carol = await setUpDevice('user-carol');
+
+      const aliceSession = await alice.engine.createGroup('conv-1');
+      const added = await aliceSession.stageCommit({
+        added: [await offerFor(bob), await offerFor(carol)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      const welcomeFor = (deviceId: string) =>
+        added.welcomes.find((w) => w.deviceId === deviceId)!.welcomeBytes;
+      const carolSession = await carol.factory.joinFromWelcome(
+        'conv-1',
+        welcomeFor(carol.deviceId),
+      );
+
+      await serveWorkOnce([
+        {
+          conversationId: 'conv-1',
+          epoch: 1,
+          add: [],
+          remove: [{ userId: 'user-carol', deviceId: carol.deviceId }],
+          unreachableUserIds: [],
+        },
+      ]);
+
+      const summary = await alice.engine.reconcileMembership();
+
+      expect(summary.outcomes).toEqual([{ conversationId: 'conv-1', outcome: 'committed' }]);
+      expect(api.submitMlsHandshake).toHaveBeenCalledWith(
+        'conv-1',
+        expect.objectContaining({ removedDeviceIds: [carol.deviceId], addedDeviceIds: [] }),
+      );
+
+      const removalCommit = base64ToBytes(
+        vi.mocked(api.submitMlsHandshake).mock.calls[0]![1].payload,
+      );
+      await carolSession.process(removalCommit);
+      const secret = await alice.engine.encryptMessage('conv-1', {
+        v: 1,
+        type: 'text',
+        body: 'carol must not read this',
+      });
+      await expect(carolSession.process(secret.wireBytes)).rejects.toThrow();
+    });
+
+    it('adds a member waiting to join so their device can read what is sent next', async () => {
+      const api = await acceptEverything();
+      const alice = await setUpDevice('user-alice');
+      const dave = await setUpDevice('user-dave');
+      await alice.engine.createGroup('conv-1');
+
+      await mockClaims({ 'user-dave': [dave] });
+      await serveWorkOnce([
+        {
+          conversationId: 'conv-1',
+          epoch: 0,
+          add: [{ userId: 'user-dave', deviceId: dave.deviceId }],
+          remove: [],
+          unreachableUserIds: [],
+        },
+      ]);
+
+      const summary = await alice.engine.reconcileMembership();
+
+      expect(summary.outcomes).toEqual([{ conversationId: 'conv-1', outcome: 'committed' }]);
+      const submitted = vi.mocked(api.submitMlsHandshake).mock.calls[0]![1];
+      expect(submitted.addedDeviceIds).toEqual([dave.deviceId]);
+
+      const daveSession = await dave.factory.joinFromWelcome(
+        'conv-1',
+        base64ToBytes(submitted.welcomes[0]!.payload),
+      );
+      const wire = await alice.engine.encryptMessage('conv-1', {
+        v: 1,
+        type: 'text',
+        body: 'welcome dave',
+      });
+      const result = await daveSession.process(wire.wireBytes);
+      expect(result.kind).toBe('application');
+    });
+
+    it('does not commit when the server’s epoch is not the one this device is at', async () => {
+      const api = await acceptEverything();
+      const alice = await setUpDevice('user-alice');
+      const dave = await setUpDevice('user-dave');
+      await alice.engine.createGroup('conv-1');
+      await mockClaims({ 'user-dave': [dave] });
+      await serveWorkOnce([
+        {
+          conversationId: 'conv-1',
+          epoch: 7,
+          add: [{ userId: 'user-dave', deviceId: dave.deviceId }],
+          remove: [],
+          unreachableUserIds: [],
+        },
+      ]);
+
+      const summary = await alice.engine.reconcileMembership();
+
+      expect(summary.outcomes).toEqual([{ conversationId: 'conv-1', outcome: 'stale' }]);
+      expect(api.submitMlsHandshake).not.toHaveBeenCalled();
+      expect(api.claimChatDeviceKeyPackages).not.toHaveBeenCalled();
+    });
+
+    it('runs queued calls one after another', async () => {
+      await acceptEverything();
+      const alice = await setUpDevice('user-alice');
+      await alice.engine.createGroup('conv-1');
+      const { api } = await import('../../api');
+      const seen: string[] = [];
+      vi.mocked(api.getMlsMembershipWork).mockImplementation(async () => {
+        seen.push('start');
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        seen.push('end');
+        return { items: [], nextCursor: null };
+      });
+
+      await Promise.all([alice.engine.reconcileMembership(), alice.engine.reconcileMembership()]);
+
+      expect(seen).toEqual(['start', 'end', 'start', 'end']);
     });
   });
 

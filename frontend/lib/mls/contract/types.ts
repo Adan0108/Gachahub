@@ -63,16 +63,20 @@ export interface KeyPackageOffer {
   keyPackage: Uint8Array;
 }
 
+/** Which device, without its key - enough to find its leaf in the group. */
+export type DeviceIdentity = Pick<DeviceCredential, 'userId' | 'deviceId'>;
+
 /**
  * What the caller supplies to GroupSession.stageCommit. Adding requires the
  * target device's actual key package bytes (not just its identity);
- * removing only needs to identify which credential to remove - the
- * implementation resolves that to a ratchet-tree leaf internally, so this
- * contract never has to expose leaf indices.
+ * removing only needs to say which device to remove - the implementation
+ * resolves that to a ratchet-tree leaf internally, so this contract never
+ * has to expose leaf indices (or require a key the caller may not have, such
+ * as when a device is being removed on the server's say-so).
  */
 export interface MembershipChangeRequest {
   added: KeyPackageOffer[];
-  removed: DeviceCredential[];
+  removed: DeviceIdentity[];
 }
 
 /**

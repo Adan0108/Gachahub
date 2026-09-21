@@ -66,6 +66,19 @@ describe('MlsMembershipWorkRepository', () => {
       });
     });
 
+    it('can be narrowed to a single conversation', async () => {
+      prisma.chatConversation.findMany.mockResolvedValue([]);
+
+      await repository.findConversationsNeedingWork({
+        deviceId: 'device-1',
+        userId: 'user-1',
+        conversationId: 'conv-3',
+        limit: 50,
+      });
+
+      expect(queryArgs()).toMatchObject({ where: { id: 'conv-3' } });
+    });
+
     it('selects only the joining and leaving participants and the live leaves', async () => {
       prisma.chatConversation.findMany.mockResolvedValue([]);
 

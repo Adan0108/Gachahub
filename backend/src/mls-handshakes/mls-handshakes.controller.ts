@@ -78,11 +78,12 @@ export class MlsHandshakesController {
     @Session() session: UserSession,
     @Param('deviceId') deviceId: string,
     @Query('after') after?: string,
+    @Query('conversationId') conversationId?: string,
   ) {
     return this.mlsMembershipWorkService.getMembershipWork(
       session.user.id,
       deviceId,
-      after,
+      { after, conversationId },
     );
   }
 

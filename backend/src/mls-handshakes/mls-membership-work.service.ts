@@ -19,14 +19,19 @@ export class MlsMembershipWorkService {
     private readonly chatDevicesService: ChatDevicesService,
   ) {}
 
-  async getMembershipWork(userId: string, deviceId: string, after?: string) {
+  async getMembershipWork(
+    userId: string,
+    deviceId: string,
+    options: { after?: string; conversationId?: string } = {},
+  ) {
     await this.chatDevicesService.assertOwnActiveDevice(userId, deviceId);
 
     const conversations =
       await this.mlsMembershipWorkRepository.findConversationsNeedingWork({
         deviceId,
         userId,
-        after,
+        after: options.after,
+        conversationId: options.conversationId,
         limit: CONVERSATIONS_PER_PAGE,
       });
 

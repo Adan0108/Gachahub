@@ -13,7 +13,7 @@ export class MlsMembershipWorkRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Conversations, in id order after `after`, where this device is in the MLS
+   * Conversations, in id order after `after` (or just `conversationId`), where this device is in the MLS
    * group, its user is an ACTIVE participant (only they may commit), and
    * someone is JOINING or LEAVING. Each comes with those participants and the
    * devices currently in the group.
@@ -22,13 +22,16 @@ export class MlsMembershipWorkRepository {
     deviceId: string;
     userId: string;
     after?: string;
+    /** Restrict to one conversation, e.g. the one a sender just found blocked. */
+    conversationId?: string;
     limit: number;
   }): Promise<DirtyConversation[]> {
-    const { deviceId, userId, after, limit } = params;
+    const { deviceId, userId, after, conversationId, limit } = params;
 
     const rows = await this.prisma.chatConversation.findMany({
       where: {
         ...(after ? { id: { gt: after } } : {}),
+        ...(conversationId ? { id: conversationId } : {}),
         mlsMembers: { some: { deviceId, removedEpoch: null } },
         AND: [
           { participants: { some: { userId, state: 'ACTIVE' } } },
