@@ -1,13 +1,49 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsEnum,
   IsObject,
   IsOptional,
   IsString,
   MaxLength,
   MinLength,
+  Validate,
+  ValidateNested,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
 } from 'class-validator';
 import { ChatMessageContentType } from '../../generated/prisma/client';
+import { ChatMediaReferenceDto } from './chat-media-reference.dto';
+
+// Matches ciphertext's own MaxLength(20000) below - encryptionMeta is an
+// arbitrary object with no per-field cap of its own, otherwise bounded
+// only by whatever the request body parser's overall size limit happens
+// to be (currently Express's 100kb default, re-added by
+// @thallesp/nestjs-better-auth after Nest's own parser is disabled in
+// main.ts) rather than anything specific to this field.
+const ENCRYPTION_META_MAX_JSON_LENGTH = 20000;
+
+@ValidatorConstraint({ name: 'BoundedJsonSize', async: false })
+class BoundedJsonSizeConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    if (value === undefined) {
+      return true;
+    }
+    try {
+      return JSON.stringify(value).length <= ENCRYPTION_META_MAX_JSON_LENGTH;
+    } catch {
+      // Circular or otherwise unserializable - @IsObject() lets it through,
+      // but it could never be stored as the JSON column it's headed for.
+      return false;
+    }
+  }
+
+  defaultMessage(): string {
+    return `encryptionMeta must serialize to at most ${ENCRYPTION_META_MAX_JSON_LENGTH} characters of JSON`;
+  }
+}
 
 /**
  * Opaque encrypted message payload.
@@ -37,6 +73,7 @@ export class EncryptedMessagePayloadDto {
   })
   @IsOptional()
   @IsObject()
+  @Validate(BoundedJsonSizeConstraint)
   encryptionMeta?: Record<string, unknown>;
 
   @ApiPropertyOptional({
@@ -65,4 +102,17 @@ export class EncryptedMessagePayloadDto {
   @IsString()
   @MaxLength(120)
   replyToId?: string;
+
+  @ApiPropertyOptional({
+    type: [ChatMediaReferenceDto],
+    maxItems: 4,
+    description:
+      'Already-uploaded media to attach. Up to four images, or one video.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(4)
+  @ValidateNested({ each: true })
+  @Type(() => ChatMediaReferenceDto)
+  media?: ChatMediaReferenceDto[];
 }

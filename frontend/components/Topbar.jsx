@@ -35,7 +35,7 @@ const notifications = [
   },
 ];
 
-export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
+export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobalActions = true }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -125,7 +125,7 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
       >
         <FiMenu />
       </button>
-      <GlobalSearch />
+      {showGlobalActions && <GlobalSearch />}
       <div className="top-actions">
         <span className={`api-status ${apiStatus}`} title={`Backend: ${api.baseUrl}`}>
           <i />{" "}
@@ -135,9 +135,11 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
               ? "Offline mode"
               : "Checking API"}
         </span>
-        <button className="outline-btn" onClick={() => router.push("/create")} type="button">
-          <FiPlus /> <span>Create</span>
-        </button>
+        {showGlobalActions && (
+          <button className="outline-btn" onClick={() => router.push("/create")} type="button">
+            <FiPlus /> <span>Create</span>
+          </button>
+        )}
         <button
           className="icon-btn theme-toggle"
           aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}

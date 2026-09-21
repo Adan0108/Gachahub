@@ -3,13 +3,32 @@ import {
   ChatMessageContentType,
   ChatParticipantRole,
   ChatParticipantState,
+  MediaResourceType,
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  claimUploadsForAttachment,
+  type PrismaTransaction,
+} from '../media/media.repository';
 
-type PrismaTransaction = Parameters<
-  Parameters<PrismaService['$transaction']>[0]
->[0];
+/**
+ * A media upload already validated (ownership, purpose, UPLOADED status) by
+ * ChatService, ready to be atomically claimed and attached to a message.
+ */
+export type ChatMessageMediaInput = {
+  mediaUploadId: string;
+  assetId: string;
+  publicId: string;
+  url: string;
+  resourceType: MediaResourceType;
+  sortOrder: number;
+  width: number | null;
+  height: number | null;
+  duration: number | null;
+  bytes: number | null;
+  format: string | null;
+};
 
 /**
  * Repository responsible for chat database queries.
@@ -102,6 +121,9 @@ export class ChatRepository {
       include: {
         receipts: true,
         replyTo: true,
+        media: {
+          orderBy: { sortOrder: 'asc' },
+        },
       },
     });
   }
@@ -151,6 +173,7 @@ export class ChatRepository {
     contentType?: ChatMessageContentType;
     clientMessageId?: string;
     replyToId?: string;
+    media?: ChatMessageMediaInput[];
   }) {
     return this.prisma.$transaction(async (tx) => {
       const conversation = await tx.chatConversation.create({
@@ -192,6 +215,7 @@ export class ChatRepository {
         contentType: params.contentType,
         clientMessageId: params.clientMessageId,
         replyToId: params.replyToId,
+        media: params.media,
       });
 
       await tx.chatConversation.update({
@@ -276,7 +300,7 @@ export class ChatRepository {
   /**
    * Add or reactivates member rows for a group.
    *
-   * skip BLOCKED rows, clears deletedAt/archivedAt and resets role to MEMBER when reactivating.
+   * skip BLOCKED and already-ACTIVE rows, clears deletedAt/archivedAt and resets role to MEMBER when reactivating.
    */
   async addGroupMembers(
     conversationId: string,
@@ -299,8 +323,9 @@ export class ChatRepository {
             role: {
               not: 'OWNER',
             },
+            // already-active rows aren't being reactivated, leave them untouched
             state: {
-              not: 'BLOCKED',
+              notIn: ['BLOCKED', 'ACTIVE'],
             },
           },
           data: {
@@ -435,6 +460,7 @@ export class ChatRepository {
     contentType?: ChatMessageContentType;
     clientMessageId?: string;
     replyToId?: string;
+    media?: ChatMessageMediaInput[];
   }) {
     return this.prisma.$transaction(async (tx) => {
       const message = await this.createMessageInTransaction(tx, params);
@@ -455,8 +481,10 @@ export class ChatRepository {
    *
    * Sender receipts are marked delivered/read immediately bc the sender's
    * client created the message. Other participants start undelivered/unread.
+   * Media (if any) is claimed and attached here too, so a message can never
+   * exist without its attachments having survived the same transaction.
    */
-  private createMessageInTransaction(
+  private async createMessageInTransaction(
     tx: PrismaTransaction,
     params: {
       conversationId: string;
@@ -467,11 +495,12 @@ export class ChatRepository {
       contentType?: ChatMessageContentType;
       clientMessageId?: string;
       replyToId?: string;
+      media?: ChatMessageMediaInput[];
     },
   ) {
     const now = new Date();
 
-    return tx.chatMessage.create({
+    const message = await tx.chatMessage.create({
       data: {
         conversationId: params.conversationId,
         senderId: params.senderId,
@@ -492,6 +521,62 @@ export class ChatRepository {
         receipts: true,
         replyTo: true,
       },
+    });
+
+    const media = params.media?.length
+      ? await this.attachMediaInTransaction(
+          tx,
+          message.id,
+          params.senderId,
+          params.media,
+        )
+      : [];
+
+    return { ...message, media };
+  }
+
+  /**
+   * Atomically claims each upload (still UPLOADED, owned by senderId,
+   * purpose CHAT) and creates its ChatMessageMedia row.
+   *
+   * Throws if any upload was already claimed by a concurrent request, so the
+   * whole message send fails instead of silently attaching only some media -
+   * the caller's transaction then rolls back the message too.
+   */
+  private async attachMediaInTransaction(
+    tx: PrismaTransaction,
+    messageId: string,
+    senderId: string,
+    media: ChatMessageMediaInput[],
+  ) {
+    const mediaUploadIds = media.map((item) => item.mediaUploadId);
+
+    await claimUploadsForAttachment(tx, {
+      ids: mediaUploadIds,
+      userId: senderId,
+      purpose: 'CHAT',
+    });
+
+    await tx.chatMessageMedia.createMany({
+      data: media.map((item) => ({
+        messageId,
+        mediaUploadId: item.mediaUploadId,
+        assetId: item.assetId,
+        publicId: item.publicId,
+        url: item.url,
+        resourceType: item.resourceType,
+        sortOrder: item.sortOrder,
+        width: item.width,
+        height: item.height,
+        duration: item.duration,
+        bytes: item.bytes,
+        format: item.format,
+      })),
+    });
+
+    return tx.chatMessageMedia.findMany({
+      where: { messageId },
+      orderBy: { sortOrder: 'asc' },
     });
   }
 
@@ -673,6 +758,9 @@ export class ChatRepository {
           },
         },
         replyTo: true,
+        media: {
+          orderBy: { sortOrder: 'asc' },
+        },
       },
     });
   }
@@ -820,8 +908,43 @@ export class ChatRepository {
             participants: true,
           },
         },
+        media: true,
       },
     });
+  }
+
+  /**
+   * Removes one message's attachment link, once its upload has actually
+   * been released (Cloudinary asset gone, MediaUpload marked DELETED).
+   *
+   * deleteMany, not delete: safe to call again if a prior attempt partially
+   * failed and left the link behind.
+   */
+  deleteMessageMediaByUploadId(mediaUploadId: string) {
+    return this.prisma.chatMessageMedia.deleteMany({
+      where: { mediaUploadId },
+    });
+  }
+
+  /**
+   * Marks an upload DELETED and drops its message link row together, once
+   * MediaService.destroyAttachedCloudinaryAsset has already destroyed the
+   * Cloudinary asset. One transaction so a crash between the two writes
+   * can't leave a link row pointing at a dead upload.
+   */
+  finalizeReleasedMedia(mediaUploadId: string) {
+    return this.prisma.$transaction([
+      this.prisma.mediaUpload.updateMany({
+        where: {
+          id: mediaUploadId,
+          status: { in: ['ATTACHED', 'RELEASE_FAILED'] },
+        },
+        data: { status: 'DELETED', deletedAt: new Date() },
+      }),
+      this.prisma.chatMessageMedia.deleteMany({
+        where: { mediaUploadId },
+      }),
+    ]);
   }
 
   /**
@@ -852,6 +975,9 @@ export class ChatRepository {
           include: {
             emote: true,
           },
+        },
+        media: {
+          orderBy: { sortOrder: 'asc' },
         },
       },
     });

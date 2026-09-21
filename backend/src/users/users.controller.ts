@@ -43,4 +43,14 @@ export class UsersController {
       session?.user.id,
     );
   }
+
+  @Get(':userId')
+  @OptionalAuth()
+  @ApiOperation({ summary: "Get a user's public profile" })
+  getUserProfile(
+    @Param('userId') userId: string,
+    @Session() session?: UserSession,
+  ) {
+    return this.usersService.getPublicProfile(userId, session?.user.id);
+  }
 }

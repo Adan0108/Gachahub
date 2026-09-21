@@ -18,7 +18,10 @@ import {
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { GameModeratorGuard } from '../common/guards/game-moderator.guard';
-import { ChatService } from './chat.service';
+import { ChatMessagingService } from './chat-messaging.service';
+import { ChatGroupService } from './chat-group.service';
+import { ChatInboxService } from './chat-inbox.service';
+import { ChatMessageActionsService } from './chat-message-actions.service';
 import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
 import { CreateGroupChatDto } from './dto/create-group-chat.dto';
@@ -42,11 +45,16 @@ import { UpdateGroupMemberRoleDto } from './dto/update-group-member-role.dto';
  *
  * Responsibilities:
  * - Read route params, query params, request bodies, and current session user
- * - Call ChatService
+ * - Call the appropriate chat service (messaging, group, inbox, or message actions)
  * - Keep chat business rules out of the HTTP layer
  */
 export class ChatController {
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatMessagingService: ChatMessagingService,
+    private readonly chatGroupService: ChatGroupService,
+    private readonly chatInboxService: ChatInboxService,
+    private readonly chatMessageActionsService: ChatMessageActionsService,
+  ) {}
 
   /**
    * Creates or reuses a direct convo and sends the first message.
@@ -64,7 +72,7 @@ export class ChatController {
     @Session() session: UserSession,
     @Body() dto: CreateDirectMessageDto,
   ) {
-    return this.chatService.createDirectMessage(session.user.id, dto);
+    return this.chatMessagingService.createDirectMessage(session.user.id, dto);
   }
 
   /**
@@ -78,7 +86,7 @@ export class ChatController {
     summary: 'List accepted chat conversations for the current user',
   })
   listConversations(@Session() session: UserSession) {
-    return this.chatService.listConversations(session.user.id);
+    return this.chatInboxService.listConversations(session.user.id);
   }
 
   /**
@@ -92,7 +100,7 @@ export class ChatController {
     summary: 'List pending stranger message requests for the current user',
   })
   listMessageRequests(@Session() session: UserSession) {
-    return this.chatService.listMessageRequests(session.user.id);
+    return this.chatInboxService.listMessageRequests(session.user.id);
   }
 
   /**
@@ -106,7 +114,7 @@ export class ChatController {
     summary: 'List archived conversations for the current user',
   })
   listArchivedConversations(@Session() session: UserSession) {
-    return this.chatService.listArchivedConversations(session.user.id);
+    return this.chatInboxService.listArchivedConversations(session.user.id);
   }
 
   /**
@@ -128,7 +136,7 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Query() query: QueryChatMessagesDto,
   ) {
-    return this.chatService.findMessages(
+    return this.chatInboxService.findMessages(
       session.user.id,
       conversationId,
       query,
@@ -145,7 +153,7 @@ export class ChatController {
     summary: 'Get current user chat unread summary',
   })
   getUnreadSummary(@Session() session: UserSession) {
-    return this.chatService.getUnreadSummary(session.user.id);
+    return this.chatInboxService.getUnreadSummary(session.user.id);
   }
 
   /**
@@ -162,7 +170,7 @@ export class ChatController {
     @Session() session: UserSession,
     @Body() dto: CreateGroupChatDto,
   ) {
-    return this.chatService.createGroupChat(session.user.id, dto);
+    return this.chatGroupService.createGroupChat(session.user.id, dto);
   }
 
   /**
@@ -183,7 +191,7 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: UpdateGroupChatDto,
   ) {
-    return this.chatService.updateGroupChat(
+    return this.chatGroupService.updateGroupChat(
       session.user.id,
       conversationId,
       dto,
@@ -208,7 +216,7 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: UpdateGroupMembersDto,
   ) {
-    return this.chatService.addGroupMembers(
+    return this.chatGroupService.addGroupMembers(
       session.user.id,
       conversationId,
       dto,
@@ -233,7 +241,7 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: UpdateGroupMembersDto,
   ) {
-    return this.chatService.removeGroupMembers(
+    return this.chatGroupService.removeGroupMembers(
       session.user.id,
       conversationId,
       dto,
@@ -258,7 +266,7 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: TransferGroupOwnershipDto,
   ) {
-    return this.chatService.transferGroupOwnership(
+    return this.chatGroupService.transferGroupOwnership(
       session.user.id,
       conversationId,
       dto,
@@ -288,7 +296,7 @@ export class ChatController {
     @Param('userId') userId: string,
     @Body() dto: UpdateGroupMemberRoleDto,
   ) {
-    return this.chatService.updateGroupMemberRole(
+    return this.chatGroupService.updateGroupMemberRole(
       session.user.id,
       conversationId,
       userId,
@@ -313,7 +321,7 @@ export class ChatController {
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
   ) {
-    return this.chatService.leaveGroup(session.user.id, conversationId);
+    return this.chatGroupService.leaveGroup(session.user.id, conversationId);
   }
 
   /**
@@ -335,7 +343,11 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: SendMessageDto,
   ) {
-    return this.chatService.sendMessage(session.user.id, conversationId, dto);
+    return this.chatMessagingService.sendMessage(
+      session.user.id,
+      conversationId,
+      dto,
+    );
   }
 
   /**
@@ -356,7 +368,7 @@ export class ChatController {
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
   ) {
-    return this.chatService.acceptRequest(session.user.id, conversationId);
+    return this.chatInboxService.acceptRequest(session.user.id, conversationId);
   }
 
   /**
@@ -376,7 +388,10 @@ export class ChatController {
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
   ) {
-    return this.chatService.declineRequest(session.user.id, conversationId);
+    return this.chatInboxService.declineRequest(
+      session.user.id,
+      conversationId,
+    );
   }
 
   /**
@@ -397,7 +412,10 @@ export class ChatController {
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
   ) {
-    return this.chatService.blockConversation(session.user.id, conversationId);
+    return this.chatInboxService.blockConversation(
+      session.user.id,
+      conversationId,
+    );
   }
 
   /**
@@ -415,7 +433,7 @@ export class ChatController {
     example: 'target-user-id',
   })
   blockUser(@Session() session: UserSession, @Param('userId') userId: string) {
-    return this.chatService.blockUser(session.user.id, userId);
+    return this.chatInboxService.blockUser(session.user.id, userId);
   }
 
   /**
@@ -435,7 +453,7 @@ export class ChatController {
     @Session() session: UserSession,
     @Param('userId') userId: string,
   ) {
-    return this.chatService.unblockUser(session.user.id, userId);
+    return this.chatInboxService.unblockUser(session.user.id, userId);
   }
 
   /**
@@ -454,7 +472,7 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: SetNotificationLevelDto,
   ) {
-    return this.chatService.setNotificationLevel(
+    return this.chatInboxService.setNotificationLevel(
       session.user.id,
       conversationId,
       dto.notificationLevel,
@@ -479,7 +497,10 @@ export class ChatController {
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
   ) {
-    return this.chatService.pinConversation(session.user.id, conversationId);
+    return this.chatInboxService.pinConversation(
+      session.user.id,
+      conversationId,
+    );
   }
 
   /**
@@ -499,7 +520,10 @@ export class ChatController {
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
   ) {
-    return this.chatService.unpinConversation(session.user.id, conversationId);
+    return this.chatInboxService.unpinConversation(
+      session.user.id,
+      conversationId,
+    );
   }
 
   /**
@@ -519,7 +543,7 @@ export class ChatController {
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
   ) {
-    return this.chatService.archiveConversation(
+    return this.chatInboxService.archiveConversation(
       session.user.id,
       conversationId,
     );
@@ -542,7 +566,7 @@ export class ChatController {
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
   ) {
-    return this.chatService.unarchiveConversation(
+    return this.chatInboxService.unarchiveConversation(
       session.user.id,
       conversationId,
     );
@@ -566,7 +590,10 @@ export class ChatController {
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
   ) {
-    return this.chatService.deleteConversation(session.user.id, conversationId);
+    return this.chatInboxService.deleteConversation(
+      session.user.id,
+      conversationId,
+    );
   }
 
   /**
@@ -583,7 +610,7 @@ export class ChatController {
     @Session() session: UserSession,
     @Body() dto: MarkMessagesDeliveredDto,
   ) {
-    return this.chatService.markDelivered(session.user.id, dto);
+    return this.chatInboxService.markDelivered(session.user.id, dto);
   }
 
   /**
@@ -605,7 +632,7 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: MarkConversationReadDto,
   ) {
-    return this.chatService.markRead(session.user.id, conversationId, dto);
+    return this.chatInboxService.markRead(session.user.id, conversationId, dto);
   }
 
   /**
@@ -629,7 +656,11 @@ export class ChatController {
     @Param('gameId') gameId: string,
     @Body() dto: CreateChatEmoteDto,
   ) {
-    return this.chatService.createGameEmote(session.user.id, gameId, dto);
+    return this.chatMessageActionsService.createGameEmote(
+      session.user.id,
+      gameId,
+      dto,
+    );
   }
 
   /**
@@ -651,7 +682,11 @@ export class ChatController {
     @Param('messageId') messageId: string,
     @Body() dto: ReactToMessageDto,
   ) {
-    return this.chatService.reactToMessage(session.user.id, messageId, dto);
+    return this.chatMessageActionsService.reactToMessage(
+      session.user.id,
+      messageId,
+      dto,
+    );
   }
 
   /**
@@ -672,7 +707,10 @@ export class ChatController {
     @Session() session: UserSession,
     @Param('messageId') messageId: string,
   ) {
-    return this.chatService.removeReaction(session.user.id, messageId);
+    return this.chatMessageActionsService.removeReaction(
+      session.user.id,
+      messageId,
+    );
   }
 
   /**
@@ -694,7 +732,11 @@ export class ChatController {
     @Param('messageId') messageId: string,
     @Body() dto: EditMessageDto,
   ) {
-    return this.chatService.editMessage(session.user.id, messageId, dto);
+    return this.chatMessageActionsService.editMessage(
+      session.user.id,
+      messageId,
+      dto,
+    );
   }
 
   /**
@@ -715,6 +757,9 @@ export class ChatController {
     @Session() session: UserSession,
     @Param('messageId') messageId: string,
   ) {
-    return this.chatService.deleteMessage(session.user.id, messageId);
+    return this.chatMessageActionsService.deleteMessage(
+      session.user.id,
+      messageId,
+    );
   }
 }

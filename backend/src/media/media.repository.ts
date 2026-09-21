@@ -1,9 +1,46 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import type {
   MediaPurpose,
   MediaResourceType,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+
+export type PrismaTransaction = Parameters<
+  Parameters<PrismaService['$transaction']>[0]
+>[0];
+
+/**
+ * Atomically claims uploads for attachment (UPLOADED -> ATTACHED) in the
+ * caller's own transaction, so the claim and the caller's own insert
+ * (PostMedia/ChatMessageMedia row) either both commit or both roll back.
+ *
+ * Throws if any id couldn't be claimed - already attached, wrong
+ * owner/purpose, or gone - so a message/post can never end up with only
+ * some of its media attached.
+ */
+export async function claimUploadsForAttachment(
+  tx: PrismaTransaction,
+  params: { ids: string[]; userId: string; purpose: MediaPurpose },
+): Promise<void> {
+  const claimed = await tx.mediaUpload.updateMany({
+    where: {
+      id: { in: params.ids },
+      userId: params.userId,
+      purpose: params.purpose,
+      status: 'UPLOADED',
+    },
+    data: {
+      status: 'ATTACHED',
+      attachedAt: new Date(),
+    },
+  });
+
+  if (claimed.count !== params.ids.length) {
+    throw new ConflictException(
+      'One or more media uploads could not be attached',
+    );
+  }
+}
 
 @Injectable()
 export class MediaRepository {
@@ -90,6 +127,41 @@ export class MediaRepository {
       data: {
         status: 'FAILED',
       },
+    });
+  }
+
+  /**
+   * Flags an upload whose release (Cloudinary delete after its parent was
+   * deleted) failed, so a retry job can pick it up later instead of leaving
+   * it stuck ATTACHED - which cleanup permanently excludes - forever.
+   *
+   * Matches from ATTACHED or RELEASE_FAILED so a retry that fails again just
+   * bumps updatedAt (via @updatedAt) and pushes the next retry out.
+   */
+  markReleaseFailed(id: string) {
+    return this.prisma.mediaUpload.updateMany({
+      where: {
+        id,
+        status: { in: ['ATTACHED', 'RELEASE_FAILED'] },
+      },
+      data: {
+        status: 'RELEASE_FAILED',
+      },
+    });
+  }
+
+  /**
+   * Uploads flagged RELEASE_FAILED whose last attempt was far enough back to
+   * retry again. take caps one run's blast radius, same as findExpiredUploads.
+   */
+  findReleaseFailedUploads(retryCutoff: Date, take = 50) {
+    return this.prisma.mediaUpload.findMany({
+      where: {
+        status: 'RELEASE_FAILED',
+        updatedAt: { lt: retryCutoff },
+      },
+      orderBy: { updatedAt: 'asc' },
+      take,
     });
   }
 

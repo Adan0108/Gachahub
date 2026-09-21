@@ -15,6 +15,7 @@ export const queryKeys = {
   comments: (postId) => ["comments", postId],
   replies: (commentId) => ["comment-replies", commentId],
   chatConversations: ["chat", "conversations"],
+  chatArchivedConversations: ["chat", "archived"],
   chatRequests: ["chat", "requests"],
   chatMessages: (conversationId) => ["chat", "messages", conversationId],
 };
@@ -99,9 +100,22 @@ export const queries = {
     retry: 1,
     staleTime: 15_000,
   }),
+  // These three poll: refetchOnWindowFocus is off app-wide (Providers.jsx).
+  // useChatSocket now delivers new messages live (backend already emits
+  // "message:created"), so this is a reliability fallback, not the primary
+  // delivery path - a longer interval than before since the socket push
+  // handles the common case, and the backend's own delivery has no
+  // retry/queue if a socket was briefly disconnected.
   chatConversations: () => ({
     queryKey: queryKeys.chatConversations,
     queryFn: api.getChatConversations,
+    retry: 1,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  }),
+  chatArchivedConversations: () => ({
+    queryKey: queryKeys.chatArchivedConversations,
+    queryFn: api.getArchivedChatConversations,
     retry: 1,
     staleTime: 10_000,
   }),
@@ -110,13 +124,15 @@ export const queries = {
     queryFn: api.getChatRequests,
     retry: 1,
     staleTime: 10_000,
+    refetchInterval: 15_000,
   }),
   chatMessages: (conversationId) => ({
     queryKey: queryKeys.chatMessages(conversationId),
     queryFn: () => api.getChatMessages(conversationId, { limit: 50 }),
     enabled: Boolean(conversationId),
     retry: 1,
-    staleTime: 5_000,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
   }),
 };
 

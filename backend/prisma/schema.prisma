@@ -29,23 +29,26 @@ model User {
   comments     Comment[]
   interests    UserInterest[]
 
-  followers             UserFollow[]          @relation("UserFollowers")
-  following             UserFollow[]          @relation("UserFollowing")
-  moderatedGames        GameModerator[]       @relation("GameModeratorUser")
-  assignedModerators    GameModerator[]       @relation("GameModeratorAssigner")
-  createdChats          ChatConversation[]    @relation("ChatConversationCreator")
-  gameMemberships       GameMember[]
-  chatParticipants      ChatParticipant[]
-  sentChatMessages      ChatMessage[]         @relation("ChatMessageSender")
-  chatMessageReceipts   ChatMessageReceipt[]
-  directChatPairsAsA    ChatDirectPair[]      @relation("ChatDirectPairUserA")
-  directChatPairsAsB    ChatDirectPair[]      @relation("ChatDirectPairUserB")
-  chatMessageReactions  ChatMessageReaction[]
-  createdChatEmotes     ChatEmote[]           @relation("ChatEmoteCreator")
-  blockedUsers          ChatUserBlock[]       @relation("ChatUserBlockBlocker")
-  blockedBy             ChatUserBlock[]       @relation("ChatUserBlockBlocked")
-  receivedNotifications Notification[]        @relation("NotificationRecipient")
-  actedNotifications    Notification[]        @relation("NotificationActor")
+  followers            UserFollow[]          @relation("UserFollowers")
+  following            UserFollow[]          @relation("UserFollowing")
+  moderatedGames       GameModerator[]       @relation("GameModeratorUser")
+  assignedModerators   GameModerator[]       @relation("GameModeratorAssigner")
+  createdChats         ChatConversation[]    @relation("ChatConversationCreator")
+  gameMemberships      GameMember[]
+  chatParticipants     ChatParticipant[]
+  sentChatMessages     ChatMessage[]         @relation("ChatMessageSender")
+  chatMessageReceipts  ChatMessageReceipt[]
+  directChatPairsAsA   ChatDirectPair[]      @relation("ChatDirectPairUserA")
+  directChatPairsAsB   ChatDirectPair[]      @relation("ChatDirectPairUserB")
+  chatMessageReactions ChatMessageReaction[]
+  createdChatEmotes    ChatEmote[]           @relation("ChatEmoteCreator")
+  blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
+  blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
+
+  receivedNotifications Notification[] @relation("NotificationRecipient")
+  actedNotifications    Notification[] @relation("NotificationActor")
+
+  chatDevices ChatDevice[]
 
   @@unique([email])
   @@map("user")
@@ -298,13 +301,22 @@ model ChatConversation {
   createdBy     String?
   lastMessageId String?
 
+  /// MLS group epoch (stage 4 - backend/docs/mls-threat-model.md). Advanced
+  /// only via an atomic compare-and-set (MlsHandshakesRepository.
+  /// acceptHandshake) so exactly one commit ever wins a given epoch. Int,
+  /// not BigInt - Prisma's BigInt breaks JSON.stringify, and 2^31 epochs is
+  /// plenty for any conversation's lifetime.
+  mlsEpoch Int @default(0)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  creator      User?             @relation("ChatConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
-  participants ChatParticipant[]
-  directPair   ChatDirectPair?
-  messages     ChatMessage[]
+  creator       User?             @relation("ChatConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  participants  ChatParticipant[]
+  directPair    ChatDirectPair?
+  messages      ChatMessage[]
+  mlsHandshakes MlsHandshake[]
+  mlsWelcomes   MlsWelcome[]
 
   @@index([type])
   @@index([status])
@@ -378,6 +390,7 @@ model ChatMessage {
   replies      ChatMessage[]         @relation("ChatMessageReplies")
   receipts     ChatMessageReceipt[]
   reactions    ChatMessageReaction[]
+  media        ChatMessageMedia[]
 
   @@unique([senderId, clientMessageId])
   @@index([conversationId, createdAt])
@@ -385,6 +398,35 @@ model ChatMessage {
   @@index([senderId])
   @@index([replyToId])
   @@map("chat_messages")
+}
+
+model ChatMessageMedia {
+  id            String @id @default(cuid())
+  messageId     String
+  mediaUploadId String @unique
+
+  assetId      String
+  publicId     String
+  url          String
+  resourceType MediaResourceType
+
+  sortOrder Int @default(0)
+
+  width    Int?
+  height   Int?
+  duration Float?
+  bytes    Int?
+  format   String?
+
+  createdAt DateTime @default(now())
+
+  message     ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  // Restrict, not Cascade: a media upload attached to a sent message must
+  // never be deleted out from under it, same guarantee PostMedia gives posts.
+  mediaUpload MediaUpload @relation(fields: [mediaUploadId], references: [id], onDelete: Restrict)
+
+  @@index([messageId, sortOrder])
+  @@map("chat_message_media")
 }
 
 model ChatMessageReceipt {
@@ -656,6 +698,11 @@ enum MediaUploadStatus {
   ATTACHED
   DELETED
   FAILED
+  /// An ATTACHED upload whose parent (e.g. a chat message) was deleted, but
+  /// releasing its Cloudinary asset failed. Retried on a backoff by the
+  /// owning feature (see ChatMediaReleaseRetryService) instead of leaking
+  /// forever, since ATTACHED itself is permanently excluded from cleanup.
+  RELEASE_FAILED
 }
 
 model MediaUpload {
@@ -693,8 +740,9 @@ model MediaUpload {
   attachedAt DateTime?
   deletedAt  DateTime?
 
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  postMedia PostMedia?
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postMedia        PostMedia?
+  chatMessageMedia ChatMessageMedia?
 
   @@index([userId, status, createdAt])
   @@index([status, createdAt])
@@ -787,4 +835,129 @@ model Notification {
   @@index([recipientId, readAt])
   @@index([actorId])
   @@map("notifications")
+}
+
+// MLS E2E encryption - stage 3 (devices and key packages) of the plan in
+// backend/docs/mls-threat-model.md. An MLS member is a device, not a user
+// (threat-model §2) - ChatParticipant/receipts/socket rooms stay
+// user-scoped for everything they already do; this sits underneath.
+model ChatDevice {
+  /// Client-supplied, not server-generated: the client mints this id and
+  /// embeds it in the MLS credential of every key package it creates,
+  /// before ever registering with the server. The server's id MUST be the
+  /// same value or credential-vs-registration checks can never match.
+  id                 String @id
+  userId             String
+  signaturePublicKey Bytes
+  /// Pinned MLS ciphersuite name this device generates key packages under,
+  /// e.g. "MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519". Rejecting anything
+  /// else at upload time avoids ever mixing ciphersuites within one device.
+  ciphersuite        String
+
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  /// Explicit revocation only (e.g. "log out this device everywhere") -
+  /// an ordinary logout must NOT set this (threat-model §2).
+  revokedAt  DateTime?
+
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  keyPackages      MlsKeyPackage[]
+  sentHandshakes   MlsHandshake[]
+  receivedWelcomes MlsWelcome[]
+
+  @@index([userId, revokedAt])
+  @@map("chat_devices")
+}
+
+enum MlsKeyPackageKind {
+  /// Claimed exactly once, then never reusable again (critique C1).
+  SINGLE_USE
+  /// Never consumed by a claim - the fallback so a device with zero
+  /// SINGLE_USE packages left can still be added to a group.
+  LAST_RESORT
+}
+
+model MlsKeyPackage {
+  id       String            @id @default(cuid())
+  deviceId String
+  kind     MlsKeyPackageKind @default(SINGLE_USE)
+
+  /// The encoded MLS KeyPackage wire bytes, verified at upload time.
+  payload Bytes
+
+  createdAt       DateTime  @default(now())
+  expiresAt       DateTime
+  /// Only ever set for SINGLE_USE packages. LAST_RESORT is read without
+  /// being claimed, so this stays null for the device's whole lifetime.
+  claimedAt       DateTime?
+  claimedByUserId String?
+
+  device ChatDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, kind, claimedAt])
+  /// MlsKeyPackageCleanupService's hourly deleteExpiredKeyPackages filters
+  /// on expiresAt alone across the whole table - a full scan without this.
+  @@index([expiresAt])
+  @@map("mls_key_packages")
+}
+
+// MLS E2E encryption - stage 4 (handshake log) of the plan in
+// backend/docs/mls-threat-model.md. A Commit is the only thing that may
+// ever advance ChatConversation.mlsEpoch, and only one Commit may ever win
+// a given epoch - enforced by the @@unique below plus an atomic
+// compare-and-set (MlsHandshakesRepository.acceptHandshake), never by
+// application-level locking.
+model MlsHandshake {
+  id             String  @id @default(cuid())
+  conversationId String
+  /// The epoch this Commit was built FROM - ChatConversation.mlsEpoch's
+  /// value at the moment the sender started building it, matching the
+  /// compare-and-set's WHERE clause. Applying this Commit moves the group
+  /// to epoch+1. @@unique below is the actual guarantee: at most one
+  /// Commit may ever resolve a given epoch.
+  epoch          Int
+  /// Nullable, and SetNull on delete - this Commit's payload is shared
+  /// group state every member still needs to reach the current epoch, not
+  /// the sender's property. Cascading it away with the sender's device
+  /// (e.g. their account gets deleted) would leave a permanent gap in the
+  /// handshake log: any member who hadn't caught up past it could never
+  /// reach a later epoch, since process() must apply every Commit in
+  /// order. Losing the sender's identity on this one row is an acceptable
+  /// trade for keeping the conversation recoverable for everyone else.
+  senderDeviceId String?
+
+  /// Opaque encoded MLS Commit bytes - the server never inspects the
+  /// content, only routes and orders it (threat-model: server is a relay).
+  payload       Bytes
+  /// SHA-256 of payload, so a network-retried submission of the same
+  /// Commit can be recognized as a duplicate instead of a real conflict.
+  payloadSha256 String
+
+  createdAt DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderDevice ChatDevice?      @relation(fields: [senderDeviceId], references: [id], onDelete: SetNull)
+
+  @@unique([conversationId, epoch])
+  @@map("mls_handshakes")
+}
+
+/// A Welcome is per-recipient-device, unlike a Commit (which every existing
+/// member processes) - delivered once, then marked consumed so it's never
+/// handed out twice.
+model MlsWelcome {
+  id                String @id @default(cuid())
+  conversationId    String
+  recipientDeviceId String
+
+  payload Bytes
+
+  createdAt  DateTime  @default(now())
+  consumedAt DateTime?
+
+  conversation    ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  recipientDevice ChatDevice       @relation(fields: [recipientDeviceId], references: [id], onDelete: Cascade)
+
+  @@index([recipientDeviceId, consumedAt])
+  @@map("mls_welcomes")
 }

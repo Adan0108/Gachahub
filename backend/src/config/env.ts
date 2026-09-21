@@ -1,5 +1,9 @@
 export const env = {
-  nodeEnv: process.env.NODE_ENV || 'development',
+  // Fail-closed: an unset NODE_ENV (a bare `node dist/main`, a container
+  // missing one env var, a CI smoke box) must land on the safe side, not
+  // silently register dev-only routes (see dev.module.ts/dev.service.ts).
+  // Local development sets this explicitly in .env.
+  nodeEnv: process.env.NODE_ENV ?? 'production',
   port: Number(process.env.PORT || 3000),
 
   databaseUrl: process.env.DATABASE_URL,
