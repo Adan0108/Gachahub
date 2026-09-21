@@ -34,8 +34,7 @@ describe('MediaService', () => {
         resourceType: 'IMAGE',
       });
 
-      const released =
-        await service.destroyAttachedCloudinaryAsset('upload-1');
+      const released = await service.destroyAttachedCloudinaryAsset('upload-1');
 
       expect(released).toBe(true);
       expect(cloudinaryService.deleteAsset).toHaveBeenCalledWith(
@@ -161,7 +160,9 @@ describe('MediaService', () => {
         publicId: 'public-1',
         resourceType: 'IMAGE',
       });
-      cloudinaryService.deleteAsset.mockRejectedValue(new Error('cloudinary down'));
+      cloudinaryService.deleteAsset.mockRejectedValue(
+        new Error('cloudinary down'),
+      );
 
       await expect(service.releaseAttachedUpload('upload-1')).rejects.toThrow(
         'cloudinary down',

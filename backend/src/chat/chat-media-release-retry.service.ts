@@ -33,8 +33,9 @@ export class ChatMediaReleaseRetryService {
 
     for (const upload of uploads) {
       try {
-        const released =
-          await this.mediaService.destroyAttachedCloudinaryAsset(upload.id);
+        const released = await this.mediaService.destroyAttachedCloudinaryAsset(
+          upload.id,
+        );
 
         if (released) {
           await this.chatRepository.finalizeReleasedMedia(upload.id);

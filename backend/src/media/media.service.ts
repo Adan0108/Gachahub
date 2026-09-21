@@ -313,7 +313,9 @@ export class MediaService {
    * writes can never leave a link row pointing at a dead upload - call this
    * first, then do both DB writes together in one transaction.
    */
-  async destroyAttachedCloudinaryAsset(mediaUploadId: string): Promise<boolean> {
+  async destroyAttachedCloudinaryAsset(
+    mediaUploadId: string,
+  ): Promise<boolean> {
     const upload = await this.mediaRepository.findById(mediaUploadId);
 
     if (
