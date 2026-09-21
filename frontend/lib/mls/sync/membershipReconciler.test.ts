@@ -329,6 +329,14 @@ describe('MembershipReconciler', () => {
       expect(work).toHaveBeenCalledTimes(2);
     });
 
+    it('passes the scope through, so a rare full check can look further than the cheap default', async () => {
+      const work = await serveWork({ items: [] });
+
+      await new MembershipReconciler(fakeEngine(), 'dev-1').reconcile({ scope: 'full' });
+
+      expect(work).toHaveBeenCalledWith('dev-1', expect.objectContaining({ scope: 'full' }));
+    });
+
     it('can be limited to one conversation', async () => {
       const work = await serveWork({ items: [] });
 

@@ -391,6 +391,29 @@ describe('planCommitTransitions', () => {
     ]);
   });
 
+  describe('a removal that can no longer complete', () => {
+    it('finishes someone marked LEAVING who has no device left in the group, on any Commit', () => {
+      expect(
+        plan({
+          participantStateByUserId: states([
+            ['stuck', 'LEAVING'],
+            ['other', 'ACTIVE'],
+          ]),
+          userIdsWithDevices: new Set(['other']),
+        }),
+      ).toEqual([{ userId: 'stuck', from: 'LEAVING', to: 'DECLINED' }]);
+    });
+
+    it('leaves someone marked LEAVING alone while they still have a device to remove', () => {
+      expect(
+        plan({
+          participantStateByUserId: states([['leaving', 'LEAVING']]),
+          userIdsWithDevices: new Set(['leaving']),
+        }),
+      ).toEqual([]);
+    });
+  });
+
   describe('when the Commit creates the group', () => {
     it('moves anyone ACTIVE without a device into JOINING, and leaves everyone else alone', () => {
       expect(

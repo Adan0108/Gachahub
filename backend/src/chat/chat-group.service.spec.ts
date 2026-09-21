@@ -6,8 +6,8 @@ import {
 jest.mock('./chat.repository', () => ({
   ChatRepository: class {},
 }));
-jest.mock('../mls-group-roster/mls-group-roster.repository', () => ({
-  MlsGroupRosterRepository: class {},
+jest.mock('./membership/chat-membership.repository', () => ({
+  ChatMembershipRepository: class {},
 }));
 jest.mock('../follows/follows.service', () => ({
   FollowsService: class {},

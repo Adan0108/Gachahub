@@ -6,6 +6,10 @@ import {
 import type { ChatParticipantState } from '../generated/prisma/client';
 import type { ParticipantTransition } from '../chat/membership/apply-participant-transitions';
 import {
+  isEntitledToLeaf,
+  isLeafRemovable,
+} from '../chat/membership/leaf-entitlement';
+import {
   resolveMembershipTransition,
   type MembershipEvent,
 } from '../chat/membership/membership-state-machine';
@@ -46,22 +50,6 @@ export type AttestedRemovedDevice = {
 };
 
 type StateByUserId = ReadonlyMap<string, ChatParticipantState>;
-
-/** States allowed to gain a device: joining, or already a member getting another device. */
-const MAY_GAIN_DEVICES: ReadonlySet<ChatParticipantState> = new Set([
-  'JOINING',
-  'ACTIVE',
-  'ARCHIVED',
-  'BLOCKED',
-]);
-
-/** States whose devices must stay in the group. Anyone else's may be removed. */
-const MUST_STAY: ReadonlySet<ChatParticipantState> = new Set([
-  'JOINING',
-  'ACTIVE',
-  'ARCHIVED',
-  'BLOCKED',
-]);
 
 function hasDuplicates(ids: readonly string[]): boolean {
   return new Set(ids).size !== ids.length;
@@ -171,8 +159,7 @@ export function assertAddedDevicesAuthorized(params: {
       );
     }
 
-    const state = participantStateByUserId.get(device.userId);
-    if (!state || !MAY_GAIN_DEVICES.has(state)) {
+    if (!isEntitledToLeaf(participantStateByUserId.get(device.userId))) {
       throw new ForbiddenException(
         `User ${device.userId} is not authorized to join this conversation`,
       );
@@ -208,11 +195,13 @@ export function assertRemovedDevicesRemovable(params: {
     }
 
     const device = deviceById.get(deviceId);
-    const deviceIsGone = !device || device.revokedAt !== null;
-    const state = participantStateByUserId.get(userId);
-    const ownerMustStay = state !== undefined && MUST_STAY.has(state);
 
-    if (ownerMustStay && !deviceIsGone) {
+    if (
+      !isLeafRemovable({
+        ownerState: participantStateByUserId.get(userId),
+        deviceIsGone: !device || device.revokedAt !== null,
+      })
+    ) {
       throw new ForbiddenException(
         `Device ${deviceId} is still authorized to be in this group`,
       );
@@ -298,6 +287,15 @@ export function planCommitTransitions(params: {
     // lost one device to revocation while still a member stays as they are.
     const state = participantStateByUserId.get(userId);
     if (state === 'LEAVING' || state === 'DECLINED') {
+      events.set(userId, 'COMMIT_REMOVED');
+    }
+  }
+
+  // Anyone still marked LEAVING with no device in the group has nothing left to
+  // wait for. Finishing them here means a removal that can no longer complete
+  // never keeps blocking sends, since LEAVING blocks them until it clears.
+  for (const [userId, state] of participantStateByUserId) {
+    if (state === 'LEAVING' && !userIdsWithDevices.has(userId)) {
       events.set(userId, 'COMMIT_REMOVED');
     }
   }

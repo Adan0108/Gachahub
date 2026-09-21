@@ -14,7 +14,7 @@ import { MlsMembershipWorkService } from './mls-membership-work.service';
 describe('MlsMembershipWorkService', () => {
   const repository = {
     findConversationsNeedingWork: jest.fn(),
-    findUnrevokedDevicesOfUsers: jest.fn(),
+    findDevices: jest.fn(),
   };
   const chatDevicesService = { assertOwnActiveDevice: jest.fn() };
 
@@ -23,12 +23,17 @@ describe('MlsMembershipWorkService', () => {
   const conversation = (id: string, joiningUserId?: string) => ({
     id,
     mlsEpoch: 2,
-    participants: joiningUserId
-      ? [{ userId: joiningUserId, state: 'JOINING' }]
-      : [{ userId: 'leaver', state: 'LEAVING' }],
+    participants: [
+      { userId: 'me', state: 'ACTIVE' },
+      joiningUserId
+        ? { userId: joiningUserId, state: 'JOINING' }
+        : { userId: 'leaver', state: 'LEAVING' },
+    ],
     activeLeaves: [
-      { userId: 'me', deviceId: 'my-device' },
-      { userId: 'leaver', deviceId: 'leaver-device' },
+      { userId: 'me', deviceId: 'device-1' },
+      ...(joiningUserId
+        ? []
+        : [{ userId: 'leaver', deviceId: 'leaver-device' }]),
     ],
   });
 
@@ -36,7 +41,7 @@ describe('MlsMembershipWorkService', () => {
     jest.clearAllMocks();
     chatDevicesService.assertOwnActiveDevice.mockResolvedValue({});
     repository.findConversationsNeedingWork.mockResolvedValue([]);
-    repository.findUnrevokedDevicesOfUsers.mockResolvedValue([]);
+    repository.findDevices.mockResolvedValue([]);
 
     service = new MlsMembershipWorkService(
       repository as unknown as MlsMembershipWorkRepository,
@@ -56,6 +61,20 @@ describe('MlsMembershipWorkService', () => {
     expect(repository.findConversationsNeedingWork).not.toHaveBeenCalled();
   });
 
+  it('looks only where someone is joining or leaving unless asked to look everywhere', async () => {
+    await service.getMembershipWork('user-1', 'device-1');
+    await service.getMembershipWork('user-1', 'device-1', { scope: 'full' });
+
+    expect(repository.findConversationsNeedingWork).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ scope: 'pending' }),
+    );
+    expect(repository.findConversationsNeedingWork).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ scope: 'full' }),
+    );
+  });
+
   it('asks for conversations this device and user can commit in, from the cursor', async () => {
     await service.getMembershipWork('user-1', 'device-1', {
       after: 'conv-9',
@@ -64,6 +83,7 @@ describe('MlsMembershipWorkService', () => {
     expect(repository.findConversationsNeedingWork).toHaveBeenCalledWith({
       deviceId: 'device-1',
       userId: 'user-1',
+      scope: 'pending',
       after: 'conv-9',
       conversationId: undefined,
       limit: 50,
@@ -80,9 +100,28 @@ describe('MlsMembershipWorkService', () => {
     );
   });
 
-  it('turns a leaving member into devices to remove, without looking up any devices', async () => {
+  it('asks for the devices of everyone in the conversations and every device in the groups, once', async () => {
+    repository.findConversationsNeedingWork.mockResolvedValue([
+      conversation('conv-1', 'joiner'),
+      conversation('conv-2', 'joiner'),
+    ]);
+
+    await service.getMembershipWork('user-1', 'device-1');
+
+    expect(repository.findDevices).toHaveBeenCalledTimes(1);
+    expect(repository.findDevices).toHaveBeenCalledWith({
+      userIds: ['me', 'joiner'],
+      deviceIds: ['device-1'],
+    });
+  });
+
+  it('turns a leaving member into devices to remove', async () => {
     repository.findConversationsNeedingWork.mockResolvedValue([
       conversation('conv-1'),
+    ]);
+    repository.findDevices.mockResolvedValue([
+      { userId: 'me', deviceId: 'device-1', revoked: false },
+      { userId: 'leaver', deviceId: 'leaver-device', revoked: false },
     ]);
 
     const result = await service.getMembershipWork('user-1', 'device-1');
@@ -93,28 +132,29 @@ describe('MlsMembershipWorkService', () => {
         remove: [{ userId: 'leaver', deviceId: 'leaver-device' }],
       }),
     ]);
-    expect(repository.findUnrevokedDevicesOfUsers).not.toHaveBeenCalled();
   });
 
-  it('looks up devices once for everyone waiting to join, across conversations', async () => {
+  it('turns a joining member into devices to add', async () => {
     repository.findConversationsNeedingWork.mockResolvedValue([
       conversation('conv-1', 'joiner'),
-      conversation('conv-2', 'joiner'),
     ]);
-    repository.findUnrevokedDevicesOfUsers.mockResolvedValue([
-      { userId: 'joiner', deviceId: 'joiner-device' },
+    repository.findDevices.mockResolvedValue([
+      { userId: 'me', deviceId: 'device-1', revoked: false },
+      { userId: 'leaver', deviceId: 'leaver-device', revoked: false },
+      { userId: 'joiner', deviceId: 'joiner-device', revoked: false },
     ]);
 
     const result = await service.getMembershipWork('user-1', 'device-1');
 
-    expect(repository.findUnrevokedDevicesOfUsers).toHaveBeenCalledTimes(1);
-    expect(repository.findUnrevokedDevicesOfUsers).toHaveBeenCalledWith([
-      'joiner',
+    expect(result.items[0]?.add).toEqual([
+      { userId: 'joiner', deviceId: 'joiner-device' },
     ]);
-    expect(result.items.map((item) => item.add)).toEqual([
-      [{ userId: 'joiner', deviceId: 'joiner-device' }],
-      [{ userId: 'joiner', deviceId: 'joiner-device' }],
-    ]);
+  });
+
+  it('does not look up devices when there are no conversations', async () => {
+    await service.getMembershipWork('user-1', 'device-1');
+
+    expect(repository.findDevices).not.toHaveBeenCalled();
   });
 
   describe('paging', () => {
@@ -129,7 +169,7 @@ describe('MlsMembershipWorkService', () => {
     });
 
     it('points at the last conversation examined when a full page came back, even if some had no work', async () => {
-      // conv-* with a joiner nobody can reach produce no item but still fill the page
+      // with no device records, each joiner is unreachable: no item, but the page is full
       const page = Array.from({ length: 50 }, (_, i) =>
         conversation(`conv-${String(i).padStart(2, '0')}`, 'unreachable'),
       );

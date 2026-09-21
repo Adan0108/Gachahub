@@ -77,13 +77,16 @@ export class MlsHandshakesController {
   getMembershipWork(
     @Session() session: UserSession,
     @Param('deviceId') deviceId: string,
+    @Query('scope') scope?: string,
     @Query('after') after?: string,
     @Query('conversationId') conversationId?: string,
   ) {
     return this.mlsMembershipWorkService.getMembershipWork(
       session.user.id,
       deviceId,
-      { after, conversationId },
+      // `full` also finds new, revoked and leftover devices but costs more, so
+      // clients ask for it rarely; anything else means the cheap default.
+      { scope: scope === 'full' ? 'full' : 'pending', after, conversationId },
     );
   }
 

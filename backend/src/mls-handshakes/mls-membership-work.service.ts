@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ChatDevicesService } from '../chat-devices/chat-devices.service';
 import { buildMembershipWork } from './membership-work';
-import { MlsMembershipWorkRepository } from './mls-membership-work.repository';
+import {
+  MlsMembershipWorkRepository,
+  type MembershipWorkScope,
+} from './mls-membership-work.repository';
 
 /** Conversations examined per request; a client pages on with `nextCursor`. */
 const CONVERSATIONS_PER_PAGE = 50;
@@ -22,7 +25,11 @@ export class MlsMembershipWorkService {
   async getMembershipWork(
     userId: string,
     deviceId: string,
-    options: { after?: string; conversationId?: string } = {},
+    options: {
+      scope?: MembershipWorkScope;
+      after?: string;
+      conversationId?: string;
+    } = {},
   ) {
     await this.chatDevicesService.assertOwnActiveDevice(userId, deviceId);
 
@@ -30,30 +37,36 @@ export class MlsMembershipWorkService {
       await this.mlsMembershipWorkRepository.findConversationsNeedingWork({
         deviceId,
         userId,
+        scope: options.scope ?? 'pending',
         after: options.after,
         conversationId: options.conversationId,
         limit: CONVERSATIONS_PER_PAGE,
       });
 
-    const joiningUserIds = [
-      ...new Set(
-        conversations.flatMap((conversation) =>
-          conversation.participants
-            .filter((participant) => participant.state === 'JOINING')
-            .map((participant) => participant.userId),
-        ),
-      ),
-    ];
-
-    const devicesOfJoiningUsers =
-      joiningUserIds.length > 0
-        ? await this.mlsMembershipWorkRepository.findUnrevokedDevicesOfUsers(
-            joiningUserIds,
-          )
+    const devices =
+      conversations.length > 0
+        ? await this.mlsMembershipWorkRepository.findDevices({
+            userIds: unique(
+              conversations.flatMap((conversation) =>
+                conversation.participants.map(
+                  (participant) => participant.userId,
+                ),
+              ),
+            ),
+            deviceIds: unique(
+              conversations.flatMap((conversation) =>
+                conversation.activeLeaves.map((leaf) => leaf.deviceId),
+              ),
+            ),
+          })
         : [];
 
     return {
-      items: buildMembershipWork({ conversations, devicesOfJoiningUsers }),
+      items: buildMembershipWork({
+        conversations,
+        devices,
+        requestingDeviceId: deviceId,
+      }),
       // A full page means there may be more; a conversation with nothing the
       // device can act on is left out of `items` but still counts toward the page.
       nextCursor:
@@ -62,4 +75,8 @@ export class MlsMembershipWorkService {
           : null,
     };
   }
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
 }

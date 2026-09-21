@@ -23,6 +23,7 @@ import { GameModeratorsModule } from '../game-moderators/game-moderators.module'
 import { BlocksModule } from '../blocks/blocks.module';
 import { MediaModule } from '../media/media.module';
 import { MlsGroupRosterModule } from '../mls-group-roster/mls-group-roster.module';
+import { ChatMembershipRepository } from './membership/chat-membership.repository';
 import { ChatMembershipService } from './membership/chat-membership.service';
 
 /**
@@ -50,6 +51,7 @@ import { ChatMembershipService } from './membership/chat-membership.service';
     ChatRepository,
     ChatAccessService,
     ChatMessagingService,
+    ChatMembershipRepository,
     ChatMembershipService,
     ChatGroupService,
     ChatInboxService,

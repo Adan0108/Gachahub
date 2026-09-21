@@ -504,9 +504,10 @@ export const api = {
   getMlsHandshakesSince: (conversationId, sinceEpoch = 0) =>
     request(withQuery(backendRoutes.mlsHandshakes(conversationId), { sinceEpoch })),
   getMlsPendingWelcomes: (deviceId) => request(backendRoutes.mlsPendingWelcomes(deviceId)),
-  // Membership changes (devices to add or remove) this device can finish; pass conversationId to look at one conversation only.
-  getMlsMembershipWork: (deviceId, { after, conversationId } = {}) =>
-    request(withQuery(backendRoutes.mlsMembershipWork(deviceId), { after, conversationId })),
+  // Membership changes (devices to add or remove) this device can finish. scope "full" also finds new,
+  // revoked and leftover devices but costs more; conversationId looks at one conversation only.
+  getMlsMembershipWork: (deviceId, { scope, after, conversationId } = {}) =>
+    request(withQuery(backendRoutes.mlsMembershipWork(deviceId), { scope, after, conversationId })),
   consumeMlsWelcome: (deviceId, welcomeId) =>
     mutation(backendRoutes.mlsConsumeWelcome(deviceId, welcomeId)),
   // Dev tools only - the backend only registers these routes at all when

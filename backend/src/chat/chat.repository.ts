@@ -8,10 +8,6 @@ import {
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  applyParticipantTransitions,
-  type ParticipantTransition,
-} from './membership/apply-participant-transitions';
-import {
   claimUploadsForAttachment,
   type PrismaTransaction,
 } from '../media/media.repository';
@@ -299,29 +295,6 @@ export class ChatRepository {
         participants: true,
       },
     });
-  }
-
-  /**
-   * The participant rows that exist for these users. Users with no row are
-   * simply absent from the result.
-   */
-  findParticipantsByUserIds(conversationId: string, userIds: string[]) {
-    return this.prisma.chatParticipant.findMany({
-      where: { conversationId, userId: { in: userIds } },
-    });
-  }
-
-  /**
-   * Applies membership state changes decided by the membership state machine,
-   * all or nothing (see applyParticipantTransitions for the conditional-write rules).
-   */
-  applyStateTransitions(
-    conversationId: string,
-    changes: ParticipantTransition[],
-  ): Promise<number> {
-    return this.prisma.$transaction((tx) =>
-      applyParticipantTransitions(tx, conversationId, changes),
-    );
   }
 
   /**

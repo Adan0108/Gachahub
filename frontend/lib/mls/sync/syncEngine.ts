@@ -2,7 +2,11 @@ import { api } from '../../api';
 import { bytesToBase64, base64ToBytes } from '../storage/base64';
 import type { GroupSession, GroupSessionFactory } from '../contract/client';
 import { toKeyPackageOffer, type ClaimedKeyPackage } from './keyPackageOffer';
-import { MembershipReconciler, type ReconcileSummary } from './membershipReconciler';
+import {
+  MembershipReconciler,
+  type ReconcileOptions,
+  type ReconcileSummary,
+} from './membershipReconciler';
 import {
   EncryptedIndexedDbGroupSessionStorage,
   type GroupSessionStorage,
@@ -103,9 +107,7 @@ export class SyncEngine {
    * are queued one after another, so the poll and a send that just hit a
    * pending removal never claim key packages for the same change twice.
    */
-  reconcileMembership(
-    options: { conversationId?: ConversationId } = {},
-  ): Promise<ReconcileSummary> {
+  reconcileMembership(options: ReconcileOptions = {}): Promise<ReconcileSummary> {
     const run = this.reconcileQueue.then(() =>
       new MembershipReconciler(this, this.deviceId).reconcile(options),
     );

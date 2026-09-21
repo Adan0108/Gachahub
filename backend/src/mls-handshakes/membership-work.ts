@@ -1,4 +1,8 @@
 import type { ChatParticipantState } from '../generated/prisma/client';
+import {
+  isEntitledToLeaf,
+  isLeafRemovable,
+} from '../chat/membership/leaf-entitlement';
 
 /** A device, and whose it is. */
 export interface WorkDevice {
@@ -8,10 +12,10 @@ export interface WorkDevice {
 
 /**
  * The membership changes one conversation is waiting on, as far as the
- * requesting device can carry them out: devices to add (for people who have
- * been authorized to join) and devices to remove (for people being removed).
- * The device turns this into one Commit and submits it; the server's
- * acceptance of that Commit is what completes the change.
+ * requesting device can carry them out: devices to add (for people entitled
+ * to be in the group) and devices to remove (for people who are not, or whose
+ * device is gone). The device turns this into one Commit and submits it; the
+ * server's acceptance of that Commit is what completes the change.
  */
 export interface MembershipWorkItem {
   conversationId: string;
@@ -23,72 +27,98 @@ export interface MembershipWorkItem {
   unreachableUserIds: string[];
 }
 
-export interface DirtyConversation {
+/** Everything the server knows about one MLS conversation, all of it - never a filtered part. */
+export interface ConversationFacts {
   id: string;
   mlsEpoch: number;
-  /** Only the JOINING and LEAVING participants. */
   participants: Array<{ userId: string; state: ChatParticipantState }>;
   /** Every device currently in the group. */
   activeLeaves: WorkDevice[];
 }
 
+export interface DeviceRecord extends WorkDevice {
+  revoked: boolean;
+}
+
 /**
  * Turns what the server knows about each conversation into the work a device
- * can do. Pure; the repository loads the facts.
+ * can do, using the same entitlement rules the server enforces on a Commit
+ * (chat/membership/leaf-entitlement.ts) - so anything a Commit may legitimately
+ * do is something this can ask for, and nothing it asks for will be refused.
  *
- * Adds are the unrevoked devices of JOINING users, minus any already in the
- * group. Removes are every device in the group belonging to a LEAVING user,
- * whether or not the device still exists. A conversation with nothing the
- * device can act on is left out - a JOINING user with no usable device is
- * reported on the conversation that does have other work, but never alone,
- * since there would be nothing for the caller to do about it.
+ * - Add: every unrevoked device of an entitled user that is not in the group.
+ *   This covers someone joining, a member's new device, and a device that had
+ *   no key package when its owner joined.
+ * - Remove: every device in the group whose owner is not entitled, or whose
+ *   device is revoked or gone. This covers someone leaving, a lost or stolen
+ *   device, and a leftover device of a user who is no longer a member.
+ *
+ * Needs the conversation's COMPLETE participant list: a member left out would
+ * look like someone with no right to be there.
  */
 export function buildMembershipWork(params: {
-  conversations: readonly DirtyConversation[];
-  /** Unrevoked devices, for every user waiting to join in any of the conversations. */
-  devicesOfJoiningUsers: readonly WorkDevice[];
+  conversations: readonly ConversationFacts[];
+  /** Every device of the entitled users and every device in the groups, revoked or not. Missing means deleted. */
+  devices: readonly DeviceRecord[];
+  /** The device asking; it can never remove itself. */
+  requestingDeviceId: string;
 }): MembershipWorkItem[] {
-  const { conversations, devicesOfJoiningUsers } = params;
+  const { conversations, devices, requestingDeviceId } = params;
 
-  const devicesByUserId = new Map<string, string[]>();
-  for (const device of devicesOfJoiningUsers) {
-    const deviceIds = devicesByUserId.get(device.userId) ?? [];
+  const unrevokedDeviceIds = new Set(
+    devices
+      .filter((device) => !device.revoked)
+      .map((device) => device.deviceId),
+  );
+  const unrevokedDeviceIdsByUser = new Map<string, string[]>();
+  for (const device of devices) {
+    if (device.revoked) continue;
+
+    const deviceIds = unrevokedDeviceIdsByUser.get(device.userId) ?? [];
     deviceIds.push(device.deviceId);
-    devicesByUserId.set(device.userId, deviceIds);
+    unrevokedDeviceIdsByUser.set(device.userId, deviceIds);
   }
 
   const items: MembershipWorkItem[] = [];
 
   for (const conversation of conversations) {
+    const stateByUserId = new Map(
+      conversation.participants.map((participant) => [
+        participant.userId,
+        participant.state,
+      ]),
+    );
     const inGroup = new Set(
       conversation.activeLeaves.map((leaf) => leaf.deviceId),
-    );
-    const leavingUserIds = new Set(
-      conversation.participants
-        .filter((participant) => participant.state === 'LEAVING')
-        .map((participant) => participant.userId),
     );
 
     const add: WorkDevice[] = [];
     const unreachableUserIds: string[] = [];
 
     for (const participant of conversation.participants) {
-      if (participant.state !== 'JOINING') continue;
+      if (!isEntitledToLeaf(participant.state)) continue;
 
-      const deviceIds = (devicesByUserId.get(participant.userId) ?? []).filter(
-        (deviceId) => !inGroup.has(deviceId),
-      );
+      const userDeviceIds =
+        unrevokedDeviceIdsByUser.get(participant.userId) ?? [];
 
-      if (deviceIds.length === 0) {
+      if (participant.state === 'JOINING' && userDeviceIds.length === 0) {
         unreachableUserIds.push(participant.userId);
       }
-      for (const deviceId of deviceIds) {
-        add.push({ userId: participant.userId, deviceId });
+
+      for (const deviceId of userDeviceIds) {
+        if (!inGroup.has(deviceId)) {
+          add.push({ userId: participant.userId, deviceId });
+        }
       }
     }
 
-    const remove = conversation.activeLeaves.filter((leaf) =>
-      leavingUserIds.has(leaf.userId),
+    const remove = conversation.activeLeaves.filter(
+      (leaf) =>
+        leaf.deviceId !== requestingDeviceId &&
+        isLeafRemovable({
+          ownerState: stateByUserId.get(leaf.userId),
+          deviceIsGone: !unrevokedDeviceIds.has(leaf.deviceId),
+        }),
     );
 
     if (add.length === 0 && remove.length === 0) {

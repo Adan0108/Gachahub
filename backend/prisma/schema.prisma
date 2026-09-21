@@ -273,7 +273,12 @@ enum ChatParticipantState {
   JOINING
   /// Being removed from an MLS-encrypted conversation: cut off server-side immediately, but their
   /// devices are still MLS members. Becomes DECLINED in the same transaction that accepts the
-  /// Remove Commit. ACTIVE therefore always means "authorized AND cryptographically in the group".
+  /// Remove Commit. Only entered when they have a device in the group to remove; otherwise the
+  /// removal is final at once, since nothing could ever complete it and LEAVING blocks sends.
+  ///
+  /// ACTIVE means authorized, not "every device is in the group": a new device, or one that had no
+  /// key package when the member joined, is added by a member's app later (membership work). The
+  /// entitled states are defined once, in chat/membership/leaf-entitlement.ts.
   LEAVING
 }
 

@@ -29,6 +29,17 @@ export interface ReconcilerEngine {
   ): Promise<Epoch>;
 }
 
+export interface ReconcileOptions {
+  /** Look at one conversation only. */
+  conversationId?: ConversationId;
+  /**
+   * `pending` (the default) checks only conversations where someone is joining
+   * or leaving - cheap enough to run often. `full` also finds a member's new
+   * device, a revoked one, or a leftover one, and should run rarely.
+   */
+  scope?: 'pending' | 'full';
+}
+
 export type ReconcileOutcome =
   | 'committed'
   /** This device has no local copy of the group, so it cannot build a Commit for it. */
@@ -68,12 +79,12 @@ export class MembershipReconciler {
     private readonly deviceId: DeviceId,
   ) {}
 
-  async reconcile(options: { conversationId?: ConversationId } = {}): Promise<ReconcileSummary> {
+  async reconcile(options: ReconcileOptions = {}): Promise<ReconcileSummary> {
     const outcomes: ReconcileSummary['outcomes'] = [];
 
     for (let pass = 0; pass < MAX_PASSES; pass += 1) {
       // eslint-disable-next-line no-await-in-loop -- each pass must see the result of the previous one
-      const items = await this.fetchWork(options.conversationId);
+      const items = await this.fetchWork(options);
       if (items.length === 0) break;
 
       let raced = false;
@@ -90,7 +101,7 @@ export class MembershipReconciler {
     return { outcomes };
   }
 
-  private async fetchWork(conversationId?: ConversationId): Promise<MembershipWorkItem[]> {
+  private async fetchWork(options: ReconcileOptions): Promise<MembershipWorkItem[]> {
     const items: MembershipWorkItem[] = [];
     let after: string | undefined;
 
@@ -98,7 +109,8 @@ export class MembershipReconciler {
       // eslint-disable-next-line no-await-in-loop -- each page needs the previous page's cursor
       const response = (await api.getMlsMembershipWork(this.deviceId, {
         after,
-        conversationId,
+        conversationId: options.conversationId,
+        scope: options.scope,
       })) as { items: MembershipWorkItem[]; nextCursor: string | null };
 
       items.push(...response.items);
