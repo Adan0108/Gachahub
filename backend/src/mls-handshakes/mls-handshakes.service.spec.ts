@@ -10,6 +10,7 @@ import { buildTestCommitWithWelcome } from './test-support/build-test-commit';
 describe('MlsHandshakesService', () => {
   const repository = {
     isActiveParticipant: jest.fn(),
+    isEntitledParticipant: jest.fn(),
     acceptHandshake: jest.fn(),
     findHandshakesSince: jest.fn(),
     findRosterAtEpoch: jest.fn(),
@@ -26,6 +27,7 @@ describe('MlsHandshakesService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     repository.isActiveParticipant.mockResolvedValue(true);
+    repository.isEntitledParticipant.mockResolvedValue(true);
     chatDevicesService.assertOwnActiveDevice.mockResolvedValue({
       id: 'device-1',
       userId: 'user-1',
@@ -355,7 +357,7 @@ describe('MlsHandshakesService', () => {
     });
 
     it('rejects when the caller is not an active participant', async () => {
-      repository.isActiveParticipant.mockResolvedValue(false);
+      repository.isEntitledParticipant.mockResolvedValue(false);
 
       await expect(
         service.getHandshakesSince('user-1', 'conv-1', 0),
@@ -390,8 +392,17 @@ describe('MlsHandshakesService', () => {
       expect(repository.findRosterAtEpoch).toHaveBeenCalledWith('conv-1', 3);
     });
 
-    it('rejects when the caller is not an active participant', async () => {
+    it('lets an archived or blocked member read it - their new device still has to join', async () => {
       repository.isActiveParticipant.mockResolvedValue(false);
+      repository.findRosterAtEpoch.mockResolvedValue([]);
+
+      await expect(
+        service.getRosterAtEpoch('user-1', 'conv-1', 3),
+      ).resolves.toEqual({ epoch: 3, leaves: [] });
+    });
+
+    it('rejects when the caller is not a member', async () => {
+      repository.isEntitledParticipant.mockResolvedValue(false);
 
       await expect(
         service.getRosterAtEpoch('user-1', 'conv-1', 3),

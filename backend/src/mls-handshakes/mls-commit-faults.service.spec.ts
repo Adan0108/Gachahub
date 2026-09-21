@@ -17,7 +17,7 @@ import { MlsCommitFaultsService } from './mls-commit-faults.service';
 
 describe('MlsCommitFaultsService', () => {
   const repository = {
-    isActiveParticipant: jest.fn(),
+    isEntitledParticipant: jest.fn(),
     findHandshakeByEpoch: jest.fn(),
     recordCommitFault: jest.fn(),
   };
@@ -34,7 +34,7 @@ describe('MlsCommitFaultsService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    repository.isActiveParticipant.mockResolvedValue(true);
+    repository.isEntitledParticipant.mockResolvedValue(true);
     repository.findHandshakeByEpoch.mockResolvedValue({
       senderDeviceId: 'device-9',
     });
@@ -102,8 +102,8 @@ describe('MlsCommitFaultsService', () => {
     expect(discordLogger.sendError).not.toHaveBeenCalled();
   });
 
-  it('only accepts a report from an active member of the conversation', async () => {
-    repository.isActiveParticipant.mockResolvedValue(false);
+  it('only accepts a report from a member of the conversation', async () => {
+    repository.isEntitledParticipant.mockResolvedValue(false);
 
     await expect(service.reportFault('user-1', 'conv-1', dto)).rejects.toThrow(
       ForbiddenException,

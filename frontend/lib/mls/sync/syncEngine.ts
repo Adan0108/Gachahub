@@ -1,7 +1,7 @@
 import { api } from '../../api';
 import { bytesToBase64, base64ToBytes } from '../storage/base64';
 import type { GroupSession, GroupSessionFactory } from '../contract/client';
-import { describeTreeMismatch, parseRoster } from './rosterCheck';
+import { CommitVerifier } from './commitVerifier';
 import { toKeyPackageOffer, type ClaimedKeyPackage } from './keyPackageOffer';
 import {
   MembershipReconciler,
@@ -17,25 +17,16 @@ import {
   EpochConflictError,
   MembershipMismatchError,
 } from '../contract/errors';
-import {
-  describeMembershipMismatch,
-  parseDeclaredMembership,
-  type DeclaredMembership,
-} from './declaredMembership';
+import { parseDeclaredMembership } from './declaredMembership';
 import type {
   ConversationId,
   DeviceId,
   Epoch,
-  MembershipChange,
   MembershipChangeRequest,
   PlaintextEnvelope,
   ProcessResult,
   UserId,
 } from '../contract/types';
-
-// Stored beside the group state, under a key of its own, so it survives a reload.
-const DECLARED_MARKER = new Uint8Array([1]);
-const declaredMarkerKey = (conversationId: ConversationId) => `${conversationId}#declared`;
 
 /**
  * Orchestrates one device's MLS group sessions against the real backend
@@ -57,16 +48,16 @@ export class SyncEngine {
   // the one already noted for the device identity's AES key).
   private readonly locks = new Map<ConversationId, Promise<unknown>>();
   private reconcileQueue: Promise<void> = Promise.resolve();
-  // Conversations in which a declared Commit has been seen (see verifyCommit).
-  private readonly declaredSeen = new Set<ConversationId>();
-  private readonly reportedFaults = new Set<string>();
+  private readonly verifier: CommitVerifier;
 
   constructor(
     private readonly factory: GroupSessionFactory,
     private readonly deviceId: DeviceId,
     private readonly ownUserId: UserId,
     private readonly storage: GroupSessionStorage = new EncryptedIndexedDbGroupSessionStorage(),
-  ) {}
+  ) {
+    this.verifier = new CommitVerifier(storage, deviceId);
+  }
 
   /** Creates a brand-new group for a first DM or group chat - this device is the sole initial member. */
   async createGroup(conversationId: ConversationId): Promise<GroupSession> {
@@ -107,12 +98,7 @@ export class SyncEngine {
     });
   }
 
-  /**
-   * Finishes the membership changes (adds and removals) the server has
-   * authorized for this device to carry out - see MembershipReconciler. Calls
-   * are queued one after another, so the poll and a send that just hit a
-   * pending removal never claim key packages for the same change twice.
-   */
+  /** Finishes the server-authorized adds and removals (see MembershipReconciler); calls queue so none claims key packages twice. */
   reconcileMembership(options: ReconcileOptions = {}): Promise<ReconcileSummary> {
     const run = this.reconcileQueue.then(() =>
       new MembershipReconciler(this, this.deviceId).reconcile(options),
@@ -153,13 +139,13 @@ export class SyncEngine {
 
       if (response.outcome === 'conflict') {
         await session.commitRejected();
-        await this.applyHandshake(conversationId, session, response.handshake);
+        await this.applyBatch(conversationId, session, [response.handshake]);
         throw new EpochConflictError(conversationId, expectedEpoch);
       }
 
       await session.commitAccepted();
       await this.persistSession(conversationId, session);
-      await this.markDeclaredSeen(conversationId);
+      await this.verifier.markDeclaredSeen(conversationId);
       return session.currentEpoch();
     });
   }
@@ -175,18 +161,7 @@ export class SyncEngine {
       const sinceEpoch = await session.currentEpoch();
       const handshakes = await api.getMlsHandshakesSince(conversationId, sinceEpoch);
 
-      for (const handshake of handshakes) {
-        // eslint-disable-next-line no-await-in-loop -- must apply strictly in epoch order, and each one persists before the next is attempted
-        const result = await this.applyHandshake(conversationId, session, handshake);
-        if (result.kind === 'rejected') {
-          // The backend already validated framing/groupId before storing
-          // this handshake (mls-handshake-framing.util.ts) - a rejection
-          // here means a local bug, not a bad server response.
-          throw new Error(
-            `Could not apply handshake at epoch ${handshake.epoch}: ${result.reason}`,
-          );
-        }
-      }
+      await this.applyBatch(conversationId, session, handshakes);
 
       return session.currentEpoch();
     });
@@ -274,8 +249,11 @@ export class SyncEngine {
           const session = await this.factory.joinFromWelcome(
             welcome.conversationId,
             base64ToBytes(welcome.payload),
+            {
+              verify: (joined) =>
+                this.verifier.assertTreeMatchesRoster(welcome.conversationId, joined),
+            },
           );
-          await this.assertTreeMatchesRoster(welcome.conversationId, session);
           this.sessions.set(welcome.conversationId, session);
           await this.persistSession(welcome.conversationId, session);
           await api.consumeMlsWelcome(this.deviceId, welcome.id);
@@ -285,6 +263,15 @@ export class SyncEngine {
           joined.push(welcome.conversationId);
         }
       } catch (error) {
+        // A refused group's key package is spent, so retrying this Welcome could never succeed.
+        if (error instanceof MembershipMismatchError) {
+          try {
+            // eslint-disable-next-line no-await-in-loop -- best effort, one Welcome at a time
+            await api.consumeMlsWelcome(this.deviceId, welcome.id);
+          } catch {
+            // it stays pending and is refused again next poll
+          }
+        }
         failures.push({ welcomeId: welcome.id, error });
       }
     }
@@ -368,171 +355,86 @@ export class SyncEngine {
   async forgetConversation(conversationId: ConversationId): Promise<void> {
     return this.runExclusive(conversationId, async () => {
       this.sessions.delete(conversationId);
-      this.declaredSeen.delete(conversationId);
       await this.storage.delete(conversationId);
-      await this.storage.delete(declaredMarkerKey(conversationId));
+      await this.verifier.forget(conversationId);
     });
   }
 
   /**
-   * Applies a Commit from a handshake row the server handed out. A Commit this
-   * device refuses is reported to the server: without that, a refused Commit
-   * freezes the conversation for everyone who checks, with nothing to say who
-   * sent it or why.
+   * Applies handshake rows from the server in order, checks them, and saves once.
+   * A Commit or tree that fails a check saves nothing and drops the in-memory
+   * session, so the next use reloads the last epoch that was verified.
    */
+  private async applyBatch(
+    conversationId: ConversationId,
+    session: GroupSession,
+    handshakes: Array<{ epoch: Epoch; payload: string; membershipDeclared?: boolean }>,
+  ): Promise<void> {
+    if (handshakes.length === 0) return;
+
+    try {
+      for (const handshake of handshakes) {
+        // eslint-disable-next-line no-await-in-loop -- must apply strictly in epoch order
+        await this.applyHandshake(conversationId, session, handshake);
+      }
+
+      // Commits from before membership was tracked have no roster to check against.
+      if (handshakes.some((handshake) => handshake.membershipDeclared)) {
+        await this.verifier.assertTreeMatchesRoster(conversationId, session);
+      }
+    } catch (error) {
+      if (error instanceof MembershipMismatchError) this.sessions.delete(conversationId);
+      throw error;
+    }
+
+    await this.persistSession(conversationId, session);
+  }
+
   private async applyHandshake(
     conversationId: ConversationId,
     session: GroupSession,
     handshake: { epoch: Epoch; payload: string },
-  ): Promise<ProcessResult> {
-    try {
-      return await this.applyIncoming(
-        conversationId,
-        session,
-        base64ToBytes(handshake.payload),
-        parseDeclaredMembership(handshake),
-      );
-    } catch (error) {
-      if (error instanceof MembershipMismatchError) {
-        void this.reportFault(conversationId, handshake.epoch, error.message);
-      }
-      throw error;
-    }
-  }
-
-  /** Best effort, and once per Commit: every sync re-detects the same fault. */
-  private async reportFault(
-    conversationId: ConversationId,
-    epoch: Epoch,
-    reason: string,
   ): Promise<void> {
-    const key = `${conversationId}:${epoch}`;
-    if (this.reportedFaults.has(key)) return;
-    this.reportedFaults.add(key);
+    const result = await session.process(base64ToBytes(handshake.payload));
 
-    try {
-      await api.reportMlsFault(conversationId, {
-        deviceId: this.deviceId,
-        epoch,
-        reason: reason.slice(0, 500),
-      });
-    } catch (error) {
-      // Try again on the next sync rather than losing the report.
-      this.reportedFaults.delete(key);
-      console.warn(`Could not report the refused commit in ${conversationId}`, error);
+    if (result.kind === 'rejected') {
+      // The backend already validated framing before storing this Commit, so this is a local bug.
+      throw new Error(`Could not apply handshake at epoch ${handshake.epoch}: ${result.reason}`);
     }
-  }
+    if (result.kind !== 'commit') return;
 
-  /**
-   * Applies one incoming wire item and saves the result - unless it is a
-   * Commit that fails verification, in which case nothing is saved and the
-   * in-memory session (which process() already advanced) is dropped, so the
-   * next use reloads the last epoch that WAS verified. `declared` is what the
-   * server recorded the Commit as doing; a Commit that arrives without it
-   * cannot be checked and is refused the same way.
-   */
-  private async applyIncoming(
-    conversationId: ConversationId,
-    session: GroupSession,
-    wireBytes: Uint8Array,
-    declared?: DeclaredMembership,
-  ): Promise<ProcessResult> {
-    const result = await session.process(wireBytes);
-
-    if (result.kind === 'commit') {
-      const problem = await this.verifyCommit(conversationId, result.membershipChange, declared);
-
-      if (problem) {
-        this.sessions.delete(conversationId);
-        throw new MembershipMismatchError(conversationId, problem);
-      }
-
-      // A Commit from before membership was tracked has no roster to check against.
-      if (declared?.membershipDeclared) {
-        try {
-          await this.assertTreeMatchesRoster(conversationId, session);
-        } catch (error) {
-          this.sessions.delete(conversationId);
-          throw error;
-        }
-      }
-    }
-
-    await this.persistSession(conversationId, session);
-    return result;
-  }
-
-  /**
-   * Checks the whole ratchet tree against the server's roster for its epoch.
-   * The per-Commit check only keeps a tree honest if it started honest, so this
-   * is what catches a leaf the group was created with (or a Welcome delivered)
-   * under someone else's name. Failing to reach the roster fails the same way:
-   * a group that can't be checked isn't trusted.
-   */
-  private async assertTreeMatchesRoster(
-    conversationId: ConversationId,
-    session: GroupSession,
-  ): Promise<void> {
-    const epoch = await session.currentEpoch();
-    const roster = parseRoster(await api.getMlsRoster(conversationId, epoch));
-
-    const problem = roster
-      ? describeTreeMismatch(await session.listLeaves(), roster)
-      : 'the server did not return a roster to check the group against';
-
+    const problem = await this.verifier.checkCommit(
+      conversationId,
+      result.membershipChange,
+      parseDeclaredMembership(handshake),
+    );
     if (problem) {
-      // The Commit that produced this epoch is the one at the epoch before it.
-      void this.reportFault(conversationId, epoch - 1, problem);
+      this.verifier.reportFault(conversationId, handshake.epoch, problem);
       throw new MembershipMismatchError(conversationId, problem);
     }
   }
 
-  /**
-   * Why a Commit can't be accepted, or undefined when it can. Beyond checking
-   * it against what the server recorded, this makes "declared" one-way per
-   * group: once a declared Commit has been seen, a later one the server calls
-   * undeclared is a fault. Without that, a server could switch verification
-   * off for a group just by reporting its Commits as undeclared - and no real
-   * group ever goes back, because the server refuses to extend a group that
-   * predates membership tracking.
-   */
-  private async verifyCommit(
+  /** Applies a live wire item and saves it at once: replaying a consumed message generation isn't safe. */
+  private async applyIncoming(
     conversationId: ConversationId,
-    actual: MembershipChange | null,
-    declared: DeclaredMembership | undefined,
-  ): Promise<string | undefined> {
-    if (!declared) {
-      return 'it arrived without the membership the server recorded for it, so it cannot be checked';
+    session: GroupSession,
+    wireBytes: Uint8Array,
+  ): Promise<ProcessResult> {
+    const result = await session.process(wireBytes);
+
+    if (result.kind === 'commit') {
+      // A Commit outside catch-up has no declaration to check it against.
+      this.sessions.delete(conversationId);
+      const problem = await this.verifier.checkCommit(
+        conversationId,
+        result.membershipChange,
+        undefined,
+      );
+      throw new MembershipMismatchError(conversationId, problem ?? 'it cannot be checked');
     }
 
-    if (!declared.membershipDeclared) {
-      return (await this.hasSeenDeclared(conversationId))
-        ? 'the server reported it as undeclared, although earlier commits in this group were declared'
-        : undefined;
-    }
-
-    const mismatch = describeMembershipMismatch(actual, declared);
-    if (mismatch) return mismatch;
-
-    await this.markDeclaredSeen(conversationId);
-    return undefined;
-  }
-
-  private async hasSeenDeclared(conversationId: ConversationId): Promise<boolean> {
-    if (this.declaredSeen.has(conversationId)) return true;
-
-    const marker = await this.storage.load(declaredMarkerKey(conversationId));
-    if (!marker) return false;
-
-    this.declaredSeen.add(conversationId);
-    return true;
-  }
-
-  private async markDeclaredSeen(conversationId: ConversationId): Promise<void> {
-    if (this.declaredSeen.has(conversationId)) return;
-
-    await this.storage.save(declaredMarkerKey(conversationId), DECLARED_MARKER);
-    this.declaredSeen.add(conversationId);
+    await this.persistSession(conversationId, session);
+    return result;
   }
 
   private async getSession(conversationId: ConversationId): Promise<GroupSession> {

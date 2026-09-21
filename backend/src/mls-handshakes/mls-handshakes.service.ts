@@ -90,7 +90,7 @@ export class MlsHandshakesService {
     conversationId: string,
     sinceEpoch: number,
   ) {
-    await this.assertActiveParticipant(conversationId, userId);
+    await this.assertEntitledParticipant(conversationId, userId);
 
     const handshakes = await this.mlsHandshakesRepository.findHandshakesSince(
       conversationId,
@@ -111,7 +111,7 @@ export class MlsHandshakesService {
     conversationId: string,
     epoch: number,
   ) {
-    await this.assertActiveParticipant(conversationId, userId);
+    await this.assertEntitledParticipant(conversationId, userId);
 
     const leaves = await this.mlsHandshakesRepository.findRosterAtEpoch(
       conversationId,
@@ -157,6 +157,20 @@ export class MlsHandshakesService {
     }
 
     return { message: 'Welcome consumed' };
+  }
+
+  private async assertEntitledParticipant(
+    conversationId: string,
+    userId: string,
+  ) {
+    const isEntitled = await this.mlsHandshakesRepository.isEntitledParticipant(
+      conversationId,
+      userId,
+    );
+
+    if (!isEntitled) {
+      throw new ForbiddenException('Not a member of this conversation');
+    }
   }
 
   private async assertActiveParticipant(

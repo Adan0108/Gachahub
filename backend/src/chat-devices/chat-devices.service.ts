@@ -116,27 +116,19 @@ export class ChatDevicesService {
   }
 
   /**
-   * Claims one key package for EACH of targetUserId's active devices, for
-   * the caller to add them all to an MLS group in a single commit - MLS
-   * membership is per device, so adding only one would leave the user's
-   * other devices unable to read the conversation. Per device, prefers a
-   * SINGLE_USE package and falls back to that device's LAST_RESORT one
-   * (never consumed) only when it has no single-use package left. A device
-   * with no usable package is skipped rather than failing the whole claim.
+   * Claims one key package per active device of targetUserId, to add them all
+   * in one Commit (MLS membership is per device). Prefers a SINGLE_USE package,
+   * falling back to the device's LAST_RESORT one; a device with neither is skipped.
    *
-   * Pass excludeDeviceId when claiming the caller's OWN devices, to leave
-   * out the device that is creating the group (already a member).
+   * Two ways to be allowed:
+   * - Messaging someone (no conversationId): a requester block and the target's
+   *   messageRequestSetting apply, unless claiming your own devices.
+   * - Finishing a change to a group (conversationId): the group must be MLS, the
+   *   caller ACTIVE, the target entitled to a leaf; DM settings don't apply and
+   *   devices already in the group are skipped.
    *
-   * Two ways to be allowed, because there are two different reasons to claim:
-   * - Messaging someone (no conversationId): the same gates as chat's
-   *   assertMessageRequestAllowed - a block by the requester, and the target's
-   *   messageRequestSetting. Skipped when claiming your own devices.
-   * - Finishing a change to a group you are in (conversationId): the person is
-   *   already authorized to be in that group, so their DM privacy settings no
-   *   longer apply - they would otherwise leave someone stuck JOINING for good,
-   *   refused for every member. The caller must be an ACTIVE participant and
-   *   the target entitled to be in it. Devices already in the group are left
-   *   out, so a claim only ever burns packages that will actually be used.
+   * excludeDeviceId leaves out the device creating the group; deviceIds limits
+   * the claim to those devices, so none registered meanwhile is claimed and wasted.
    */
   async claimKeyPackagesForUser(
     requesterId: string,

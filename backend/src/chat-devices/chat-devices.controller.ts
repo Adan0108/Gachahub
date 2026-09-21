@@ -3,6 +3,7 @@ import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { ChatDevicesService } from './chat-devices.service';
+import { ClaimKeyPackagesQueryDto } from './dto/claim-key-packages-query.dto';
 import { RegisterDeviceDto } from './dto/register-device.dto';
 import { UploadKeyPackagesDto } from './dto/upload-key-packages.dto';
 
@@ -52,18 +53,12 @@ export class ChatDevicesController {
   claimKeyPackages(
     @Session() session: UserSession,
     @Param('userId') userId: string,
-    @Query('excludeDeviceId') excludeDeviceId?: string,
-    @Query('conversationId') conversationId?: string,
-    @Query('deviceIds') deviceIds?: string,
+    @Query() query: ClaimKeyPackagesQueryDto,
   ) {
     return this.chatDevicesService.claimKeyPackagesForUser(
       session.user.id,
       userId,
-      {
-        excludeDeviceId,
-        conversationId,
-        deviceIds: deviceIds ? deviceIds.split(',') : undefined,
-      },
+      query,
     );
   }
 }

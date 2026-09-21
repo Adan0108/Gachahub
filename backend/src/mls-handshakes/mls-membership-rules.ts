@@ -276,40 +276,48 @@ export function planCommitTransitions(params: {
     groupJustActivated,
   } = params;
 
-  const events = new Map<string, MembershipEvent>();
+  const added = new Set(addedUserIds);
+  const fullyRemoved = new Set(fullyRemovedUserIds);
 
-  for (const userId of addedUserIds) {
-    events.set(userId, 'COMMIT_ADDED');
-  }
-
-  for (const userId of fullyRemovedUserIds) {
-    // Only someone actually being removed finishes leaving. A user who merely
-    // lost one device to revocation while still a member stays as they are.
+  // One event per user; the first rule that applies wins.
+  const eventFor = (userId: string): MembershipEvent | undefined => {
     const state = participantStateByUserId.get(userId);
-    if (state === 'LEAVING' || state === 'DECLINED') {
-      events.set(userId, 'COMMIT_REMOVED');
-    }
-  }
 
-  // Anyone still marked LEAVING with no device in the group has nothing left to
-  // wait for. Finishing them here means a removal that can no longer complete
-  // never keeps blocking sends, since LEAVING blocks them until it clears.
-  for (const [userId, state] of participantStateByUserId) {
+    if (added.has(userId)) return 'COMMIT_ADDED';
+
+    // Only someone actually being removed finishes leaving; a member who merely
+    // lost one device to revocation stays as they are.
+    if (
+      fullyRemoved.has(userId) &&
+      (state === 'LEAVING' || state === 'DECLINED')
+    ) {
+      return 'COMMIT_REMOVED';
+    }
+
+    // LEAVING with no device left has nothing to wait for, and LEAVING blocks sends.
     if (state === 'LEAVING' && !userIdsWithDevices.has(userId)) {
-      events.set(userId, 'COMMIT_REMOVED');
+      return 'COMMIT_REMOVED';
     }
-  }
 
-  if (groupJustActivated) {
-    for (const [userId, state] of participantStateByUserId) {
-      if (
-        state === 'ACTIVE' &&
-        !userIdsWithDevices.has(userId) &&
-        !events.has(userId)
-      ) {
-        events.set(userId, 'GROUP_ACTIVATED');
-      }
+    if (
+      groupJustActivated &&
+      state === 'ACTIVE' &&
+      !userIdsWithDevices.has(userId)
+    ) {
+      return 'GROUP_ACTIVATED';
     }
+
+    return undefined;
+  };
+
+  const events = new Map<string, MembershipEvent>();
+  for (const userId of new Set([
+    ...added,
+    ...fullyRemoved,
+    ...participantStateByUserId.keys(),
+  ])) {
+    const event = eventFor(userId);
+    if (event) events.set(userId, event);
   }
 
   const transitions: ParticipantTransition[] = [];

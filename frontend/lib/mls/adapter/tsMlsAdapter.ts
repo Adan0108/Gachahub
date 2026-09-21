@@ -39,7 +39,7 @@ import type {
   ProcessResult,
   UserId,
 } from '../contract/types';
-import { CredentialMismatchError } from '../contract/errors';
+import { CredentialMismatchError, MembershipMismatchError } from '../contract/errors';
 import { bytesEqual } from '../bytes';
 import { decodeIdentity, encodeIdentity } from './identityCodec';
 import { diffLeafMembership, listLeafCredentials } from './leafMembership';
@@ -639,6 +639,7 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
   async joinFromWelcome(
     conversationId: ConversationId,
     welcomeBytes: Uint8Array,
+    options: { verify?: (session: GroupSession) => Promise<void> } = {},
   ): Promise<GroupSession> {
     const decoded = decodeMlsMessage(welcomeBytes, 0)?.[0];
     if (!decoded || decoded.wireformat !== 'mls_welcome') {
@@ -675,12 +676,20 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
       );
     }
 
-    // Only after the join actually succeeds - a failed joinGroup or a
-    // wrong-conversation Welcome above should leave the package available
-    // for a genuine retry, not consume it on a doomed attempt.
+    const session = new TsMlsGroupSession(conversationId, state, credential);
+
+    try {
+      await options.verify?.(session);
+    } catch (error) {
+      // A definite refusal spends the package; a transport error keeps it for the retry.
+      if (error instanceof MembershipMismatchError) await this.store.consumeKeyPackage(matching.id);
+      throw error;
+    }
+
+    // Spent only once the join is accepted, so a failed attempt leaves it for a retry.
     await this.store.consumeKeyPackage(matching.id);
 
-    return new TsMlsGroupSession(conversationId, state, credential);
+    return session;
   }
 
   private async findMatchingKeyPackage(

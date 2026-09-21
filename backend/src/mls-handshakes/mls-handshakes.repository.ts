@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import type { MlsHandshake, Prisma } from '../generated/prisma/client';
 import { applyParticipantTransitions } from '../chat/membership/apply-participant-transitions';
+import { isEntitledToLeaf } from '../chat/membership/leaf-entitlement';
 import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -34,13 +35,7 @@ export class MlsHandshakesRepository {
     private readonly mlsGroupRosterRepository: MlsGroupRosterRepository,
   ) {}
 
-  /**
-   * ChatModule exports nothing today, and importing it here would risk a
-   * circular dependency once stage 5 has it call into MlsHandshakesService -
-   * so this duplicates a trivial lookup instead, matching existing
-   * precedent (chat-devices.repository.ts already queries `user` directly
-   * for the same reason).
-   */
+  /** Only an ACTIVE member may submit a Commit. */
   async isActiveParticipant(
     conversationId: string,
     userId: string,
@@ -50,6 +45,18 @@ export class MlsHandshakesRepository {
     });
 
     return participant?.state === 'ACTIVE';
+  }
+
+  /** Anyone entitled to a leaf may read the group's Commits and roster, so a new device of an archived or blocked member can still join. */
+  async isEntitledParticipant(
+    conversationId: string,
+    userId: string,
+  ): Promise<boolean> {
+    const participant = await this.prisma.chatParticipant.findUnique({
+      where: { conversationId_userId: { conversationId, userId } },
+    });
+
+    return isEntitledToLeaf(participant?.state);
   }
 
   /**

@@ -1,3 +1,4 @@
+// Poll is 5s (useSyncEngine); the backend's work lease (60s) and cooldown (2min) are sized against it.
 export const FULL_RECONCILE_INTERVAL_MS = 5 * 60_000;
 
 export type ReconcileScope = 'pending' | 'full';

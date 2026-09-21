@@ -49,6 +49,7 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
     $transaction: jest.Mock;
     mlsHandshake: { findUnique: jest.Mock };
     chatDevice: { findMany: jest.Mock };
+    chatParticipant: { findUnique: jest.Mock };
     mlsCommitFault: { createMany: jest.Mock };
   };
   let repository: MlsHandshakesRepository;
@@ -80,6 +81,7 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
       mlsHandshake: { findUnique: jest.fn() },
       mlsCommitFault: { createMany: jest.fn() },
       chatDevice: { findMany: jest.fn() },
+      chatParticipant: { findUnique: jest.fn() },
     };
     tx.chatConversation.updateMany.mockResolvedValue({ count: 1 });
     tx.mlsHandshake.create.mockImplementation(({ data }: { data: object }) =>
@@ -555,6 +557,26 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
         { deviceId: 'd-gone', userId: 'u2', signaturePublicKey: null },
       ]);
       expect(roster.findLeavesAtEpoch).toHaveBeenCalledWith('conv-1', 2);
+    });
+  });
+
+  describe('isEntitledParticipant', () => {
+    it.each([
+      ['ACTIVE', true],
+      ['ARCHIVED', true],
+      ['BLOCKED', true],
+      ['JOINING', true],
+      ['LEAVING', false],
+      ['DECLINED', false],
+      [undefined, false],
+    ])('for a %s participant is %s', async (state, expected) => {
+      prisma.chatParticipant.findUnique.mockResolvedValue(
+        state ? { state } : null,
+      );
+
+      await expect(
+        repository.isEntitledParticipant('conv-1', 'user-1'),
+      ).resolves.toBe(expected);
     });
   });
 });

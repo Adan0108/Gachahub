@@ -56,23 +56,14 @@ export interface ReconcileSummary {
   outcomes: Array<{ conversationId: ConversationId; outcome: ReconcileOutcome }>;
 }
 
-/** Server-side cap on devices added (and separately, removed) by one Commit (SubmitHandshakeDto). */
+/** Same cap as the backend's SubmitHandshakeDto and ClaimKeyPackagesQueryDto; keep in step. */
 const MAX_DEVICES_PER_COMMIT = 50;
 /** Recomputing after a conflict is bounded so two members racing can't loop forever. */
 const MAX_PASSES = 3;
 /** Pages of work fetched per pass - a guard against a server that never stops paging. */
 const MAX_WORK_PAGES = 20;
 
-/**
- * Finishes the membership changes the server has authorized but only a member
- * can carry out: it fetches the work for this device, brings each group up to
- * date, claims key packages for the devices to add, and submits one Commit that
- * adds and removes them together. The server accepting that Commit is what
- * moves people out of JOINING and LEAVING.
- *
- * Nothing here decides who may be in a group - the server already did. If the
- * server's roster and a Commit disagree, the Commit is refused there.
- */
+/** Carries out the membership changes the server authorized: one Commit per conversation. The server decides who may be in a group; accepting the Commit completes it. */
 export class MembershipReconciler {
   constructor(
     private readonly engine: ReconcilerEngine,
@@ -167,16 +158,7 @@ export class MembershipReconciler {
     }
   }
 
-  /**
-   * One key package per device to add, claimed user by user. A user whose
-   * packages can't be claimed is skipped, not fatal: the rest still join, and
-   * the missed user shows up as work again on the next pass.
-   *
-   * The Commit can carry only so many devices, and a claim burns single-use key
-   * packages, so the size is worked out from the work list BEFORE claiming: a
-   * user who would not fit is left for the next Commit, never claimed and
-   * thrown away.
-   */
+  /** Claims key packages user by user, counting devices first so nothing claimed is left unused. */
   private async claimOffers(item: MembershipWorkItem): Promise<KeyPackageOffer[]> {
     const devicesByUser = new Map<UserId, DeviceId[]>();
     for (const device of item.add) {

@@ -433,6 +433,42 @@ describe('SyncEngine', () => {
       await expect(bobEngine.getCurrentEpoch('conv-1')).resolves.toBe(1);
     });
 
+    it('checks the tree once for a whole catch-up batch, not once per commit', async () => {
+      const { api } = await import('../../api');
+      const { alice, aliceSession, bobEngine } = await groupWithBobVerifying();
+      const carol = await setUpDevice('user-carol');
+      const dave = await setUpDevice('user-dave');
+      const addCarol = await aliceSession.stageCommit({
+        added: [await offerFor(carol)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      const addDave = await aliceSession.stageCommit({
+        added: [await offerFor(dave)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      vi.mocked(api.getMlsHandshakesSince).mockResolvedValue([
+        fakeHandshake({
+          epoch: 1,
+          senderDeviceId: alice.deviceId,
+          payload: addCarol.wireBytes,
+          declared: { addedDevices: [attest(carol)], removedDevices: [] },
+        }),
+        fakeHandshake({
+          epoch: 2,
+          senderDeviceId: alice.deviceId,
+          payload: addDave.wireBytes,
+          declared: { addedDevices: [attest(dave)], removedDevices: [] },
+        }),
+      ] as never);
+      vi.mocked(api.getMlsRoster).mockClear();
+
+      await expect(bobEngine.syncCommits('conv-1')).resolves.toBe(3);
+
+      expect(api.getMlsRoster).toHaveBeenCalledTimes(1);
+    });
+
     it('lets the device being removed process its own removal, as declared', async () => {
       const { alice, aliceSession, bob, bobEngine } = await groupWithBobVerifying();
       const removeBob = await aliceSession.stageCommit({
@@ -935,12 +971,47 @@ describe('SyncEngine', () => {
 
       expect(result.joined).toEqual([]);
       expect(result.failures[0]?.error).toBeInstanceOf(MembershipMismatchError);
-      expect(api.consumeMlsWelcome).not.toHaveBeenCalled();
+      // a definite refusal: the Welcome is dropped so it is not retried every poll
+      expect(api.consumeMlsWelcome).toHaveBeenCalledWith(bob.deviceId, 'welcome-1');
       await expect(bob.engine.getCurrentEpoch('conv-1')).rejects.toThrow();
       expect(api.reportMlsFault).toHaveBeenCalledWith(
         'conv-1',
         expect.objectContaining({ epoch: 0 }),
       );
+    });
+
+    it('keeps the key package when the roster cannot be fetched, so the retry can still join', async () => {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      const bob = await setUpDevice('user-bob');
+      const aliceSession = await alice.engine.createGroup('conv-1');
+      const addBob = await aliceSession.stageCommit({
+        added: [await offerFor(bob)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      vi.mocked(api.getMlsPendingWelcomes).mockResolvedValue([
+        {
+          id: 'welcome-1',
+          conversationId: 'conv-1',
+          payload: bytesToBase64(
+            addBob.welcomes.find((w) => w.deviceId === bob.deviceId)!.welcomeBytes,
+          ),
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+
+      vi.mocked(api.getMlsRoster).mockRejectedValueOnce(new Error('offline'));
+      const first = await bob.engine.processPendingWelcomes();
+      expect(first.joined).toEqual([]);
+      expect(api.consumeMlsWelcome).not.toHaveBeenCalled();
+
+      await serveRosterOf(aliceSession);
+      const retry = await bob.engine.processPendingWelcomes();
+
+      expect(retry.failures).toEqual([]);
+      expect(retry.joined).toEqual(['conv-1']);
+      await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(1);
     });
 
     // regression: a Welcome can be re-delivered for a conversation this

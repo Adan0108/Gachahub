@@ -28,7 +28,7 @@ export class MlsCommitFaultsService {
     conversationId: string,
     dto: ReportCommitFaultDto,
   ) {
-    await this.assertActiveParticipant(conversationId, userId);
+    await this.assertEntitledParticipant(conversationId, userId);
     await this.chatDevicesService.assertOwnActiveDevice(userId, dto.deviceId);
 
     // Only a Commit that exists can be reported, which also bounds how many
@@ -72,20 +72,18 @@ export class MlsCommitFaultsService {
     return { recorded: isNew };
   }
 
-  private async assertActiveParticipant(
+  private async assertEntitledParticipant(
     conversationId: string,
     userId: string,
   ) {
     const isParticipant =
-      await this.mlsHandshakesRepository.isActiveParticipant(
+      await this.mlsHandshakesRepository.isEntitledParticipant(
         conversationId,
         userId,
       );
 
     if (!isParticipant) {
-      throw new ForbiddenException(
-        'Not an active participant in this conversation',
-      );
+      throw new ForbiddenException('Not a member of this conversation');
     }
   }
 }

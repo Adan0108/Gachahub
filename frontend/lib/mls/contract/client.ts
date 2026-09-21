@@ -182,5 +182,16 @@ export interface GroupSessionFactory {
    * conversationId, or if it's addressed to a different device than this
    * store's own credential (critique C2's required test cases).
    */
-  joinFromWelcome(conversationId: ConversationId, welcomeBytes: Uint8Array): Promise<GroupSession>;
+  joinFromWelcome(
+    conversationId: ConversationId,
+    welcomeBytes: Uint8Array,
+    options?: {
+      /**
+       * Runs on the joined session before its key package is spent. Throwing
+       * MembershipMismatchError refuses the group for good and spends the
+       * package; any other error keeps it, so the same Welcome can be retried.
+       */
+      verify?: (session: GroupSession) => Promise<void>;
+    },
+  ): Promise<GroupSession>;
 }

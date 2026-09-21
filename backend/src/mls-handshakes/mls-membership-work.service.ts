@@ -12,14 +12,10 @@ import {
 /** Conversations examined per request; a client pages on with `nextCursor`. */
 const CONVERSATIONS_PER_PAGE = 50;
 
-/**
- * How long a device keeps a conversation's work to itself. Long enough to claim
- * key packages and submit a Commit; short enough that if the device goes away
- * mid-way another member picks it up soon.
- */
+/** Must outlast one client reconcile pass (polled every 5s, see useSyncEngine). */
 const WORK_LEASE_MS = 60_000;
 
-/** How long a device whose lease ended without a Commit stays out of that conversation's work. */
+/** A device whose lease ended without a Commit stays out for this long; keep it above the poll interval. */
 const WORK_COOLDOWN_MS = 2 * 60_000;
 
 /**
