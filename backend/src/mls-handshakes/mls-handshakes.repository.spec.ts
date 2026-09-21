@@ -47,6 +47,7 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
   let prisma: {
     $transaction: jest.Mock;
     mlsHandshake: { findUnique: jest.Mock };
+    mlsCommitFault: { createMany: jest.Mock };
   };
   let repository: MlsHandshakesRepository;
 
@@ -75,6 +76,7 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
         callback(tx),
       ),
       mlsHandshake: { findUnique: jest.fn() },
+      mlsCommitFault: { createMany: jest.fn() },
     };
     tx.chatConversation.updateMany.mockResolvedValue({ count: 1 });
     tx.mlsHandshake.create.mockImplementation(({ data }: { data: object }) =>
@@ -139,6 +141,46 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
       expect(roster.hasRoster).not.toHaveBeenCalled();
       expect(roster.addLeaves).not.toHaveBeenCalled();
       expect(roster.removeLeaves).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('commit faults', () => {
+    const fault = {
+      conversationId: 'conv-1',
+      epoch: 4,
+      senderDeviceId: 'device-9',
+      reporterDeviceId: 'device-2',
+      reason: 'because',
+    };
+
+    it('records a fault, reporting whether it was new', async () => {
+      prisma.mlsCommitFault.createMany.mockResolvedValue({ count: 1 });
+
+      await expect(repository.recordCommitFault(fault)).resolves.toBe(true);
+      expect(prisma.mlsCommitFault.createMany).toHaveBeenCalledWith({
+        data: [fault],
+        skipDuplicates: true,
+      });
+    });
+
+    it('reports a repeat of the same fault from the same device as not new', async () => {
+      prisma.mlsCommitFault.createMany.mockResolvedValue({ count: 0 });
+
+      await expect(repository.recordCommitFault(fault)).resolves.toBe(false);
+    });
+
+    it('finds the handshake at an epoch, for its sender', async () => {
+      prisma.mlsHandshake.findUnique.mockResolvedValue({
+        senderDeviceId: 'device-9',
+      });
+
+      await expect(
+        repository.findHandshakeByEpoch('conv-1', 4),
+      ).resolves.toEqual({ senderDeviceId: 'device-9' });
+      expect(prisma.mlsHandshake.findUnique).toHaveBeenCalledWith({
+        where: { conversationId_epoch: { conversationId: 'conv-1', epoch: 4 } },
+        select: { senderDeviceId: true },
+      });
     });
   });
 

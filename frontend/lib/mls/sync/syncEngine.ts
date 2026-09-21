@@ -58,6 +58,7 @@ export class SyncEngine {
   private reconcileQueue: Promise<void> = Promise.resolve();
   // Conversations in which a declared Commit has been seen (see verifyCommit).
   private readonly declaredSeen = new Set<ConversationId>();
+  private readonly reportedFaults = new Set<string>();
 
   constructor(
     private readonly factory: GroupSessionFactory,
@@ -77,16 +78,20 @@ export class SyncEngine {
   }
 
   /**
-   * Claims a key package for EVERY active device of `userId`, plus every
-   * other active device of this user (this device created the group, so it
-   * is already in), and commits them all into the conversation in one
-   * Commit. MLS membership is per device, so adding only one device would
+   * Seeds a group this device has JUST created: claims a key package for EVERY
+   * active device of `userId`, plus every other active device of this user (this
+   * device created the group, so it is already in), and commits them all into
+   * the conversation in one Commit. Only for a brand-new group - on a group that
+   * already exists this user's other devices are members, so the server would
+   * refuse it and the packages would be wasted. Changes to a live group (a new
+   * member, a new device, a removal) go through reconcileMembership.
+   * MLS membership is per device, so adding only one device would
    * leave the rest unable to read the conversation. Throws
    * EpochConflictError if another device's commit won the race first - the
    * group is already caught up on the winner by the time this throws, so
    * the caller can decide whether to retry.
    */
-  async addUserToConversation(conversationId: ConversationId, userId: UserId): Promise<Epoch> {
+  async seedNewGroup(conversationId: ConversationId, userId: UserId): Promise<Epoch> {
     const [theirDevices, myOtherDevices] = (await Promise.all([
       api.claimChatDeviceKeyPackages(userId),
       api.claimChatDeviceKeyPackages(this.ownUserId, { excludeDeviceId: this.deviceId }),
@@ -119,8 +124,8 @@ export class SyncEngine {
   }
 
   /**
-   * Lower-level primitive for addUserToConversation and any future
-   * multi-add/remove case - the caller supplies already-resolved
+   * Lower-level primitive for seedNewGroup and the reconciler's
+   * multi-add/remove Commits - the caller supplies already-resolved
    * KeyPackageOffers/DeviceCredentials directly.
    */
   async submitMembershipChange(
@@ -147,12 +152,7 @@ export class SyncEngine {
 
       if (response.outcome === 'conflict') {
         await session.commitRejected();
-        await this.applyIncoming(
-          conversationId,
-          session,
-          base64ToBytes(response.handshake.payload),
-          parseDeclaredMembership(response.handshake),
-        );
+        await this.applyHandshake(conversationId, session, response.handshake);
         throw new EpochConflictError(conversationId, expectedEpoch);
       }
 
@@ -176,12 +176,7 @@ export class SyncEngine {
 
       for (const handshake of handshakes) {
         // eslint-disable-next-line no-await-in-loop -- must apply strictly in epoch order, and each one persists before the next is attempted
-        const result = await this.applyIncoming(
-          conversationId,
-          session,
-          base64ToBytes(handshake.payload),
-          parseDeclaredMembership(handshake),
-        );
+        const result = await this.applyHandshake(conversationId, session, handshake);
         if (result.kind === 'rejected') {
           // The backend already validated framing/groupId before storing
           // this handshake (mls-handshake-framing.util.ts) - a rejection
@@ -375,6 +370,55 @@ export class SyncEngine {
       await this.storage.delete(conversationId);
       await this.storage.delete(declaredMarkerKey(conversationId));
     });
+  }
+
+  /**
+   * Applies a Commit from a handshake row the server handed out. A Commit this
+   * device refuses is reported to the server: without that, a refused Commit
+   * freezes the conversation for everyone who checks, with nothing to say who
+   * sent it or why.
+   */
+  private async applyHandshake(
+    conversationId: ConversationId,
+    session: GroupSession,
+    handshake: { epoch: Epoch; payload: string },
+  ): Promise<ProcessResult> {
+    try {
+      return await this.applyIncoming(
+        conversationId,
+        session,
+        base64ToBytes(handshake.payload),
+        parseDeclaredMembership(handshake),
+      );
+    } catch (error) {
+      if (error instanceof MembershipMismatchError) {
+        void this.reportFault(conversationId, handshake.epoch, error.message);
+      }
+      throw error;
+    }
+  }
+
+  /** Best effort, and once per Commit: every sync re-detects the same fault. */
+  private async reportFault(
+    conversationId: ConversationId,
+    epoch: Epoch,
+    reason: string,
+  ): Promise<void> {
+    const key = `${conversationId}:${epoch}`;
+    if (this.reportedFaults.has(key)) return;
+    this.reportedFaults.add(key);
+
+    try {
+      await api.reportMlsFault(conversationId, {
+        deviceId: this.deviceId,
+        epoch,
+        reason: reason.slice(0, 500),
+      });
+    } catch (error) {
+      // Try again on the next sync rather than losing the report.
+      this.reportedFaults.delete(key);
+      console.warn(`Could not report the refused commit in ${conversationId}`, error);
+    }
   }
 
   /**

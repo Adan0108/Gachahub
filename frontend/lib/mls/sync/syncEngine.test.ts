@@ -18,6 +18,7 @@ vi.mock('../../api', () => ({
     getMlsMembershipWork: vi.fn(),
     getMlsPendingWelcomes: vi.fn(),
     consumeMlsWelcome: vi.fn(),
+    reportMlsFault: vi.fn(),
   },
 }));
 
@@ -133,7 +134,7 @@ describe('SyncEngine', () => {
     });
   });
 
-  describe('addUserToConversation', () => {
+  describe('seedNewGroup', () => {
     it('claims a key package, stages a commit, and submits it', async () => {
       const { api } = await import('../../api');
       const alice = await setUpDevice('user-alice');
@@ -150,7 +151,7 @@ describe('SyncEngine', () => {
         }),
       }));
 
-      const epoch = await alice.engine.addUserToConversation('conv-1', 'user-bob');
+      const epoch = await alice.engine.seedNewGroup('conv-1', 'user-bob');
 
       expect(epoch).toBe(1);
       expect(api.claimChatDeviceKeyPackages).toHaveBeenCalledWith('user-bob');
@@ -187,7 +188,7 @@ describe('SyncEngine', () => {
         }),
       }));
 
-      await alice.engine.addUserToConversation('conv-1', 'user-bob');
+      await alice.engine.seedNewGroup('conv-1', 'user-bob');
 
       expect(api.submitMlsHandshake).toHaveBeenCalledTimes(1);
       const [, submitted] = vi.mocked(api.submitMlsHandshake).mock.calls[0]!;
@@ -239,7 +240,7 @@ describe('SyncEngine', () => {
         }),
       });
 
-      await expect(bobEngine.addUserToConversation('conv-1', 'user-carol')).rejects.toThrow(
+      await expect(bobEngine.seedNewGroup('conv-1', 'user-carol')).rejects.toThrow(
         EpochConflictError,
       );
 
@@ -263,7 +264,7 @@ describe('SyncEngine', () => {
           payload: base64ToBytes(payload.payload),
         }),
       }));
-      await alice.engine.addUserToConversation('conv-1', 'user-bob');
+      await alice.engine.seedNewGroup('conv-1', 'user-bob');
       vi.mocked(api.submitMlsHandshake).mockClear();
 
       await alice.engine.submitMembershipChange('conv-1', {
@@ -351,6 +352,35 @@ describe('SyncEngine', () => {
       await expect(bobEngine.getCurrentEpoch('conv-1')).resolves.toBe(1);
       const saved = await bob.factory.restore('conv-1', (await bobStorage.load('conv-1'))!);
       await expect(saved.currentEpoch()).resolves.toBe(1);
+    });
+
+    it('reports a refused commit to the server once, however often it is re-detected', async () => {
+      const { api } = await import('../../api');
+      const { alice, aliceSession, bobEngine } = await groupWithBobVerifying();
+      const sneaky = await setUpDevice('user-mallory');
+      const addSneaky = await aliceSession.stageCommit({
+        added: [await offerFor(sneaky)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      await serveHandshake(
+        fakeHandshake({
+          epoch: 1,
+          senderDeviceId: alice.deviceId,
+          payload: addSneaky.wireBytes,
+          declared: { addedDevices: [], removedDevices: [] },
+        }),
+      );
+      vi.mocked(api.reportMlsFault).mockResolvedValue({ recorded: true } as never);
+
+      await expect(bobEngine.syncCommits('conv-1')).rejects.toThrow(MembershipMismatchError);
+      await expect(bobEngine.syncCommits('conv-1')).rejects.toThrow(MembershipMismatchError);
+
+      expect(api.reportMlsFault).toHaveBeenCalledTimes(1);
+      expect(api.reportMlsFault).toHaveBeenCalledWith(
+        'conv-1',
+        expect.objectContaining({ epoch: 1, reason: expect.any(String) }),
+      );
     });
 
     it('lets the device being removed process its own removal, as declared', async () => {
@@ -574,7 +604,7 @@ describe('SyncEngine', () => {
         }),
       });
 
-      await expect(bobEngine.addUserToConversation('conv-1', 'user-carol')).rejects.toThrow(
+      await expect(bobEngine.seedNewGroup('conv-1', 'user-carol')).rejects.toThrow(
         MembershipMismatchError,
       );
     });

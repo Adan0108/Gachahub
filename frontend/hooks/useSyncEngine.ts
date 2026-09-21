@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useDeviceIdentity, getSharedDeviceIdentityStore } from './useDeviceIdentity';
 import { TsMlsGroupSessionFactory } from '../lib/mls/adapter/tsMlsAdapter';
 import { SyncEngine } from '../lib/mls/sync/syncEngine';
+import { nextReconcileScope } from '../lib/mls/sync/reconcileSchedule';
 import type { DeviceId, UserId } from '../lib/mls/contract/types';
 
 // One engine per browser tab per device, reused across hook instances - a
@@ -34,12 +35,18 @@ function ensureSharedSyncEngine(deviceId: DeviceId, userId: UserId): SyncEngine 
 // cheap enough for one lightweight GET per tab at this interval.
 const WELCOME_POLL_INTERVAL_MS = 5000;
 
+let lastFullReconcileAt: number | null = null;
+
 function checkForPendingWork(engine: SyncEngine): void {
+  const scope = nextReconcileScope(Date.now(), lastFullReconcileAt, document.hidden);
+  if (!scope) return;
+  if (scope === 'full') lastFullReconcileAt = Date.now();
+
   // Welcomes first: joining a conversation is what makes this device able to
   // carry out that conversation's pending membership changes.
   engine
     .processPendingWelcomes()
-    .then(() => engine.reconcileMembership())
+    .then(() => engine.reconcileMembership({ scope }))
     .catch((error: unknown) => {
       console.warn('Could not process pending MLS work', error);
     });

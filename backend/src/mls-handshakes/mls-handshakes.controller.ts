@@ -12,7 +12,9 @@ import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { MlsHandshakesService } from './mls-handshakes.service';
+import { MlsCommitFaultsService } from './mls-commit-faults.service';
 import { MlsMembershipWorkService } from './mls-membership-work.service';
+import { ReportCommitFaultDto } from './dto/report-commit-fault.dto';
 import { SubmitHandshakeDto } from './dto/submit-handshake.dto';
 
 @ApiTags('MLS Handshakes')
@@ -22,6 +24,7 @@ export class MlsHandshakesController {
   constructor(
     private readonly mlsHandshakesService: MlsHandshakesService,
     private readonly mlsMembershipWorkService: MlsMembershipWorkService,
+    private readonly mlsCommitFaultsService: MlsCommitFaultsService,
   ) {}
 
   @Post('conversations/:conversationId')
@@ -34,6 +37,23 @@ export class MlsHandshakesController {
     @Body() dto: SubmitHandshakeDto,
   ) {
     return this.mlsHandshakesService.submitHandshake(
+      session.user.id,
+      conversationId,
+      dto,
+    );
+  }
+
+  @Post('conversations/:conversationId/faults')
+  @ApiOperation({
+    summary:
+      'Report that this client refused a Commit because it did not match what the server recorded',
+  })
+  reportCommitFault(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: ReportCommitFaultDto,
+  ) {
+    return this.mlsCommitFaultsService.reportFault(
       session.user.id,
       conversationId,
       dto,

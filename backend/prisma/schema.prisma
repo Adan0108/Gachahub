@@ -333,13 +333,14 @@ model ChatConversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  creator       User?             @relation("ChatConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
-  participants  ChatParticipant[]
-  directPair    ChatDirectPair?
-  messages      ChatMessage[]
-  mlsHandshakes MlsHandshake[]
-  mlsWelcomes   MlsWelcome[]
-  mlsMembers    MlsGroupMember[]
+  creator         User?             @relation("ChatConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  participants    ChatParticipant[]
+  directPair      ChatDirectPair?
+  messages        ChatMessage[]
+  mlsHandshakes   MlsHandshake[]
+  mlsWelcomes     MlsWelcome[]
+  mlsMembers      MlsGroupMember[]
+  mlsCommitFaults MlsCommitFault[]
 
   @@index([type])
   @@index([status])
@@ -1035,4 +1036,28 @@ model MlsGroupMember {
   @@index([conversationId, userId])
   @@index([deviceId])
   @@map("mls_group_members")
+}
+
+/// A member's client refused a Commit: it did not do what the server recorded for it (or could not be
+/// checked). The conversation is stuck at that epoch for that member, and for everyone else who
+/// checks, until someone looks. Kept so an admin can see which sender and which Commit, instead of
+/// the group silently freezing. senderDeviceId and reporterDeviceId are plain strings, like
+/// MlsGroupMember's, so the record outlives the devices.
+model MlsCommitFault {
+  id               String  @id @default(cuid())
+  conversationId   String
+  /// The epoch the refused Commit was built from - identifies the handshake row.
+  epoch            Int
+  /// Who sent the refused Commit; null if that handshake row is gone.
+  senderDeviceId   String?
+  reporterDeviceId String
+  reason           String
+
+  createdAt DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, epoch, reporterDeviceId])
+  @@index([conversationId, epoch])
+  @@map("mls_commit_faults")
 }

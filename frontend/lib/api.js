@@ -47,6 +47,8 @@ export const backendRoutes = {
   mlsHandshakes: (conversationId) =>
     `/mls-handshakes/conversations/${encodePathParam(conversationId)}`,
   mlsPendingWelcomes: (deviceId) => `/mls-handshakes/devices/${encodePathParam(deviceId)}/welcomes`,
+  mlsFaults: (conversationId) =>
+    `/mls-handshakes/conversations/${encodePathParam(conversationId)}/faults`,
   mlsMembershipWork: (deviceId) =>
     `/mls-handshakes/devices/${encodePathParam(deviceId)}/membership-work`,
   mlsConsumeWelcome: (deviceId, welcomeId) =>
@@ -508,6 +510,9 @@ export const api = {
   // revoked and leftover devices but costs more; conversationId looks at one conversation only.
   getMlsMembershipWork: (deviceId, { scope, after, conversationId } = {}) =>
     request(withQuery(backendRoutes.mlsMembershipWork(deviceId), { scope, after, conversationId })),
+  // Tell the server this device refused a Commit that did not match what it recorded.
+  reportMlsFault: (conversationId, payload) =>
+    mutation(backendRoutes.mlsFaults(conversationId), payload),
   consumeMlsWelcome: (deviceId, welcomeId) =>
     mutation(backendRoutes.mlsConsumeWelcome(deviceId, welcomeId)),
   // Dev tools only - the backend only registers these routes at all when

@@ -325,6 +325,29 @@ export class MlsHandshakesRepository {
     return attested;
   }
 
+  findHandshakeByEpoch(conversationId: string, epoch: number) {
+    return this.prisma.mlsHandshake.findUnique({
+      where: { conversationId_epoch: { conversationId, epoch } },
+      select: { senderDeviceId: true },
+    });
+  }
+
+  /** Returns false when this reporter had already filed this fault. */
+  async recordCommitFault(fault: {
+    conversationId: string;
+    epoch: number;
+    senderDeviceId: string | null;
+    reporterDeviceId: string;
+    reason: string;
+  }): Promise<boolean> {
+    const result = await this.prisma.mlsCommitFault.createMany({
+      data: [fault],
+      skipDuplicates: true,
+    });
+
+    return result.count === 1;
+  }
+
   findHandshakesSince(conversationId: string, fromEpoch: number) {
     return this.prisma.mlsHandshake.findMany({
       where: { conversationId, epoch: { gte: fromEpoch } },

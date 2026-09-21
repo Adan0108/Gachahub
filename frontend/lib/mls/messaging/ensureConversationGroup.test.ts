@@ -6,7 +6,7 @@ function fakeSyncEngine() {
   return {
     getCurrentEpoch: vi.fn(),
     createGroup: vi.fn(),
-    addUserToConversation: vi.fn(),
+    seedNewGroup: vi.fn(),
     forgetConversation: vi.fn(),
   };
 }
@@ -19,7 +19,7 @@ describe('ensureConversationGroup', () => {
     await ensureConversationGroup(engine as any, 'conv-1', 'user-bob');
 
     expect(engine.createGroup).not.toHaveBeenCalled();
-    expect(engine.addUserToConversation).not.toHaveBeenCalled();
+    expect(engine.seedNewGroup).not.toHaveBeenCalled();
   });
 
   it('creates a group and adds the recipient when none exists yet', async () => {
@@ -29,7 +29,7 @@ describe('ensureConversationGroup', () => {
     await ensureConversationGroup(engine as any, 'conv-1', 'user-bob');
 
     expect(engine.createGroup).toHaveBeenCalledWith('conv-1');
-    expect(engine.addUserToConversation).toHaveBeenCalledWith('conv-1', 'user-bob');
+    expect(engine.seedNewGroup).toHaveBeenCalledWith('conv-1', 'user-bob');
   });
 
   it('propagates an unrelated error without attempting to create a group', async () => {
@@ -42,11 +42,11 @@ describe('ensureConversationGroup', () => {
     expect(engine.createGroup).not.toHaveBeenCalled();
   });
 
-  it('propagates a failure from addUserToConversation (e.g. recipient not yet active)', async () => {
+  it('propagates a failure from seedNewGroup (e.g. recipient not yet active)', async () => {
     const engine = fakeSyncEngine();
     engine.getCurrentEpoch.mockRejectedValue(new GroupStateUnavailableError('conv-1'));
     engine.createGroup.mockResolvedValue(undefined);
-    engine.addUserToConversation.mockRejectedValue(
+    engine.seedNewGroup.mockRejectedValue(
       new Error('User user-bob is not an active participant of this conversation'),
     );
 
@@ -59,7 +59,7 @@ describe('ensureConversationGroup', () => {
     const engine = fakeSyncEngine();
     engine.getCurrentEpoch.mockRejectedValue(new GroupStateUnavailableError('conv-1'));
     engine.createGroup.mockResolvedValue(undefined);
-    engine.addUserToConversation.mockRejectedValue(new Error('not an active participant'));
+    engine.seedNewGroup.mockRejectedValue(new Error('not an active participant'));
 
     await expect(ensureConversationGroup(engine as any, 'conv-1', 'user-bob')).rejects.toThrow();
 
@@ -77,7 +77,7 @@ describe('ensureConversationGroup', () => {
     const engine = fakeSyncEngine();
     engine.getCurrentEpoch.mockRejectedValue(new GroupStateUnavailableError('conv-1'));
     engine.createGroup.mockResolvedValue(undefined);
-    engine.addUserToConversation.mockRejectedValue(new EpochConflictError('conv-1', 0));
+    engine.seedNewGroup.mockRejectedValue(new EpochConflictError('conv-1', 0));
 
     await expect(ensureConversationGroup(engine as any, 'conv-1', 'user-bob')).rejects.toThrow(
       EpochConflictError,
