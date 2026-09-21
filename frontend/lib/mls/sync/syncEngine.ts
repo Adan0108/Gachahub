@@ -14,10 +14,14 @@ import {
   type GroupSessionStorage,
 } from '../storage/groupSessionStorage';
 import {
+  CredentialMismatchError,
   GroupStateUnavailableError,
   EpochConflictError,
   MembershipMismatchError,
 } from '../contract/errors';
+
+/** A Welcome that is not a later epoch than the session this device already has. */
+class StaleWelcomeError extends Error {}
 import { parseDeclaredMembership } from './declaredMembership';
 import type {
   ConversationId,
@@ -225,14 +229,11 @@ export class SyncEngine {
    * other methods, since a device doesn't know which conversationIds it's
    * being welcomed into until it asks.
    *
-   * A Welcome can be re-delivered for a conversation this device already
-   * joined (e.g. the join succeeded but the consumeMlsWelcome call that
-   * follows it failed - a crash, a dropped connection - leaving the
-   * Welcome pending for the next call, by which point this device may have
-   * advanced the group well past epoch 0). Re-joining unconditionally would
-   * silently rewind/clobber that already-advanced session, so an existing
-   * session for the conversation is left untouched and the stale Welcome is
-   * just consumed without acting on it.
+   * A device that already has a session may still need the Welcome: after being
+   * removed and re-added, it is the only way back in. So it is joined first, and
+   * replaces the old session only if it is a later epoch. One at or before the
+   * current epoch, or one this device can no longer open (its key package was
+   * spent by an earlier join), is stale and is consumed without joining.
    */
   async processPendingWelcomes(): Promise<{
     joined: ConversationId[];
@@ -246,21 +247,36 @@ export class SyncEngine {
       try {
         // eslint-disable-next-line no-await-in-loop -- each Welcome is joined and consumed independently; no benefit to parallelizing sequential backend calls
         const didJoin = await this.runExclusive(welcome.conversationId, async () => {
-          if (await this.hasSession(welcome.conversationId)) {
-            // Stale/re-delivered Welcome for a conversation already joined
-            // - still consume it so it stops being handed back, but this
-            // isn't a new join.
+          const existingEpoch = await this.savedEpoch(welcome.conversationId);
+          let session: GroupSession;
+
+          try {
+            session = await this.factory.joinFromWelcome(
+              welcome.conversationId,
+              base64ToBytes(welcome.payload),
+              {
+                verify: async (joined) => {
+                  if (
+                    existingEpoch !== undefined &&
+                    (await joined.currentEpoch()) <= existingEpoch
+                  ) {
+                    throw new StaleWelcomeError();
+                  }
+                  await this.verifier.assertTreeMatchesRoster(welcome.conversationId, joined);
+                },
+              },
+            );
+          } catch (error) {
+            const isStale =
+              error instanceof StaleWelcomeError ||
+              (existingEpoch !== undefined && error instanceof CredentialMismatchError);
+            if (!isStale) throw error;
+
+            // Not a newer group: consume it so it stops being handed back.
             await api.consumeMlsWelcome(this.deviceId, welcome.id);
             return false;
           }
-          const session = await this.factory.joinFromWelcome(
-            welcome.conversationId,
-            base64ToBytes(welcome.payload),
-            {
-              verify: (joined) =>
-                this.verifier.assertTreeMatchesRoster(welcome.conversationId, joined),
-            },
-          );
+
           this.sessions.set(welcome.conversationId, session);
           await this.persistSession(welcome.conversationId, session);
           await api.consumeMlsWelcome(this.deviceId, welcome.id);
@@ -286,12 +302,14 @@ export class SyncEngine {
     return { joined, failures };
   }
 
-  /** Whether this device already has a session (cached or persisted) for `conversationId` - used to avoid rejoining a stale/re-delivered Welcome over an already-advanced session. */
-  private async hasSession(conversationId: ConversationId): Promise<boolean> {
-    if (this.sessions.has(conversationId)) {
-      return true;
+  /** The epoch of the saved session for `conversationId`, or undefined when there is none (or it can't be restored, so a Welcome should replace it). */
+  private async savedEpoch(conversationId: ConversationId): Promise<Epoch | undefined> {
+    try {
+      return await (await this.getSession(conversationId)).currentEpoch();
+    } catch (error) {
+      if (error instanceof GroupStateUnavailableError) return undefined;
+      throw error;
     }
-    return (await this.storage.load(conversationId)) !== undefined;
   }
 
   /**

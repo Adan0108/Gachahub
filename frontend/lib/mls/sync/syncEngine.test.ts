@@ -1062,8 +1062,7 @@ describe('SyncEngine', () => {
         {
           id: 'welcome-stale',
           conversationId: 'conv-1',
-          // Never actually decoded - hasSession() must short-circuit
-          // before joinFromWelcome is ever attempted on this garbage.
+          // Not a decodable Welcome, so it can only be stale.
           payload: bytesToBase64(new TextEncoder().encode('stale-welcome')),
           createdAt: new Date().toISOString(),
         },
@@ -1076,6 +1075,68 @@ describe('SyncEngine', () => {
       expect(result.joined).toEqual([]);
       expect(result.failures).toEqual([]);
       expect(api.consumeMlsWelcome).toHaveBeenCalledWith(bob.deviceId, 'welcome-stale');
+      await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(1);
+    });
+
+    it('joins a Welcome for a later epoch and replaces the old session - a device removed and re-added must be able to rejoin', async () => {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      const bob = await setUpDevice('user-bob');
+      const aliceSession = await alice.engine.createGroup('conv-1');
+      const first = await aliceSession.stageCommit({ added: [await offerFor(bob)], removed: [] });
+      await aliceSession.commitAccepted();
+      await serveRosterOf(aliceSession);
+      const welcomeOf = (welcomes: typeof first.welcomes) => ({
+        id: `welcome-${welcomes.length}-${Math.random()}`,
+        conversationId: 'conv-1',
+        payload: bytesToBase64(welcomes.find((w) => w.deviceId === bob.deviceId)!.welcomeBytes),
+        createdAt: new Date().toISOString(),
+      });
+      vi.mocked(api.getMlsPendingWelcomes).mockResolvedValue([welcomeOf(first.welcomes)]);
+      await bob.engine.processPendingWelcomes();
+      await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(1);
+
+      // bob is removed and re-added while his device never saw it: he still holds the epoch-1 session
+      await aliceSession.stageCommit({ added: [], removed: [bob.credential] });
+      await aliceSession.commitAccepted();
+      const readd = await aliceSession.stageCommit({ added: [await offerFor(bob)], removed: [] });
+      await aliceSession.commitAccepted();
+      const rejoin = welcomeOf(readd.welcomes);
+      vi.mocked(api.getMlsPendingWelcomes).mockResolvedValue([rejoin]);
+      vi.mocked(api.consumeMlsWelcome).mockClear();
+
+      const result = await bob.engine.processPendingWelcomes();
+
+      expect(result.joined).toEqual(['conv-1']);
+      expect(api.consumeMlsWelcome).toHaveBeenCalledWith(bob.deviceId, rejoin.id);
+      await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(3);
+    });
+
+    it('consumes a re-delivered Welcome for a group the device already joined, without rewinding it', async () => {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      const bob = await setUpDevice('user-bob');
+      const aliceSession = await alice.engine.createGroup('conv-1');
+      const added = await aliceSession.stageCommit({ added: [await offerFor(bob)], removed: [] });
+      await aliceSession.commitAccepted();
+      await serveRosterOf(aliceSession);
+      const welcome = {
+        id: 'welcome-1',
+        conversationId: 'conv-1',
+        payload: bytesToBase64(
+          added.welcomes.find((w) => w.deviceId === bob.deviceId)!.welcomeBytes,
+        ),
+        createdAt: new Date().toISOString(),
+      };
+      vi.mocked(api.getMlsPendingWelcomes).mockResolvedValue([welcome]);
+      await bob.engine.processPendingWelcomes();
+      vi.mocked(api.consumeMlsWelcome).mockClear();
+
+      const again = await bob.engine.processPendingWelcomes();
+
+      expect(again.joined).toEqual([]);
+      expect(again.failures).toEqual([]);
+      expect(api.consumeMlsWelcome).toHaveBeenCalledWith(bob.deviceId, 'welcome-1');
       await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(1);
     });
 
