@@ -645,17 +645,26 @@ describe('ChatDevicesService', () => {
     it('revokes an owned device', async () => {
       repository.revokeDevice.mockResolvedValue({ count: 1 });
 
-      const result = await service.revokeDevice('user-1', 'device-1');
+      const result = await service.revokeDevice(
+        'user-1',
+        'device-1',
+        'session-1',
+      );
 
       expect(result).toEqual({ message: 'Device revoked successfully' });
+      expect(repository.revokeDevice).toHaveBeenCalledWith(
+        'device-1',
+        'user-1',
+        'session-1',
+      );
     });
 
     it('throws when nothing matched', async () => {
       repository.revokeDevice.mockResolvedValue({ count: 0 });
 
-      await expect(service.revokeDevice('user-1', 'device-1')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.revokeDevice('user-1', 'device-1', 'session-1'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });

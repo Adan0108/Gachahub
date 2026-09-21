@@ -167,10 +167,21 @@ export class ChatDevicesRepository {
     });
   }
 
-  revokeDevice(deviceId: string, userId: string) {
-    return this.prisma.chatDevice.updateMany({
-      where: { id: deviceId, userId },
-      data: { revokedAt: new Date() },
+  /** Revokes the device and logs the user out everywhere else - sessions aren't tied to devices, so the revoked one can't be singled out. */
+  revokeDevice(deviceId: string, userId: string, keepSessionId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const result = await tx.chatDevice.updateMany({
+        where: { id: deviceId, userId },
+        data: { revokedAt: new Date() },
+      });
+
+      if (result.count > 0) {
+        await tx.session.deleteMany({
+          where: { userId, id: { not: keepSessionId } },
+        });
+      }
+
+      return result;
     });
   }
 

@@ -102,10 +102,11 @@ export class ChatDevicesService {
     return { message: 'Key packages uploaded successfully' };
   }
 
-  async revokeDevice(userId: string, deviceId: string) {
+  async revokeDevice(userId: string, deviceId: string, keepSessionId: string) {
     const result = await this.chatDevicesRepository.revokeDevice(
       deviceId,
       userId,
+      keepSessionId,
     );
 
     if (result.count === 0) {

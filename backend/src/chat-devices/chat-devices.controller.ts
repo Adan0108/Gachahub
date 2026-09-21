@@ -37,12 +37,19 @@ export class ChatDevicesController {
   }
 
   @Delete(':deviceId')
-  @ApiOperation({ summary: 'Revoke an owned device' })
+  @ApiOperation({
+    summary:
+      'Revoke an owned device and log the user out of every other session',
+  })
   revokeDevice(
     @Session() session: UserSession,
     @Param('deviceId') deviceId: string,
   ) {
-    return this.chatDevicesService.revokeDevice(session.user.id, deviceId);
+    return this.chatDevicesService.revokeDevice(
+      session.user.id,
+      deviceId,
+      session.session.id,
+    );
   }
 
   @Post('claim/:userId')
