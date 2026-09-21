@@ -167,7 +167,15 @@ export class ChatDevicesRepository {
     });
   }
 
-  /** Revokes the device and logs the user out everywhere else - sessions aren't tied to devices, so the revoked one can't be singled out. */
+  /** Ties a login to the chat device of the browser it is in, so revoking the device can end it. */
+  linkSession(sessionId: string, userId: string, deviceId: string) {
+    return this.prisma.session.updateMany({
+      where: { id: sessionId, userId },
+      data: { chatDeviceId: deviceId },
+    });
+  }
+
+  /** Revokes the device and ends the logins linked to it, plus any not linked to a device yet (older logins), except the one making the request. */
   revokeDevice(deviceId: string, userId: string, keepSessionId: string) {
     return this.prisma.$transaction(async (tx) => {
       const result = await tx.chatDevice.updateMany({
@@ -175,13 +183,21 @@ export class ChatDevicesRepository {
         data: { revokedAt: new Date() },
       });
 
-      if (result.count > 0) {
-        await tx.session.deleteMany({
-          where: { userId, id: { not: keepSessionId } },
-        });
-      }
+      if (result.count === 0) return { count: 0, endedSessions: [] };
 
-      return result;
+      const sessions = await tx.session.findMany({
+        where: {
+          userId,
+          id: { not: keepSessionId },
+          OR: [{ chatDeviceId: deviceId }, { chatDeviceId: null }],
+        },
+        select: { id: true, token: true },
+      });
+      await tx.session.deleteMany({
+        where: { id: { in: sessions.map((session) => session.id) } },
+      });
+
+      return { count: result.count, endedSessions: sessions };
     });
   }
 

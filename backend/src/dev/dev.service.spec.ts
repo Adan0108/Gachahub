@@ -4,6 +4,7 @@ jest.mock('../auth/auth', () => ({
 
 import { InternalServerErrorException } from '@nestjs/common';
 import { env } from '../config/env';
+import { sessionStorage } from '../auth/session-storage';
 import { DevService } from './dev.service';
 
 /**
@@ -41,5 +42,52 @@ describe('DevService', () => {
     env.nodeEnv = 'development';
 
     expect(() => new DevService({} as never)).not.toThrow();
+  });
+
+  describe('deleting test users', () => {
+    const makeService = () => {
+      env.nodeEnv = 'development';
+      const prisma = {
+        user: {
+          findUnique: jest.fn().mockResolvedValue({ name: 'DevTest_1' }),
+          delete: jest.fn(),
+          deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
+        },
+        session: {
+          findMany: jest.fn().mockResolvedValue([
+            { userId: 'u1', token: 't1' },
+            { userId: 'u1', token: 't2' },
+            { userId: 'u2', token: 't3' },
+          ]),
+        },
+      };
+      return { prisma, service: new DevService(prisma as never) };
+    };
+
+    beforeEach(() => {
+      for (const token of ['t1', 't2', 't3'])
+        sessionStorage.set(token, 'login');
+    });
+
+    it('signs a deleted user out of the login cache too', async () => {
+      const { service } = makeService();
+
+      await service.deleteTestUser('u1');
+
+      expect(sessionStorage.get('t1')).toBeNull();
+      expect(sessionStorage.get('t2')).toBeNull();
+    });
+
+    it('does the same when deleting every test user', async () => {
+      const { service } = makeService();
+
+      await service.deleteAllTestUsers();
+
+      expect(['t1', 't2', 't3'].map((t) => sessionStorage.get(t))).toEqual([
+        null,
+        null,
+        null,
+      ]);
+    });
   });
 });

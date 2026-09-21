@@ -42,6 +42,7 @@ export const backendRoutes = {
   chatDevices: "/chat-devices",
   chatDeviceKeyPackages: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}/key-packages`,
   chatDevice: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}`,
+  chatDeviceSession: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}/session`,
   chatDeviceClaim: (userId, query) =>
     withQuery(`/chat-devices/claim/${encodePathParam(userId)}`, query),
   mlsHandshakes: (conversationId) =>
@@ -499,6 +500,9 @@ export const api = {
   registerChatDevice: (payload) => mutation(backendRoutes.chatDevices, payload),
   uploadChatDeviceKeyPackages: (deviceId, payload) =>
     mutation(backendRoutes.chatDeviceKeyPackages(deviceId), payload),
+  // Tells the server this login is in this device's browser, so revoking the device ends the login.
+  linkChatDeviceSession: (deviceId) =>
+    mutation(backendRoutes.chatDeviceSession(deviceId), undefined, { method: "PUT" }),
   revokeChatDevice: (deviceId) =>
     mutation(backendRoutes.chatDevice(deviceId), undefined, { method: "DELETE" }),
   // One key package per active device of `userId` (an array). Pass excludeDeviceId when claiming your own

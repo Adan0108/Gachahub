@@ -57,6 +57,24 @@ async function ensureDeviceProvisionedUnsafe(
   store: TsMlsDeviceIdentityStore,
   userId: UserId,
 ): Promise<DeviceCredential> {
+  const credential = await provisionIfNeeded(store, userId);
+  await linkSession(credential);
+  return credential;
+}
+
+/** Best effort: a failure only means revoking this device would not end this login. */
+async function linkSession(credential: DeviceCredential): Promise<void> {
+  try {
+    await api.linkChatDeviceSession(credential.deviceId);
+  } catch (error) {
+    console.warn('Could not link this login to its device', error);
+  }
+}
+
+async function provisionIfNeeded(
+  store: TsMlsDeviceIdentityStore,
+  userId: UserId,
+): Promise<DeviceCredential> {
   if (await store.isProvisioned()) {
     const existing = await store.getOwnCredential();
     if (existing.userId === userId) {
@@ -119,9 +137,7 @@ async function provisionAndRegister(
  * stale local credential this browser still holds can never be revoked
  * again through a device row that no longer exists.
  */
-export async function revokeDeviceEverywhere(
-  store: TsMlsDeviceIdentityStore,
-): Promise<void> {
+export async function revokeDeviceEverywhere(store: TsMlsDeviceIdentityStore): Promise<void> {
   const credential = await store.getOwnCredential();
   try {
     await api.revokeChatDevice(credential.deviceId);

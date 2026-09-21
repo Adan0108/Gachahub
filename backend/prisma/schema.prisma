@@ -67,9 +67,12 @@ model Session {
   userAgent String?
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The chat device this login belongs to, set when the browser links them; revoking that device ends this session.
+  chatDeviceId String?
 
   @@unique([token])
   @@index([userId])
+  @@index([chatDeviceId])
   @@map("session")
 }
 

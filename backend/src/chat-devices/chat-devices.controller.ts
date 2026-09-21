@@ -1,4 +1,12 @@
-import { Body, Controller, Delete, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Param,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
@@ -36,10 +44,22 @@ export class ChatDevicesController {
     );
   }
 
+  @Put(':deviceId/session')
+  @ApiOperation({ summary: 'Link the current login to an owned device' })
+  linkSession(
+    @Session() session: UserSession,
+    @Param('deviceId') deviceId: string,
+  ) {
+    return this.chatDevicesService.linkSessionToDevice(
+      session.user.id,
+      deviceId,
+      session.session.id,
+    );
+  }
+
   @Delete(':deviceId')
   @ApiOperation({
-    summary:
-      'Revoke an owned device and log the user out of every other session',
+    summary: 'Revoke an owned device and end the logins linked to it',
   })
   revokeDevice(
     @Session() session: UserSession,

@@ -19,6 +19,8 @@ import {
   decodeAndVerifyKeyPackage,
   PINNED_CIPHERSUITE,
 } from './mls-key-package.util';
+import { sessionStorage } from '../auth/session-storage';
+import { SocketRegistry } from '../websocket/socket-registry.service';
 import { RegisterDeviceDto } from './dto/register-device.dto';
 import { UploadKeyPackagesDto } from './dto/upload-key-packages.dto';
 import { KeyPackageItemDto } from './dto/key-package-item.dto';
@@ -32,6 +34,7 @@ export class ChatDevicesService {
     private readonly fetchRateLimiter: KeyPackageFetchRateLimiterService,
     private readonly uploadRateLimiter: KeyPackageUploadRateLimiterService,
     private readonly mlsGroupRosterRepository: MlsGroupRosterRepository,
+    private readonly socketRegistry: SocketRegistry,
   ) {}
 
   /**
@@ -102,6 +105,18 @@ export class ChatDevicesService {
     return { message: 'Key packages uploaded successfully' };
   }
 
+  /** Records which device this login is in, so that revoking the device also ends the login. */
+  async linkSessionToDevice(
+    userId: string,
+    deviceId: string,
+    sessionId: string,
+  ) {
+    await this.assertOwnActiveDevice(userId, deviceId);
+    await this.chatDevicesRepository.linkSession(sessionId, userId, deviceId);
+
+    return { message: 'Session linked to device' };
+  }
+
   async revokeDevice(userId: string, deviceId: string, keepSessionId: string) {
     const result = await this.chatDevicesRepository.revokeDevice(
       deviceId,
@@ -112,6 +127,16 @@ export class ChatDevicesService {
     if (result.count === 0) {
       throw new NotFoundException('Device not found');
     }
+
+    // Out of the cache, so the next request from those logins is refused; and any that
+    // are open right now are told over their sockets.
+    sessionStorage.forgetSessions(
+      userId,
+      result.endedSessions.map((session) => session.token),
+    );
+    this.socketRegistry.endSessions(
+      result.endedSessions.map((session) => session.id),
+    );
 
     return { message: 'Device revoked successfully' };
   }

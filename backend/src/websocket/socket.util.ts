@@ -2,3 +2,8 @@
 export function userRoom(userId: string): string {
   return `user:${userId}`;
 }
+
+// one room per login, so a revoked login's sockets can be reached and closed
+export function sessionRoom(sessionId: string): string {
+  return `session:${sessionId}`;
+}

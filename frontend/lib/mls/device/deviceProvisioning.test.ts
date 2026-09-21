@@ -6,6 +6,7 @@ vi.mock('../../api', () => ({
   api: {
     registerChatDevice: vi.fn().mockResolvedValue({ id: 'device-1' }),
     revokeChatDevice: vi.fn().mockResolvedValue({ message: 'Device revoked successfully' }),
+    linkChatDeviceSession: vi.fn().mockResolvedValue({ message: 'Session linked to device' }),
   },
 }));
 
@@ -91,6 +92,33 @@ describe('ensureDeviceProvisioned', () => {
     expect(second).toEqual(first);
     expect(third).toEqual(first);
     expect(api.registerChatDevice).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('linking the login to the device', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('links the login to the device on every call, provisioned already or not', async () => {
+    const { api } = await import('../../api');
+    const store = new TsMlsDeviceIdentityStore();
+
+    const first = await ensureDeviceProvisioned(store, 'user-1');
+    await ensureDeviceProvisioned(store, 'user-1');
+
+    expect(api.linkChatDeviceSession).toHaveBeenCalledTimes(2);
+    expect(api.linkChatDeviceSession).toHaveBeenCalledWith(first.deviceId);
+  });
+
+  it('still returns the device when linking fails', async () => {
+    const { api } = await import('../../api');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.mocked(api.linkChatDeviceSession).mockRejectedValueOnce(new Error('offline'));
+
+    await expect(
+      ensureDeviceProvisioned(new TsMlsDeviceIdentityStore(), 'user-1'),
+    ).resolves.toBeDefined();
   });
 });
 

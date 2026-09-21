@@ -29,13 +29,17 @@ describe('WebsocketGateway', () => {
 
   describe('handleConnection', () => {
     it('joins the user room on a valid session', async () => {
-      getSession.mockResolvedValue({ user: { id: 'user-1' } });
+      getSession.mockResolvedValue({
+        user: { id: 'user-1' },
+        session: { id: 'session-1' },
+      });
       const socket = makeSocket();
 
       await gateway.handleConnection(socket as any);
 
       expect(socket.data.userId).toBe('user-1');
       expect(socket.join).toHaveBeenCalledWith('user:user-1');
+      expect(socket.join).toHaveBeenCalledWith('session:session-1');
       expect(socket.disconnect).not.toHaveBeenCalled();
     });
 

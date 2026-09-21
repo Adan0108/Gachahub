@@ -1,3 +1,4 @@
+import { sessionStorage } from '../auth/session-storage';
 import {
   ConflictException,
   ForbiddenException,
@@ -17,10 +18,13 @@ describe('ChatDevicesService', () => {
     claimSingleUseKeyPackage: jest.fn(),
     findLastResortKeyPackage: jest.fn(),
     revokeDevice: jest.fn(),
+    linkSession: jest.fn(),
     findParticipantStates: jest.fn(),
   };
 
   const roster = { findActiveLeaves: jest.fn(), hasRoster: jest.fn() };
+
+  const socketRegistry = { endSessions: jest.fn() };
 
   const followsService = {
     isFollowing: jest.fn(),
@@ -50,6 +54,7 @@ describe('ChatDevicesService', () => {
       fetchRateLimiter as any,
       uploadRateLimiter as any,
       roster as any,
+      socketRegistry,
     );
   });
 
@@ -641,9 +646,44 @@ describe('ChatDevicesService', () => {
     });
   });
 
+  describe('linkSessionToDevice', () => {
+    it('links the login to a device the caller owns', async () => {
+      repository.findById.mockResolvedValue({
+        id: 'device-1',
+        userId: 'user-1',
+        revokedAt: null,
+      });
+
+      await service.linkSessionToDevice('user-1', 'device-1', 'session-1');
+
+      expect(repository.linkSession).toHaveBeenCalledWith(
+        'session-1',
+        'user-1',
+        'device-1',
+      );
+    });
+
+    it('refuses a device that belongs to someone else', async () => {
+      repository.findById.mockResolvedValue({
+        id: 'device-1',
+        userId: 'user-2',
+        revokedAt: null,
+      });
+
+      await expect(
+        service.linkSessionToDevice('user-1', 'device-1', 'session-1'),
+      ).rejects.toThrow(NotFoundException);
+      expect(repository.linkSession).not.toHaveBeenCalled();
+    });
+  });
+
   describe('revokeDevice', () => {
     it('revokes an owned device', async () => {
-      repository.revokeDevice.mockResolvedValue({ count: 1 });
+      sessionStorage.set('t2', 'cached login');
+      repository.revokeDevice.mockResolvedValue({
+        count: 1,
+        endedSessions: [{ id: 's2', token: 't2' }],
+      });
 
       const result = await service.revokeDevice(
         'user-1',
@@ -657,14 +697,21 @@ describe('ChatDevicesService', () => {
         'user-1',
         'session-1',
       );
+      // the login can no longer be found in the cache, and is signed out over its socket
+      expect(sessionStorage.get('t2')).toBeNull();
+      expect(socketRegistry.endSessions).toHaveBeenCalledWith(['s2']);
     });
 
     it('throws when nothing matched', async () => {
-      repository.revokeDevice.mockResolvedValue({ count: 0 });
+      repository.revokeDevice.mockResolvedValue({
+        count: 0,
+        endedSessions: [],
+      });
 
       await expect(
         service.revokeDevice('user-1', 'device-1', 'session-1'),
       ).rejects.toThrow(NotFoundException);
+      expect(socketRegistry.endSessions).not.toHaveBeenCalled();
     });
   });
 });

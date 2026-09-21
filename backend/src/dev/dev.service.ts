@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { auth } from '../auth/auth';
+import { sessionStorage } from '../auth/session-storage';
 import { env } from '../config/env';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -92,6 +93,7 @@ export class DevService {
 
   async deleteTestUser(id: string): Promise<{ message: string }> {
     await this.assertTestUser(id);
+    await this.forgetLogins({ id });
     // Prisma's schema-level onDelete: Cascade on every direct User relation
     // (ChatDevice, ChatParticipant, ChatMessage.sender, Follow, etc.) does
     // the actual cleanup - a real DB-level ON DELETE CASCADE, not something
@@ -101,10 +103,28 @@ export class DevService {
   }
 
   async deleteAllTestUsers(): Promise<{ deleted: number }> {
-    const result = await this.prisma.user.deleteMany({
-      where: { name: { startsWith: TEST_USER_PREFIX } },
-    });
+    const where = { name: { startsWith: TEST_USER_PREFIX } };
+    await this.forgetLogins(where);
+    const result = await this.prisma.user.deleteMany({ where });
     return { deleted: result.count };
+  }
+
+  /** Deleting a user removes their logins from the database by cascade, so the cache has to be told too. */
+  private async forgetLogins(
+    userWhere: { id: string } | { name: { startsWith: string } },
+  ) {
+    const sessions = await this.prisma.session.findMany({
+      where: { user: userWhere },
+      select: { userId: true, token: true },
+    });
+
+    const tokensByUser = new Map<string, string[]>();
+    for (const { userId, token } of sessions) {
+      tokensByUser.set(userId, [...(tokensByUser.get(userId) ?? []), token]);
+    }
+    for (const [userId, tokens] of tokensByUser) {
+      sessionStorage.forgetSessions(userId, tokens);
+    }
   }
 
   private async assertTestUser(id: string) {
