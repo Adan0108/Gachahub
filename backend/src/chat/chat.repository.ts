@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import {
   ChatMessageContentType,
   ChatParticipantRole,
@@ -7,6 +7,7 @@ import {
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { lockConversation } from './membership/lock-conversation';
 import {
   claimUploadsForAttachment,
   type PrismaTransaction,
@@ -298,110 +299,34 @@ export class ChatRepository {
   }
 
   /**
-   * Add or reactivates member rows for a group.
-   *
-   * skip BLOCKED and already-ACTIVE rows, clears deletedAt/archivedAt and resets role to MEMBER when reactivating.
-   */
-  async addGroupMembers(
-    conversationId: string,
-    members: Array<{ userId: string; state: 'ACTIVE' | 'PENDING' }>,
-  ) {
-    const memberIdsByState = new Map<'ACTIVE' | 'PENDING', string[]>();
-
-    for (const member of members) {
-      const userIds = memberIdsByState.get(member.state) ?? [];
-      userIds.push(member.userId);
-      memberIdsByState.set(member.state, userIds);
-    }
-
-    return this.prisma.$transaction(async (tx) => {
-      for (const [state, userIds] of memberIdsByState) {
-        await tx.chatParticipant.updateMany({
-          where: {
-            conversationId,
-            userId: { in: userIds },
-            role: {
-              not: 'OWNER',
-            },
-            // already-active rows aren't being reactivated, leave them untouched
-            state: {
-              notIn: ['BLOCKED', 'ACTIVE'],
-            },
-          },
-          data: {
-            state,
-            role: 'MEMBER',
-            deletedAt: null,
-            archivedAt: null,
-          },
-        });
-      }
-
-      return tx.chatParticipant.createMany({
-        data: members.map((member) => ({
-          conversationId,
-          userId: member.userId,
-          role: 'MEMBER',
-          state: member.state,
-        })),
-        skipDuplicates: true,
-      });
-    });
-  }
-
-  /**
-   * Marks group members as declined/removed.
-   *
-   * OWNER participants are excluded so a group cannot lose ownership here.
-   */
-  removeGroupMembers(conversationId: string, userIds: string[]) {
-    return this.prisma.chatParticipant.updateMany({
-      where: {
-        conversationId,
-        userId: {
-          in: userIds,
-        },
-        role: {
-          not: 'OWNER',
-        },
-      },
-      data: {
-        state: 'DECLINED',
-      },
-    });
-  }
-
-  /**
    * Swaps OWNER between two participants in one transaction.
    *
    * Both updates happen together so the group is never
-   * briefly ownerless or briefly has two owner
+   * briefly ownerless or briefly has two owners. Runs under the conversation
+   * lock, and each write only matches a participant still in the state the
+   * caller checked, so a removal running alongside cannot leave a removed owner.
    */
   transferGroupOwnership(
     conversationId: string,
     currentOwnerUserId: string,
     newOwnerUserId: string,
   ) {
-    return this.prisma.$transaction([
-      this.prisma.chatParticipant.update({
-        where: {
-          conversationId_userId: {
-            conversationId,
-            userId: currentOwnerUserId,
-          },
-        },
-        data: { role: 'ADMIN' },
-      }),
-      this.prisma.chatParticipant.update({
-        where: {
-          conversationId_userId: {
-            conversationId,
-            userId: newOwnerUserId,
-          },
-        },
+    return this.prisma.$transaction(async (tx) => {
+      await lockConversation(tx, conversationId);
+
+      const promoted = await tx.chatParticipant.updateMany({
+        where: { conversationId, userId: newOwnerUserId, state: 'ACTIVE' },
         data: { role: 'OWNER' },
-      }),
-    ]);
+      });
+      const demoted = await tx.chatParticipant.updateMany({
+        where: { conversationId, userId: currentOwnerUserId, role: 'OWNER' },
+        data: { role: 'ADMIN' },
+      });
+
+      if (promoted.count !== 1 || demoted.count !== 1) {
+        throw new ConflictException('Group membership changed, try again');
+      }
+    });
   }
 
   updateParticipantRole(

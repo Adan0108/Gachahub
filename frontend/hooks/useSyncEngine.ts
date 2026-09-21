@@ -4,7 +4,8 @@ import { useEffect } from 'react';
 import { useDeviceIdentity, getSharedDeviceIdentityStore } from './useDeviceIdentity';
 import { TsMlsGroupSessionFactory } from '../lib/mls/adapter/tsMlsAdapter';
 import { SyncEngine } from '../lib/mls/sync/syncEngine';
-import type { DeviceId } from '../lib/mls/contract/types';
+import { nextReconcileScope } from '../lib/mls/sync/reconcileSchedule';
+import type { DeviceId, UserId } from '../lib/mls/contract/types';
 
 // One engine per browser tab per device, reused across hook instances - a
 // second SyncEngine wrapping the same store would just duplicate the
@@ -17,10 +18,10 @@ import type { DeviceId } from '../lib/mls/contract/types';
 let sharedEngine: SyncEngine | undefined;
 let sharedEngineDeviceId: DeviceId | undefined;
 
-function ensureSharedSyncEngine(deviceId: DeviceId): SyncEngine {
+function ensureSharedSyncEngine(deviceId: DeviceId, userId: UserId): SyncEngine {
   if (!sharedEngine || sharedEngineDeviceId !== deviceId) {
     const factory = new TsMlsGroupSessionFactory(getSharedDeviceIdentityStore());
-    sharedEngine = new SyncEngine(factory, deviceId);
+    sharedEngine = new SyncEngine(factory, deviceId, userId);
     sharedEngineDeviceId = deviceId;
   }
   return sharedEngine;
@@ -34,10 +35,21 @@ function ensureSharedSyncEngine(deviceId: DeviceId): SyncEngine {
 // cheap enough for one lightweight GET per tab at this interval.
 const WELCOME_POLL_INTERVAL_MS = 5000;
 
-function checkForPendingWelcomes(engine: SyncEngine): void {
-  engine.processPendingWelcomes().catch((error: unknown) => {
-    console.warn('Could not process pending MLS welcomes', error);
-  });
+let lastFullReconcileAt: number | null = null;
+
+function checkForPendingWork(engine: SyncEngine): void {
+  const scope = nextReconcileScope(Date.now(), lastFullReconcileAt, document.hidden);
+  if (!scope) return;
+  if (scope === 'full') lastFullReconcileAt = Date.now();
+
+  // Welcomes first: joining a conversation is what makes this device able to
+  // carry out that conversation's pending membership changes.
+  engine
+    .processPendingWelcomes()
+    .then(() => engine.reconcileMembership({ scope }))
+    .catch((error: unknown) => {
+      console.warn('Could not process pending MLS work', error);
+    });
 }
 
 // Reference-counted so several components can call useSyncEngine() for the
@@ -59,8 +71,8 @@ function startWelcomePolling(engine: SyncEngine): void {
     clearInterval(pollIntervalId);
   }
   pollingEngine = engine;
-  checkForPendingWelcomes(engine);
-  pollIntervalId = setInterval(() => checkForPendingWelcomes(engine), WELCOME_POLL_INTERVAL_MS);
+  checkForPendingWork(engine);
+  pollIntervalId = setInterval(() => checkForPendingWork(engine), WELCOME_POLL_INTERVAL_MS);
 }
 
 // Takes the engine it registered for (not just "one fewer consumer") so
@@ -89,7 +101,10 @@ function stopWelcomePollingConsumer(engine: SyncEngine): void {
  */
 export function useSyncEngine(): SyncEngine | undefined {
   const { credential, isReady } = useDeviceIdentity();
-  const engine = isReady && credential ? ensureSharedSyncEngine(credential.deviceId) : undefined;
+  const engine =
+    isReady && credential
+      ? ensureSharedSyncEngine(credential.deviceId, credential.userId)
+      : undefined;
 
   useEffect(() => {
     if (!engine) {

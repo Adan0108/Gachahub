@@ -27,18 +27,29 @@ export class KeyPackageFetchRateLimiterService {
   private readonly recentFetchesByRequester = new Map<string, number[]>();
   private readonly recentFetchesByTarget = new Map<string, number[]>();
 
-  assertNotRateLimited(requesterId: string, targetUserId: string): void {
+  /**
+   * `cost` is how many key packages the request will hand out: a request that
+   * claims across all of someone's devices drains their pool that many times
+   * faster than a one-package request, so it counts that many times.
+   */
+  assertNotRateLimited(
+    requesterId: string,
+    targetUserId: string,
+    cost = 1,
+  ): void {
     this.assertBucketNotRateLimited(
       this.recentFetchesByRequester,
       requesterId,
       this.MAX_FETCHES_PER_REQUESTER,
       'You are fetching key packages too fast, please slow down',
+      cost,
     );
     this.assertBucketNotRateLimited(
       this.recentFetchesByTarget,
       targetUserId,
       this.MAX_FETCHES_PER_TARGET,
       'This user is receiving too many key package requests right now, please try again shortly',
+      cost,
     );
   }
 
@@ -47,6 +58,7 @@ export class KeyPackageFetchRateLimiterService {
     key: string,
     maxPerWindow: number,
     message: string,
+    cost: number,
   ): void {
     const now = Date.now();
     const recent = pruneOldTimestamps(
@@ -54,7 +66,9 @@ export class KeyPackageFetchRateLimiterService {
       now,
       this.WINDOW_MS,
     );
-    recent.push(now);
+    for (let i = 0; i < cost; i += 1) {
+      recent.push(now);
+    }
 
     if (recent.length > maxPerWindow) {
       throw new RateLimitedException(message, Math.ceil(this.WINDOW_MS / 1000));

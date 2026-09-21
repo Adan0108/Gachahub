@@ -13,8 +13,9 @@ function fakeSyncEngine() {
   return {
     getCurrentEpoch: vi.fn(),
     createGroup: vi.fn(),
-    addUserToConversation: vi.fn(),
+    seedNewGroup: vi.fn(),
     encryptMessage: vi.fn(),
+    reconcileMembership: vi.fn(),
   };
 }
 
@@ -65,6 +66,71 @@ describe('sendEncryptedChatMessage', () => {
     await sendEncryptedChatMessage(engine as any, 'device-1', 'conv-1', 'user-bob', 'hi');
 
     expect(engine.createGroup).toHaveBeenCalledWith('conv-1');
-    expect(engine.addUserToConversation).toHaveBeenCalledWith('conv-1', 'user-bob');
+    expect(engine.seedNewGroup).toHaveBeenCalledWith('conv-1', 'user-bob');
+  });
+
+  describe('when a member is still being removed', () => {
+    const pendingError = () =>
+      Object.assign(new Error('A member is being removed'), {
+        status: 409,
+        code: 'MEMBERSHIP_CHANGE_PENDING',
+      });
+
+    it('finishes the removal, then encrypts again under the new epoch and sends once more', async () => {
+      const { api } = await import('../../api');
+      const engine = fakeSyncEngine();
+      engine.getCurrentEpoch.mockResolvedValue(2);
+      engine.encryptMessage
+        .mockResolvedValueOnce({ wireBytes: new Uint8Array([1]), epoch: 2 })
+        .mockResolvedValueOnce({ wireBytes: new Uint8Array([2]), epoch: 3 });
+      vi.mocked(api.sendChatMessage)
+        .mockRejectedValueOnce(pendingError())
+        .mockResolvedValueOnce({ message: { id: 'msg-9' } });
+
+      const result = await sendEncryptedChatMessage(
+        engine as any,
+        'device-1',
+        'conv-1',
+        'user-bob',
+        'hello',
+      );
+
+      expect(engine.reconcileMembership).toHaveBeenCalledWith({ conversationId: 'conv-1' });
+      expect(engine.encryptMessage).toHaveBeenCalledTimes(2);
+      expect(api.sendChatMessage).toHaveBeenCalledTimes(2);
+      expect(result.message.id).toBe('msg-9');
+    });
+
+    it('only retries once - a second refusal is surfaced', async () => {
+      const { api } = await import('../../api');
+      const engine = fakeSyncEngine();
+      engine.getCurrentEpoch.mockResolvedValue(2);
+      engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
+      vi.mocked(api.sendChatMessage).mockRejectedValue(pendingError());
+
+      await expect(
+        sendEncryptedChatMessage(engine as any, 'device-1', 'conv-1', 'user-bob', 'hello'),
+      ).rejects.toMatchObject({ code: 'MEMBERSHIP_CHANGE_PENDING' });
+
+      expect(engine.reconcileMembership).toHaveBeenCalledTimes(1);
+      expect(api.sendChatMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not reconcile or retry for any other failure', async () => {
+      const { api } = await import('../../api');
+      const engine = fakeSyncEngine();
+      engine.getCurrentEpoch.mockResolvedValue(2);
+      engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
+      vi.mocked(api.sendChatMessage).mockRejectedValue(
+        Object.assign(new Error('duplicate'), { status: 409 }),
+      );
+
+      await expect(
+        sendEncryptedChatMessage(engine as any, 'device-1', 'conv-1', 'user-bob', 'hello'),
+      ).rejects.toThrow('duplicate');
+
+      expect(engine.reconcileMembership).not.toHaveBeenCalled();
+      expect(api.sendChatMessage).toHaveBeenCalledTimes(1);
+    });
   });
 });

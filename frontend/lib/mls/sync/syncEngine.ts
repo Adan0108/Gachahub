@@ -1,11 +1,23 @@
 import { api } from '../../api';
 import { bytesToBase64, base64ToBytes } from '../storage/base64';
 import type { GroupSession, GroupSessionFactory } from '../contract/client';
+import { CommitVerifier } from './commitVerifier';
+import { toKeyPackageOffer, type ClaimedKeyPackage } from './keyPackageOffer';
+import {
+  MembershipReconciler,
+  type ReconcileOptions,
+  type ReconcileSummary,
+} from './membershipReconciler';
 import {
   EncryptedIndexedDbGroupSessionStorage,
   type GroupSessionStorage,
 } from '../storage/groupSessionStorage';
-import { GroupStateUnavailableError, EpochConflictError } from '../contract/errors';
+import {
+  GroupStateUnavailableError,
+  EpochConflictError,
+  MembershipMismatchError,
+} from '../contract/errors';
+import { parseDeclaredMembership } from './declaredMembership';
 import type {
   ConversationId,
   DeviceId,
@@ -35,12 +47,17 @@ export class SyncEngine {
   // open on the same conversation is a known, accepted gap (same class as
   // the one already noted for the device identity's AES key).
   private readonly locks = new Map<ConversationId, Promise<unknown>>();
+  private reconcileQueue: Promise<void> = Promise.resolve();
+  private readonly verifier: CommitVerifier;
 
   constructor(
     private readonly factory: GroupSessionFactory,
     private readonly deviceId: DeviceId,
+    private readonly ownUserId: UserId,
     private readonly storage: GroupSessionStorage = new EncryptedIndexedDbGroupSessionStorage(),
-  ) {}
+  ) {
+    this.verifier = new CommitVerifier(storage, deviceId);
+  }
 
   /** Creates a brand-new group for a first DM or group chat - this device is the sole initial member. */
   async createGroup(conversationId: ConversationId): Promise<GroupSession> {
@@ -53,31 +70,49 @@ export class SyncEngine {
   }
 
   /**
-   * Claims a key package for `userId` and commits them into the
-   * conversation. Throws EpochConflictError if another device's commit won
-   * the race first - the group is already caught up on the winner by the
-   * time this throws, so the caller can decide whether to retry.
+   * Seeds a group this device has JUST created: claims a key package for EVERY
+   * active device of `userId`, plus every other active device of this user (this
+   * device created the group, so it is already in), and commits them all into
+   * the conversation in one Commit. Only for a brand-new group - on a group that
+   * already exists this user's other devices are members, so the server would
+   * refuse it and the packages would be wasted. Changes to a live group (a new
+   * member, a new device, a removal) go through reconcileMembership.
+   * MLS membership is per device, so adding only one device would
+   * leave the rest unable to read the conversation. Throws
+   * EpochConflictError if another device's commit won the race first - the
+   * group is already caught up on the winner by the time this throws, so
+   * the caller can decide whether to retry.
    */
-  async addUserToConversation(conversationId: ConversationId, userId: UserId): Promise<Epoch> {
-    const claimed = await api.claimChatDeviceKeyPackage(userId);
+  async seedNewGroup(conversationId: ConversationId, userId: UserId): Promise<Epoch> {
+    const [theirDevices, myOtherDevices] = (await Promise.all([
+      api.claimChatDeviceKeyPackages(userId),
+      api.claimChatDeviceKeyPackages(this.ownUserId, { excludeDeviceId: this.deviceId }),
+    ])) as [ClaimedKeyPackage[], ClaimedKeyPackage[]];
+
     return this.submitMembershipChange(conversationId, {
       added: [
-        {
-          credential: {
-            userId,
-            deviceId: claimed.deviceId,
-            signatureKey: base64ToBytes(claimed.signaturePublicKey),
-          },
-          keyPackage: base64ToBytes(claimed.payload),
-        },
+        ...theirDevices.map((claimed) => toKeyPackageOffer(userId, claimed)),
+        ...myOtherDevices.map((claimed) => toKeyPackageOffer(this.ownUserId, claimed)),
       ],
       removed: [],
     });
   }
 
+  /** Finishes the server-authorized adds and removals (see MembershipReconciler); calls queue so none claims key packages twice. */
+  reconcileMembership(options: ReconcileOptions = {}): Promise<ReconcileSummary> {
+    const run = this.reconcileQueue.then(() =>
+      new MembershipReconciler(this, this.deviceId).reconcile(options),
+    );
+    this.reconcileQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
   /**
-   * Lower-level primitive for addUserToConversation and any future
-   * multi-add/remove case - the caller supplies already-resolved
+   * Lower-level primitive for seedNewGroup and the reconciler's
+   * multi-add/remove Commits - the caller supplies already-resolved
    * KeyPackageOffers/DeviceCredentials directly.
    */
   async submitMembershipChange(
@@ -96,17 +131,21 @@ export class SyncEngine {
           recipientDeviceId: welcome.deviceId,
           payload: bytesToBase64(welcome.welcomeBytes),
         })),
+        // What this Commit does to the group. The server checks it against the
+        // authorized roster; every other member checks it against the Commit.
+        addedDeviceIds: change.added.map((offer) => offer.credential.deviceId),
+        removedDeviceIds: change.removed.map((credential) => credential.deviceId),
       });
 
       if (response.outcome === 'conflict') {
         await session.commitRejected();
-        await session.process(base64ToBytes(response.handshake.payload));
-        await this.persistSession(conversationId, session);
+        await this.applyBatch(conversationId, session, [response.handshake]);
         throw new EpochConflictError(conversationId, expectedEpoch);
       }
 
       await session.commitAccepted();
       await this.persistSession(conversationId, session);
+      await this.verifier.markDeclaredSeen(conversationId);
       return session.currentEpoch();
     });
   }
@@ -122,22 +161,7 @@ export class SyncEngine {
       const sinceEpoch = await session.currentEpoch();
       const handshakes = await api.getMlsHandshakesSince(conversationId, sinceEpoch);
 
-      for (const handshake of handshakes) {
-        // eslint-disable-next-line no-await-in-loop -- must apply strictly in epoch order, and each one persists before the next is attempted
-        const result = await this.applyIncoming(
-          conversationId,
-          session,
-          base64ToBytes(handshake.payload),
-        );
-        if (result.kind === 'rejected') {
-          // The backend already validated framing/groupId before storing
-          // this handshake (mls-handshake-framing.util.ts) - a rejection
-          // here means a local bug, not a bad server response.
-          throw new Error(
-            `Could not apply handshake at epoch ${handshake.epoch}: ${result.reason}`,
-          );
-        }
-      }
+      await this.applyBatch(conversationId, session, handshakes);
 
       return session.currentEpoch();
     });
@@ -152,7 +176,10 @@ export class SyncEngine {
    * repeatable, so a crash between processing and persisting must not
    * force a retry.
    */
-  async processIncoming(conversationId: ConversationId, wireBytes: Uint8Array): Promise<ProcessResult> {
+  async processIncoming(
+    conversationId: ConversationId,
+    wireBytes: Uint8Array,
+  ): Promise<ProcessResult> {
     return this.runExclusive(conversationId, async () => {
       const session = await this.getSession(conversationId);
       return this.applyIncoming(conversationId, session, wireBytes);
@@ -222,6 +249,10 @@ export class SyncEngine {
           const session = await this.factory.joinFromWelcome(
             welcome.conversationId,
             base64ToBytes(welcome.payload),
+            {
+              verify: (joined) =>
+                this.verifier.assertTreeMatchesRoster(welcome.conversationId, joined),
+            },
           );
           this.sessions.set(welcome.conversationId, session);
           await this.persistSession(welcome.conversationId, session);
@@ -232,6 +263,15 @@ export class SyncEngine {
           joined.push(welcome.conversationId);
         }
       } catch (error) {
+        // A refused group's key package is spent, so retrying this Welcome could never succeed.
+        if (error instanceof MembershipMismatchError) {
+          try {
+            // eslint-disable-next-line no-await-in-loop -- best effort, one Welcome at a time
+            await api.consumeMlsWelcome(this.deviceId, welcome.id);
+          } catch {
+            // it stays pending and is refused again next poll
+          }
+        }
         failures.push({ welcomeId: welcome.id, error });
       }
     }
@@ -316,15 +356,83 @@ export class SyncEngine {
     return this.runExclusive(conversationId, async () => {
       this.sessions.delete(conversationId);
       await this.storage.delete(conversationId);
+      await this.verifier.forget(conversationId);
     });
   }
 
+  /**
+   * Applies handshake rows from the server in order, checks them, and saves once.
+   * A Commit or tree that fails a check saves nothing and drops the in-memory
+   * session, so the next use reloads the last epoch that was verified.
+   */
+  private async applyBatch(
+    conversationId: ConversationId,
+    session: GroupSession,
+    handshakes: Array<{ epoch: Epoch; payload: string; membershipDeclared?: boolean }>,
+  ): Promise<void> {
+    if (handshakes.length === 0) return;
+
+    try {
+      for (const handshake of handshakes) {
+        // eslint-disable-next-line no-await-in-loop -- must apply strictly in epoch order
+        await this.applyHandshake(conversationId, session, handshake);
+      }
+
+      // Commits from before membership was tracked have no roster to check against.
+      if (handshakes.some((handshake) => handshake.membershipDeclared)) {
+        await this.verifier.assertTreeMatchesRoster(conversationId, session);
+      }
+    } catch (error) {
+      if (error instanceof MembershipMismatchError) this.sessions.delete(conversationId);
+      throw error;
+    }
+
+    await this.persistSession(conversationId, session);
+  }
+
+  private async applyHandshake(
+    conversationId: ConversationId,
+    session: GroupSession,
+    handshake: { epoch: Epoch; payload: string },
+  ): Promise<void> {
+    const result = await session.process(base64ToBytes(handshake.payload));
+
+    if (result.kind === 'rejected') {
+      // The backend already validated framing before storing this Commit, so this is a local bug.
+      throw new Error(`Could not apply handshake at epoch ${handshake.epoch}: ${result.reason}`);
+    }
+    if (result.kind !== 'commit') return;
+
+    const problem = await this.verifier.checkCommit(
+      conversationId,
+      result.membershipChange,
+      parseDeclaredMembership(handshake),
+    );
+    if (problem) {
+      this.verifier.reportFault(conversationId, handshake.epoch, problem);
+      throw new MembershipMismatchError(conversationId, problem);
+    }
+  }
+
+  /** Applies a live wire item and saves it at once: replaying a consumed message generation isn't safe. */
   private async applyIncoming(
     conversationId: ConversationId,
     session: GroupSession,
     wireBytes: Uint8Array,
   ): Promise<ProcessResult> {
     const result = await session.process(wireBytes);
+
+    if (result.kind === 'commit') {
+      // A Commit outside catch-up has no declaration to check it against.
+      this.sessions.delete(conversationId);
+      const problem = await this.verifier.checkCommit(
+        conversationId,
+        result.membershipChange,
+        undefined,
+      );
+      throw new MembershipMismatchError(conversationId, problem ?? 'it cannot be checked');
+    }
+
     await this.persistSession(conversationId, session);
     return result;
   }
@@ -350,7 +458,10 @@ export class SyncEngine {
     return session;
   }
 
-  private async persistSession(conversationId: ConversationId, session: GroupSession): Promise<void> {
+  private async persistSession(
+    conversationId: ConversationId,
+    session: GroupSession,
+  ): Promise<void> {
     const stateBytes = await session.serialize();
     await this.storage.save(conversationId, stateBytes);
   }

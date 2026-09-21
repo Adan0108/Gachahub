@@ -9,6 +9,7 @@ import {
   MessageRequestSetting,
   UserRole,
 } from '../generated/prisma/client';
+import { MembershipChangePendingException } from '../common/exceptions/membership-change-pending.exception';
 import { ChatRepository } from './chat.repository';
 import { FollowsService } from '../follows/follows.service';
 import { BlocksService } from '../blocks/blocks.service';
@@ -145,6 +146,21 @@ export class ChatAccessService {
    */
   canShowTypingState(state: ChatParticipantState) {
     return this.canReadState(state) && state !== 'PENDING';
+  }
+
+  /**
+   * Blocks sending new encrypted content into a group that still has a member
+   * being removed (state LEAVING): their devices remain in the MLS group until
+   * a Remove Commit lands, so anything encrypted now would still be readable
+   * to them. Callers run this after their own access checks, so it never tells
+   * an outsider anything about the conversation.
+   */
+  assertNoMembershipChangePending(
+    participants: ReadonlyArray<{ state: ChatParticipantState }>,
+  ) {
+    if (participants.some((participant) => participant.state === 'LEAVING')) {
+      throw new MembershipChangePendingException();
+    }
   }
 
   /**

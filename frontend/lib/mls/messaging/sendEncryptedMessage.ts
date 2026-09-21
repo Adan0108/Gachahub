@@ -25,6 +25,35 @@ export async function sendEncryptedChatMessage(
   recipientUserId: UserId,
   text: string,
 ) {
+  try {
+    return await encryptAndSend(syncEngine, deviceId, conversationId, recipientUserId, text);
+  } catch (error) {
+    if (!isMembershipChangePending(error)) throw error;
+
+    // A member is being removed, so anything encrypted now would still be
+    // readable to them. Finish the removal, then encrypt again under the new
+    // epoch - the attempt that was refused is simply discarded, and one retry
+    // is all a pending change should ever need.
+    await syncEngine.reconcileMembership({ conversationId });
+    return encryptAndSend(syncEngine, deviceId, conversationId, recipientUserId, text);
+  }
+}
+
+function isMembershipChangePending(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === 'MEMBERSHIP_CHANGE_PENDING'
+  );
+}
+
+async function encryptAndSend(
+  syncEngine: SyncEngine,
+  deviceId: DeviceId,
+  conversationId: ConversationId,
+  recipientUserId: UserId,
+  text: string,
+) {
   await ensureConversationGroup(syncEngine, conversationId, recipientUserId);
 
   const envelope = { v: 1 as const, type: 'text' as const, body: text };

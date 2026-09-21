@@ -6,6 +6,9 @@ import {
 jest.mock('./chat.repository', () => ({
   ChatRepository: class {},
 }));
+jest.mock('./membership/chat-membership.repository', () => ({
+  ChatMembershipRepository: class {},
+}));
 jest.mock('../follows/follows.service', () => ({
   FollowsService: class {},
 }));
@@ -96,6 +99,11 @@ describe('ChatInboxService', () => {
     isModerator: jest.fn(),
   };
 
+  const membershipService = {
+    acceptInvite: jest.fn(),
+    declineInvite: jest.fn(),
+  };
+
   let chatAccessService: ChatAccessService;
   let service: ChatInboxService;
 
@@ -111,6 +119,7 @@ describe('ChatInboxService', () => {
       repository as any,
       chatAccessService,
       blocksService as any,
+      membershipService as any,
     );
     blocksService.getBlockedIdsAmong.mockResolvedValue(new Set());
     blocksService.isBlocked.mockResolvedValue(false);
@@ -349,59 +358,76 @@ describe('ChatInboxService', () => {
     const requestMethods: Array<{
       name: string;
       call: (userId: string, conversationId: string) => Promise<unknown>;
-      targetState: string;
+      membershipCall: jest.Mock;
     }> = [
       {
         name: 'acceptRequest',
         call: (u, c) => service.acceptRequest(u, c),
-        targetState: 'ACTIVE',
+        membershipCall: membershipService.acceptInvite,
       },
       {
         name: 'declineRequest',
         call: (u, c) => service.declineRequest(u, c),
-        targetState: 'DECLINED',
+        membershipCall: membershipService.declineInvite,
       },
     ];
 
     it.each(requestMethods)(
       '$name rejects when the conversation is not found',
-      async ({ call }) => {
+      async ({ call, membershipCall }) => {
         repository.findParticipant.mockResolvedValue(null);
 
         await expect(call('user-1', 'conversation-1')).rejects.toThrow(
           NotFoundException,
         );
+        expect(membershipCall).not.toHaveBeenCalled();
       },
     );
 
     it.each(requestMethods)(
-      '$name rejects when the conversation is not pending',
-      async ({ call }) => {
+      '$name treats a conversation the user deleted as not found',
+      async ({ call, membershipCall }) => {
+        repository.findParticipant.mockResolvedValue({
+          userId: 'user-1',
+          state: 'PENDING',
+          deletedAt: new Date(),
+        });
+
+        await expect(call('user-1', 'conversation-1')).rejects.toThrow(
+          NotFoundException,
+        );
+        expect(membershipCall).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(requestMethods)(
+      '$name hands the change to the membership service and returns the updated participant',
+      async ({ call, membershipCall }) => {
+        const updated = { userId: 'user-1', state: 'JOINING' };
+        repository.findParticipant
+          .mockResolvedValueOnce({ userId: 'user-1', state: 'PENDING' })
+          .mockResolvedValueOnce(updated);
+        membershipCall.mockResolvedValue(undefined);
+
+        await expect(call('user-1', 'conversation-1')).resolves.toBe(updated);
+
+        expect(membershipCall).toHaveBeenCalledWith('conversation-1', 'user-1');
+      },
+    );
+
+    it.each(requestMethods)(
+      '$name surfaces the membership service rejecting a conversation that is not pending',
+      async ({ call, membershipCall }) => {
         repository.findParticipant.mockResolvedValue({
           userId: 'user-1',
           state: 'ACTIVE',
         });
+        membershipCall.mockRejectedValue(
+          new BadRequestException('Conversation is not pending'),
+        );
 
         await expect(call('user-1', 'conversation-1')).rejects.toThrow(
           BadRequestException,
-        );
-      },
-    );
-
-    it.each(requestMethods)(
-      '$name moves a pending conversation to $targetState',
-      async ({ call, targetState }) => {
-        repository.findParticipant.mockResolvedValue({
-          userId: 'user-1',
-          state: 'PENDING',
-        });
-
-        await call('user-1', 'conversation-1');
-
-        expect(repository.updateParticipantState).toHaveBeenCalledWith(
-          'conversation-1',
-          'user-1',
-          targetState,
         );
       },
     );

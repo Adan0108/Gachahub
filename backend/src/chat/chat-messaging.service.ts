@@ -314,6 +314,8 @@ export class ChatMessagingService {
       throw new ForbiddenException('You cannot send messages here');
     }
 
+    this.chatAccessService.assertNoMembershipChangePending(participants);
+
     if (conversation.type === 'DIRECT') {
       const recipient = participants.find(
         (participant) => participant.userId !== senderId,

@@ -17,7 +17,10 @@ describe('ChatDevicesService', () => {
     claimSingleUseKeyPackage: jest.fn(),
     findLastResortKeyPackage: jest.fn(),
     revokeDevice: jest.fn(),
+    findParticipantStates: jest.fn(),
   };
+
+  const roster = { findActiveLeaves: jest.fn(), hasRoster: jest.fn() };
 
   const followsService = {
     isFollowing: jest.fn(),
@@ -46,6 +49,7 @@ describe('ChatDevicesService', () => {
       blocksService as any,
       fetchRateLimiter as any,
       uploadRateLimiter as any,
+      roster as any,
     );
   });
 
@@ -233,11 +237,25 @@ describe('ChatDevicesService', () => {
     });
   });
 
-  describe('claimKeyPackageForUser', () => {
+  describe('claimKeyPackagesForUser', () => {
     const activeTarget = { id: 'user-2', messageRequestSetting: 'EVERYONE' };
+    const ciphersuite = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519';
+
+    const device = (id: string) => ({
+      id,
+      ciphersuite,
+      signaturePublicKey: Buffer.from(`sig-${id}`),
+    });
 
     beforeEach(() => {
       repository.findUserMessagingProfile.mockResolvedValue(activeTarget);
+      repository.findActiveDevicesForUser.mockResolvedValue([
+        device('device-2'),
+      ]);
+      repository.claimSingleUseKeyPackage.mockResolvedValue({
+        payload: Buffer.from('key-package-bytes'),
+      });
+      repository.findLastResortKeyPackage.mockResolvedValue(null);
     });
 
     it('enforces the fetch rate limit', async () => {
@@ -246,7 +264,7 @@ describe('ChatDevicesService', () => {
       });
 
       await expect(
-        service.claimKeyPackageForUser('user-1', 'user-2'),
+        service.claimKeyPackagesForUser('user-1', 'user-2'),
       ).rejects.toThrow(RateLimitedException);
     });
 
@@ -257,7 +275,7 @@ describe('ChatDevicesService', () => {
       );
 
       await expect(
-        service.claimKeyPackageForUser('user-1', 'user-2'),
+        service.claimKeyPackagesForUser('user-1', 'user-2'),
       ).rejects.toThrow(ForbiddenException);
     });
 
@@ -266,26 +284,17 @@ describe('ChatDevicesService', () => {
         (blockerId: string, blockedId: string) =>
           Promise.resolve(blockerId === 'user-2' && blockedId === 'user-1'),
       );
-      repository.claimSingleUseKeyPackage.mockResolvedValue({
-        deviceId: 'device-2',
-        payload: Buffer.from('key-package-bytes'),
-      });
-      repository.findById.mockResolvedValue({
-        id: 'device-2',
-        ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
-        signaturePublicKey: Buffer.from('sig-key'),
-      });
 
       await expect(
-        service.claimKeyPackageForUser('user-1', 'user-2'),
-      ).resolves.toEqual(expect.objectContaining({ deviceId: 'device-2' }));
+        service.claimKeyPackagesForUser('user-1', 'user-2'),
+      ).resolves.toEqual([expect.objectContaining({ deviceId: 'device-2' })]);
     });
 
     it('rejects when the target user does not exist', async () => {
       repository.findUserMessagingProfile.mockResolvedValue(null);
 
       await expect(
-        service.claimKeyPackageForUser('user-1', 'user-2'),
+        service.claimKeyPackagesForUser('user-1', 'user-2'),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -296,7 +305,7 @@ describe('ChatDevicesService', () => {
       });
 
       await expect(
-        service.claimKeyPackageForUser('user-1', 'user-2'),
+        service.claimKeyPackagesForUser('user-1', 'user-2'),
       ).rejects.toThrow(ForbiddenException);
     });
 
@@ -308,56 +317,327 @@ describe('ChatDevicesService', () => {
       followsService.isFollowing.mockResolvedValue({ following: false });
 
       await expect(
-        service.claimKeyPackageForUser('user-1', 'user-2'),
+        service.claimKeyPackagesForUser('user-1', 'user-2'),
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('claims a single-use key package when one is available', async () => {
-      repository.claimSingleUseKeyPackage.mockResolvedValue({
-        deviceId: 'device-2',
-        payload: Buffer.from('key-package-bytes'),
-      });
-      repository.findById.mockResolvedValue({
-        id: 'device-2',
-        ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
-        signaturePublicKey: Buffer.from('sig-key'),
-      });
+    it('claims a single-use key package for the device when one is available', async () => {
+      const result = await service.claimKeyPackagesForUser('user-1', 'user-2');
 
-      const result = await service.claimKeyPackageForUser('user-1', 'user-2');
-
+      expect(repository.claimSingleUseKeyPackage).toHaveBeenCalledWith(
+        'device-2',
+        'user-1',
+      );
       expect(repository.findLastResortKeyPackage).not.toHaveBeenCalled();
-      expect(result.deviceId).toBe('device-2');
-      expect(result.payload).toBe(
-        Buffer.from('key-package-bytes').toString('base64'),
+      expect(result).toEqual([
+        {
+          deviceId: 'device-2',
+          ciphersuite,
+          signaturePublicKey: Buffer.from('sig-device-2').toString('base64'),
+          payload: Buffer.from('key-package-bytes').toString('base64'),
+        },
+      ]);
+    });
+
+    it('claims one key package for EACH active device, so every device can be added to the group', async () => {
+      repository.findActiveDevicesForUser.mockResolvedValue([
+        device('device-a'),
+        device('device-b'),
+      ]);
+
+      const result = await service.claimKeyPackagesForUser('user-1', 'user-2');
+
+      expect(result.map((offer) => offer.deviceId)).toEqual([
+        'device-a',
+        'device-b',
+      ]);
+      expect(repository.claimSingleUseKeyPackage).toHaveBeenCalledWith(
+        'device-a',
+        'user-1',
+      );
+      expect(repository.claimSingleUseKeyPackage).toHaveBeenCalledWith(
+        'device-b',
+        'user-1',
       );
     });
 
-    it('falls back to the last-resort key package when no single-use one is available', async () => {
+    it("falls back to a device's last-resort key package when it has no single-use one", async () => {
       repository.claimSingleUseKeyPackage.mockResolvedValue(null);
       repository.findLastResortKeyPackage.mockResolvedValue({
-        deviceId: 'device-2',
         payload: Buffer.from('last-resort-bytes'),
       });
-      repository.findById.mockResolvedValue({
-        id: 'device-2',
-        ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
-        signaturePublicKey: Buffer.from('sig-key'),
-      });
 
-      const result = await service.claimKeyPackageForUser('user-1', 'user-2');
+      const result = await service.claimKeyPackagesForUser('user-1', 'user-2');
 
-      expect(result.payload).toBe(
+      expect(repository.findLastResortKeyPackage).toHaveBeenCalledWith(
+        'device-2',
+      );
+      expect(result[0]?.payload).toBe(
         Buffer.from('last-resort-bytes').toString('base64'),
       );
     });
 
-    it('throws when the target has no available devices at all', async () => {
+    it('skips a device with no usable key package instead of failing the whole claim', async () => {
+      repository.findActiveDevicesForUser.mockResolvedValue([
+        device('device-a'),
+        device('device-b'),
+      ]);
+      repository.claimSingleUseKeyPackage.mockImplementation(
+        (deviceId: string) =>
+          Promise.resolve(
+            deviceId === 'device-a' ? null : { payload: Buffer.from('bytes') },
+          ),
+      );
+
+      const result = await service.claimKeyPackagesForUser('user-1', 'user-2');
+
+      expect(result.map((offer) => offer.deviceId)).toEqual(['device-b']);
+    });
+
+    it('throws when the target has no claimable devices at all', async () => {
       repository.claimSingleUseKeyPackage.mockResolvedValue(null);
       repository.findLastResortKeyPackage.mockResolvedValue(null);
 
       await expect(
-        service.claimKeyPackageForUser('user-1', 'user-2'),
+        service.claimKeyPackagesForUser('user-1', 'user-2'),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    describe("claiming the requester's own devices", () => {
+      it('skips the block and messaging-setting gates', async () => {
+        repository.findActiveDevicesForUser.mockResolvedValue([
+          device('phone'),
+        ]);
+
+        await service.claimKeyPackagesForUser('user-1', 'user-1');
+
+        expect(blocksService.isBlocked).not.toHaveBeenCalled();
+        expect(repository.findUserMessagingProfile).not.toHaveBeenCalled();
+      });
+
+      it('leaves out the excluded device (the one creating the group)', async () => {
+        repository.findActiveDevicesForUser.mockResolvedValue([
+          device('laptop'),
+          device('phone'),
+        ]);
+
+        const result = await service.claimKeyPackagesForUser(
+          'user-1',
+          'user-1',
+          { excludeDeviceId: 'laptop' },
+        );
+
+        expect(result.map((offer) => offer.deviceId)).toEqual(['phone']);
+        expect(repository.claimSingleUseKeyPackage).not.toHaveBeenCalledWith(
+          'laptop',
+          expect.anything(),
+        );
+      });
+
+      it('returns an empty list, not a 404, when there are no other devices', async () => {
+        repository.findActiveDevicesForUser.mockResolvedValue([
+          device('laptop'),
+        ]);
+
+        await expect(
+          service.claimKeyPackagesForUser('user-1', 'user-1', {
+            excludeDeviceId: 'laptop',
+          }),
+        ).resolves.toEqual([]);
+      });
+    });
+  });
+
+  describe('claimKeyPackagesForUser for a change to a group', () => {
+    const device = (id: string) => ({
+      id,
+      ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
+      signaturePublicKey: Buffer.from(`sig-${id}`),
+    });
+
+    const claimForGroup = () =>
+      service.claimKeyPackagesForUser('user-1', 'user-2', {
+        conversationId: 'conv-1',
+      });
+
+    beforeEach(() => {
+      repository.findParticipantStates.mockResolvedValue(
+        new Map([
+          ['user-1', 'ACTIVE'],
+          ['user-2', 'JOINING'],
+        ]),
+      );
+      roster.hasRoster.mockResolvedValue(true);
+      roster.findActiveLeaves.mockResolvedValue([]);
+      repository.findActiveDevicesForUser.mockResolvedValue([device('d2')]);
+      repository.claimSingleUseKeyPackage.mockResolvedValue({
+        payload: Buffer.from('kp'),
+      });
+    });
+
+    it('lets a member claim for someone whose privacy settings would refuse a stranger - they are already authorized to be in the group', async () => {
+      repository.findUserMessagingProfile.mockResolvedValue({
+        id: 'user-2',
+        messageRequestSetting: 'NO_ONE',
+      });
+
+      await expect(claimForGroup()).resolves.toEqual([
+        expect.objectContaining({ deviceId: 'd2' }),
+      ]);
+
+      expect(repository.findUserMessagingProfile).not.toHaveBeenCalled();
+      expect(blocksService.isBlocked).not.toHaveBeenCalled();
+    });
+
+    it('still applies the direct-message gates when no conversation is given', async () => {
+      repository.findUserMessagingProfile.mockResolvedValue({
+        id: 'user-2',
+        messageRequestSetting: 'NO_ONE',
+      });
+
+      await expect(
+        service.claimKeyPackagesForUser('user-1', 'user-2'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('refuses a caller who is not an ACTIVE member of the group', async () => {
+      repository.findParticipantStates.mockResolvedValue(
+        new Map([
+          ['user-1', 'PENDING'],
+          ['user-2', 'JOINING'],
+        ]),
+      );
+
+      await expect(claimForGroup()).rejects.toThrow(ForbiddenException);
+
+      expect(repository.claimSingleUseKeyPackage).not.toHaveBeenCalled();
+    });
+
+    it.each(['PENDING', 'DECLINED', 'LEAVING', 'MISSING'])(
+      'refuses to claim for someone who is %s in the group',
+      async (state) => {
+        repository.findParticipantStates.mockResolvedValue(
+          new Map(
+            state === 'MISSING'
+              ? [['user-1', 'ACTIVE']]
+              : [
+                  ['user-1', 'ACTIVE'],
+                  ['user-2', state],
+                ],
+          ),
+        );
+
+        await expect(claimForGroup()).rejects.toThrow(ForbiddenException);
+      },
+    );
+
+    it('claims only for devices not already in the group, so no package is burned on a device that cannot be added', async () => {
+      repository.findActiveDevicesForUser.mockResolvedValue([
+        device('d2-in'),
+        device('d2-new'),
+      ]);
+      roster.findActiveLeaves.mockResolvedValue([
+        { userId: 'user-2', deviceId: 'd2-in' },
+      ]);
+
+      const result = await claimForGroup();
+
+      expect(result.map((offer) => offer.deviceId)).toEqual(['d2-new']);
+      expect(repository.claimSingleUseKeyPackage).not.toHaveBeenCalledWith(
+        'd2-in',
+        expect.anything(),
+      );
+    });
+
+    it('refuses a claim for a conversation that has no MLS group, so a plain group cannot be used to burn packages', async () => {
+      roster.hasRoster.mockResolvedValue(false);
+
+      await expect(claimForGroup()).rejects.toThrow(ForbiddenException);
+      expect(repository.claimSingleUseKeyPackage).not.toHaveBeenCalled();
+    });
+
+    it('claims only for the devices the caller listed, so a device registered meanwhile is left alone', async () => {
+      repository.findActiveDevicesForUser.mockResolvedValue([
+        device('d2'),
+        device('d2-late'),
+      ]);
+
+      const result = await service.claimKeyPackagesForUser('user-1', 'user-2', {
+        conversationId: 'conv-1',
+        deviceIds: ['d2'],
+      });
+
+      expect(result.map((offer) => offer.deviceId)).toEqual(['d2']);
+      expect(repository.claimSingleUseKeyPackage).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns an empty list, not a 404, when everything is already in the group', async () => {
+      roster.findActiveLeaves.mockResolvedValue([
+        { userId: 'user-2', deviceId: 'd2' },
+      ]);
+
+      await expect(claimForGroup()).resolves.toEqual([]);
+    });
+  });
+
+  describe('claiming charges the rate limit by packages handed out', () => {
+    const device = (id: string) => ({
+      id,
+      ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
+      signaturePublicKey: Buffer.from(`sig-${id}`),
+    });
+
+    beforeEach(() => {
+      repository.findUserMessagingProfile.mockResolvedValue({
+        id: 'user-2',
+        messageRequestSetting: 'EVERYONE',
+      });
+      repository.claimSingleUseKeyPackage.mockResolvedValue({
+        payload: Buffer.from('kp'),
+      });
+    });
+
+    it('charges once for a one-device claim', async () => {
+      repository.findActiveDevicesForUser.mockResolvedValue([device('d1')]);
+
+      await service.claimKeyPackagesForUser('user-1', 'user-2');
+
+      expect(fetchRateLimiter.assertNotRateLimited).toHaveBeenCalledTimes(1);
+    });
+
+    it('charges for every extra device, so claiming across many devices drains no faster than claiming one by one', async () => {
+      repository.findActiveDevicesForUser.mockResolvedValue([
+        device('d1'),
+        device('d2'),
+        device('d3'),
+      ]);
+
+      await service.claimKeyPackagesForUser('user-1', 'user-2');
+
+      expect(fetchRateLimiter.assertNotRateLimited).toHaveBeenNthCalledWith(
+        2,
+        'user-1',
+        'user-2',
+        2,
+      );
+    });
+
+    it('claims nothing if the extra charge is refused', async () => {
+      repository.findActiveDevicesForUser.mockResolvedValue([
+        device('d1'),
+        device('d2'),
+      ]);
+      fetchRateLimiter.assertNotRateLimited
+        .mockImplementationOnce(() => undefined)
+        .mockImplementationOnce(() => {
+          throw new RateLimitedException('slow down', 30);
+        });
+
+      await expect(
+        service.claimKeyPackagesForUser('user-1', 'user-2'),
+      ).rejects.toThrow(RateLimitedException);
+
+      expect(repository.claimSingleUseKeyPackage).not.toHaveBeenCalled();
     });
   });
 

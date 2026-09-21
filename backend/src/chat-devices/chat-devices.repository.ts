@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { MlsKeyPackageKind } from '../generated/prisma/client';
+import {
+  MlsKeyPackageKind,
+  type ChatParticipantState,
+} from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface NewKeyPackage {
@@ -21,6 +24,24 @@ export class ChatDevicesRepository {
       where: { id: userId },
       select: { id: true, messageRequestSetting: true },
     });
+  }
+
+  /** The participant state of each of these users in the conversation; users with no row are absent. */
+  async findParticipantStates(
+    conversationId: string,
+    userIds: string[],
+  ): Promise<Map<string, ChatParticipantState>> {
+    const participants = await this.prisma.chatParticipant.findMany({
+      where: { conversationId, userId: { in: userIds } },
+      select: { userId: true, state: true },
+    });
+
+    return new Map(
+      participants.map((participant) => [
+        participant.userId,
+        participant.state,
+      ]),
+    );
   }
 
   async createDeviceWithKeyPackages(params: {
@@ -75,7 +96,7 @@ export class ChatDevicesRepository {
 
   /**
    * Atomically claims one SINGLE_USE, unexpired key package belonging to
-   * any of the user's active devices (claim-once, critique C1) - the same
+   * the given active device (claim-once, critique C1) - the same
    * find-then-guarded-updateMany pattern already established for
    * MediaUpload claims (see MediaRepository/claimUploadsForAttachment).
    *
@@ -83,22 +104,23 @@ export class ChatDevicesRepository {
    * request wins the race for the row this call picked, until the pool is
    * genuinely exhausted (each attempt permanently excludes one id via
    * triedIds, so this always terminates) - a fixed retry cap would let
-   * ordinary contention on a popular user's pool silently fall back to the
+   * ordinary contention on a popular device's pool silently fall back to the
    * reused LAST_RESORT package while real unclaimed SINGLE_USE packages
    * still existed. MAX_CLAIM_ATTEMPTS is a defensive ceiling against a
    * runaway loop, not an expected limit.
    */
-  async claimSingleUseKeyPackage(userId: string, claimedByUserId: string) {
+  async claimSingleUseKeyPackage(deviceId: string, claimedByUserId: string) {
     const triedIds: string[] = [];
     const MAX_CLAIM_ATTEMPTS = 1000;
 
     for (let attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt += 1) {
       const candidate = await this.prisma.mlsKeyPackage.findFirst({
         where: {
+          deviceId,
           kind: 'SINGLE_USE',
           claimedAt: null,
           expiresAt: { gt: new Date() },
-          device: { userId, revokedAt: null },
+          device: { revokedAt: null },
           ...(triedIds.length > 0 ? { id: { notIn: triedIds } } : {}),
         },
         orderBy: { createdAt: 'asc' },
@@ -133,12 +155,13 @@ export class ChatDevicesRepository {
     return null;
   }
 
-  findLastResortKeyPackage(userId: string) {
+  findLastResortKeyPackage(deviceId: string) {
     return this.prisma.mlsKeyPackage.findFirst({
       where: {
+        deviceId,
         kind: 'LAST_RESORT',
         expiresAt: { gt: new Date() },
-        device: { userId, revokedAt: null },
+        device: { revokedAt: null },
       },
       orderBy: { createdAt: 'desc' },
     });

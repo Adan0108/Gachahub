@@ -10,8 +10,10 @@ import { buildTestCommitWithWelcome } from './test-support/build-test-commit';
 describe('MlsHandshakesService', () => {
   const repository = {
     isActiveParticipant: jest.fn(),
+    isEntitledParticipant: jest.fn(),
     acceptHandshake: jest.fn(),
     findHandshakesSince: jest.fn(),
+    findRosterAtEpoch: jest.fn(),
     findPendingWelcomes: jest.fn(),
     markWelcomeConsumed: jest.fn(),
   };
@@ -25,6 +27,7 @@ describe('MlsHandshakesService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     repository.isActiveParticipant.mockResolvedValue(true);
+    repository.isEntitledParticipant.mockResolvedValue(true);
     chatDevicesService.assertOwnActiveDevice.mockResolvedValue({
       id: 'device-1',
       userId: 'user-1',
@@ -57,6 +60,8 @@ describe('MlsHandshakesService', () => {
         epoch,
         payload: Buffer.from(commitPayload).toString('base64'),
         welcomes: [],
+        addedDeviceIds: [],
+        removedDeviceIds: [],
       });
 
       expect(result.outcome).toBe('accepted');
@@ -70,6 +75,58 @@ describe('MlsHandshakesService', () => {
             .digest('hex'),
         }),
       );
+    });
+
+    it('returns the declaration with the accepted handshake and with the winning one on a lost race', async () => {
+      const { epoch, commitPayload } =
+        await buildTestCommitWithWelcome('conv-1');
+      const handshake = {
+        id: 'hs-1',
+        conversationId: 'conv-1',
+        epoch,
+        senderDeviceId: 'device-2',
+        payload: commitPayload,
+        membershipDeclared: true,
+        addedDevices: [{ deviceId: 'device-4' }],
+        removedDevices: [],
+        createdAt: new Date(),
+      };
+      const dto = {
+        deviceId: 'device-1',
+        epoch,
+        payload: Buffer.from(commitPayload).toString('base64'),
+        welcomes: [],
+        addedDeviceIds: [],
+        removedDeviceIds: [],
+      };
+
+      repository.acceptHandshake.mockResolvedValue({
+        outcome: 'accepted',
+        handshake,
+      });
+      await expect(
+        service.submitHandshake('user-1', 'conv-1', dto),
+      ).resolves.toMatchObject({
+        handshake: {
+          membershipDeclared: true,
+          addedDevices: [{ deviceId: 'device-4' }],
+        },
+      });
+
+      repository.acceptHandshake.mockResolvedValue({
+        outcome: 'conflict',
+        handshake,
+      });
+      await expect(
+        service.submitHandshake('user-1', 'conv-1', dto),
+      ).rejects.toMatchObject({
+        response: {
+          handshake: {
+            membershipDeclared: true,
+            addedDevices: [{ deviceId: 'device-4' }],
+          },
+        },
+      });
     });
 
     it('forwards real Welcome bytes for newly added devices', async () => {
@@ -97,6 +154,8 @@ describe('MlsHandshakesService', () => {
             payload: Buffer.from(welcomePayload).toString('base64'),
           },
         ],
+        addedDeviceIds: ['device-2'],
+        removedDeviceIds: [],
       });
 
       expect(repository.acceptHandshake).toHaveBeenCalledWith(
@@ -106,6 +165,68 @@ describe('MlsHandshakesService', () => {
           ],
         }),
       );
+    });
+
+    it('passes the sender, and what the Commit declares it adds and removes, to the repository', async () => {
+      const { epoch, commitPayload, welcomePayload } =
+        await buildTestCommitWithWelcome('conv-1');
+      repository.acceptHandshake.mockResolvedValue({
+        outcome: 'accepted',
+        handshake: {
+          id: 'hs-1',
+          conversationId: 'conv-1',
+          epoch,
+          senderDeviceId: 'device-1',
+          payload: commitPayload,
+          createdAt: new Date(),
+        },
+      });
+
+      await service.submitHandshake('user-1', 'conv-1', {
+        deviceId: 'device-1',
+        epoch,
+        payload: Buffer.from(commitPayload).toString('base64'),
+        welcomes: [
+          {
+            recipientDeviceId: 'device-2',
+            payload: Buffer.from(welcomePayload).toString('base64'),
+          },
+        ],
+        addedDeviceIds: ['device-2'],
+        removedDeviceIds: ['device-3'],
+      });
+
+      expect(repository.acceptHandshake).toHaveBeenCalledWith(
+        expect.objectContaining({
+          senderUserId: 'user-1',
+          addedDeviceIds: ['device-2'],
+          removedDeviceIds: ['device-3'],
+        }),
+      );
+    });
+
+    it('rejects a declaration that does not add up before ever reaching the repository', async () => {
+      const { epoch, commitPayload, welcomePayload } =
+        await buildTestCommitWithWelcome('conv-1');
+
+      await expect(
+        service.submitHandshake('user-1', 'conv-1', {
+          deviceId: 'device-1',
+          epoch,
+          payload: Buffer.from(commitPayload).toString('base64'),
+          // a Welcome for a device the Commit does not declare as added
+          welcomes: [
+            {
+              recipientDeviceId: 'device-2',
+              payload: Buffer.from(welcomePayload).toString('base64'),
+            },
+          ],
+          addedDeviceIds: [],
+          removedDeviceIds: [],
+        }),
+      ).rejects.toThrow('exactly the devices');
+
+      expect(repository.acceptHandshake).not.toHaveBeenCalled();
     });
 
     it('rejects a commit addressed to a different conversation before ever reaching the repository', async () => {
@@ -118,6 +239,8 @@ describe('MlsHandshakesService', () => {
           epoch,
           payload: Buffer.from(commitPayload).toString('base64'),
           welcomes: [],
+          addedDeviceIds: [],
+          removedDeviceIds: [],
         }),
       ).rejects.toThrow('group_id does not match this conversation');
 
@@ -146,6 +269,8 @@ describe('MlsHandshakesService', () => {
           epoch,
           payload: Buffer.from(commitPayload).toString('base64'),
           welcomes: [],
+          addedDeviceIds: [],
+          removedDeviceIds: [],
         }),
       ).rejects.toThrow(ConflictException);
     });
@@ -163,6 +288,8 @@ describe('MlsHandshakesService', () => {
           epoch,
           payload: Buffer.from(commitPayload).toString('base64'),
           welcomes: [],
+          addedDeviceIds: [],
+          removedDeviceIds: [],
         }),
       ).rejects.toThrow(ForbiddenException);
     });
@@ -178,6 +305,8 @@ describe('MlsHandshakesService', () => {
           epoch,
           payload: Buffer.from(commitPayload).toString('base64'),
           welcomes: [],
+          addedDeviceIds: [],
+          removedDeviceIds: [],
         }),
       ).rejects.toThrow(ForbiddenException);
 
@@ -203,12 +332,82 @@ describe('MlsHandshakesService', () => {
       expect(result[0].payload).toBe(Buffer.from([1, 2, 3]).toString('base64'));
     });
 
+    it('hands out what each Commit was declared to do, so every member can check it', async () => {
+      repository.findHandshakesSince.mockResolvedValue([
+        {
+          id: 'hs-1',
+          conversationId: 'conv-1',
+          epoch: 0,
+          senderDeviceId: 'device-1',
+          payload: new Uint8Array([1]),
+          membershipDeclared: true,
+          addedDevices: [{ deviceId: 'device-2' }],
+          removedDevices: [{ deviceId: 'device-3' }],
+          createdAt: new Date(),
+        },
+      ]);
+
+      const result = await service.getHandshakesSince('user-1', 'conv-1', 0);
+
+      expect(result[0]).toMatchObject({
+        membershipDeclared: true,
+        addedDevices: [{ deviceId: 'device-2' }],
+        removedDevices: [{ deviceId: 'device-3' }],
+      });
+    });
+
     it('rejects when the caller is not an active participant', async () => {
-      repository.isActiveParticipant.mockResolvedValue(false);
+      repository.isEntitledParticipant.mockResolvedValue(false);
 
       await expect(
         service.getHandshakesSince('user-1', 'conv-1', 0),
       ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('getRosterAtEpoch', () => {
+    it('returns each leaf with its registered key as base64, or null when the device record is gone', async () => {
+      repository.findRosterAtEpoch.mockResolvedValue([
+        {
+          deviceId: 'd1',
+          userId: 'u1',
+          signaturePublicKey: new Uint8Array([1, 2]),
+        },
+        { deviceId: 'd2', userId: 'u2', signaturePublicKey: null },
+      ]);
+
+      await expect(
+        service.getRosterAtEpoch('user-1', 'conv-1', 3),
+      ).resolves.toEqual({
+        epoch: 3,
+        leaves: [
+          {
+            deviceId: 'd1',
+            userId: 'u1',
+            signaturePublicKey: Buffer.from([1, 2]).toString('base64'),
+          },
+          { deviceId: 'd2', userId: 'u2', signaturePublicKey: null },
+        ],
+      });
+      expect(repository.findRosterAtEpoch).toHaveBeenCalledWith('conv-1', 3);
+    });
+
+    it('lets an archived or blocked member read it - their new device still has to join', async () => {
+      repository.isActiveParticipant.mockResolvedValue(false);
+      repository.findRosterAtEpoch.mockResolvedValue([]);
+
+      await expect(
+        service.getRosterAtEpoch('user-1', 'conv-1', 3),
+      ).resolves.toEqual({ epoch: 3, leaves: [] });
+    });
+
+    it('rejects when the caller is not a member', async () => {
+      repository.isEntitledParticipant.mockResolvedValue(false);
+
+      await expect(
+        service.getRosterAtEpoch('user-1', 'conv-1', 3),
+      ).rejects.toThrow(ForbiddenException);
+      expect(repository.findRosterAtEpoch).not.toHaveBeenCalled();
     });
   });
 

@@ -15,6 +15,7 @@ import {
   type HandshakeAcceptResult,
 } from './mls-handshakes.repository';
 import { SubmitHandshakeDto } from './dto/submit-handshake.dto';
+import { assertDeclarationIsConsistent } from './mls-membership-rules';
 
 interface SerializableHandshake {
   id: string;
@@ -23,6 +24,11 @@ interface SerializableHandshake {
   /** Null once the sending device (and its owning account) has been deleted - the Commit itself is kept regardless (see schema.prisma's MlsHandshake.senderDeviceId doc). */
   senderDeviceId: string | null;
   payload: Uint8Array;
+  /** False for Commits from before membership was tracked, which carry nothing to check. */
+  membershipDeclared: boolean;
+  /** Whose device each added leaf must be and which key it must carry - the server's records, not the sender's word. */
+  addedDevices: unknown;
+  removedDevices: unknown;
   createdAt: Date;
 }
 
@@ -55,14 +61,24 @@ export class MlsHandshakesService {
       };
     });
 
+    assertDeclarationIsConsistent({
+      senderDeviceId: dto.deviceId,
+      addedDeviceIds: dto.addedDeviceIds,
+      removedDeviceIds: dto.removedDeviceIds,
+      welcomeRecipientDeviceIds: welcomes.map((item) => item.recipientDeviceId),
+    });
+
     const payloadSha256 = createHash('sha256').update(payload).digest('hex');
 
     const result = await this.mlsHandshakesRepository.acceptHandshake({
       conversationId,
       expectedEpoch: dto.epoch,
       senderDeviceId: dto.deviceId,
+      senderUserId: userId,
       payload,
       payloadSha256,
+      addedDeviceIds: dto.addedDeviceIds,
+      removedDeviceIds: dto.removedDeviceIds,
       welcomes,
     });
 
@@ -74,7 +90,7 @@ export class MlsHandshakesService {
     conversationId: string,
     sinceEpoch: number,
   ) {
-    await this.assertActiveParticipant(conversationId, userId);
+    await this.assertEntitledParticipant(conversationId, userId);
 
     const handshakes = await this.mlsHandshakesRepository.findHandshakesSince(
       conversationId,
@@ -82,6 +98,36 @@ export class MlsHandshakesService {
     );
 
     return handshakes.map((handshake) => this.serializeHandshake(handshake));
+  }
+
+  /**
+   * Who is in the group at `epoch`, by the server's records. A member checks
+   * its whole ratchet tree against this after joining and after every Commit:
+   * the per-Commit attestation only proves the tree stayed honest if it started
+   * honest, and nothing else vouches for the leaves the group was created with.
+   */
+  async getRosterAtEpoch(
+    userId: string,
+    conversationId: string,
+    epoch: number,
+  ) {
+    await this.assertEntitledParticipant(conversationId, userId);
+
+    const leaves = await this.mlsHandshakesRepository.findRosterAtEpoch(
+      conversationId,
+      epoch,
+    );
+
+    return {
+      epoch,
+      leaves: leaves.map((leaf) => ({
+        deviceId: leaf.deviceId,
+        userId: leaf.userId,
+        signaturePublicKey: leaf.signaturePublicKey
+          ? Buffer.from(leaf.signaturePublicKey).toString('base64')
+          : null,
+      })),
+    };
   }
 
   async getPendingWelcomes(userId: string, deviceId: string) {
@@ -111,6 +157,20 @@ export class MlsHandshakesService {
     }
 
     return { message: 'Welcome consumed' };
+  }
+
+  private async assertEntitledParticipant(
+    conversationId: string,
+    userId: string,
+  ) {
+    const isEntitled = await this.mlsHandshakesRepository.isEntitledParticipant(
+      conversationId,
+      userId,
+    );
+
+    if (!isEntitled) {
+      throw new ForbiddenException('Not a member of this conversation');
+    }
   }
 
   private async assertActiveParticipant(
@@ -155,6 +215,10 @@ export class MlsHandshakesService {
       epoch: handshake.epoch,
       senderDeviceId: handshake.senderDeviceId,
       payload: Buffer.from(handshake.payload).toString('base64'),
+      // Every member checks these against what the Commit actually did.
+      membershipDeclared: handshake.membershipDeclared,
+      addedDevices: handshake.addedDevices,
+      removedDevices: handshake.removedDevices,
       createdAt: handshake.createdAt,
     };
   }

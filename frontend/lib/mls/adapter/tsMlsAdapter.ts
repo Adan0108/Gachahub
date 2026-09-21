@@ -28,11 +28,7 @@ import { toNodeIndex, nodeToLeafIndex } from 'ts-mls/treemath.js';
 import { defaultClientConfig } from 'ts-mls/clientConfig.js';
 import { decryptSenderData } from 'ts-mls/privateMessage.js';
 import { makeKeyPackageRef } from 'ts-mls/keyPackage.js';
-import type {
-  DeviceIdentityStore,
-  GroupSession,
-  GroupSessionFactory,
-} from '../contract/client';
+import type { DeviceIdentityStore, GroupSession, GroupSessionFactory } from '../contract/client';
 import type {
   ConversationId,
   DeviceCredential,
@@ -43,7 +39,10 @@ import type {
   ProcessResult,
   UserId,
 } from '../contract/types';
-import { CredentialMismatchError } from '../contract/errors';
+import { CredentialMismatchError, MembershipMismatchError } from '../contract/errors';
+import { bytesEqual } from '../bytes';
+import { decodeIdentity, encodeIdentity } from './identityCodec';
+import { diffLeafMembership, listLeafCredentials } from './leafMembership';
 import type { MlsClientCandidate } from '../contract/contractTests';
 import {
   InMemoryDeviceIdentityStorage,
@@ -82,38 +81,6 @@ function getImpl(): Promise<CiphersuiteImpl> {
   return cachedImpl;
 }
 
-function encodeIdentity(userId: UserId, deviceId: DeviceId): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify({ userId, deviceId }));
-}
-
-/**
- * Parses a ratchet-tree leaf's credential identity - bytes that arrived
- * over the wire (via a Welcome or Commit from the server, which never
- * inspects Welcome contents) rather than something this device produced
- * itself. Returns undefined instead of throwing for anything malformed, so
- * one bad credential can be rejected as data (a normal ProcessResult) by
- * the caller instead of crashing out of process() with a raw SyntaxError -
- * which would otherwise repeat identically on every retry, permanently
- * wedging that conversation's sync.
- */
-function decodeIdentity(identity: Uint8Array): { userId: UserId; deviceId: DeviceId } | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(identity));
-  } catch {
-    return undefined;
-  }
-  if (
-    typeof parsed !== 'object' ||
-    parsed === null ||
-    typeof (parsed as { userId?: unknown }).userId !== 'string' ||
-    typeof (parsed as { deviceId?: unknown }).deviceId !== 'string'
-  ) {
-    return undefined;
-  }
-  return parsed as { userId: UserId; deviceId: DeviceId };
-}
-
 function encodeConversationId(conversationId: ConversationId): Uint8Array {
   return new TextEncoder().encode(conversationId);
 }
@@ -130,18 +97,6 @@ function isPlaintextEnvelope(value: unknown): value is PlaintextEnvelope {
   );
 }
 
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  for (let i = 0; i < a.length; i += 1) {
-    if (a[i] !== b[i]) {
-      return false;
-    }
-  }
-  return true;
-}
-
 export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
   private deviceId: DeviceId | undefined;
   private credential: DeviceCredential | undefined;
@@ -155,7 +110,9 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
   readonly keyPackagesById = new Map<string, StoredKeyPackage>();
   private hydrationPromise: Promise<void> | undefined;
 
-  constructor(private readonly storage: DeviceIdentityStorage = new InMemoryDeviceIdentityStorage()) {}
+  constructor(
+    private readonly storage: DeviceIdentityStorage = new InMemoryDeviceIdentityStorage(),
+  ) {}
 
   async isProvisioned(): Promise<boolean> {
     await this.ensureHydrated();
@@ -355,9 +312,7 @@ function findLeafIndexByIdentity(
 }
 
 class TsMlsGroupSession implements GroupSession {
-  private staged:
-    | { newState: ClientState; welcome: Uint8Array | undefined }
-    | undefined;
+  private staged: { newState: ClientState; welcome: Uint8Array | undefined } | undefined;
 
   constructor(
     public readonly conversationId: ConversationId,
@@ -367,6 +322,10 @@ class TsMlsGroupSession implements GroupSession {
 
   async currentEpoch(): Promise<Epoch> {
     return Number(this.state.groupContext.epoch);
+  }
+
+  async listLeaves(): Promise<DeviceCredential[] | undefined> {
+    return listLeafCredentials(this.state.ratchetTree);
   }
 
   async peekEpoch(wireBytes: Uint8Array): Promise<Epoch | undefined> {
@@ -394,8 +353,7 @@ class TsMlsGroupSession implements GroupSession {
 
     let incomingKind: 'commit' | 'proposal' | undefined;
     let proposalInfo:
-      | { proposal: Proposal; proposer: DeviceCredential; isExternal: boolean }
-      | undefined;
+      { proposal: Proposal; proposer: DeviceCredential; isExternal: boolean } | undefined;
     // A member-sent proposal whose credential didn't decode - distinct from
     // proposalInfo being absent (e.g. this was a commit, not a proposal).
     let proposalCredentialMismatch = false;
@@ -517,10 +475,15 @@ class TsMlsGroupSession implements GroupSession {
       };
     }
 
+    const membershipChange = diffLeafMembership(treeBeforeCommit, this.state.ratchetTree);
+    if (!membershipChange) {
+      return { kind: 'rejected', reason: 'credential-mismatch' };
+    }
+
     return {
       kind: 'commit',
       epoch: Number(this.state.groupContext.epoch),
-      membershipChange: null, // best-effort for this spike, see note in stageCommit
+      membershipChange,
     };
   }
 
@@ -676,6 +639,7 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
   async joinFromWelcome(
     conversationId: ConversationId,
     welcomeBytes: Uint8Array,
+    options: { verify?: (session: GroupSession) => Promise<void> } = {},
   ): Promise<GroupSession> {
     const decoded = decodeMlsMessage(welcomeBytes, 0)?.[0];
     if (!decoded || decoded.wireformat !== 'mls_welcome') {
@@ -712,12 +676,20 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
       );
     }
 
-    // Only after the join actually succeeds - a failed joinGroup or a
-    // wrong-conversation Welcome above should leave the package available
-    // for a genuine retry, not consume it on a doomed attempt.
+    const session = new TsMlsGroupSession(conversationId, state, credential);
+
+    try {
+      await options.verify?.(session);
+    } catch (error) {
+      // A definite refusal spends the package; a transport error keeps it for the retry.
+      if (error instanceof MembershipMismatchError) await this.store.consumeKeyPackage(matching.id);
+      throw error;
+    }
+
+    // Spent only once the join is accepted, so a failed attempt leaves it for a retry.
     await this.store.consumeKeyPackage(matching.id);
 
-    return new TsMlsGroupSession(conversationId, state, credential);
+    return session;
   }
 
   private async findMatchingKeyPackage(

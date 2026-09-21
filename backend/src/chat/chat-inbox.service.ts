@@ -7,6 +7,7 @@ import {
 import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
 import { BlocksService } from '../blocks/blocks.service';
+import { ChatMembershipService } from './membership/chat-membership.service';
 import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
 import { MarkMessagesDeliveredDto } from './dto/mark-messages-delivered.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
@@ -24,6 +25,7 @@ export class ChatInboxService {
     private readonly chatRepository: ChatRepository,
     private readonly chatAccessService: ChatAccessService,
     private readonly blocksService: BlocksService,
+    private readonly chatMembershipService: ChatMembershipService,
   ) {}
 
   /**
@@ -171,27 +173,16 @@ export class ChatInboxService {
    * Accepts a pending stranger convo.
    *
    * Only the pending recipient can accept. After acceptance, the participant is
-   * moved into ACTIVE state and future messages can behave like normal inbox messages.
+   * moved into ACTIVE state and future messages can behave like normal inbox messages -
+   * or into JOINING first when the conversation is MLS-encrypted, until a member's
+   * Commit adds their devices (see ChatMembershipService).
    */
   async acceptRequest(userId: string, conversationId: string) {
-    const participant = await this.chatRepository.findParticipant(
-      conversationId,
-      userId,
-    );
+    await this.assertHasVisibleParticipant(conversationId, userId);
 
-    if (!participant || participant.deletedAt) {
-      throw new NotFoundException('Conversation not found');
-    }
+    await this.chatMembershipService.acceptInvite(conversationId, userId);
 
-    if (participant.state !== 'PENDING') {
-      throw new BadRequestException('Conversation is not pending');
-    }
-
-    return this.chatRepository.updateParticipantState(
-      conversationId,
-      userId,
-      'ACTIVE',
-    );
+    return this.chatRepository.findParticipant(conversationId, userId);
   }
 
   /**
@@ -201,6 +192,17 @@ export class ChatInboxService {
    * marks the participant as DECLINED so future sends are rejected.
    */
   async declineRequest(userId: string, conversationId: string) {
+    await this.assertHasVisibleParticipant(conversationId, userId);
+
+    await this.chatMembershipService.declineInvite(conversationId, userId);
+
+    return this.chatRepository.findParticipant(conversationId, userId);
+  }
+
+  private async assertHasVisibleParticipant(
+    conversationId: string,
+    userId: string,
+  ) {
     const participant = await this.chatRepository.findParticipant(
       conversationId,
       userId,
@@ -209,16 +211,6 @@ export class ChatInboxService {
     if (!participant || participant.deletedAt) {
       throw new NotFoundException('Conversation not found');
     }
-
-    if (participant.state !== 'PENDING') {
-      throw new BadRequestException('Conversation is not pending');
-    }
-
-    return this.chatRepository.updateParticipantState(
-      conversationId,
-      userId,
-      'DECLINED',
-    );
   }
 
   /**

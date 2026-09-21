@@ -6,6 +6,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { BlocksService } from '../blocks/blocks.service';
+import { isEntitledToLeaf } from '../chat/membership/leaf-entitlement';
+import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
 import { FollowsService } from '../follows/follows.service';
 import {
   ChatDevicesRepository,
@@ -29,6 +31,7 @@ export class ChatDevicesService {
     private readonly blocksService: BlocksService,
     private readonly fetchRateLimiter: KeyPackageFetchRateLimiterService,
     private readonly uploadRateLimiter: KeyPackageUploadRateLimiterService,
+    private readonly mlsGroupRosterRepository: MlsGroupRosterRepository,
   ) {}
 
   /**
@@ -113,44 +116,134 @@ export class ChatDevicesService {
   }
 
   /**
-   * Claims one key package for targetUserId, for the caller to use in
-   * adding a device to an MLS group. Prefers a SINGLE_USE package,
-   * falling back to the LAST_RESORT one (never consumed) only when no
-   * single-use package is available.
+   * Claims one key package per active device of targetUserId, to add them all
+   * in one Commit (MLS membership is per device). Prefers a SINGLE_USE package,
+   * falling back to the device's LAST_RESORT one; a device with neither is skipped.
    *
-   * Same authorization shape as chat's assertMessageRequestAllowed
-   * (mutual-block check, messageRequestSetting gate) - duplicated here
-   * rather than shared, since stage 5 (MLS-driven membership) will need to
-   * reconcile this against "already in a shared group" exceptions chat.
-   * service.ts's version doesn't need to consider. Unify then, not now.
+   * Two ways to be allowed:
+   * - Messaging someone (no conversationId): a requester block and the target's
+   *   messageRequestSetting apply, unless claiming your own devices.
+   * - Finishing a change to a group (conversationId): the group must be MLS, the
+   *   caller ACTIVE, the target entitled to a leaf; DM settings don't apply and
+   *   devices already in the group are skipped.
+   *
+   * excludeDeviceId leaves out the device creating the group; deviceIds limits
+   * the claim to those devices, so none registered meanwhile is claimed and wasted.
    */
-  async claimKeyPackageForUser(requesterId: string, targetUserId: string) {
+  async claimKeyPackagesForUser(
+    requesterId: string,
+    targetUserId: string,
+    options: {
+      excludeDeviceId?: string;
+      conversationId?: string;
+      /** Claim only for these devices, so a device registered meanwhile is not claimed and wasted. */
+      deviceIds?: string[];
+    } = {},
+  ) {
     this.fetchRateLimiter.assertNotRateLimited(requesterId, targetUserId);
 
-    await this.assertMayFetchKeyPackage(requesterId, targetUserId);
+    const isOwnDevices = requesterId === targetUserId;
+    const { excludeDeviceId, conversationId, deviceIds } = options;
 
-    const claimed = await this.chatDevicesRepository.claimSingleUseKeyPackage(
-      targetUserId,
-      requesterId,
+    const devicesInGroup = conversationId
+      ? await this.assertMayClaimForGroup(
+          requesterId,
+          targetUserId,
+          conversationId,
+        )
+      : new Set<string>();
+
+    if (!isOwnDevices && !conversationId) {
+      await this.assertMayFetchKeyPackage(requesterId, targetUserId);
+    }
+
+    const devices = (
+      await this.chatDevicesRepository.findActiveDevicesForUser(targetUserId)
+    ).filter(
+      (device) =>
+        device.id !== excludeDeviceId &&
+        !devicesInGroup.has(device.id) &&
+        (!deviceIds || deviceIds.includes(device.id)),
     );
 
-    const keyPackage =
-      claimed ??
-      (await this.chatDevicesRepository.findLastResortKeyPackage(targetUserId));
+    // The request above counted once; every extra package handed out counts too.
+    if (devices.length > 1) {
+      this.fetchRateLimiter.assertNotRateLimited(
+        requesterId,
+        targetUserId,
+        devices.length - 1,
+      );
+    }
 
-    if (!keyPackage) {
+    const claims = await Promise.all(
+      devices.map((device) => this.claimForDevice(device, requesterId)),
+    );
+    const offers = claims.filter((offer) => offer !== null);
+
+    // Own devices and devices for a group can legitimately be none (nothing new
+    // to add); someone else's account with nothing to claim means they can't be
+    // messaged yet.
+    if (offers.length === 0 && !isOwnDevices && !conversationId) {
       throw new NotFoundException(
         'This user has no available devices to message yet',
       );
     }
 
-    const device = await this.chatDevicesRepository.findById(
-      keyPackage.deviceId,
+    return offers;
+  }
+
+  /** Returns the devices already in the group, which a claim must skip. */
+  private async assertMayClaimForGroup(
+    requesterId: string,
+    targetUserId: string,
+    conversationId: string,
+  ): Promise<Set<string>> {
+    const states = await this.chatDevicesRepository.findParticipantStates(
+      conversationId,
+      [requesterId, targetUserId],
     );
-    if (!device) {
-      throw new NotFoundException(
-        'This user has no available devices to message yet',
+
+    if (states.get(requesterId) !== 'ACTIVE') {
+      throw new ForbiddenException(
+        'You are not an active member of this group',
       );
+    }
+
+    if (!isEntitledToLeaf(states.get(targetUserId))) {
+      throw new ForbiddenException(
+        'This user is not entitled to join this group',
+      );
+    }
+
+    // A group with no MLS roster has nothing to finish, and no key package of
+    // anyone's is ever needed for it.
+    if (!(await this.mlsGroupRosterRepository.hasRoster(conversationId))) {
+      throw new ForbiddenException('This conversation has no MLS group yet');
+    }
+
+    const leaves =
+      await this.mlsGroupRosterRepository.findActiveLeaves(conversationId);
+
+    return new Set(leaves.map((leaf) => leaf.deviceId));
+  }
+
+  private async claimForDevice(
+    device: {
+      id: string;
+      ciphersuite: string;
+      signaturePublicKey: Uint8Array;
+    },
+    requesterId: string,
+  ) {
+    const keyPackage =
+      (await this.chatDevicesRepository.claimSingleUseKeyPackage(
+        device.id,
+        requesterId,
+      )) ??
+      (await this.chatDevicesRepository.findLastResortKeyPackage(device.id));
+
+    if (!keyPackage) {
+      return null;
     }
 
     return {

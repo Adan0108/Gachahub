@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Param, Post, Query } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { ChatDevicesService } from './chat-devices.service';
+import { ClaimKeyPackagesQueryDto } from './dto/claim-key-packages-query.dto';
 import { RegisterDeviceDto } from './dto/register-device.dto';
 import { UploadKeyPackagesDto } from './dto/upload-key-packages.dto';
 
@@ -47,15 +48,17 @@ export class ChatDevicesController {
   @Post('claim/:userId')
   @ApiOperation({
     summary:
-      'Claim one key package for a user, to add their device to an MLS group',
+      'Claim one key package per active device of a user, to add all their devices to an MLS group. Pass excludeDeviceId when claiming your own devices, to skip the one creating the group; pass conversationId when finishing a change to a group you are in, and deviceIds (comma-separated) to claim for only those devices.',
   })
-  claimKeyPackage(
+  claimKeyPackages(
     @Session() session: UserSession,
     @Param('userId') userId: string,
+    @Query() query: ClaimKeyPackagesQueryDto,
   ) {
-    return this.chatDevicesService.claimKeyPackageForUser(
+    return this.chatDevicesService.claimKeyPackagesForUser(
       session.user.id,
       userId,
+      query,
     );
   }
 }
