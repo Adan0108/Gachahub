@@ -15,6 +15,7 @@ import {
   type HandshakeAcceptResult,
 } from './mls-handshakes.repository';
 import { SubmitHandshakeDto } from './dto/submit-handshake.dto';
+import { assertDeclarationIsConsistent } from './mls-membership-rules';
 
 interface SerializableHandshake {
   id: string;
@@ -55,14 +56,24 @@ export class MlsHandshakesService {
       };
     });
 
+    assertDeclarationIsConsistent({
+      senderDeviceId: dto.deviceId,
+      addedDeviceIds: dto.addedDeviceIds,
+      removedDeviceIds: dto.removedDeviceIds,
+      welcomeRecipientDeviceIds: welcomes.map((item) => item.recipientDeviceId),
+    });
+
     const payloadSha256 = createHash('sha256').update(payload).digest('hex');
 
     const result = await this.mlsHandshakesRepository.acceptHandshake({
       conversationId,
       expectedEpoch: dto.epoch,
       senderDeviceId: dto.deviceId,
+      senderUserId: userId,
       payload,
       payloadSha256,
+      addedDeviceIds: dto.addedDeviceIds,
+      removedDeviceIds: dto.removedDeviceIds,
       welcomes,
     });
 

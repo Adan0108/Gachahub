@@ -49,4 +49,32 @@ export class SubmitHandshakeDto {
   @ValidateNested({ each: true })
   @Type(() => WelcomeItemDto)
   welcomes: WelcomeItemDto[] = [];
+
+  // Required, with no default: a client that leaves these out must be
+  // refused, not treated as "this Commit changes no one" - the server checks
+  // membership against what is declared here, and every other member's client
+  // checks the declaration against the Commit itself.
+  @ApiProperty({
+    type: [String],
+    description: 'Device ids this Commit adds - exactly the Welcome recipients',
+  })
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ArrayUnique()
+  @IsString({ each: true })
+  @IsNotEmpty({ each: true })
+  @MaxLength(64, { each: true })
+  addedDeviceIds!: string[];
+
+  @ApiProperty({
+    type: [String],
+    description: 'Device ids this Commit removes from the group',
+  })
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ArrayUnique()
+  @IsString({ each: true })
+  @IsNotEmpty({ each: true })
+  @MaxLength(64, { each: true })
+  removedDeviceIds!: string[];
 }

@@ -268,6 +268,13 @@ enum ChatParticipantState {
   DECLINED
   BLOCKED
   ARCHIVED
+  /// Authorized to join an MLS-encrypted conversation but no device is in the MLS group yet.
+  /// Becomes ACTIVE in the same transaction that accepts the Commit adding their device.
+  JOINING
+  /// Being removed from an MLS-encrypted conversation: cut off server-side immediately, but their
+  /// devices are still MLS members. Becomes DECLINED in the same transaction that accepts the
+  /// Remove Commit. ACTIVE therefore always means "authorized AND cryptographically in the group".
+  LEAVING
 }
 
 enum ChatNotificationLevel {
@@ -320,6 +327,7 @@ model ChatConversation {
   messages      ChatMessage[]
   mlsHandshakes MlsHandshake[]
   mlsWelcomes   MlsWelcome[]
+  mlsMembers    MlsGroupMember[]
 
   @@index([type])
   @@index([status])
@@ -915,7 +923,7 @@ model MlsKeyPackage {
 // compare-and-set (MlsHandshakesRepository.acceptHandshake), never by
 // application-level locking.
 model MlsHandshake {
-  id             String @id @default(cuid())
+  id             String  @id @default(cuid())
   conversationId String
   /// The epoch this Commit was built FROM - ChatConversation.mlsEpoch's
   /// value at the moment the sender started building it, matching the
@@ -939,6 +947,15 @@ model MlsHandshake {
   /// SHA-256 of payload, so a network-retried submission of the same
   /// Commit can be recognized as a duplicate instead of a real conflict.
   payloadSha256 String
+
+  /// The sender's claim of which devices this Commit added and removed. The server cannot read a
+  /// Commit, so it only validates these against the authorized roster (see MlsGroupMember); every
+  /// other member's client checks them against what the Commit actually did and treats a mismatch
+  /// as a fault. False for Commits accepted before membership was tracked - those arrays are then
+  /// empty because nothing was declared, not because nothing changed.
+  membershipDeclared Boolean  @default(false)
+  addedDeviceIds     String[] @default([])
+  removedDeviceIds   String[] @default([])
 
   createdAt DateTime @default(now())
 
@@ -967,4 +984,40 @@ model MlsWelcome {
 
   @@index([recipientDeviceId, consumedAt])
   @@map("mls_welcomes")
+}
+
+/// The server's record of which devices are leaves in a conversation's MLS ratchet tree. The tree
+/// itself is opaque to the server; this is kept in sync with accepted Commits in the same
+/// transaction (MlsHandshakesRepository.acceptHandshake) so the server always knows who still
+/// holds group secrets.
+///
+/// deviceId and userId are deliberately plain strings, not relations: a leaf outlives its device
+/// row (deleting an account cascades ChatDevice away, but the leaf keeps holding group secrets
+/// until a Remove Commit lands), and the row must still say whose leaf it was to queue that removal.
+///
+/// A row is history once removedEpoch is set - a device removed and later re-added gets a new row.
+/// Epochs are the group's epoch AFTER the Commit (the founder device joins at 0).
+///
+/// No @@unique here: at most one ACTIVE row (removedEpoch IS NULL) may exist per device, which
+/// Prisma cannot express as a WHERE-scoped unique index, so the real constraint is a hand-written
+/// partial unique index in migration 20260921100000_add_mls_group_membership
+/// ("mls_group_members_active_device_key"), alongside a CHECK on the epochs
+/// ("mls_group_members_epochs_check"). Keep both migration lines when regenerating.
+model MlsGroupMember {
+  id             String @id @default(cuid())
+  conversationId String
+  deviceId       String
+  userId         String
+
+  addedEpoch   Int
+  removedEpoch Int?
+
+  createdAt DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, removedEpoch])
+  @@index([conversationId, userId])
+  @@index([deviceId])
+  @@map("mls_group_members")
 }

@@ -100,6 +100,10 @@ export class SyncEngine {
           recipientDeviceId: welcome.deviceId,
           payload: bytesToBase64(welcome.welcomeBytes),
         })),
+        // What this Commit does to the group. The server checks it against the
+        // authorized roster; every other member checks it against the Commit.
+        addedDeviceIds: change.added.map((offer) => offer.credential.deviceId),
+        removedDeviceIds: change.removed.map((credential) => credential.deviceId),
       });
 
       if (response.outcome === 'conflict') {

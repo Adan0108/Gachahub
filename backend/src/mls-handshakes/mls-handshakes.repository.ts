@@ -1,20 +1,22 @@
 import {
   BadRequestException,
-  ForbiddenException,
+  ConflictException,
   Injectable,
 } from '@nestjs/common';
-import type { Prisma } from '../generated/prisma/client';
+import type { MlsHandshake, Prisma } from '../generated/prisma/client';
+import { applyParticipantTransitions } from '../chat/membership/apply-participant-transitions';
+import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  assertAddedDevicesAuthorized,
+  assertRemovedDevicesRemovable,
+  assertSenderIsMember,
+  planCommitTransitions,
+  type DeviceFact,
+} from './mls-membership-rules';
 
-interface HandshakeRow {
-  id: string;
-  conversationId: string;
-  epoch: number;
-  senderDeviceId: string;
-  payload: Uint8Array;
-  payloadSha256: string;
-  createdAt: Date;
-}
+/** senderDeviceId is null once the sending device (and its account) has been deleted - the Commit is kept regardless. */
+type HandshakeRow = MlsHandshake;
 
 export type HandshakeAcceptResult =
   | { outcome: 'accepted'; handshake: HandshakeRow }
@@ -23,7 +25,10 @@ export type HandshakeAcceptResult =
 
 @Injectable()
 export class MlsHandshakesRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mlsGroupRosterRepository: MlsGroupRosterRepository,
+  ) {}
 
   /**
    * ChatModule exports nothing today, and importing it here would risk a
@@ -50,19 +55,24 @@ export class MlsHandshakesRepository {
    * payload) from a real conflict (someone else's Commit) it must catch up
    * on - the server never resolves crypto conflicts itself, only ordering.
    *
-   * The epoch bump, the membership sync (below), and the handshake/welcome
-   * rows all happen in one transaction (threat-model §3: "the two must be
-   * kept in sync in the same transaction") - if a welcome targets a user the
-   * server never authorized into this conversation, the whole commit is
-   * rejected and rolled back, including the epoch bump, rather than leaving
-   * an epoch advanced with no matching handshake row.
+   * The epoch bump, the roster and participant changes the Commit makes (see
+   * applyMembershipChange), and the handshake/welcome rows all happen in one
+   * transaction (threat-model §3: "the two must be kept in sync in the same
+   * transaction"). If any rule is broken the whole Commit is rejected and
+   * rolled back, including the epoch bump, rather than leaving an epoch
+   * advanced with no matching handshake row or the two rosters out of step.
    */
   async acceptHandshake(params: {
     conversationId: string;
     expectedEpoch: number;
     senderDeviceId: string;
+    senderUserId: string;
     payload: Uint8Array;
     payloadSha256: string;
+    /** Devices this Commit adds, as declared by the sender. Each needs a Welcome. */
+    addedDeviceIds: string[];
+    /** Devices this Commit removes, as declared by the sender. */
+    removedDeviceIds: string[];
     welcomes: { recipientDeviceId: string; payload: Uint8Array }[];
   }): Promise<HandshakeAcceptResult> {
     const {
@@ -71,6 +81,8 @@ export class MlsHandshakesRepository {
       senderDeviceId,
       payload,
       payloadSha256,
+      addedDeviceIds,
+      removedDeviceIds,
       welcomes,
     } = params;
 
@@ -84,11 +96,7 @@ export class MlsHandshakesRepository {
         return null;
       }
 
-      await this.assertAllWelcomedIntoAuthorizedConversation(
-        tx,
-        conversationId,
-        welcomes,
-      );
+      await this.applyMembershipChange(tx, params);
 
       const handshake = await tx.mlsHandshake.create({
         data: {
@@ -97,6 +105,9 @@ export class MlsHandshakesRepository {
           senderDeviceId,
           payload: payload.slice(),
           payloadSha256,
+          membershipDeclared: true,
+          addedDeviceIds,
+          removedDeviceIds,
         },
       });
 
@@ -137,75 +148,153 @@ export class MlsHandshakesRepository {
   }
 
   /**
-   * MLS Add is only ever the cryptographic side effect of a membership
-   * decision the server already authorized elsewhere - mutual-follow/
-   * message-request checks (chat.service.ts) or an explicit acceptRequest
-   * (threat-model §3). This never CREATES or flips participant state; it
-   * only asserts the state that decision already produced is ACTIVE, so an
-   * MLS commit can never be the thing that first grants conversation
-   * membership.
+   * Brings the roster and the participant rows in line with the Commit being
+   * accepted, after checking its declared changes against the authorized
+   * roster (mls-membership-rules.ts). MLS Add is only ever the cryptographic
+   * side effect of a decision the server already made - a Commit can never be
+   * the thing that first grants conversation membership.
    *
-   * Batched into two findMany calls regardless of how many welcomes are in
-   * this commit (up to 50, per SubmitHandshakeDto) instead of two
-   * findUnique calls per welcome - this runs inside the same transaction
-   * as the epoch compare-and-set, holding a lock every other member's
-   * commit for this conversation contends on, so up to 100 sequential
-   * round trips here directly extends how long that lock is held.
+   * The Commit that creates the group is special: the roster is empty, the
+   * sender's device is the founder, and anyone already ACTIVE without a device
+   * in the new group is moved to JOINING.
    */
-  private async assertAllWelcomedIntoAuthorizedConversation(
+  private async applyMembershipChange(
     tx: Prisma.TransactionClient,
-    conversationId: string,
-    welcomes: { recipientDeviceId: string }[],
+    params: {
+      conversationId: string;
+      expectedEpoch: number;
+      senderDeviceId: string;
+      senderUserId: string;
+      addedDeviceIds: string[];
+      removedDeviceIds: string[];
+    },
   ): Promise<void> {
-    if (welcomes.length === 0) {
-      return;
+    const {
+      conversationId,
+      expectedEpoch,
+      senderDeviceId,
+      senderUserId,
+      addedDeviceIds,
+      removedDeviceIds,
+    } = params;
+    const newEpoch = expectedEpoch + 1;
+
+    const groupJustActivated = !(await this.mlsGroupRosterRepository.hasRoster(
+      conversationId,
+      tx,
+    ));
+
+    if (groupJustActivated && expectedEpoch !== 0) {
+      // The group already ran before membership was tracked, so who is in it
+      // is unknown - guessing would let the two rosters silently disagree.
+      throw new BadRequestException(
+        'This conversation predates membership tracking and cannot be extended',
+      );
+    }
+
+    const activeLeaves = groupJustActivated
+      ? []
+      : await this.mlsGroupRosterRepository.findActiveLeaves(
+          conversationId,
+          tx,
+        );
+    const activeLeafDeviceIds = new Set(
+      activeLeaves.map((leaf) => leaf.deviceId),
+    );
+
+    if (!groupJustActivated) {
+      assertSenderIsMember(activeLeafDeviceIds, senderDeviceId);
     }
 
     const devices = await tx.chatDevice.findMany({
-      where: {
-        id: { in: welcomes.map((welcome) => welcome.recipientDeviceId) },
-      },
+      where: { id: { in: [...addedDeviceIds, ...removedDeviceIds] } },
       select: { id: true, userId: true, revokedAt: true },
     });
-    const deviceById = new Map(devices.map((device) => [device.id, device]));
-
     const participants = await tx.chatParticipant.findMany({
-      where: {
-        conversationId,
-        userId: { in: [...new Set(devices.map((device) => device.userId))] },
-      },
+      where: { conversationId },
+      select: { userId: true, state: true },
     });
-    const participantByUserId = new Map(
-      participants.map((participant) => [participant.userId, participant]),
+    const deviceById = new Map<string, DeviceFact>(
+      devices.map((device) => [device.id, device]),
+    );
+    const participantStateByUserId = new Map(
+      participants.map((participant) => [
+        participant.userId,
+        participant.state,
+      ]),
     );
 
-    for (const welcome of welcomes) {
-      const device = deviceById.get(welcome.recipientDeviceId);
-      if (!device) {
-        throw new BadRequestException(
-          `Unknown recipient device: ${welcome.recipientDeviceId}`,
-        );
-      }
+    assertAddedDevicesAuthorized({
+      addedDeviceIds,
+      deviceById,
+      participantStateByUserId,
+      activeLeafDeviceIds,
+    });
+    assertRemovedDevicesRemovable({
+      removedDeviceIds,
+      activeLeafUserIdByDeviceId: new Map(
+        activeLeaves.map((leaf) => [leaf.deviceId, leaf.userId]),
+      ),
+      deviceById,
+      participantStateByUserId,
+    });
 
-      // The consumption side (assertOwnActiveDevice, called from
-      // getPendingWelcomes/consumeWelcome) already blocks a revoked device
-      // from ever fetching or consuming a Welcome addressed to it - this
-      // is defense-in-depth so a Welcome row for an already-revoked device
-      // is never created in the first place (e.g. revocation landing
-      // between the key-package claim and this commit's submission).
-      if (device.revokedAt) {
-        throw new BadRequestException(
-          `Recipient device is revoked: ${welcome.recipientDeviceId}`,
-        );
-      }
-
-      const participant = participantByUserId.get(device.userId);
-      if (!participant || participant.state !== 'ACTIVE') {
-        throw new ForbiddenException(
-          `User ${device.userId} is not an active participant of this conversation`,
-        );
-      }
+    const removedCount = await this.mlsGroupRosterRepository.removeLeaves(
+      conversationId,
+      removedDeviceIds,
+      newEpoch,
+      tx,
+    );
+    if (removedCount !== removedDeviceIds.length) {
+      throw new ConflictException(
+        'The group changed while this Commit was being accepted - please retry',
+      );
     }
+
+    const addedLeaves = addedDeviceIds.map((deviceId) => ({
+      deviceId,
+      userId: deviceById.get(deviceId)!.userId,
+    }));
+
+    if (groupJustActivated) {
+      await this.mlsGroupRosterRepository.addLeaves(
+        conversationId,
+        [{ deviceId: senderDeviceId, userId: senderUserId }],
+        0,
+        tx,
+      );
+    }
+    await this.mlsGroupRosterRepository.addLeaves(
+      conversationId,
+      addedLeaves,
+      newEpoch,
+      tx,
+    );
+
+    const removedDeviceIdSet = new Set(removedDeviceIds);
+    const userIdsWithDevices = new Set([
+      ...activeLeaves
+        .filter((leaf) => !removedDeviceIdSet.has(leaf.deviceId))
+        .map((leaf) => leaf.userId),
+      ...addedLeaves.map((leaf) => leaf.userId),
+      ...(groupJustActivated ? [senderUserId] : []),
+    ]);
+
+    const removedUserIds = activeLeaves
+      .filter((leaf) => removedDeviceIdSet.has(leaf.deviceId))
+      .map((leaf) => leaf.userId);
+
+    const transitions = planCommitTransitions({
+      participantStateByUserId,
+      addedUserIds: addedLeaves.map((leaf) => leaf.userId),
+      fullyRemovedUserIds: removedUserIds.filter(
+        (userId) => !userIdsWithDevices.has(userId),
+      ),
+      userIdsWithDevices,
+      groupJustActivated,
+    });
+
+    await applyParticipantTransitions(tx, conversationId, transitions);
   }
 
   findHandshakesSince(conversationId: string, fromEpoch: number) {

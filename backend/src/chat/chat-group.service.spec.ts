@@ -6,6 +6,9 @@ import {
 jest.mock('./chat.repository', () => ({
   ChatRepository: class {},
 }));
+jest.mock('../mls-group-roster/mls-group-roster.repository', () => ({
+  MlsGroupRosterRepository: class {},
+}));
 jest.mock('../follows/follows.service', () => ({
   FollowsService: class {},
 }));
@@ -43,8 +46,6 @@ describe('ChatGroupService', () => {
     findActiveUsersByIds: jest.fn(),
     createGroupConversation: jest.fn(),
     updateGroupConversation: jest.fn(),
-    addGroupMembers: jest.fn(),
-    removeGroupMembers: jest.fn(),
     findConversationWithParticipants: jest.fn(),
     findParticipant: jest.fn(),
     transferGroupOwnership: jest.fn(),
@@ -96,6 +97,11 @@ describe('ChatGroupService', () => {
     isModerator: jest.fn(),
   };
 
+  const membershipService = {
+    addMembers: jest.fn(),
+    removeMembers: jest.fn(),
+  };
+
   let chatAccessService: ChatAccessService;
   let service: ChatGroupService;
 
@@ -107,7 +113,11 @@ describe('ChatGroupService', () => {
       blocksService as any,
       gameModeratorsService as any,
     );
-    service = new ChatGroupService(repository as any, chatAccessService);
+    service = new ChatGroupService(
+      repository as any,
+      chatAccessService,
+      membershipService as any,
+    );
     blocksService.getBlockedIdsAmong.mockResolvedValue(new Set());
     blocksService.isBlocked.mockResolvedValue(false);
     followsService.isFollowing.mockResolvedValue({ following: false });
@@ -181,7 +191,7 @@ describe('ChatGroupService', () => {
       });
     });
 
-    it('resolves mutual followers to ACTIVE and others to PENDING', async () => {
+    it('lets mutual followers join directly and asks everyone else to accept an invite', async () => {
       repository.findActiveUsersByIds.mockResolvedValue([
         { id: 'user-2' },
         { id: 'user-3' },
@@ -383,17 +393,17 @@ describe('ChatGroupService', () => {
         { id: 'user-2' },
         { id: 'user-3' },
       ]);
-      repository.addGroupMembers.mockResolvedValue({ count: 2 });
+      membershipService.addMembers.mockResolvedValue({ count: 2 });
 
       await service.addGroupMembers('user-1', 'conversation-1', {
         userIds: ['user-2', 'user-3', 'user-2'],
       });
 
-      expect(repository.addGroupMembers).toHaveBeenCalledWith(
+      expect(membershipService.addMembers).toHaveBeenCalledWith(
         'conversation-1',
         [
-          { userId: 'user-2', state: 'PENDING' },
-          { userId: 'user-3', state: 'PENDING' },
+          { userId: 'user-2', entitlement: 'INVITE' },
+          { userId: 'user-3', entitlement: 'INVITE' },
         ],
       );
     });
@@ -410,17 +420,17 @@ describe('ChatGroupService', () => {
             (followerId === 'user-3' && followingId === 'user-1'),
         }),
       );
-      repository.addGroupMembers.mockResolvedValue({ count: 2 });
+      membershipService.addMembers.mockResolvedValue({ count: 2 });
 
       await service.addGroupMembers('user-1', 'conversation-1', {
         userIds: ['user-2', 'user-3'],
       });
 
-      expect(repository.addGroupMembers).toHaveBeenCalledWith(
+      expect(membershipService.addMembers).toHaveBeenCalledWith(
         'conversation-1',
         [
-          { userId: 'user-2', state: 'PENDING' },
-          { userId: 'user-3', state: 'ACTIVE' },
+          { userId: 'user-2', entitlement: 'INVITE' },
+          { userId: 'user-3', entitlement: 'DIRECT' },
         ],
       );
     });
@@ -436,7 +446,7 @@ describe('ChatGroupService', () => {
         }),
       ).rejects.toThrow(ForbiddenException);
 
-      expect(repository.addGroupMembers).not.toHaveBeenCalled();
+      expect(membershipService.addMembers).not.toHaveBeenCalled();
     });
   });
 
@@ -470,17 +480,17 @@ describe('ChatGroupService', () => {
         } as any),
       ).rejects.toThrow(BadRequestException);
 
-      expect(repository.removeGroupMembers).not.toHaveBeenCalled();
+      expect(membershipService.removeMembers).not.toHaveBeenCalled();
     });
 
     it('removes a deduped member list on success', async () => {
-      repository.removeGroupMembers.mockResolvedValue({ count: 1 });
+      membershipService.removeMembers.mockResolvedValue({ count: 1 });
 
       await service.removeGroupMembers('user-1', 'conversation-1', {
         userIds: ['user-2', 'user-2'],
       });
 
-      expect(repository.removeGroupMembers).toHaveBeenCalledWith(
+      expect(membershipService.removeMembers).toHaveBeenCalledWith(
         'conversation-1',
         ['user-2'],
       );
@@ -532,7 +542,7 @@ describe('ChatGroupService', () => {
         service.leaveGroup('user-1', 'conversation-1'),
       ).rejects.toThrow(BadRequestException);
 
-      expect(repository.removeGroupMembers).not.toHaveBeenCalled();
+      expect(membershipService.removeMembers).not.toHaveBeenCalled();
       expect(repository.updateParticipantState).not.toHaveBeenCalled();
     });
 
@@ -555,7 +565,7 @@ describe('ChatGroupService', () => {
         'user-1',
         'DECLINED',
       );
-      expect(repository.removeGroupMembers).not.toHaveBeenCalled();
+      expect(membershipService.removeMembers).not.toHaveBeenCalled();
     });
 
     it('removes an active non-owner member on leave', async () => {
@@ -564,11 +574,11 @@ describe('ChatGroupService', () => {
           { userId: 'user-1', role: 'MEMBER', state: 'ACTIVE' },
         ]),
       );
-      repository.removeGroupMembers.mockResolvedValue({ count: 1 });
+      membershipService.removeMembers.mockResolvedValue({ count: 1 });
 
       await service.leaveGroup('user-1', 'conversation-1');
 
-      expect(repository.removeGroupMembers).toHaveBeenCalledWith(
+      expect(membershipService.removeMembers).toHaveBeenCalledWith(
         'conversation-1',
         ['user-1'],
       );

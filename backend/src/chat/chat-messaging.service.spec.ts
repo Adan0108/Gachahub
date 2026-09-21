@@ -37,6 +37,7 @@ jest.mock('../generated/prisma/client', () => ({
 }));
 
 import { Prisma } from '../generated/prisma/client';
+import { MembershipChangePendingException } from '../common/exceptions/membership-change-pending.exception';
 import { ChatAccessService } from './chat-access.service';
 import { ChatMessagingService } from './chat-messaging.service';
 
@@ -842,6 +843,36 @@ describe('ChatMessagingService', () => {
           message: { clientMessageId: 'client-1' },
         } as any),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('makes the sender wait while a group member is still being removed', async () => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          { userId: 'user-1', role: 'OWNER', state: 'ACTIVE' },
+          { userId: 'user-2', role: 'MEMBER', state: 'LEAVING' },
+        ]),
+      );
+
+      const rejection = service.sendMessage('user-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      await expect(rejection).rejects.toThrow(MembershipChangePendingException);
+      expect(repository.createMessage).not.toHaveBeenCalled();
+    });
+
+    it('does not tell an outsider a removal is pending - access is checked first', async () => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          { userId: 'user-2', role: 'MEMBER', state: 'LEAVING' },
+        ]),
+      );
+
+      await expect(
+        service.sendMessage('user-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('rejects when the conversation is not found', async () => {

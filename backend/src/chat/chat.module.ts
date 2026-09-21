@@ -22,6 +22,8 @@ import { GamesModule } from '../games/games.module';
 import { GameModeratorsModule } from '../game-moderators/game-moderators.module';
 import { BlocksModule } from '../blocks/blocks.module';
 import { MediaModule } from '../media/media.module';
+import { MlsGroupRosterModule } from '../mls-group-roster/mls-group-roster.module';
+import { ChatMembershipService } from './membership/chat-membership.service';
 
 /**
  * Chat feature module.
@@ -41,12 +43,14 @@ import { MediaModule } from '../media/media.module';
     GameModeratorsModule,
     BlocksModule,
     MediaModule,
+    MlsGroupRosterModule,
   ],
   controllers: [ChatController],
   providers: [
     ChatRepository,
     ChatAccessService,
     ChatMessagingService,
+    ChatMembershipService,
     ChatGroupService,
     ChatInboxService,
     ChatMessageActionsService,

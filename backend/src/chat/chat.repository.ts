@@ -8,6 +8,10 @@ import {
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  applyParticipantTransitions,
+  type ParticipantTransition,
+} from './membership/apply-participant-transitions';
+import {
   claimUploadsForAttachment,
   type PrismaTransaction,
 } from '../media/media.repository';
@@ -298,77 +302,26 @@ export class ChatRepository {
   }
 
   /**
-   * Add or reactivates member rows for a group.
-   *
-   * skip BLOCKED and already-ACTIVE rows, clears deletedAt/archivedAt and resets role to MEMBER when reactivating.
+   * The participant rows that exist for these users. Users with no row are
+   * simply absent from the result.
    */
-  async addGroupMembers(
-    conversationId: string,
-    members: Array<{ userId: string; state: 'ACTIVE' | 'PENDING' }>,
-  ) {
-    const memberIdsByState = new Map<'ACTIVE' | 'PENDING', string[]>();
-
-    for (const member of members) {
-      const userIds = memberIdsByState.get(member.state) ?? [];
-      userIds.push(member.userId);
-      memberIdsByState.set(member.state, userIds);
-    }
-
-    return this.prisma.$transaction(async (tx) => {
-      for (const [state, userIds] of memberIdsByState) {
-        await tx.chatParticipant.updateMany({
-          where: {
-            conversationId,
-            userId: { in: userIds },
-            role: {
-              not: 'OWNER',
-            },
-            // already-active rows aren't being reactivated, leave them untouched
-            state: {
-              notIn: ['BLOCKED', 'ACTIVE'],
-            },
-          },
-          data: {
-            state,
-            role: 'MEMBER',
-            deletedAt: null,
-            archivedAt: null,
-          },
-        });
-      }
-
-      return tx.chatParticipant.createMany({
-        data: members.map((member) => ({
-          conversationId,
-          userId: member.userId,
-          role: 'MEMBER',
-          state: member.state,
-        })),
-        skipDuplicates: true,
-      });
+  findParticipantsByUserIds(conversationId: string, userIds: string[]) {
+    return this.prisma.chatParticipant.findMany({
+      where: { conversationId, userId: { in: userIds } },
     });
   }
 
   /**
-   * Marks group members as declined/removed.
-   *
-   * OWNER participants are excluded so a group cannot lose ownership here.
+   * Applies membership state changes decided by the membership state machine,
+   * all or nothing (see applyParticipantTransitions for the conditional-write rules).
    */
-  removeGroupMembers(conversationId: string, userIds: string[]) {
-    return this.prisma.chatParticipant.updateMany({
-      where: {
-        conversationId,
-        userId: {
-          in: userIds,
-        },
-        role: {
-          not: 'OWNER',
-        },
-      },
-      data: {
-        state: 'DECLINED',
-      },
-    });
+  applyStateTransitions(
+    conversationId: string,
+    changes: ParticipantTransition[],
+  ): Promise<number> {
+    return this.prisma.$transaction((tx) =>
+      applyParticipantTransitions(tx, conversationId, changes),
+    );
   }
 
   /**

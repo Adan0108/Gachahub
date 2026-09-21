@@ -57,6 +57,8 @@ describe('MlsHandshakesService', () => {
         epoch,
         payload: Buffer.from(commitPayload).toString('base64'),
         welcomes: [],
+        addedDeviceIds: [],
+        removedDeviceIds: [],
       });
 
       expect(result.outcome).toBe('accepted');
@@ -97,6 +99,8 @@ describe('MlsHandshakesService', () => {
             payload: Buffer.from(welcomePayload).toString('base64'),
           },
         ],
+        addedDeviceIds: ['device-2'],
+        removedDeviceIds: [],
       });
 
       expect(repository.acceptHandshake).toHaveBeenCalledWith(
@@ -106,6 +110,68 @@ describe('MlsHandshakesService', () => {
           ],
         }),
       );
+    });
+
+    it('passes the sender, and what the Commit declares it adds and removes, to the repository', async () => {
+      const { epoch, commitPayload, welcomePayload } =
+        await buildTestCommitWithWelcome('conv-1');
+      repository.acceptHandshake.mockResolvedValue({
+        outcome: 'accepted',
+        handshake: {
+          id: 'hs-1',
+          conversationId: 'conv-1',
+          epoch,
+          senderDeviceId: 'device-1',
+          payload: commitPayload,
+          createdAt: new Date(),
+        },
+      });
+
+      await service.submitHandshake('user-1', 'conv-1', {
+        deviceId: 'device-1',
+        epoch,
+        payload: Buffer.from(commitPayload).toString('base64'),
+        welcomes: [
+          {
+            recipientDeviceId: 'device-2',
+            payload: Buffer.from(welcomePayload).toString('base64'),
+          },
+        ],
+        addedDeviceIds: ['device-2'],
+        removedDeviceIds: ['device-3'],
+      });
+
+      expect(repository.acceptHandshake).toHaveBeenCalledWith(
+        expect.objectContaining({
+          senderUserId: 'user-1',
+          addedDeviceIds: ['device-2'],
+          removedDeviceIds: ['device-3'],
+        }),
+      );
+    });
+
+    it('rejects a declaration that does not add up before ever reaching the repository', async () => {
+      const { epoch, commitPayload, welcomePayload } =
+        await buildTestCommitWithWelcome('conv-1');
+
+      await expect(
+        service.submitHandshake('user-1', 'conv-1', {
+          deviceId: 'device-1',
+          epoch,
+          payload: Buffer.from(commitPayload).toString('base64'),
+          // a Welcome for a device the Commit does not declare as added
+          welcomes: [
+            {
+              recipientDeviceId: 'device-2',
+              payload: Buffer.from(welcomePayload).toString('base64'),
+            },
+          ],
+          addedDeviceIds: [],
+          removedDeviceIds: [],
+        }),
+      ).rejects.toThrow('exactly the devices');
+
+      expect(repository.acceptHandshake).not.toHaveBeenCalled();
     });
 
     it('rejects a commit addressed to a different conversation before ever reaching the repository', async () => {
@@ -118,6 +184,8 @@ describe('MlsHandshakesService', () => {
           epoch,
           payload: Buffer.from(commitPayload).toString('base64'),
           welcomes: [],
+          addedDeviceIds: [],
+          removedDeviceIds: [],
         }),
       ).rejects.toThrow('group_id does not match this conversation');
 
@@ -146,6 +214,8 @@ describe('MlsHandshakesService', () => {
           epoch,
           payload: Buffer.from(commitPayload).toString('base64'),
           welcomes: [],
+          addedDeviceIds: [],
+          removedDeviceIds: [],
         }),
       ).rejects.toThrow(ConflictException);
     });
@@ -163,6 +233,8 @@ describe('MlsHandshakesService', () => {
           epoch,
           payload: Buffer.from(commitPayload).toString('base64'),
           welcomes: [],
+          addedDeviceIds: [],
+          removedDeviceIds: [],
         }),
       ).rejects.toThrow(ForbiddenException);
     });
@@ -178,6 +250,8 @@ describe('MlsHandshakesService', () => {
           epoch,
           payload: Buffer.from(commitPayload).toString('base64'),
           welcomes: [],
+          addedDeviceIds: [],
+          removedDeviceIds: [],
         }),
       ).rejects.toThrow(ForbiddenException);
 

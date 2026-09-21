@@ -12,13 +12,17 @@ import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { MlsHandshakesService } from './mls-handshakes.service';
+import { MlsMembershipWorkService } from './mls-membership-work.service';
 import { SubmitHandshakeDto } from './dto/submit-handshake.dto';
 
 @ApiTags('MLS Handshakes')
 @ApiCookieAuth('better-auth.session_token')
 @Controller('mls-handshakes')
 export class MlsHandshakesController {
-  constructor(private readonly mlsHandshakesService: MlsHandshakesService) {}
+  constructor(
+    private readonly mlsHandshakesService: MlsHandshakesService,
+    private readonly mlsMembershipWorkService: MlsMembershipWorkService,
+  ) {}
 
   @Post('conversations/:conversationId')
   @ApiOperation({
@@ -62,6 +66,23 @@ export class MlsHandshakesController {
     return this.mlsHandshakesService.getPendingWelcomes(
       session.user.id,
       deviceId,
+    );
+  }
+
+  @Get('devices/:deviceId/membership-work')
+  @ApiOperation({
+    summary:
+      'List the membership changes (devices to add or remove) this device can finish, per conversation',
+  })
+  getMembershipWork(
+    @Session() session: UserSession,
+    @Param('deviceId') deviceId: string,
+    @Query('after') after?: string,
+  ) {
+    return this.mlsMembershipWorkService.getMembershipWork(
+      session.user.id,
+      deviceId,
+      after,
     );
   }
 

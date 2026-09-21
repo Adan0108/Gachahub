@@ -135,6 +135,8 @@ describe('SyncEngine', () => {
           deviceId: alice.deviceId,
           epoch: 0,
           welcomes: [expect.objectContaining({ recipientDeviceId: bob.deviceId })],
+          addedDeviceIds: [bob.deviceId],
+          removedDeviceIds: [],
         }),
       );
     });
@@ -215,6 +217,40 @@ describe('SyncEngine', () => {
 
       // Bob's session should now be caught up on alice's winning commit.
       await expect(bobEngine.getCurrentEpoch('conv-1')).resolves.toBe(2);
+    });
+  });
+
+  describe('submitMembershipChange', () => {
+    it('declares the devices it removes, so the server can check them against the roster', async () => {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      const bob = await setUpDevice('user-bob');
+      await alice.engine.createGroup('conv-1');
+      await mockClaims({ 'user-bob': [bob] });
+      vi.mocked(api.submitMlsHandshake).mockImplementation(async (_conversationId, payload) => ({
+        outcome: 'accepted',
+        handshake: fakeHandshake({
+          epoch: payload.epoch,
+          senderDeviceId: payload.deviceId,
+          payload: base64ToBytes(payload.payload),
+        }),
+      }));
+      await alice.engine.addUserToConversation('conv-1', 'user-bob');
+      vi.mocked(api.submitMlsHandshake).mockClear();
+
+      await alice.engine.submitMembershipChange('conv-1', {
+        added: [],
+        removed: [bob.credential],
+      });
+
+      expect(api.submitMlsHandshake).toHaveBeenCalledWith(
+        'conv-1',
+        expect.objectContaining({
+          welcomes: [],
+          addedDeviceIds: [],
+          removedDeviceIds: [bob.deviceId],
+        }),
+      );
     });
   });
 

@@ -173,6 +173,10 @@ export class ChatMessageActionsService {
       messageId,
     );
 
+    this.chatAccessService.assertNoMembershipChangePending(
+      message.conversation.participants,
+    );
+
     const updated = await this.chatRepository.updateMessage({
       messageId,
       ciphertext: dto.ciphertext,
