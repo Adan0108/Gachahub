@@ -13,6 +13,9 @@ const plaintextStore = new EncryptedIndexedDbMessagePlaintextStore();
  * its own message later (that generation's key is already gone by the time
  * encryptMessage returns), so this is the only chance to ever cache it.
  *
+ * `clientMessageId` must stay the same across retries of one message: the backend returns the message
+ * it already stored for that id, so a retry after a lost response is not delivered twice.
+ *
  * Ensures a local MLS group exists first (see ensureConversationGroup) so
  * this doubles as "finish setting up encryption" for a conversation that
  * was just created, or a request that just got accepted - the caller
@@ -24,9 +27,17 @@ export async function sendEncryptedChatMessage(
   conversationId: ConversationId,
   recipientUserId: UserId,
   text: string,
+  clientMessageId: string,
 ) {
   try {
-    return await encryptAndSend(syncEngine, deviceId, conversationId, recipientUserId, text);
+    return await encryptAndSend(
+      syncEngine,
+      deviceId,
+      conversationId,
+      recipientUserId,
+      text,
+      clientMessageId,
+    );
   } catch (error) {
     if (!isMembershipChangePending(error)) throw error;
 
@@ -35,7 +46,14 @@ export async function sendEncryptedChatMessage(
     // epoch - the attempt that was refused is simply discarded, and one retry
     // is all a pending change should ever need.
     await syncEngine.reconcileMembership({ conversationId });
-    return encryptAndSend(syncEngine, deviceId, conversationId, recipientUserId, text);
+    return encryptAndSend(
+      syncEngine,
+      deviceId,
+      conversationId,
+      recipientUserId,
+      text,
+      clientMessageId,
+    );
   }
 }
 
@@ -53,6 +71,7 @@ async function encryptAndSend(
   conversationId: ConversationId,
   recipientUserId: UserId,
   text: string,
+  clientMessageId: string,
 ) {
   await ensureConversationGroup(syncEngine, conversationId, recipientUserId);
 
@@ -62,6 +81,7 @@ async function encryptAndSend(
   const response = await api.sendChatMessage(conversationId, {
     ciphertext: bytesToBase64(wireBytes),
     contentType: 'TEXT',
+    clientMessageId,
   });
 
   await plaintextStore.save({

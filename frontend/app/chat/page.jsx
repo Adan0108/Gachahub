@@ -147,13 +147,14 @@ export default function ChatPage() {
   // id since the server hasn't assigned one yet.
   const [pendingMessages, setPendingMessages] = useState([]);
   const sendMessage = useMutation({
-    mutationFn: ({ text }) =>
+    mutationFn: ({ text, clientId }) =>
       sendEncryptedChatMessage(
         syncEngine,
         deviceCredential.deviceId,
         activeId,
         peer?.id,
         text,
+        clientId,
       ),
     onSuccess: (response, variables) => {
       setPendingMessages((prev) => prev.filter((pending) => pending.clientId !== variables.clientId));

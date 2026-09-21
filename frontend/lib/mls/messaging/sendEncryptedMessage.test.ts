@@ -39,6 +39,7 @@ describe('sendEncryptedChatMessage', () => {
       'conv-1',
       'user-bob',
       'hello',
+      'client-1',
     );
 
     expect(engine.createGroup).not.toHaveBeenCalled();
@@ -49,7 +50,7 @@ describe('sendEncryptedChatMessage', () => {
     });
     expect(api.sendChatMessage).toHaveBeenCalledWith(
       'conv-1',
-      expect.objectContaining({ contentType: 'TEXT' }),
+      expect.objectContaining({ contentType: 'TEXT', clientMessageId: 'client-1' }),
     );
     expect(result.message.id).toBe('msg-1');
   });
@@ -63,7 +64,14 @@ describe('sendEncryptedChatMessage', () => {
     engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 0 });
     vi.mocked(api.sendChatMessage).mockResolvedValue({ message: { id: 'msg-2' } });
 
-    await sendEncryptedChatMessage(engine as any, 'device-1', 'conv-1', 'user-bob', 'hi');
+    await sendEncryptedChatMessage(
+      engine as any,
+      'device-1',
+      'conv-1',
+      'user-bob',
+      'hi',
+      'client-1',
+    );
 
     expect(engine.createGroup).toHaveBeenCalledWith('conv-1');
     expect(engine.seedNewGroup).toHaveBeenCalledWith('conv-1', 'user-bob');
@@ -93,11 +101,16 @@ describe('sendEncryptedChatMessage', () => {
         'conv-1',
         'user-bob',
         'hello',
+        'client-1',
       );
 
       expect(engine.reconcileMembership).toHaveBeenCalledWith({ conversationId: 'conv-1' });
       expect(engine.encryptMessage).toHaveBeenCalledTimes(2);
       expect(api.sendChatMessage).toHaveBeenCalledTimes(2);
+      // both sends carry the same id, so the backend can tell they are one message
+      expect(
+        vi.mocked(api.sendChatMessage).mock.calls.map(([, body]) => body.clientMessageId),
+      ).toEqual(['client-1', 'client-1']);
       expect(result.message.id).toBe('msg-9');
     });
 
@@ -109,7 +122,14 @@ describe('sendEncryptedChatMessage', () => {
       vi.mocked(api.sendChatMessage).mockRejectedValue(pendingError());
 
       await expect(
-        sendEncryptedChatMessage(engine as any, 'device-1', 'conv-1', 'user-bob', 'hello'),
+        sendEncryptedChatMessage(
+          engine as any,
+          'device-1',
+          'conv-1',
+          'user-bob',
+          'hello',
+          'client-1',
+        ),
       ).rejects.toMatchObject({ code: 'MEMBERSHIP_CHANGE_PENDING' });
 
       expect(engine.reconcileMembership).toHaveBeenCalledTimes(1);
@@ -126,7 +146,14 @@ describe('sendEncryptedChatMessage', () => {
       );
 
       await expect(
-        sendEncryptedChatMessage(engine as any, 'device-1', 'conv-1', 'user-bob', 'hello'),
+        sendEncryptedChatMessage(
+          engine as any,
+          'device-1',
+          'conv-1',
+          'user-bob',
+          'hello',
+          'client-1',
+        ),
       ).rejects.toThrow('duplicate');
 
       expect(engine.reconcileMembership).not.toHaveBeenCalled();
