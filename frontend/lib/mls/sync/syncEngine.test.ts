@@ -3,7 +3,11 @@ import { SyncEngine } from './syncEngine';
 import { TsMlsDeviceIdentityStore, TsMlsGroupSessionFactory } from '../adapter/tsMlsAdapter';
 import { InMemoryGroupSessionStorage } from '../storage/groupSessionStorage';
 import { bytesToBase64, base64ToBytes } from '../storage/base64';
-import { EpochConflictError, GroupStateUnavailableError } from '../contract/errors';
+import {
+  EpochConflictError,
+  GroupStateUnavailableError,
+  MembershipMismatchError,
+} from '../contract/errors';
 import type { DeviceCredential, KeyPackageOffer } from '../contract/types';
 
 vi.mock('../../api', () => ({
@@ -79,8 +83,17 @@ async function offerFor(device: Device): Promise<KeyPackageOffer> {
   };
 }
 
-function fakeHandshake(overrides: { epoch: number; senderDeviceId: string; payload: Uint8Array }) {
+function fakeHandshake(overrides: {
+  epoch: number;
+  senderDeviceId: string;
+  payload: Uint8Array;
+  /** What the server recorded the Commit as doing; defaults to a Commit from before membership was tracked. */
+  declared?: { addedDeviceIds: string[]; removedDeviceIds: string[] };
+}) {
   return {
+    membershipDeclared: overrides.declared !== undefined,
+    addedDeviceIds: overrides.declared?.addedDeviceIds ?? [],
+    removedDeviceIds: overrides.declared?.removedDeviceIds ?? [],
     id: `hs-${overrides.epoch}-${overrides.senderDeviceId}`,
     conversationId: 'conv-1',
     epoch: overrides.epoch,
@@ -251,6 +264,217 @@ describe('SyncEngine', () => {
           addedDeviceIds: [],
           removedDeviceIds: [bob.deviceId],
         }),
+      );
+    });
+  });
+
+  describe('verifying a commit against what the server recorded (real MLS)', () => {
+    /** alice founds the group and adds bob; returns alice's session and bob's engine, seeded with his real member state. */
+    async function groupWithBobVerifying() {
+      const alice = await setUpDevice('user-alice');
+      const bob = await setUpDevice('user-bob');
+      const aliceSession = await alice.engine.createGroup('conv-1');
+      const addBob = await aliceSession.stageCommit({
+        added: [await offerFor(bob)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      const bobSession = await bob.factory.joinFromWelcome(
+        'conv-1',
+        addBob.welcomes.find((w) => w.deviceId === bob.deviceId)!.welcomeBytes,
+      );
+      const storage = new InMemoryGroupSessionStorage();
+      await storage.save('conv-1', await bobSession.serialize());
+      const bobEngine = new SyncEngine(bob.factory, bob.deviceId, bob.userId, storage);
+      return { alice, bob, aliceSession, bobEngine, bobStorage: storage };
+    }
+
+    async function serveHandshake(handshake: unknown) {
+      const { api } = await import('../../api');
+      vi.mocked(api.getMlsHandshakesSince).mockResolvedValue([handshake] as never);
+    }
+
+    it('applies a commit that did exactly what its sender declared', async () => {
+      const { alice, aliceSession, bobEngine } = await groupWithBobVerifying();
+      const carol = await setUpDevice('user-carol');
+      const addCarol = await aliceSession.stageCommit({
+        added: [await offerFor(carol)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      await serveHandshake(
+        fakeHandshake({
+          epoch: 1,
+          senderDeviceId: alice.deviceId,
+          payload: addCarol.wireBytes,
+          declared: { addedDeviceIds: [carol.deviceId], removedDeviceIds: [] },
+        }),
+      );
+
+      await expect(bobEngine.syncCommits('conv-1')).resolves.toBe(2);
+    });
+
+    it('refuses a commit that added a device it did not declare, and stays at the epoch it could verify', async () => {
+      const { alice, aliceSession, bob, bobEngine, bobStorage } = await groupWithBobVerifying();
+      const sneaky = await setUpDevice('user-mallory');
+      const addSneaky = await aliceSession.stageCommit({
+        added: [await offerFor(sneaky)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      await serveHandshake(
+        fakeHandshake({
+          epoch: 1,
+          senderDeviceId: alice.deviceId,
+          payload: addSneaky.wireBytes,
+          declared: { addedDeviceIds: [], removedDeviceIds: [] },
+        }),
+      );
+
+      await expect(bobEngine.syncCommits('conv-1')).rejects.toThrow(MembershipMismatchError);
+
+      // in memory and on disk, bob is still at the epoch before the refused commit
+      await expect(bobEngine.getCurrentEpoch('conv-1')).resolves.toBe(1);
+      const saved = await bob.factory.restore('conv-1', (await bobStorage.load('conv-1'))!);
+      await expect(saved.currentEpoch()).resolves.toBe(1);
+    });
+
+    it('lets the device being removed process its own removal, as declared', async () => {
+      const { alice, aliceSession, bob, bobEngine } = await groupWithBobVerifying();
+      const removeBob = await aliceSession.stageCommit({
+        added: [],
+        removed: [bob.credential],
+      });
+      await aliceSession.commitAccepted();
+      await serveHandshake(
+        fakeHandshake({
+          epoch: 1,
+          senderDeviceId: alice.deviceId,
+          payload: removeBob.wireBytes,
+          declared: { addedDeviceIds: [], removedDeviceIds: [bob.deviceId] },
+        }),
+      );
+
+      await expect(bobEngine.syncCommits('conv-1')).resolves.toBeDefined();
+    });
+
+    it('refuses a commit that removed a device it did not declare', async () => {
+      const { alice, aliceSession, bobEngine } = await groupWithBobVerifying();
+      const carol = await setUpDevice('user-carol');
+      const addCarol = await aliceSession.stageCommit({
+        added: [await offerFor(carol)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      await serveHandshake(
+        fakeHandshake({
+          epoch: 1,
+          senderDeviceId: alice.deviceId,
+          payload: addCarol.wireBytes,
+          declared: { addedDeviceIds: [carol.deviceId], removedDeviceIds: [] },
+        }),
+      );
+      await bobEngine.syncCommits('conv-1');
+
+      const removeCarol = await aliceSession.stageCommit({
+        added: [],
+        removed: [carol.credential],
+      });
+      await aliceSession.commitAccepted();
+      await serveHandshake(
+        fakeHandshake({
+          epoch: 2,
+          senderDeviceId: alice.deviceId,
+          payload: removeCarol.wireBytes,
+          declared: { addedDeviceIds: [], removedDeviceIds: [] },
+        }),
+      );
+
+      await expect(bobEngine.syncCommits('conv-1')).rejects.toThrow(MembershipMismatchError);
+      await expect(bobEngine.getCurrentEpoch('conv-1')).resolves.toBe(2);
+    });
+
+    it('refuses a commit whose handshake row came back without the declaration at all', async () => {
+      const { alice, aliceSession, bobEngine } = await groupWithBobVerifying();
+      const carol = await setUpDevice('user-carol');
+      const addCarol = await aliceSession.stageCommit({
+        added: [await offerFor(carol)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      const row: Record<string, unknown> = {
+        ...fakeHandshake({
+          epoch: 1,
+          senderDeviceId: alice.deviceId,
+          payload: addCarol.wireBytes,
+          declared: { addedDeviceIds: [carol.deviceId], removedDeviceIds: [] },
+        }),
+      };
+      delete row.membershipDeclared;
+      delete row.addedDeviceIds;
+      delete row.removedDeviceIds;
+      await serveHandshake(row);
+
+      await expect(bobEngine.syncCommits('conv-1')).rejects.toThrow(MembershipMismatchError);
+    });
+
+    it('applies a commit from before membership was tracked without checking it', async () => {
+      const { alice, aliceSession, bobEngine } = await groupWithBobVerifying();
+      const carol = await setUpDevice('user-carol');
+      const addCarol = await aliceSession.stageCommit({
+        added: [await offerFor(carol)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      await serveHandshake(
+        fakeHandshake({
+          epoch: 1,
+          senderDeviceId: alice.deviceId,
+          payload: addCarol.wireBytes,
+        }),
+      );
+
+      await expect(bobEngine.syncCommits('conv-1')).resolves.toBe(2);
+    });
+
+    it('refuses a commit delivered outside catch-up, where there is no declaration to check it against', async () => {
+      const { aliceSession, bobEngine } = await groupWithBobVerifying();
+      const carol = await setUpDevice('user-carol');
+      const addCarol = await aliceSession.stageCommit({
+        added: [await offerFor(carol)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+
+      await expect(bobEngine.processIncoming('conv-1', addCarol.wireBytes)).rejects.toThrow(
+        MembershipMismatchError,
+      );
+      await expect(bobEngine.getCurrentEpoch('conv-1')).resolves.toBe(1);
+    });
+
+    it('refuses a winning commit that does not match its declaration, instead of reporting an ordinary lost race', async () => {
+      const { api } = await import('../../api');
+      const { alice, aliceSession, bobEngine } = await groupWithBobVerifying();
+      const carol = await setUpDevice('user-carol');
+      const sneaky = await setUpDevice('user-mallory');
+      const winner = await aliceSession.stageCommit({
+        added: [await offerFor(sneaky)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      await mockClaims({ 'user-carol': [carol] });
+      vi.mocked(api.submitMlsHandshake).mockResolvedValue({
+        outcome: 'conflict',
+        handshake: fakeHandshake({
+          epoch: 1,
+          senderDeviceId: alice.deviceId,
+          payload: winner.wireBytes,
+          declared: { addedDeviceIds: [], removedDeviceIds: [] },
+        }),
+      });
+
+      await expect(bobEngine.addUserToConversation('conv-1', 'user-carol')).rejects.toThrow(
+        MembershipMismatchError,
       );
     });
   });

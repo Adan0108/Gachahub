@@ -74,6 +74,52 @@ describe('MlsHandshakesService', () => {
       );
     });
 
+    it('returns the declaration with the accepted handshake and with the winning one on a lost race', async () => {
+      const { epoch, commitPayload } =
+        await buildTestCommitWithWelcome('conv-1');
+      const handshake = {
+        id: 'hs-1',
+        conversationId: 'conv-1',
+        epoch,
+        senderDeviceId: 'device-2',
+        payload: commitPayload,
+        membershipDeclared: true,
+        addedDeviceIds: ['device-4'],
+        removedDeviceIds: [],
+        createdAt: new Date(),
+      };
+      const dto = {
+        deviceId: 'device-1',
+        epoch,
+        payload: Buffer.from(commitPayload).toString('base64'),
+        welcomes: [],
+        addedDeviceIds: [],
+        removedDeviceIds: [],
+      };
+
+      repository.acceptHandshake.mockResolvedValue({
+        outcome: 'accepted',
+        handshake,
+      });
+      await expect(
+        service.submitHandshake('user-1', 'conv-1', dto),
+      ).resolves.toMatchObject({
+        handshake: { membershipDeclared: true, addedDeviceIds: ['device-4'] },
+      });
+
+      repository.acceptHandshake.mockResolvedValue({
+        outcome: 'conflict',
+        handshake,
+      });
+      await expect(
+        service.submitHandshake('user-1', 'conv-1', dto),
+      ).rejects.toMatchObject({
+        response: {
+          handshake: { membershipDeclared: true, addedDeviceIds: ['device-4'] },
+        },
+      });
+    });
+
     it('forwards real Welcome bytes for newly added devices', async () => {
       const { epoch, commitPayload, welcomePayload } =
         await buildTestCommitWithWelcome('conv-1');
@@ -275,6 +321,30 @@ describe('MlsHandshakesService', () => {
       const result = await service.getHandshakesSince('user-1', 'conv-1', 0);
 
       expect(result[0].payload).toBe(Buffer.from([1, 2, 3]).toString('base64'));
+    });
+
+    it('hands out what each Commit was declared to do, so every member can check it', async () => {
+      repository.findHandshakesSince.mockResolvedValue([
+        {
+          id: 'hs-1',
+          conversationId: 'conv-1',
+          epoch: 0,
+          senderDeviceId: 'device-1',
+          payload: new Uint8Array([1]),
+          membershipDeclared: true,
+          addedDeviceIds: ['device-2'],
+          removedDeviceIds: ['device-3'],
+          createdAt: new Date(),
+        },
+      ]);
+
+      const result = await service.getHandshakesSince('user-1', 'conv-1', 0);
+
+      expect(result[0]).toMatchObject({
+        membershipDeclared: true,
+        addedDeviceIds: ['device-2'],
+        removedDeviceIds: ['device-3'],
+      });
     });
 
     it('rejects when the caller is not an active participant', async () => {

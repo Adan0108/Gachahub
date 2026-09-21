@@ -7,7 +7,16 @@ import {
   EncryptedIndexedDbGroupSessionStorage,
   type GroupSessionStorage,
 } from '../storage/groupSessionStorage';
-import { GroupStateUnavailableError, EpochConflictError } from '../contract/errors';
+import {
+  GroupStateUnavailableError,
+  EpochConflictError,
+  MembershipMismatchError,
+} from '../contract/errors';
+import {
+  describeMembershipMismatch,
+  parseDeclaredMembership,
+  type DeclaredMembership,
+} from './declaredMembership';
 import type {
   ConversationId,
   DeviceId,
@@ -129,8 +138,12 @@ export class SyncEngine {
 
       if (response.outcome === 'conflict') {
         await session.commitRejected();
-        await session.process(base64ToBytes(response.handshake.payload));
-        await this.persistSession(conversationId, session);
+        await this.applyIncoming(
+          conversationId,
+          session,
+          base64ToBytes(response.handshake.payload),
+          parseDeclaredMembership(response.handshake),
+        );
         throw new EpochConflictError(conversationId, expectedEpoch);
       }
 
@@ -157,6 +170,7 @@ export class SyncEngine {
           conversationId,
           session,
           base64ToBytes(handshake.payload),
+          parseDeclaredMembership(handshake),
         );
         if (result.kind === 'rejected') {
           // The backend already validated framing/groupId before storing
@@ -351,12 +365,33 @@ export class SyncEngine {
     });
   }
 
+  /**
+   * Applies one incoming wire item and saves the result - unless it is a
+   * Commit that fails verification, in which case nothing is saved and the
+   * in-memory session (which process() already advanced) is dropped, so the
+   * next use reloads the last epoch that WAS verified. `declared` is what the
+   * server recorded the Commit as doing; a Commit that arrives without it
+   * cannot be checked and is refused the same way.
+   */
   private async applyIncoming(
     conversationId: ConversationId,
     session: GroupSession,
     wireBytes: Uint8Array,
+    declared?: DeclaredMembership,
   ): Promise<ProcessResult> {
     const result = await session.process(wireBytes);
+
+    if (result.kind === 'commit') {
+      const problem = declared
+        ? describeMembershipMismatch(result.membershipChange, declared)
+        : 'it arrived without the membership the server recorded for it, so it cannot be checked';
+
+      if (problem) {
+        this.sessions.delete(conversationId);
+        throw new MembershipMismatchError(conversationId, problem);
+      }
+    }
+
     await this.persistSession(conversationId, session);
     return result;
   }
