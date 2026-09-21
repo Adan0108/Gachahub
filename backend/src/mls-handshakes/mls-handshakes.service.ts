@@ -100,6 +100,36 @@ export class MlsHandshakesService {
     return handshakes.map((handshake) => this.serializeHandshake(handshake));
   }
 
+  /**
+   * Who is in the group at `epoch`, by the server's records. A member checks
+   * its whole ratchet tree against this after joining and after every Commit:
+   * the per-Commit attestation only proves the tree stayed honest if it started
+   * honest, and nothing else vouches for the leaves the group was created with.
+   */
+  async getRosterAtEpoch(
+    userId: string,
+    conversationId: string,
+    epoch: number,
+  ) {
+    await this.assertActiveParticipant(conversationId, userId);
+
+    const leaves = await this.mlsHandshakesRepository.findRosterAtEpoch(
+      conversationId,
+      epoch,
+    );
+
+    return {
+      epoch,
+      leaves: leaves.map((leaf) => ({
+        deviceId: leaf.deviceId,
+        userId: leaf.userId,
+        signaturePublicKey: leaf.signaturePublicKey
+          ? Buffer.from(leaf.signaturePublicKey).toString('base64')
+          : null,
+      })),
+    };
+  }
+
   async getPendingWelcomes(userId: string, deviceId: string) {
     await this.chatDevicesService.assertOwnActiveDevice(userId, deviceId);
 

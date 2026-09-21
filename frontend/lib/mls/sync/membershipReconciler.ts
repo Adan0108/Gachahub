@@ -10,7 +10,7 @@ import type {
 } from '../contract/types';
 import { toKeyPackageOffer, type ClaimedKeyPackage } from './keyPackageOffer';
 
-/** What the backend says one conversation is waiting on (GET .../membership-work). */
+/** What the backend says one conversation is waiting on (POST .../membership-work). */
 export interface MembershipWorkItem {
   conversationId: ConversationId;
   /** The epoch a Commit for this work must be built from. */
@@ -92,6 +92,8 @@ export class MembershipReconciler {
         // eslint-disable-next-line no-await-in-loop -- one Commit at a time: each changes the epoch the next may depend on
         const outcome = await this.reconcileConversation(item);
         outcomes.push({ conversationId: item.conversationId, outcome });
+        // eslint-disable-next-line no-await-in-loop -- a few small requests, one per stuck conversation
+        await this.releaseIfStuck(item.conversationId, outcome);
         raced ||= outcome === 'conflict';
       }
 
@@ -120,6 +122,21 @@ export class MembershipReconciler {
     }
 
     return items;
+  }
+
+  /** A device that could not finish the work gives it back so another member can take it. */
+  private async releaseIfStuck(
+    conversationId: ConversationId,
+    outcome: ReconcileOutcome,
+  ): Promise<void> {
+    // A Commit clears the lease itself, and a conflict means someone else's Commit did.
+    if (outcome === 'committed' || outcome === 'conflict') return;
+
+    try {
+      await api.releaseMlsMembershipWork(this.deviceId, conversationId);
+    } catch (error) {
+      console.warn(`Could not release the lease on ${conversationId}`, error);
+    }
   }
 
   private async reconcileConversation(item: MembershipWorkItem): Promise<ReconcileOutcome> {
@@ -161,21 +178,26 @@ export class MembershipReconciler {
    * thrown away.
    */
   private async claimOffers(item: MembershipWorkItem): Promise<KeyPackageOffer[]> {
-    const deviceCountByUser = new Map<UserId, number>();
+    const devicesByUser = new Map<UserId, DeviceId[]>();
     for (const device of item.add) {
-      deviceCountByUser.set(device.userId, (deviceCountByUser.get(device.userId) ?? 0) + 1);
+      devicesByUser.set(device.userId, [
+        ...(devicesByUser.get(device.userId) ?? []),
+        device.deviceId,
+      ]);
     }
 
     const offers: KeyPackageOffer[] = [];
 
-    for (const [userId, deviceCount] of deviceCountByUser) {
-      if (offers.length + deviceCount > MAX_DEVICES_PER_COMMIT) continue;
+    for (const [userId, deviceIds] of devicesByUser) {
+      if (offers.length + deviceIds.length > MAX_DEVICES_PER_COMMIT) continue;
 
       let claimed: ClaimedKeyPackage[];
       try {
         // eslint-disable-next-line no-await-in-loop -- claims are sequential so the limit is never overshot by parallel requests
         claimed = (await api.claimChatDeviceKeyPackages(userId, {
           conversationId: item.conversationId,
+          // Only the devices counted above: one registered since would be claimed and wasted.
+          deviceIds,
         })) as ClaimedKeyPackage[];
       } catch (error) {
         console.warn(`Could not claim key packages for ${userId}`, error);
@@ -185,6 +207,6 @@ export class MembershipReconciler {
       offers.push(...claimed.map((keyPackage) => toKeyPackageOffer(userId, keyPackage)));
     }
 
-    return offers.slice(0, MAX_DEVICES_PER_COMMIT);
+    return offers;
   }
 }

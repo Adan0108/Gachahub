@@ -10,9 +10,9 @@ ALTER TYPE "ChatParticipantState" ADD VALUE 'JOINING';
 ALTER TYPE "ChatParticipantState" ADD VALUE 'LEAVING';
 
 -- AlterTable
-ALTER TABLE "mls_handshakes" ADD COLUMN     "addedDeviceIds" TEXT[] DEFAULT ARRAY[]::TEXT[],
+ALTER TABLE "mls_handshakes" ADD COLUMN     "addedDevices" JSONB NOT NULL DEFAULT '[]',
 ADD COLUMN     "membershipDeclared" BOOLEAN NOT NULL DEFAULT false,
-ADD COLUMN     "removedDeviceIds" TEXT[] DEFAULT ARRAY[]::TEXT[];
+ADD COLUMN     "removedDevices" JSONB NOT NULL DEFAULT '[]';
 
 -- CreateTable
 CREATE TABLE "mls_group_members" (

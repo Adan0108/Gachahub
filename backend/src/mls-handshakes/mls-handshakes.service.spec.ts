@@ -12,6 +12,7 @@ describe('MlsHandshakesService', () => {
     isActiveParticipant: jest.fn(),
     acceptHandshake: jest.fn(),
     findHandshakesSince: jest.fn(),
+    findRosterAtEpoch: jest.fn(),
     findPendingWelcomes: jest.fn(),
     markWelcomeConsumed: jest.fn(),
   };
@@ -359,6 +360,43 @@ describe('MlsHandshakesService', () => {
       await expect(
         service.getHandshakesSince('user-1', 'conv-1', 0),
       ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('getRosterAtEpoch', () => {
+    it('returns each leaf with its registered key as base64, or null when the device record is gone', async () => {
+      repository.findRosterAtEpoch.mockResolvedValue([
+        {
+          deviceId: 'd1',
+          userId: 'u1',
+          signaturePublicKey: new Uint8Array([1, 2]),
+        },
+        { deviceId: 'd2', userId: 'u2', signaturePublicKey: null },
+      ]);
+
+      await expect(
+        service.getRosterAtEpoch('user-1', 'conv-1', 3),
+      ).resolves.toEqual({
+        epoch: 3,
+        leaves: [
+          {
+            deviceId: 'd1',
+            userId: 'u1',
+            signaturePublicKey: Buffer.from([1, 2]).toString('base64'),
+          },
+          { deviceId: 'd2', userId: 'u2', signaturePublicKey: null },
+        ],
+      });
+      expect(repository.findRosterAtEpoch).toHaveBeenCalledWith('conv-1', 3);
+    });
+
+    it('rejects when the caller is not an active participant', async () => {
+      repository.isActiveParticipant.mockResolvedValue(false);
+
+      await expect(
+        service.getRosterAtEpoch('user-1', 'conv-1', 3),
+      ).rejects.toThrow(ForbiddenException);
+      expect(repository.findRosterAtEpoch).not.toHaveBeenCalled();
     });
   });
 

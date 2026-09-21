@@ -16,6 +16,7 @@ describe('MlsMembershipWorkService', () => {
     findConversationsNeedingWork: jest.fn(),
     findDevices: jest.fn(),
     leaseConversations: jest.fn(),
+    releaseLease: jest.fn(),
   };
   const chatDevicesService = { assertOwnActiveDevice: jest.fn() };
 
@@ -231,6 +232,23 @@ describe('MlsMembershipWorkService', () => {
 
       expect(result.items).toEqual([]);
       expect(result.nextCursor).toBe('conv-49');
+    });
+  });
+
+  describe('releaseMembershipWork', () => {
+    it('gives back the lease for a device the caller owns', async () => {
+      await service.releaseMembershipWork('user-1', 'device-1', 'conv-1');
+
+      expect(chatDevicesService.assertOwnActiveDevice).toHaveBeenCalledWith(
+        'user-1',
+        'device-1',
+      );
+      expect(repository.releaseLease).toHaveBeenCalledWith(
+        expect.objectContaining({
+          deviceId: 'device-1',
+          conversationId: 'conv-1',
+        }),
+      );
     });
   });
 });

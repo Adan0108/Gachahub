@@ -7,6 +7,7 @@ vi.mock('../../api', () => ({
   api: {
     getMlsMembershipWork: vi.fn(),
     claimChatDeviceKeyPackages: vi.fn(),
+    releaseMlsMembershipWork: vi.fn(),
   },
 }));
 
@@ -83,7 +84,9 @@ describe('MembershipReconciler', () => {
     expect(engine.syncCommits).toHaveBeenCalledWith('conv-1');
     expect(api.claimChatDeviceKeyPackages).toHaveBeenCalledWith('u2', {
       conversationId: 'conv-1',
+      deviceIds: ['d2'],
     });
+    expect(api.releaseMlsMembershipWork).not.toHaveBeenCalled();
     const [conversationId, change] = engine.submitMembershipChange.mock.calls[0]!;
     expect(conversationId).toBe('conv-1');
     expect(
@@ -157,6 +160,27 @@ describe('MembershipReconciler', () => {
 
       expect(api.claimChatDeviceKeyPackages).not.toHaveBeenCalled();
       expect(summary.outcomes[0]?.outcome).toBe('no-local-state');
+    });
+
+    it('gives the lease back when it cannot finish a conversation, so another member can take it', async () => {
+      await serveWork({ items: [item({ add: [{ userId: 'u2', deviceId: 'd2' }] })] });
+      const api = await load();
+      const engine = fakeEngine();
+      engine.syncCommits.mockRejectedValue(new GroupStateUnavailableError('conv-1'));
+
+      await new MembershipReconciler(engine, 'dev-1').reconcile();
+
+      expect(api.releaseMlsMembershipWork).toHaveBeenCalledWith('dev-1', 'conv-1');
+    });
+
+    it('still finishes when giving the lease back fails', async () => {
+      await serveWork({ items: [item({ add: [{ userId: 'u2', deviceId: 'd2' }] })] });
+      const api = await load();
+      vi.mocked(api.releaseMlsMembershipWork).mockRejectedValue(new Error('offline'));
+      const engine = fakeEngine();
+      engine.syncCommits.mockRejectedValue(new GroupStateUnavailableError('conv-1'));
+
+      await expect(new MembershipReconciler(engine, 'dev-1').reconcile()).resolves.toBeDefined();
     });
   });
 

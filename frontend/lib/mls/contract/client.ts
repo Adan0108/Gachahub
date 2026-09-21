@@ -53,10 +53,7 @@ export interface DeviceIdentityStore {
    * LAST_RESORT for the one reusable fallback package a device offers
    * when it has no SINGLE_USE packages left (critique C1).
    */
-  generateKeyPackages(
-    count: number,
-    kind?: 'SINGLE_USE' | 'LAST_RESORT',
-  ): Promise<Uint8Array[]>;
+  generateKeyPackages(count: number, kind?: 'SINGLE_USE' | 'LAST_RESORT'): Promise<Uint8Array[]>;
 
   /**
    * Marks a SINGLE_USE key package as spent once it's been matched to a
@@ -103,6 +100,14 @@ export interface GroupSession {
    * round trip before every single process() call.
    */
   peekEpoch(wireBytes: Uint8Array): Promise<Epoch | undefined>;
+
+  /**
+   * Every leaf in the current ratchet tree, as device credentials - so the
+   * whole group can be checked against the server's roster, not just what
+   * each Commit changed. Undefined when a leaf carries a credential that
+   * can't be read.
+   */
+  listLeaves(): Promise<DeviceCredential[] | undefined>;
 
   /**
    * Decrypts and applies one incoming wire item - application message,
@@ -168,10 +173,7 @@ export interface GroupSessionFactory {
   create(conversationId: ConversationId): Promise<GroupSession>;
 
   /** Restores a session from bytes produced by a prior GroupSession.serialize(). */
-  restore(
-    conversationId: ConversationId,
-    state: Uint8Array,
-  ): Promise<GroupSession>;
+  restore(conversationId: ConversationId, state: Uint8Array): Promise<GroupSession>;
 
   /**
    * Joins an existing group via a Welcome message - the only way a session
@@ -180,8 +182,5 @@ export interface GroupSessionFactory {
    * conversationId, or if it's addressed to a different device than this
    * store's own credential (critique C2's required test cases).
    */
-  joinFromWelcome(
-    conversationId: ConversationId,
-    welcomeBytes: Uint8Array,
-  ): Promise<GroupSession>;
+  joinFromWelcome(conversationId: ConversationId, welcomeBytes: Uint8Array): Promise<GroupSession>;
 }

@@ -77,6 +77,23 @@ export class MlsHandshakesController {
     );
   }
 
+  @Get('conversations/:conversationId/roster')
+  @ApiOperation({
+    summary:
+      'The devices that were in the group at an epoch, with their registered keys, to check a ratchet tree against',
+  })
+  getRosterAtEpoch(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+    @Query('epoch', ParseIntPipe) epoch: number,
+  ) {
+    return this.mlsHandshakesService.getRosterAtEpoch(
+      session.user.id,
+      conversationId,
+      epoch,
+    );
+  }
+
   @Get('devices/:deviceId/welcomes')
   @ApiOperation({ summary: 'Fetch pending Welcomes for an owned device' })
   getPendingWelcomes(
@@ -89,10 +106,11 @@ export class MlsHandshakesController {
     );
   }
 
-  @Get('devices/:deviceId/membership-work')
+  // A POST because it takes a lease on the work it returns; a GET must be safe to repeat and prefetch.
+  @Post('devices/:deviceId/membership-work')
   @ApiOperation({
     summary:
-      'List the membership changes (devices to add or remove) this device can finish, per conversation',
+      'Take the membership changes (devices to add or remove) this device can finish, per conversation',
   })
   getMembershipWork(
     @Session() session: UserSession,
@@ -107,6 +125,23 @@ export class MlsHandshakesController {
       // `full` also finds new, revoked and leftover devices but costs more, so
       // clients ask for it rarely; anything else means the cheap default.
       { scope: scope === 'full' ? 'full' : 'pending', after, conversationId },
+    );
+  }
+
+  @Post('devices/:deviceId/membership-work/:conversationId/release')
+  @ApiOperation({
+    summary:
+      'Give back the lease on a conversation whose membership work this device could not finish',
+  })
+  releaseMembershipWork(
+    @Session() session: UserSession,
+    @Param('deviceId') deviceId: string,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.mlsMembershipWorkService.releaseMembershipWork(
+      session.user.id,
+      deviceId,
+      conversationId,
     );
   }
 

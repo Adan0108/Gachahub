@@ -63,7 +63,7 @@ export class MlsCommitFaultsService {
             value: handshake.senderDeviceId ?? 'deleted',
             inline: true,
           },
-          { name: 'Reason', value: dto.reason, inline: false },
+          { name: 'Reason', value: asInlineCode(dto.reason), inline: false },
         ],
         dedupKey: `MlsCommitRefused:${conversationId}:${dto.epoch}`,
       });
@@ -88,4 +88,9 @@ export class MlsCommitFaultsService {
       );
     }
   }
+}
+
+/** The reason is a member's own text: shown as code so links and mentions in it stay inert. */
+function asInlineCode(text: string): string {
+  return `\`${text.replace(/`/g, "'").replace(/\s+/g, ' ')}\``;
 }

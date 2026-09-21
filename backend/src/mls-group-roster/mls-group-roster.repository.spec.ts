@@ -26,6 +26,23 @@ describe('MlsGroupRosterRepository', () => {
     );
   });
 
+  describe('findLeavesAtEpoch', () => {
+    it('asks for the devices added by that epoch and not removed until after it', async () => {
+      prisma.mlsGroupMember.findMany.mockResolvedValue([]);
+
+      await repository.findLeavesAtEpoch('conv-1', 4);
+
+      expect(prisma.mlsGroupMember.findMany).toHaveBeenCalledWith({
+        where: {
+          conversationId: 'conv-1',
+          addedEpoch: { lte: 4 },
+          OR: [{ removedEpoch: null }, { removedEpoch: { gt: 4 } }],
+        },
+        select: { deviceId: true, userId: true },
+      });
+    });
+  });
+
   describe('hasRoster', () => {
     it('is true when the conversation has any member row', async () => {
       prisma.mlsGroupMember.findFirst.mockResolvedValue({ id: 'm1' });

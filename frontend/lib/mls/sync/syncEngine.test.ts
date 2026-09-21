@@ -19,6 +19,7 @@ vi.mock('../../api', () => ({
     getMlsPendingWelcomes: vi.fn(),
     consumeMlsWelcome: vi.fn(),
     reportMlsFault: vi.fn(),
+    getMlsRoster: vi.fn(),
   },
 }));
 
@@ -96,6 +97,29 @@ function attest(device: Device, overrides: { userId?: string; signatureKey?: Uin
 /** What the server records for a removed device: whose leaf it was. */
 function attestRemoved(device: Device) {
   return { deviceId: device.deviceId, userId: device.userId };
+}
+
+/** The roster the server would return if it recorded exactly the leaves of `session`'s tree - or, with `tamper`, a changed version of them. */
+async function serveRosterOf(
+  session: {
+    listLeaves(): Promise<
+      Array<{ userId: string; deviceId: string; signatureKey: Uint8Array }> | undefined
+    >;
+  },
+  tamper: (
+    leaves: Array<{ deviceId: string; userId: string; signaturePublicKey: string | null }>,
+  ) => void = () => undefined,
+) {
+  const { api } = await import('../../api');
+  vi.mocked(api.getMlsRoster).mockImplementation(async (_conversationId: string, epoch: number) => {
+    const leaves = ((await session.listLeaves()) ?? []).map((leaf) => ({
+      deviceId: leaf.deviceId,
+      userId: leaf.userId,
+      signaturePublicKey: bytesToBase64(leaf.signatureKey) as string | null,
+    }));
+    tamper(leaves);
+    return { epoch, leaves };
+  });
 }
 
 function fakeHandshake(overrides: {
@@ -301,6 +325,7 @@ describe('SyncEngine', () => {
       const storage = new InMemoryGroupSessionStorage();
       await storage.save('conv-1', await bobSession.serialize());
       const bobEngine = new SyncEngine(bob.factory, bob.deviceId, bob.userId, storage);
+      await serveRosterOf(aliceSession);
       return { alice, bob, aliceSession, bobEngine, bobStorage: storage };
     }
 
@@ -381,6 +406,31 @@ describe('SyncEngine', () => {
         'conv-1',
         expect.objectContaining({ epoch: 1, reason: expect.any(String) }),
       );
+    });
+
+    it('refuses a declared commit that leaves the tree disagreeing with the server roster, and stays at the epoch it could verify', async () => {
+      const { alice, aliceSession, bobEngine } = await groupWithBobVerifying();
+      const carol = await setUpDevice('user-carol');
+      const addCarol = await aliceSession.stageCommit({
+        added: [await offerFor(carol)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      await serveHandshake(
+        fakeHandshake({
+          epoch: 1,
+          senderDeviceId: alice.deviceId,
+          payload: addCarol.wireBytes,
+          declared: { addedDevices: [attest(carol)], removedDevices: [] },
+        }),
+      );
+      // the founder's leaf was labelled as someone else all along
+      await serveRosterOf(aliceSession, (leaves) => {
+        leaves.find((leaf) => leaf.deviceId === alice.deviceId)!.userId = 'user-victim';
+      });
+
+      await expect(bobEngine.syncCommits('conv-1')).rejects.toThrow(MembershipMismatchError);
+      await expect(bobEngine.getCurrentEpoch('conv-1')).resolves.toBe(1);
     });
 
     it('lets the device being removed process its own removal, as declared', async () => {
@@ -836,6 +886,7 @@ describe('SyncEngine', () => {
       const bobWelcome = addBob.welcomes.find((w) => w.deviceId === bob.deviceId);
       if (!bobWelcome) throw new Error('missing Bob Welcome');
 
+      await serveRosterOf(aliceSession);
       vi.mocked(api.getMlsPendingWelcomes).mockResolvedValue([
         {
           id: 'welcome-1',
@@ -851,6 +902,45 @@ describe('SyncEngine', () => {
       expect(result.failures).toEqual([]);
       expect(api.consumeMlsWelcome).toHaveBeenCalledWith(bob.deviceId, 'welcome-1');
       await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(1);
+    });
+
+    it('refuses a Welcome whose tree has a leaf under someone else name, and keeps nothing of it', async () => {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      const bob = await setUpDevice('user-bob');
+      const aliceSession = await alice.engine.createGroup('conv-1');
+      const addBob = await aliceSession.stageCommit({
+        added: [await offerFor(bob)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      // the server has the founder's device under a different owner than the tree's leaf says
+      await serveRosterOf(aliceSession, (leaves) => {
+        const founder = leaves.find((leaf) => leaf.deviceId === alice.deviceId)!;
+        founder.userId = 'user-someone-else';
+      });
+      vi.mocked(api.reportMlsFault).mockResolvedValue({ recorded: true } as never);
+      vi.mocked(api.getMlsPendingWelcomes).mockResolvedValue([
+        {
+          id: 'welcome-1',
+          conversationId: 'conv-1',
+          payload: bytesToBase64(
+            addBob.welcomes.find((w) => w.deviceId === bob.deviceId)!.welcomeBytes,
+          ),
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+
+      const result = await bob.engine.processPendingWelcomes();
+
+      expect(result.joined).toEqual([]);
+      expect(result.failures[0]?.error).toBeInstanceOf(MembershipMismatchError);
+      expect(api.consumeMlsWelcome).not.toHaveBeenCalled();
+      await expect(bob.engine.getCurrentEpoch('conv-1')).rejects.toThrow();
+      expect(api.reportMlsFault).toHaveBeenCalledWith(
+        'conv-1',
+        expect.objectContaining({ epoch: 0 }),
+      );
     });
 
     // regression: a Welcome can be re-delivered for a conversation this

@@ -19,6 +19,9 @@ const CONVERSATIONS_PER_PAGE = 50;
  */
 const WORK_LEASE_MS = 60_000;
 
+/** How long a device whose lease ended without a Commit stays out of that conversation's work. */
+const WORK_COOLDOWN_MS = 2 * 60_000;
+
 /**
  * Tells a device which membership changes it can finish. The server can't
  * create the Commits that add or remove devices - only a member's client can -
@@ -88,6 +91,20 @@ export class MlsMembershipWorkService {
     };
   }
 
+  /** The device could not finish this conversation's work: hand it to someone else. */
+  async releaseMembershipWork(
+    userId: string,
+    deviceId: string,
+    conversationId: string,
+  ) {
+    await this.chatDevicesService.assertOwnActiveDevice(userId, deviceId);
+    await this.mlsMembershipWorkRepository.releaseLease({
+      deviceId,
+      conversationId,
+      now: new Date(),
+    });
+  }
+
   /** Work is handed to one device at a time: drop what another member already holds. */
   private async keepOnlyLeased(items: MembershipWorkItem[], deviceId: string) {
     if (items.length === 0) return items;
@@ -98,6 +115,7 @@ export class MlsMembershipWorkService {
       conversationIds: items.map((item) => item.conversationId),
       now,
       until: new Date(now.getTime() + WORK_LEASE_MS),
+      cooldownMs: WORK_COOLDOWN_MS,
     });
 
     return items.filter((item) => held.has(item.conversationId));

@@ -51,6 +51,10 @@ export const backendRoutes = {
     `/mls-handshakes/conversations/${encodePathParam(conversationId)}/faults`,
   mlsMembershipWork: (deviceId) =>
     `/mls-handshakes/devices/${encodePathParam(deviceId)}/membership-work`,
+  mlsRoster: (conversationId) =>
+    `/mls-handshakes/conversations/${encodePathParam(conversationId)}/roster`,
+  mlsReleaseMembershipWork: (deviceId, conversationId) =>
+    `/mls-handshakes/devices/${encodePathParam(deviceId)}/membership-work/${encodePathParam(conversationId)}/release`,
   mlsConsumeWelcome: (deviceId, welcomeId) =>
     `/mls-handshakes/devices/${encodePathParam(deviceId)}/welcomes/${encodePathParam(welcomeId)}/consume`,
   devTestUsers: "/dev/test-users",
@@ -500,16 +504,28 @@ export const api = {
   // One key package per active device of `userId` (an array). Pass excludeDeviceId when claiming your own
   // devices, and conversationId when finishing a change to a group you are in - the server then skips
   // devices already in that group and the DM privacy settings, which no longer apply.
-  claimChatDeviceKeyPackages: (userId, { excludeDeviceId, conversationId } = {}) =>
-    mutation(backendRoutes.chatDeviceClaim(userId, { excludeDeviceId, conversationId })),
+  claimChatDeviceKeyPackages: (userId, { excludeDeviceId, conversationId, deviceIds } = {}) =>
+    mutation(
+      backendRoutes.chatDeviceClaim(userId, {
+        excludeDeviceId,
+        conversationId,
+        deviceIds: deviceIds?.join(","),
+      }),
+    ),
   submitMlsHandshake: (conversationId, payload) => submitMlsHandshake(conversationId, payload),
   getMlsHandshakesSince: (conversationId, sinceEpoch = 0) =>
     request(withQuery(backendRoutes.mlsHandshakes(conversationId), { sinceEpoch })),
   getMlsPendingWelcomes: (deviceId) => request(backendRoutes.mlsPendingWelcomes(deviceId)),
-  // Membership changes (devices to add or remove) this device can finish. scope "full" also finds new,
-  // revoked and leftover devices but costs more; conversationId looks at one conversation only.
+  // Membership changes (devices to add or remove) this device can finish, and takes a lease on them.
+  // scope "full" also finds new, revoked and leftover devices but costs more; conversationId looks at one conversation only.
   getMlsMembershipWork: (deviceId, { scope, after, conversationId } = {}) =>
-    request(withQuery(backendRoutes.mlsMembershipWork(deviceId), { scope, after, conversationId })),
+    mutation(withQuery(backendRoutes.mlsMembershipWork(deviceId), { scope, after, conversationId })),
+  // Who the server has in the group at an epoch, to check a ratchet tree against.
+  getMlsRoster: (conversationId, epoch) =>
+    request(withQuery(backendRoutes.mlsRoster(conversationId), { epoch })),
+  // Give the lease back when this device could not finish a conversation's work.
+  releaseMlsMembershipWork: (deviceId, conversationId) =>
+    mutation(backendRoutes.mlsReleaseMembershipWork(deviceId, conversationId)),
   // Tell the server this device refused a Commit that did not match what it recorded.
   reportMlsFault: (conversationId, payload) =>
     mutation(backendRoutes.mlsFaults(conversationId), payload),

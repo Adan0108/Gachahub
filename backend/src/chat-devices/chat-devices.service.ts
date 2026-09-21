@@ -141,12 +141,17 @@ export class ChatDevicesService {
   async claimKeyPackagesForUser(
     requesterId: string,
     targetUserId: string,
-    options: { excludeDeviceId?: string; conversationId?: string } = {},
+    options: {
+      excludeDeviceId?: string;
+      conversationId?: string;
+      /** Claim only for these devices, so a device registered meanwhile is not claimed and wasted. */
+      deviceIds?: string[];
+    } = {},
   ) {
     this.fetchRateLimiter.assertNotRateLimited(requesterId, targetUserId);
 
     const isOwnDevices = requesterId === targetUserId;
-    const { excludeDeviceId, conversationId } = options;
+    const { excludeDeviceId, conversationId, deviceIds } = options;
 
     const devicesInGroup = conversationId
       ? await this.assertMayClaimForGroup(
@@ -164,7 +169,9 @@ export class ChatDevicesService {
       await this.chatDevicesRepository.findActiveDevicesForUser(targetUserId)
     ).filter(
       (device) =>
-        device.id !== excludeDeviceId && !devicesInGroup.has(device.id),
+        device.id !== excludeDeviceId &&
+        !devicesInGroup.has(device.id) &&
+        (!deviceIds || deviceIds.includes(device.id)),
     );
 
     // The request above counted once; every extra package handed out counts too.
@@ -214,6 +221,12 @@ export class ChatDevicesService {
       throw new ForbiddenException(
         'This user is not entitled to join this group',
       );
+    }
+
+    // A group with no MLS roster has nothing to finish, and no key package of
+    // anyone's is ever needed for it.
+    if (!(await this.mlsGroupRosterRepository.hasRoster(conversationId))) {
+      throw new ForbiddenException('This conversation has no MLS group yet');
     }
 
     const leaves =

@@ -48,6 +48,27 @@ export class MlsGroupRosterRepository {
     });
   }
 
+  /**
+   * The devices that were leaves once the group reached `epoch`: added at or
+   * before it and not removed until after it. A member checks its whole
+   * ratchet tree against this, so a leaf nobody vouches for is caught even
+   * when it got in before any Commit this member ever saw.
+   */
+  findLeavesAtEpoch(
+    conversationId: string,
+    epoch: number,
+    db: Prisma.TransactionClient = this.prisma,
+  ): Promise<RosterLeaf[]> {
+    return db.mlsGroupMember.findMany({
+      where: {
+        conversationId,
+        addedEpoch: { lte: epoch },
+        OR: [{ removedEpoch: null }, { removedEpoch: { gt: epoch } }],
+      },
+      select: { deviceId: true, userId: true },
+    });
+  }
+
   /** Records devices joining at `addedEpoch`, the group's epoch after the Commit that added them. */
   async addLeaves(
     conversationId: string,

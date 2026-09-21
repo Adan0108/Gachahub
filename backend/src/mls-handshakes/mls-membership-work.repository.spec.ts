@@ -159,7 +159,7 @@ describe('MlsMembershipWorkRepository', () => {
     const now = new Date('2026-09-22T10:00:00Z');
     const until = new Date('2026-09-22T10:01:00Z');
 
-    it('takes only conversations nobody else holds, refreshing one this device already holds', async () => {
+    it('takes a conversation nobody holds, or whose lease ended - never refreshing its own, and not straight back after it let one end', async () => {
       prisma.chatConversation.updateMany.mockResolvedValue({ count: 1 });
       prisma.chatConversation.findMany.mockResolvedValue([{ id: 'conv-1' }]);
 
@@ -168,6 +168,7 @@ describe('MlsMembershipWorkRepository', () => {
         conversationIds: ['conv-1', 'conv-2'],
         now,
         until,
+        cooldownMs: 120_000,
       });
 
       expect(prisma.chatConversation.updateMany).toHaveBeenCalledWith({
@@ -175,8 +176,11 @@ describe('MlsMembershipWorkRepository', () => {
           id: { in: ['conv-1', 'conv-2'] },
           OR: [
             { mlsWorkLeaseUntil: null },
-            { mlsWorkLeaseUntil: { lt: now } },
-            { mlsWorkLeaseDeviceId: 'device-1' },
+            { mlsWorkLeaseUntil: { lt: new Date('2026-09-22T09:58:00Z') } },
+            {
+              mlsWorkLeaseUntil: { lt: now },
+              mlsWorkLeaseDeviceId: { not: 'device-1' },
+            },
           ],
         },
         data: { mlsWorkLeaseDeviceId: 'device-1', mlsWorkLeaseUntil: until },
@@ -193,6 +197,7 @@ describe('MlsMembershipWorkRepository', () => {
         conversationIds: ['conv-1'],
         now,
         until,
+        cooldownMs: 120_000,
       });
 
       expect(prisma.chatConversation.findMany).toHaveBeenCalledWith({
@@ -204,6 +209,24 @@ describe('MlsMembershipWorkRepository', () => {
         select: { id: true },
       });
       expect(held.size).toBe(0);
+    });
+  });
+
+  describe('releaseLease', () => {
+    it('ends only this device’s own lease, leaving it as the last holder', async () => {
+      prisma.chatConversation.updateMany.mockResolvedValue({ count: 1 });
+      const now = new Date('2026-09-22T10:00:00Z');
+
+      await repository.releaseLease({
+        deviceId: 'device-1',
+        conversationId: 'conv-1',
+        now,
+      });
+
+      expect(prisma.chatConversation.updateMany).toHaveBeenCalledWith({
+        where: { id: 'conv-1', mlsWorkLeaseDeviceId: 'device-1' },
+        data: { mlsWorkLeaseUntil: now },
+      });
     });
   });
 

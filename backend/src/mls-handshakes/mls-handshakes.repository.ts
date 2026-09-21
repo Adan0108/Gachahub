@@ -348,6 +348,27 @@ export class MlsHandshakesRepository {
     return result.count === 1;
   }
 
+  /** The leaves at `epoch` with each device's registered key; the key is null for a device whose record is gone. */
+  async findRosterAtEpoch(conversationId: string, epoch: number) {
+    const leaves = await this.mlsGroupRosterRepository.findLeavesAtEpoch(
+      conversationId,
+      epoch,
+    );
+    const devices = await this.prisma.chatDevice.findMany({
+      where: { id: { in: leaves.map((leaf) => leaf.deviceId) } },
+      select: { id: true, signaturePublicKey: true },
+    });
+    const keyByDeviceId = new Map(
+      devices.map((device) => [device.id, device.signaturePublicKey]),
+    );
+
+    return leaves.map((leaf) => ({
+      deviceId: leaf.deviceId,
+      userId: leaf.userId,
+      signaturePublicKey: keyByDeviceId.get(leaf.deviceId) ?? null,
+    }));
+  }
+
   findHandshakesSince(conversationId: string, fromEpoch: number) {
     return this.prisma.mlsHandshake.findMany({
       where: { conversationId, epoch: { gte: fromEpoch } },

@@ -20,7 +20,7 @@ describe('ChatDevicesService', () => {
     findParticipantStates: jest.fn(),
   };
 
-  const roster = { findActiveLeaves: jest.fn() };
+  const roster = { findActiveLeaves: jest.fn(), hasRoster: jest.fn() };
 
   const followsService = {
     isFollowing: jest.fn(),
@@ -467,6 +467,7 @@ describe('ChatDevicesService', () => {
           ['user-2', 'JOINING'],
         ]),
       );
+      roster.hasRoster.mockResolvedValue(true);
       roster.findActiveLeaves.mockResolvedValue([]);
       repository.findActiveDevicesForUser.mockResolvedValue([device('d2')]);
       repository.claimSingleUseKeyPackage.mockResolvedValue({
@@ -546,6 +547,28 @@ describe('ChatDevicesService', () => {
         'd2-in',
         expect.anything(),
       );
+    });
+
+    it('refuses a claim for a conversation that has no MLS group, so a plain group cannot be used to burn packages', async () => {
+      roster.hasRoster.mockResolvedValue(false);
+
+      await expect(claimForGroup()).rejects.toThrow(ForbiddenException);
+      expect(repository.claimSingleUseKeyPackage).not.toHaveBeenCalled();
+    });
+
+    it('claims only for the devices the caller listed, so a device registered meanwhile is left alone', async () => {
+      repository.findActiveDevicesForUser.mockResolvedValue([
+        device('d2'),
+        device('d2-late'),
+      ]);
+
+      const result = await service.claimKeyPackagesForUser('user-1', 'user-2', {
+        conversationId: 'conv-1',
+        deviceIds: ['d2'],
+      });
+
+      expect(result.map((offer) => offer.deviceId)).toEqual(['d2']);
+      expect(repository.claimSingleUseKeyPackage).toHaveBeenCalledTimes(1);
     });
 
     it('returns an empty list, not a 404, when everything is already in the group', async () => {

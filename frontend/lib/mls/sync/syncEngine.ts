@@ -1,6 +1,7 @@
 import { api } from '../../api';
 import { bytesToBase64, base64ToBytes } from '../storage/base64';
 import type { GroupSession, GroupSessionFactory } from '../contract/client';
+import { describeTreeMismatch, parseRoster } from './rosterCheck';
 import { toKeyPackageOffer, type ClaimedKeyPackage } from './keyPackageOffer';
 import {
   MembershipReconciler,
@@ -274,6 +275,7 @@ export class SyncEngine {
             welcome.conversationId,
             base64ToBytes(welcome.payload),
           );
+          await this.assertTreeMatchesRoster(welcome.conversationId, session);
           this.sessions.set(welcome.conversationId, session);
           await this.persistSession(welcome.conversationId, session);
           await api.consumeMlsWelcome(this.deviceId, welcome.id);
@@ -444,10 +446,45 @@ export class SyncEngine {
         this.sessions.delete(conversationId);
         throw new MembershipMismatchError(conversationId, problem);
       }
+
+      // A Commit from before membership was tracked has no roster to check against.
+      if (declared?.membershipDeclared) {
+        try {
+          await this.assertTreeMatchesRoster(conversationId, session);
+        } catch (error) {
+          this.sessions.delete(conversationId);
+          throw error;
+        }
+      }
     }
 
     await this.persistSession(conversationId, session);
     return result;
+  }
+
+  /**
+   * Checks the whole ratchet tree against the server's roster for its epoch.
+   * The per-Commit check only keeps a tree honest if it started honest, so this
+   * is what catches a leaf the group was created with (or a Welcome delivered)
+   * under someone else's name. Failing to reach the roster fails the same way:
+   * a group that can't be checked isn't trusted.
+   */
+  private async assertTreeMatchesRoster(
+    conversationId: ConversationId,
+    session: GroupSession,
+  ): Promise<void> {
+    const epoch = await session.currentEpoch();
+    const roster = parseRoster(await api.getMlsRoster(conversationId, epoch));
+
+    const problem = roster
+      ? describeTreeMismatch(await session.listLeaves(), roster)
+      : 'the server did not return a roster to check the group against';
+
+    if (problem) {
+      // The Commit that produced this epoch is the one at the epoch before it.
+      void this.reportFault(conversationId, epoch - 1, problem);
+      throw new MembershipMismatchError(conversationId, problem);
+    }
   }
 
   /**

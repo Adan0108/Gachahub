@@ -85,24 +85,33 @@ export class MlsMembershipWorkRepository {
    * now holds. A conversation another device holds a live lease on is left out,
    * so only one member at a time claims key packages for the same change -
    * otherwise every online member would, only one Commit could win, and the rest
-   * of the single-use packages would be burned. Asking again refreshes a lease
-   * this device already holds; an expired lease is up for grabs.
+   * of the single-use packages would be burned. A lease is never refreshed by
+   * its holder: one that ends without a Commit (it lapsed or was released) is up
+   * for grabs by everyone else at once, and by that device only after
+   * `cooldownMs` - otherwise a device that cannot finish the work would keep it
+   * from every other member for as long as its tab is open. A Commit clears the
+   * lease, so a device that finishes the work is never held back.
    */
   async leaseConversations(params: {
     deviceId: string;
     conversationIds: string[];
     now: Date;
     until: Date;
+    cooldownMs: number;
   }): Promise<Set<string>> {
-    const { deviceId, conversationIds, now, until } = params;
+    const { deviceId, conversationIds, now, until, cooldownMs } = params;
+    const cooldownStart = new Date(now.getTime() - cooldownMs);
 
     await this.prisma.chatConversation.updateMany({
       where: {
         id: { in: conversationIds },
         OR: [
           { mlsWorkLeaseUntil: null },
-          { mlsWorkLeaseUntil: { lt: now } },
-          { mlsWorkLeaseDeviceId: deviceId },
+          { mlsWorkLeaseUntil: { lt: cooldownStart } },
+          {
+            mlsWorkLeaseUntil: { lt: now },
+            mlsWorkLeaseDeviceId: { not: deviceId },
+          },
         ],
       },
       data: { mlsWorkLeaseDeviceId: deviceId, mlsWorkLeaseUntil: until },
@@ -118,6 +127,25 @@ export class MlsMembershipWorkRepository {
     });
 
     return new Set(held.map((conversation) => conversation.id));
+  }
+
+  /**
+   * Ends this device's lease on a conversation it could not finish work for, so
+   * another member can take it now. The device stays the last holder, which is
+   * what keeps it from taking the lease straight back.
+   */
+  async releaseLease(params: {
+    deviceId: string;
+    conversationId: string;
+    now: Date;
+  }): Promise<void> {
+    await this.prisma.chatConversation.updateMany({
+      where: {
+        id: params.conversationId,
+        mlsWorkLeaseDeviceId: params.deviceId,
+      },
+      data: { mlsWorkLeaseUntil: params.now },
+    });
   }
 
   /** Every device of these users, plus these devices wherever they belong - revoked ones included, so a revoked leaf can be told from a working one. */

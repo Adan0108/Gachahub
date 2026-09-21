@@ -34,6 +34,14 @@ function listLeaves(tree: RatchetTree): Leaf[] {
   return leaves;
 }
 
+/** Every leaf in the tree, or undefined when one carries a credential that can't be read - a leaf that can't be named can't be checked. */
+export function listLeafCredentials(tree: RatchetTree): DeviceCredential[] | undefined {
+  const leaves = listLeaves(tree);
+  if (leaves.some((leaf) => leaf.credential === undefined)) return undefined;
+
+  return leaves.map((leaf) => leaf.credential!);
+}
+
 function countByKey(leaves: Leaf[]): Map<string, number> {
   const counts = new Map<string, number>();
   for (const leaf of leaves) {

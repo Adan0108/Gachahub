@@ -28,11 +28,7 @@ import { toNodeIndex, nodeToLeafIndex } from 'ts-mls/treemath.js';
 import { defaultClientConfig } from 'ts-mls/clientConfig.js';
 import { decryptSenderData } from 'ts-mls/privateMessage.js';
 import { makeKeyPackageRef } from 'ts-mls/keyPackage.js';
-import type {
-  DeviceIdentityStore,
-  GroupSession,
-  GroupSessionFactory,
-} from '../contract/client';
+import type { DeviceIdentityStore, GroupSession, GroupSessionFactory } from '../contract/client';
 import type {
   ConversationId,
   DeviceCredential,
@@ -46,7 +42,7 @@ import type {
 import { CredentialMismatchError } from '../contract/errors';
 import { bytesEqual } from '../bytes';
 import { decodeIdentity, encodeIdentity } from './identityCodec';
-import { diffLeafMembership } from './leafMembership';
+import { diffLeafMembership, listLeafCredentials } from './leafMembership';
 import type { MlsClientCandidate } from '../contract/contractTests';
 import {
   InMemoryDeviceIdentityStorage,
@@ -114,7 +110,9 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
   readonly keyPackagesById = new Map<string, StoredKeyPackage>();
   private hydrationPromise: Promise<void> | undefined;
 
-  constructor(private readonly storage: DeviceIdentityStorage = new InMemoryDeviceIdentityStorage()) {}
+  constructor(
+    private readonly storage: DeviceIdentityStorage = new InMemoryDeviceIdentityStorage(),
+  ) {}
 
   async isProvisioned(): Promise<boolean> {
     await this.ensureHydrated();
@@ -314,9 +312,7 @@ function findLeafIndexByIdentity(
 }
 
 class TsMlsGroupSession implements GroupSession {
-  private staged:
-    | { newState: ClientState; welcome: Uint8Array | undefined }
-    | undefined;
+  private staged: { newState: ClientState; welcome: Uint8Array | undefined } | undefined;
 
   constructor(
     public readonly conversationId: ConversationId,
@@ -326,6 +322,10 @@ class TsMlsGroupSession implements GroupSession {
 
   async currentEpoch(): Promise<Epoch> {
     return Number(this.state.groupContext.epoch);
+  }
+
+  async listLeaves(): Promise<DeviceCredential[] | undefined> {
+    return listLeafCredentials(this.state.ratchetTree);
   }
 
   async peekEpoch(wireBytes: Uint8Array): Promise<Epoch | undefined> {
@@ -353,8 +353,7 @@ class TsMlsGroupSession implements GroupSession {
 
     let incomingKind: 'commit' | 'proposal' | undefined;
     let proposalInfo:
-      | { proposal: Proposal; proposer: DeviceCredential; isExternal: boolean }
-      | undefined;
+      { proposal: Proposal; proposer: DeviceCredential; isExternal: boolean } | undefined;
     // A member-sent proposal whose credential didn't decode - distinct from
     // proposalInfo being absent (e.g. this was a commit, not a proposal).
     let proposalCredentialMismatch = false;

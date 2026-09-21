@@ -41,12 +41,14 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
     findActiveLeaves: jest.fn(),
     addLeaves: jest.fn(),
     removeLeaves: jest.fn(),
+    findLeavesAtEpoch: jest.fn(),
   };
 
   let tx: ReturnType<typeof buildTx>;
   let prisma: {
     $transaction: jest.Mock;
     mlsHandshake: { findUnique: jest.Mock };
+    chatDevice: { findMany: jest.Mock };
     mlsCommitFault: { createMany: jest.Mock };
   };
   let repository: MlsHandshakesRepository;
@@ -77,6 +79,7 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
       ),
       mlsHandshake: { findUnique: jest.fn() },
       mlsCommitFault: { createMany: jest.fn() },
+      chatDevice: { findMany: jest.fn() },
     };
     tx.chatConversation.updateMany.mockResolvedValue({ count: 1 });
     tx.mlsHandshake.create.mockImplementation(({ data }: { data: object }) =>
@@ -530,6 +533,28 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
       expect(result.outcome).toBe('accepted');
       expect(roster.addLeaves).toHaveBeenCalledWith('conv-1', [], 1, tx);
       expect(tx.chatParticipant.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findRosterAtEpoch', () => {
+    it('pairs each leaf with its registered key, and gives null for a device whose record is gone', async () => {
+      roster.findLeavesAtEpoch.mockResolvedValue([
+        { deviceId: 'd1', userId: 'u1' },
+        { deviceId: 'd-gone', userId: 'u2' },
+      ]);
+      prisma.chatDevice.findMany.mockResolvedValue([
+        { id: 'd1', signaturePublicKey: new Uint8Array([7]) },
+      ]);
+
+      await expect(repository.findRosterAtEpoch('conv-1', 2)).resolves.toEqual([
+        {
+          deviceId: 'd1',
+          userId: 'u1',
+          signaturePublicKey: new Uint8Array([7]),
+        },
+        { deviceId: 'd-gone', userId: 'u2', signaturePublicKey: null },
+      ]);
+      expect(roster.findLeavesAtEpoch).toHaveBeenCalledWith('conv-1', 2);
     });
   });
 });

@@ -70,10 +70,26 @@ describe('MlsCommitFaultsService', () => {
         source: 'mls',
         dedupKey: 'MlsCommitRefused:conv-1:4',
         fields: expect.arrayContaining([
-          expect.objectContaining({ name: 'Sender device', value: 'device-9' }),
-        ]),
+          expect.objectContaining({
+            name: 'Sender device',
+            value: 'device-9',
+          }) as unknown,
+        ]) as unknown,
       }),
     );
+  });
+
+  it('shows the reporter’s text as code, so a link in it is not clickable in the alert', async () => {
+    await service.reportFault('user-1', 'conv-1', {
+      ...dto,
+      reason: '[Reset admin session](https://evil) `x`',
+    });
+
+    const [alert] = discordLogger.sendError.mock.calls[0] as [
+      { fields: Array<{ name: string; value: string }> },
+    ];
+    const reason = alert.fields.find((field) => field.name === 'Reason');
+    expect(reason?.value).toBe("`[Reset admin session](https://evil) 'x'`");
   });
 
   it('does not alert again when the same fault is filed again - every poll re-detects it', async () => {

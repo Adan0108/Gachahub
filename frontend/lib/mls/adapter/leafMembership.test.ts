@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RatchetTree } from 'ts-mls';
 import { encodeIdentity } from './identityCodec';
-import { diffLeafMembership } from './leafMembership';
+import { diffLeafMembership, listLeafCredentials } from './leafMembership';
 
 function key(...bytes: number[]) {
   return new Uint8Array(bytes);
@@ -101,5 +101,18 @@ describe('diffLeafMembership', () => {
     const t = tree(leaf('u1', 'd1'), undecodableLeaf());
 
     expect(diffLeafMembership(t, t)).toEqual({ added: [], removed: [] });
+  });
+});
+
+describe('listLeafCredentials', () => {
+  it('lists every leaf as a credential with its key', () => {
+    expect(listLeafCredentials(tree(leaf('u1', 'd1'), leaf('u2', 'd2', key(2))))).toEqual([
+      { userId: 'u1', deviceId: 'd1', signatureKey: key(1) },
+      { userId: 'u2', deviceId: 'd2', signatureKey: key(2) },
+    ]);
+  });
+
+  it('gives undefined when any leaf cannot be read, so the group cannot be checked', () => {
+    expect(listLeafCredentials(tree(leaf('u1', 'd1'), undecodableLeaf()))).toBeUndefined();
   });
 });

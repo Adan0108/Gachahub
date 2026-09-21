@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import {
   ChatMessageContentType,
   ChatParticipantRole,
@@ -7,6 +7,7 @@ import {
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { lockConversation } from './membership/lock-conversation';
 import {
   claimUploadsForAttachment,
   type PrismaTransaction,
@@ -301,33 +302,31 @@ export class ChatRepository {
    * Swaps OWNER between two participants in one transaction.
    *
    * Both updates happen together so the group is never
-   * briefly ownerless or briefly has two owner
+   * briefly ownerless or briefly has two owners. Runs under the conversation
+   * lock, and each write only matches a participant still in the state the
+   * caller checked, so a removal running alongside cannot leave a removed owner.
    */
   transferGroupOwnership(
     conversationId: string,
     currentOwnerUserId: string,
     newOwnerUserId: string,
   ) {
-    return this.prisma.$transaction([
-      this.prisma.chatParticipant.update({
-        where: {
-          conversationId_userId: {
-            conversationId,
-            userId: currentOwnerUserId,
-          },
-        },
-        data: { role: 'ADMIN' },
-      }),
-      this.prisma.chatParticipant.update({
-        where: {
-          conversationId_userId: {
-            conversationId,
-            userId: newOwnerUserId,
-          },
-        },
+    return this.prisma.$transaction(async (tx) => {
+      await lockConversation(tx, conversationId);
+
+      const promoted = await tx.chatParticipant.updateMany({
+        where: { conversationId, userId: newOwnerUserId, state: 'ACTIVE' },
         data: { role: 'OWNER' },
-      }),
-    ]);
+      });
+      const demoted = await tx.chatParticipant.updateMany({
+        where: { conversationId, userId: currentOwnerUserId, role: 'OWNER' },
+        data: { role: 'ADMIN' },
+      });
+
+      if (promoted.count !== 1 || demoted.count !== 1) {
+        throw new ConflictException('Group membership changed, try again');
+      }
+    });
   }
 
   updateParticipantRole(
