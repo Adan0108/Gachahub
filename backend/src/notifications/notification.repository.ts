@@ -1,9 +1,10 @@
-import { PrismaService } from '../prisma/prisma.service';
-import {
-  NotificationType,
-  NotificationEntityType,
-} from '../generated/prisma/client';
 import { Injectable } from '@nestjs/common';
+
+import {
+  NotificationEntityType,
+  NotificationType,
+} from '../generated/prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class NotificationRepository {
@@ -18,6 +19,18 @@ export class NotificationRepository {
   }) {
     return this.prisma.notification.create({
       data,
+    });
+  }
+
+  findRecipientById(recipientId: string) {
+    return this.prisma.user.findUnique({
+      where: {
+        id: recipientId,
+      },
+      select: {
+        id: true,
+        status: true,
+      },
     });
   }
 
@@ -75,7 +88,6 @@ export class NotificationRepository {
     return this.prisma.notification.count({
       where: {
         recipientId,
-
         readAt: null,
       },
     });
@@ -123,6 +135,7 @@ export class NotificationRepository {
     since: Date;
   }) {
     const { recipientId, actorId, type, entityType, entityId, since } = params;
+
     return this.prisma.notification.findFirst({
       where: {
         recipientId,

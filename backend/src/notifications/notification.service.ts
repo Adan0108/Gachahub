@@ -7,6 +7,7 @@ import {
 import {
   NotificationEntityType,
   NotificationType,
+  UserStatus,
 } from '../generated/prisma/client';
 
 import { GetNotificationsQueryDto } from './dto/get-notifications-query.dto';
@@ -30,14 +31,18 @@ export class NotificationService {
    * - Actor validation
    * - Notification type/entity validation
    * - Self-notification prevention
+   * - Recipient availability validation
    * - Short-term duplicate prevention
    *
-   * Returns an existing notification if a recent duplicate is found.
-   * Returns null when the actor and recipient are the same user.
+   * Returns:
+   * - The newly created notification
+   * - An existing recent duplicate
+   * - null when notification should be skipped
    */
   async createNotification(input: CreateNotificationInput) {
     const { recipientId, actorId, type, entityType, entityId } = input;
 
+    // 1. Basic runtime validation.
     if (!recipientId) {
       throw new BadRequestException('recipientId is required');
     }
@@ -46,31 +51,49 @@ export class NotificationService {
       throw new BadRequestException('entityId is required');
     }
 
-    /**
-     * All notification types currently supported are triggered
-     * by another user and therefore require an actor.
-     */
+    if (!type) {
+      throw new BadRequestException('type is required');
+    }
+
+    if (!entityType) {
+      throw new BadRequestException('entityType is required');
+    }
+
+    // 2. All currently supported notification types require an actor.
     this.validateActor(type, actorId);
 
-    /**
-     * Ensure the notification type can target the supplied entity.
-     */
+    // 3. Validate type -> entity compatibility.
     this.validateEntityForType(type, entityType);
 
-    /**
-     * Avoid notifications caused by the recipient themselves.
-     */
+    // 4. Do not notify users about their own actions.
     if (actorId === recipientId) {
       return null;
     }
 
-    /**
-     * Temporary duplicate protection.
-     *
-     * This prevents repeated processing of the same action within
-     * a short period. Kafka event IDs will later provide stronger
-     * idempotency guarantees.
-     */
+    // 5. Ensure recipient still exists.
+    //
+    // This becomes particularly important once notifications are created
+    // asynchronously through Kafka because the recipient may disappear
+    // between event publication and event consumption.
+    const recipient =
+      await this.notificationRepository.findRecipientById(recipientId);
+
+    if (!recipient) {
+      return null;
+    }
+
+    // Deleted/banned accounts should not receive new notifications.
+    if (
+      recipient.status === UserStatus.DELETED ||
+      recipient.status === UserStatus.BANNED
+    ) {
+      return null;
+    }
+
+    // 6. Temporary short-term duplicate protection.
+    //
+    // Later Kafka event IDs / idempotency handling should become the
+    // stronger guarantee against processing the same event multiple times.
     const dedupeSince = new Date(
       Date.now() - NotificationService.DEDUPE_WINDOW_MS,
     );
@@ -86,13 +109,12 @@ export class NotificationService {
       },
     );
 
-    /**
-     * Duplicate processing is not considered an error.
-     */
+    // Duplicate processing is not considered an error.
     if (existingNotification) {
       return existingNotification;
     }
 
+    // 7. Persist the notification.
     return this.notificationRepository.create({
       recipientId,
       actorId,
@@ -105,15 +127,17 @@ export class NotificationService {
   /**
    * Returns a cursor-paginated list of notifications for a recipient.
    *
-   * Fetches one additional record to determine whether another
-   * page exists.
+   * Fetches one additional row to determine whether another page exists.
    */
   async getNotifications(
     recipientId: string,
     params: GetNotificationsQueryDto,
   ) {
-    const limit = params.limit ?? NotificationService.DEFAULT_PAGE_SIZE;
+    if (!recipientId) {
+      throw new BadRequestException('recipientId is required');
+    }
 
+    const limit = params.limit ?? NotificationService.DEFAULT_PAGE_SIZE;
     const cursor = params.cursor;
 
     const notifications = await this.notificationRepository.findByRecipient({
@@ -140,17 +164,33 @@ export class NotificationService {
    * Returns the number of unread notifications for a recipient.
    */
   async getUnreadCount(recipientId: string) {
-    return this.notificationRepository.countUnread(recipientId);
+    if (!recipientId) {
+      throw new BadRequestException('recipientId is required');
+    }
+
+    const count = await this.notificationRepository.countUnread(recipientId);
+
+    return {
+      count,
+    };
   }
 
   /**
-   * Marks a notification as read if it belongs to the recipient.
+   * Marks one notification as read.
    *
-   * Returns the existing notification when it has already been read.
-   * Throws when the notification does not exist or does not belong
-   * to the recipient.
+   * The notification must belong to the supplied recipient.
+   *
+   * This operation is intentionally idempotent.
    */
   async markAsRead(recipientId: string, notificationId: string) {
+    if (!recipientId) {
+      throw new BadRequestException('recipientId is required');
+    }
+
+    if (!notificationId) {
+      throw new BadRequestException('notificationId is required');
+    }
+
     const notification = await this.notificationRepository.findByIdForRecipient(
       notificationId,
       recipientId,
@@ -160,9 +200,7 @@ export class NotificationService {
       throw new NotFoundException('Notification not found');
     }
 
-    /**
-     * Mark-as-read is intentionally idempotent.
-     */
+    // Already read -> successful no-op.
     if (notification.readAt) {
       return notification;
     }
@@ -182,22 +220,30 @@ export class NotificationService {
   }
 
   /**
-   * Marks all unread notifications for a recipient as read.
+   * Marks all currently unread notifications for a recipient as read.
    */
   async markAllAsRead(recipientId: string) {
+    if (!recipientId) {
+      throw new BadRequestException('recipientId is required');
+    }
+
     const readAt = new Date();
 
-    return this.notificationRepository.markAllAsRead({
+    const result = await this.notificationRepository.markAllAsRead({
       recipientId,
       readAt,
     });
+
+    return {
+      updatedCount: result.count,
+      readAt,
+    };
   }
 
   /**
-   * Ensures notification types triggered by user actions have an actor.
+   * All currently supported notification types are caused by another user.
    *
-   * All currently supported notification types require an actor.
-   * This can be extended later for system or moderation notifications.
+   * This can later be relaxed for system/moderation notifications.
    */
   private validateActor(type: NotificationType, actorId?: string | null) {
     if (!actorId) {
@@ -206,7 +252,7 @@ export class NotificationService {
   }
 
   /**
-   * Ensures that each notification type targets a compatible entity.
+   * Ensures that a notification type targets a compatible entity.
    */
   private validateEntityForType(
     type: NotificationType,
@@ -257,6 +303,14 @@ export class NotificationService {
           throw new BadRequestException(`${type} must target a CONVERSATION`);
         }
         return;
+
+      default:
+        // Do not interpolate `type` here.
+        //
+        // TypeScript considers this branch unreachable for the current
+        // exhaustive NotificationType enum, so `type` is narrowed to
+        // `never`, which triggers restrict-template-expressions.
+        throw new BadRequestException('Unsupported notification type');
     }
   }
 }
