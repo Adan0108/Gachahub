@@ -31,19 +31,21 @@ interface Device {
   deviceId: string;
   userId: string;
   credential: DeviceCredential;
+  storage: InMemoryGroupSessionStorage;
 }
 
 async function setUpDevice(userId: string): Promise<Device> {
   const store = new TsMlsDeviceIdentityStore();
   const credential = await store.provision(userId);
   const factory = new TsMlsGroupSessionFactory(store);
-  const engine = new SyncEngine(
-    factory,
-    credential.deviceId,
-    userId,
-    new InMemoryGroupSessionStorage(),
-  );
-  return { store, factory, engine, deviceId: credential.deviceId, userId, credential };
+  const storage = new InMemoryGroupSessionStorage();
+  const engine = new SyncEngine(factory, credential.deviceId, userId, storage);
+  return { store, factory, engine, deviceId: credential.deviceId, userId, credential, storage };
+}
+
+/** The engine reloads the saved session for every operation, so a session the test advanced by hand has to be saved. */
+async function saveSession(device: Device, session: { serialize(): Promise<Uint8Array> }) {
+  await device.storage.save('conv-1', await session.serialize());
 }
 
 /** Builds one entry of a claimChatDeviceKeyPackages response from a real key package `device` just generated. */
@@ -732,6 +734,7 @@ describe('SyncEngine', () => {
         removed: [],
       });
       await aliceSession.commitAccepted();
+      await saveSession(alice, aliceSession);
       const welcomeFor = (deviceId: string) =>
         added.welcomes.find((w) => w.deviceId === deviceId)!.welcomeBytes;
       const carolSession = await carol.factory.joinFromWelcome(
@@ -1052,6 +1055,7 @@ describe('SyncEngine', () => {
         removed: [],
       });
       await bobSession.commitAccepted();
+      await saveSession(bob, bobSession);
       await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(1);
 
       vi.mocked(api.getMlsPendingWelcomes).mockResolvedValue([
@@ -1119,6 +1123,39 @@ describe('SyncEngine', () => {
       await engine.encryptMessage('conv-1', { v: 1, type: 'text', body: 'again' });
 
       expect(saveSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('two tabs of one device', () => {
+    it('never reuse a message key, because each reloads the saved session before it encrypts', async () => {
+      const alice = await setUpDevice('user-alice');
+      const bob = await setUpDevice('user-bob');
+      const aliceSession = await alice.engine.createGroup('conv-1');
+      const addBob = await aliceSession.stageCommit({
+        added: [await offerFor(bob)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      await saveSession(alice, aliceSession);
+      const bobSession = await bob.factory.joinFromWelcome(
+        'conv-1',
+        addBob.welcomes.find((w) => w.deviceId === bob.deviceId)!.welcomeBytes,
+      );
+      // a second tab: its own engine and memory, the same saved state
+      const otherTab = new SyncEngine(alice.factory, alice.deviceId, alice.userId, alice.storage);
+
+      // the other tab has already opened the conversation, so it holds an older copy in memory
+      await otherTab.getCurrentEpoch('conv-1');
+
+      const first = await alice.engine.encryptMessage('conv-1', { v: 1, type: 'text', body: 'a' });
+      const second = await otherTab.encryptMessage('conv-1', { v: 1, type: 'text', body: 'b' });
+
+      await expect(bobSession.process(first.wireBytes)).resolves.toMatchObject({
+        kind: 'application',
+      });
+      await expect(bobSession.process(second.wireBytes)).resolves.toMatchObject({
+        kind: 'application',
+      });
     });
   });
 

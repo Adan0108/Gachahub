@@ -2,6 +2,7 @@ import { api } from '../../api';
 import { bytesToBase64, base64ToBytes } from '../storage/base64';
 import type { GroupSession, GroupSessionFactory } from '../contract/client';
 import { CommitVerifier } from './commitVerifier';
+import { withCrossTabLock } from './crossTabLock';
 import { toKeyPackageOffer, type ClaimedKeyPackage } from './keyPackageOffer';
 import {
   MembershipReconciler,
@@ -472,10 +473,21 @@ export class SyncEngine {
     await this.storage.save(conversationId, stateBytes);
   }
 
-  /** Chains `task` after whatever is already pending for `conversationId`, so per-conversation operations never overlap - a settled (never-rejecting) copy is what's kept in the map so one failure doesn't wedge the chain for later calls. */
+  /**
+   * Runs `task` alone for this device and conversation - across tabs too, via a
+   * Web Lock - after reloading the saved session, since another tab may have
+   * advanced it. The in-tab chain keeps calls in order and a failure from
+   * wedging later ones.
+   */
   private runExclusive<T>(conversationId: ConversationId, task: () => Promise<T>): Promise<T> {
+    const locked = async () =>
+      withCrossTabLock(`mls:${this.deviceId}:${conversationId}`, async () => {
+        this.sessions.delete(conversationId);
+        return task();
+      });
+
     const previous = this.locks.get(conversationId) ?? Promise.resolve();
-    const result = previous.then(task, task);
+    const result = previous.then(locked, locked);
     this.locks.set(
       conversationId,
       result.then(
