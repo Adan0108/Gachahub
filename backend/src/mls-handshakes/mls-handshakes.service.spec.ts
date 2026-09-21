@@ -84,8 +84,8 @@ describe('MlsHandshakesService', () => {
         senderDeviceId: 'device-2',
         payload: commitPayload,
         membershipDeclared: true,
-        addedDeviceIds: ['device-4'],
-        removedDeviceIds: [],
+        addedDevices: [{ deviceId: 'device-4' }],
+        removedDevices: [],
         createdAt: new Date(),
       };
       const dto = {
@@ -104,7 +104,10 @@ describe('MlsHandshakesService', () => {
       await expect(
         service.submitHandshake('user-1', 'conv-1', dto),
       ).resolves.toMatchObject({
-        handshake: { membershipDeclared: true, addedDeviceIds: ['device-4'] },
+        handshake: {
+          membershipDeclared: true,
+          addedDevices: [{ deviceId: 'device-4' }],
+        },
       });
 
       repository.acceptHandshake.mockResolvedValue({
@@ -115,7 +118,10 @@ describe('MlsHandshakesService', () => {
         service.submitHandshake('user-1', 'conv-1', dto),
       ).rejects.toMatchObject({
         response: {
-          handshake: { membershipDeclared: true, addedDeviceIds: ['device-4'] },
+          handshake: {
+            membershipDeclared: true,
+            addedDevices: [{ deviceId: 'device-4' }],
+          },
         },
       });
     });
@@ -332,8 +338,8 @@ describe('MlsHandshakesService', () => {
           senderDeviceId: 'device-1',
           payload: new Uint8Array([1]),
           membershipDeclared: true,
-          addedDeviceIds: ['device-2'],
-          removedDeviceIds: ['device-3'],
+          addedDevices: [{ deviceId: 'device-2' }],
+          removedDevices: [{ deviceId: 'device-3' }],
           createdAt: new Date(),
         },
       ]);
@@ -342,8 +348,8 @@ describe('MlsHandshakesService', () => {
 
       expect(result[0]).toMatchObject({
         membershipDeclared: true,
-        addedDeviceIds: ['device-2'],
-        removedDeviceIds: ['device-3'],
+        addedDevices: [{ deviceId: 'device-2' }],
+        removedDevices: [{ deviceId: 'device-3' }],
       });
     });
 

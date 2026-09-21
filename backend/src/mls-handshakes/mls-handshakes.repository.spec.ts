@@ -109,6 +109,7 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
         id,
         userId,
         revokedAt: revokedAt ?? null,
+        signaturePublicKey: new Uint8Array([1, 2, 3]),
       })),
     );
 
@@ -160,8 +161,8 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
       );
       expect(createdHandshakeData()).toMatchObject({
         membershipDeclared: true,
-        addedDeviceIds: [],
-        removedDeviceIds: [],
+        addedDevices: [],
+        removedDevices: [],
       });
     });
 
@@ -260,6 +261,19 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
 
       expect(tx.mlsHandshake.create).not.toHaveBeenCalled();
     });
+
+    it.each(['LEAVING', 'DECLINED'])(
+      'refuses a Commit from a device whose user is %s, even though the device is still in the group',
+      async (state) => {
+        participants(['user-1', state]);
+
+        await expect(repository.acceptHandshake(baseParams)).rejects.toThrow(
+          ForbiddenException,
+        );
+
+        expect(tx.mlsHandshake.create).not.toHaveBeenCalled();
+      },
+    );
 
     it('adds a device for someone waiting to join and activates them in the same transaction', async () => {
       devices(['device-2', 'user-2']);
@@ -419,7 +433,7 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
       expect(tx.mlsHandshake.create).not.toHaveBeenCalled();
     });
 
-    it('stores exactly what the sender declared on the handshake', async () => {
+    it('stores what the server attests about the added and removed devices on the handshake', async () => {
       roster.findActiveLeaves.mockResolvedValue([
         { deviceId: 'device-1', userId: 'user-1' },
         { deviceId: 'device-3', userId: 'user-3' },
@@ -440,8 +454,14 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
 
       expect(createdHandshakeData()).toMatchObject({
         membershipDeclared: true,
-        addedDeviceIds: ['device-2'],
-        removedDeviceIds: ['device-3'],
+        addedDevices: [
+          {
+            deviceId: 'device-2',
+            userId: 'user-2',
+            signaturePublicKey: Buffer.from([1, 2, 3]).toString('base64'),
+          },
+        ],
+        removedDevices: [{ deviceId: 'device-3', userId: 'user-3' }],
       });
     });
 

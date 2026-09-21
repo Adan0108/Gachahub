@@ -21,11 +21,16 @@ import type {
   ConversationId,
   DeviceId,
   Epoch,
+  MembershipChange,
   MembershipChangeRequest,
   PlaintextEnvelope,
   ProcessResult,
   UserId,
 } from '../contract/types';
+
+// Stored beside the group state, under a key of its own, so it survives a reload.
+const DECLARED_MARKER = new Uint8Array([1]);
+const declaredMarkerKey = (conversationId: ConversationId) => `${conversationId}#declared`;
 
 /**
  * Orchestrates one device's MLS group sessions against the real backend
@@ -47,6 +52,8 @@ export class SyncEngine {
   // the one already noted for the device identity's AES key).
   private readonly locks = new Map<ConversationId, Promise<unknown>>();
   private reconcileQueue: Promise<void> = Promise.resolve();
+  // Conversations in which a declared Commit has been seen (see verifyCommit).
+  private readonly declaredSeen = new Set<ConversationId>();
 
   constructor(
     private readonly factory: GroupSessionFactory,
@@ -149,6 +156,7 @@ export class SyncEngine {
 
       await session.commitAccepted();
       await this.persistSession(conversationId, session);
+      await this.markDeclaredSeen(conversationId);
       return session.currentEpoch();
     });
   }
@@ -361,7 +369,9 @@ export class SyncEngine {
   async forgetConversation(conversationId: ConversationId): Promise<void> {
     return this.runExclusive(conversationId, async () => {
       this.sessions.delete(conversationId);
+      this.declaredSeen.delete(conversationId);
       await this.storage.delete(conversationId);
+      await this.storage.delete(declaredMarkerKey(conversationId));
     });
   }
 
@@ -382,9 +392,7 @@ export class SyncEngine {
     const result = await session.process(wireBytes);
 
     if (result.kind === 'commit') {
-      const problem = declared
-        ? describeMembershipMismatch(result.membershipChange, declared)
-        : 'it arrived without the membership the server recorded for it, so it cannot be checked';
+      const problem = await this.verifyCommit(conversationId, result.membershipChange, declared);
 
       if (problem) {
         this.sessions.delete(conversationId);
@@ -394,6 +402,54 @@ export class SyncEngine {
 
     await this.persistSession(conversationId, session);
     return result;
+  }
+
+  /**
+   * Why a Commit can't be accepted, or undefined when it can. Beyond checking
+   * it against what the server recorded, this makes "declared" one-way per
+   * group: once a declared Commit has been seen, a later one the server calls
+   * undeclared is a fault. Without that, a server could switch verification
+   * off for a group just by reporting its Commits as undeclared - and no real
+   * group ever goes back, because the server refuses to extend a group that
+   * predates membership tracking.
+   */
+  private async verifyCommit(
+    conversationId: ConversationId,
+    actual: MembershipChange | null,
+    declared: DeclaredMembership | undefined,
+  ): Promise<string | undefined> {
+    if (!declared) {
+      return 'it arrived without the membership the server recorded for it, so it cannot be checked';
+    }
+
+    if (!declared.membershipDeclared) {
+      return (await this.hasSeenDeclared(conversationId))
+        ? 'the server reported it as undeclared, although earlier commits in this group were declared'
+        : undefined;
+    }
+
+    const mismatch = describeMembershipMismatch(actual, declared);
+    if (mismatch) return mismatch;
+
+    await this.markDeclaredSeen(conversationId);
+    return undefined;
+  }
+
+  private async hasSeenDeclared(conversationId: ConversationId): Promise<boolean> {
+    if (this.declaredSeen.has(conversationId)) return true;
+
+    const marker = await this.storage.load(declaredMarkerKey(conversationId));
+    if (!marker) return false;
+
+    this.declaredSeen.add(conversationId);
+    return true;
+  }
+
+  private async markDeclaredSeen(conversationId: ConversationId): Promise<void> {
+    if (this.declaredSeen.has(conversationId)) return;
+
+    await this.storage.save(declaredMarkerKey(conversationId), DECLARED_MARKER);
+    this.declaredSeen.add(conversationId);
   }
 
   private async getSession(conversationId: ConversationId): Promise<GroupSession> {

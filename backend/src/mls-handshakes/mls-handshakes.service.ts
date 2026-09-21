@@ -24,10 +24,11 @@ interface SerializableHandshake {
   /** Null once the sending device (and its owning account) has been deleted - the Commit itself is kept regardless (see schema.prisma's MlsHandshake.senderDeviceId doc). */
   senderDeviceId: string | null;
   payload: Uint8Array;
-  /** What the sender declared the Commit does to the group; false for Commits from before membership was tracked. */
+  /** False for Commits from before membership was tracked, which carry nothing to check. */
   membershipDeclared: boolean;
-  addedDeviceIds: string[];
-  removedDeviceIds: string[];
+  /** Whose device each added leaf must be and which key it must carry - the server's records, not the sender's word. */
+  addedDevices: unknown;
+  removedDevices: unknown;
   createdAt: Date;
 }
 
@@ -172,8 +173,8 @@ export class MlsHandshakesService {
       payload: Buffer.from(handshake.payload).toString('base64'),
       // Every member checks these against what the Commit actually did.
       membershipDeclared: handshake.membershipDeclared,
-      addedDeviceIds: handshake.addedDeviceIds,
-      removedDeviceIds: handshake.removedDeviceIds,
+      addedDevices: handshake.addedDevices,
+      removedDevices: handshake.removedDevices,
       createdAt: handshake.createdAt,
     };
   }

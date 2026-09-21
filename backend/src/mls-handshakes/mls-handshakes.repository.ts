@@ -10,8 +10,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   assertAddedDevicesAuthorized,
   assertRemovedDevicesRemovable,
+  assertSenderIsActiveParticipant,
   assertSenderIsMember,
+  attestMembershipChange,
   planCommitTransitions,
+  type AttestedAddedDevice,
+  type AttestedRemovedDevice,
   type DeviceFact,
 } from './mls-membership-rules';
 
@@ -81,8 +85,6 @@ export class MlsHandshakesRepository {
       senderDeviceId,
       payload,
       payloadSha256,
-      addedDeviceIds,
-      removedDeviceIds,
       welcomes,
     } = params;
 
@@ -96,7 +98,7 @@ export class MlsHandshakesRepository {
         return null;
       }
 
-      await this.applyMembershipChange(tx, params);
+      const attested = await this.applyMembershipChange(tx, params);
 
       const handshake = await tx.mlsHandshake.create({
         data: {
@@ -106,8 +108,8 @@ export class MlsHandshakesRepository {
           payload: payload.slice(),
           payloadSha256,
           membershipDeclared: true,
-          addedDeviceIds,
-          removedDeviceIds,
+          addedDevices: attested.addedDevices,
+          removedDevices: attested.removedDevices,
         },
       });
 
@@ -168,7 +170,10 @@ export class MlsHandshakesRepository {
       addedDeviceIds: string[];
       removedDeviceIds: string[];
     },
-  ): Promise<void> {
+  ): Promise<{
+    addedDevices: AttestedAddedDevice[];
+    removedDevices: AttestedRemovedDevice[];
+  }> {
     const {
       conversationId,
       expectedEpoch,
@@ -208,7 +213,12 @@ export class MlsHandshakesRepository {
 
     const devices = await tx.chatDevice.findMany({
       where: { id: { in: [...addedDeviceIds, ...removedDeviceIds] } },
-      select: { id: true, userId: true, revokedAt: true },
+      select: {
+        id: true,
+        userId: true,
+        revokedAt: true,
+        signaturePublicKey: true,
+      },
     });
     const participants = await tx.chatParticipant.findMany({
       where: { conversationId },
@@ -224,6 +234,12 @@ export class MlsHandshakesRepository {
       ]),
     );
 
+    const activeLeafUserIdByDeviceId = new Map(
+      activeLeaves.map((leaf) => [leaf.deviceId, leaf.userId]),
+    );
+
+    assertSenderIsActiveParticipant(participantStateByUserId.get(senderUserId));
+
     assertAddedDevicesAuthorized({
       addedDeviceIds,
       deviceById,
@@ -232,11 +248,16 @@ export class MlsHandshakesRepository {
     });
     assertRemovedDevicesRemovable({
       removedDeviceIds,
-      activeLeafUserIdByDeviceId: new Map(
-        activeLeaves.map((leaf) => [leaf.deviceId, leaf.userId]),
-      ),
+      activeLeafUserIdByDeviceId,
       deviceById,
       participantStateByUserId,
+    });
+
+    const attested = attestMembershipChange({
+      addedDeviceIds,
+      removedDeviceIds,
+      deviceById,
+      activeLeafUserIdByDeviceId,
     });
 
     const removedCount = await this.mlsGroupRosterRepository.removeLeaves(
@@ -295,6 +316,8 @@ export class MlsHandshakesRepository {
     });
 
     await applyParticipantTransitions(tx, conversationId, transitions);
+
+    return attested;
   }
 
   findHandshakesSince(conversationId: string, fromEpoch: number) {

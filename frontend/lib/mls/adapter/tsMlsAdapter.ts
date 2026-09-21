@@ -44,6 +44,7 @@ import type {
   UserId,
 } from '../contract/types';
 import { CredentialMismatchError } from '../contract/errors';
+import { bytesEqual } from '../bytes';
 import { decodeIdentity, encodeIdentity } from './identityCodec';
 import { diffLeafMembership } from './leafMembership';
 import type { MlsClientCandidate } from '../contract/contractTests';
@@ -98,18 +99,6 @@ function isPlaintextEnvelope(value: unknown): value is PlaintextEnvelope {
     (value as { v?: unknown }).v === 1 &&
     PLAINTEXT_ENVELOPE_TYPES.has((value as { type?: unknown }).type as string)
   );
-}
-
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  for (let i = 0; i < a.length; i += 1) {
-    if (a[i] !== b[i]) {
-      return false;
-    }
-  }
-  return true;
 }
 
 export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {

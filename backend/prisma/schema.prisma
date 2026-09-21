@@ -948,14 +948,17 @@ model MlsHandshake {
   /// Commit can be recognized as a duplicate instead of a real conflict.
   payloadSha256 String
 
-  /// The sender's claim of which devices this Commit added and removed. The server cannot read a
-  /// Commit, so it only validates these against the authorized roster (see MlsGroupMember); every
-  /// other member's client checks them against what the Commit actually did and treats a mismatch
-  /// as a fault. False for Commits accepted before membership was tracked - those arrays are then
-  /// empty because nothing was declared, not because nothing changed.
-  membershipDeclared Boolean  @default(false)
-  addedDeviceIds     String[] @default([])
-  removedDeviceIds   String[] @default([])
+  /// What this Commit does to the group, as declared by its sender and attested by the server. The
+  /// server cannot read a Commit, so it validates the sender's declared device ids against the
+  /// authorized roster (see MlsGroupMember) and records, from its own registry, whose device each one
+  /// is: addedDevices = [{ deviceId, userId, signaturePublicKey (base64) }] from ChatDevice, and
+  /// removedDevices = [{ deviceId, userId }] from the roster. Every other member's client checks the
+  /// Commit against these - id, owner AND key - and treats a mismatch as a fault. False for Commits
+  /// accepted before membership was tracked; the arrays are then empty because nothing was declared,
+  /// not because nothing changed.
+  membershipDeclared Boolean @default(false)
+  addedDevices       Json    @default("[]")
+  removedDevices     Json    @default("[]")
 
   createdAt DateTime @default(now())
 

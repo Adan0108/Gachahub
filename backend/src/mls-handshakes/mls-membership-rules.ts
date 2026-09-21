@@ -27,7 +27,23 @@ export interface DeviceFact {
   id: string;
   userId: string;
   revokedAt: Date | null;
+  /** The signing key the device registered; every key package it uploads must be signed with it. */
+  signaturePublicKey: Uint8Array;
 }
+
+/** Whose device an added leaf must be, and which key it must carry - from the server's registry, not the sender. */
+export type AttestedAddedDevice = {
+  deviceId: string;
+  userId: string;
+  /** Base64. */
+  signaturePublicKey: string;
+};
+
+/** Whose leaf a removed device was, from the server's roster. */
+export type AttestedRemovedDevice = {
+  deviceId: string;
+  userId: string;
+};
 
 type StateByUserId = ReadonlyMap<string, ChatParticipantState>;
 
@@ -94,6 +110,22 @@ export function assertDeclarationIsConsistent(params: {
 
   if (added.has(senderDeviceId) || removedDeviceIds.includes(senderDeviceId)) {
     throw new BadRequestException('A device cannot add or remove itself');
+  }
+}
+
+/**
+ * The device's user must still be an ACTIVE participant when the Commit is
+ * accepted. The caller checked before the transaction started; a LEAVING or
+ * DECLINED user still has devices in the group, so being in the group is not
+ * enough on its own.
+ */
+export function assertSenderIsActiveParticipant(
+  state: ChatParticipantState | undefined,
+): void {
+  if (state !== 'ACTIVE') {
+    throw new ForbiddenException(
+      'No longer an active member of this conversation',
+    );
   }
 }
 
@@ -186,6 +218,48 @@ export function assertRemovedDevicesRemovable(params: {
       );
     }
   }
+}
+
+/**
+ * What the server vouches for about a Commit's membership change, taken from
+ * its own records. Members compare the real Commit with THIS - not with what
+ * the sender said - so a leaf that carries the right device id but a different
+ * owner or key (a "ghost leaf") is caught. Call only after the added and
+ * removed devices have been validated.
+ */
+export function attestMembershipChange(params: {
+  addedDeviceIds: readonly string[];
+  removedDeviceIds: readonly string[];
+  deviceById: ReadonlyMap<string, DeviceFact>;
+  activeLeafUserIdByDeviceId: ReadonlyMap<string, string>;
+}): {
+  addedDevices: AttestedAddedDevice[];
+  removedDevices: AttestedRemovedDevice[];
+} {
+  const {
+    addedDeviceIds,
+    removedDeviceIds,
+    deviceById,
+    activeLeafUserIdByDeviceId,
+  } = params;
+
+  return {
+    addedDevices: addedDeviceIds.map((deviceId) => {
+      const device = deviceById.get(deviceId)!;
+
+      return {
+        deviceId,
+        userId: device.userId,
+        signaturePublicKey: Buffer.from(device.signaturePublicKey).toString(
+          'base64',
+        ),
+      };
+    }),
+    removedDevices: removedDeviceIds.map((deviceId) => ({
+      deviceId,
+      userId: activeLeafUserIdByDeviceId.get(deviceId)!,
+    })),
+  };
 }
 
 /**

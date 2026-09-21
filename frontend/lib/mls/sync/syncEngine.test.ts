@@ -83,17 +83,31 @@ async function offerFor(device: Device): Promise<KeyPackageOffer> {
   };
 }
 
+/** What the server records for an added device: its owner and registered key. */
+function attest(device: Device, overrides: { userId?: string; signatureKey?: Uint8Array } = {}) {
+  return {
+    deviceId: device.deviceId,
+    userId: overrides.userId ?? device.userId,
+    signaturePublicKey: bytesToBase64(overrides.signatureKey ?? device.credential.signatureKey),
+  };
+}
+
+/** What the server records for a removed device: whose leaf it was. */
+function attestRemoved(device: Device) {
+  return { deviceId: device.deviceId, userId: device.userId };
+}
+
 function fakeHandshake(overrides: {
   epoch: number;
   senderDeviceId: string;
   payload: Uint8Array;
-  /** What the server recorded the Commit as doing; defaults to a Commit from before membership was tracked. */
-  declared?: { addedDeviceIds: string[]; removedDeviceIds: string[] };
+  /** What the server attests the Commit does; defaults to a Commit from before membership was tracked. */
+  declared?: { addedDevices: unknown[]; removedDevices: unknown[] };
 }) {
   return {
     membershipDeclared: overrides.declared !== undefined,
-    addedDeviceIds: overrides.declared?.addedDeviceIds ?? [],
-    removedDeviceIds: overrides.declared?.removedDeviceIds ?? [],
+    addedDevices: overrides.declared?.addedDevices ?? [],
+    removedDevices: overrides.declared?.removedDevices ?? [],
     id: `hs-${overrides.epoch}-${overrides.senderDeviceId}`,
     conversationId: 'conv-1',
     epoch: overrides.epoch,
@@ -307,7 +321,7 @@ describe('SyncEngine', () => {
           epoch: 1,
           senderDeviceId: alice.deviceId,
           payload: addCarol.wireBytes,
-          declared: { addedDeviceIds: [carol.deviceId], removedDeviceIds: [] },
+          declared: { addedDevices: [attest(carol)], removedDevices: [] },
         }),
       );
 
@@ -327,7 +341,7 @@ describe('SyncEngine', () => {
           epoch: 1,
           senderDeviceId: alice.deviceId,
           payload: addSneaky.wireBytes,
-          declared: { addedDeviceIds: [], removedDeviceIds: [] },
+          declared: { addedDevices: [], removedDevices: [] },
         }),
       );
 
@@ -351,11 +365,98 @@ describe('SyncEngine', () => {
           epoch: 1,
           senderDeviceId: alice.deviceId,
           payload: removeBob.wireBytes,
-          declared: { addedDeviceIds: [], removedDeviceIds: [bob.deviceId] },
+          declared: { addedDevices: [], removedDevices: [attestRemoved(bob)] },
         }),
       );
 
       await expect(bobEngine.syncCommits('conv-1')).resolves.toBeDefined();
+    });
+
+    it('refuses a leaf that carries the right device id but not that device’s registered key', async () => {
+      const { alice, aliceSession, bobEngine } = await groupWithBobVerifying();
+      const carol = await setUpDevice('user-carol');
+      const addCarol = await aliceSession.stageCommit({
+        added: [await offerFor(carol)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      await serveHandshake(
+        fakeHandshake({
+          epoch: 1,
+          senderDeviceId: alice.deviceId,
+          payload: addCarol.wireBytes,
+          // the server's registry says carol's device has a different key than the leaf carries
+          declared: {
+            addedDevices: [attest(carol, { signatureKey: new Uint8Array([9, 9, 9]) })],
+            removedDevices: [],
+          },
+        }),
+      );
+
+      await expect(bobEngine.syncCommits('conv-1')).rejects.toThrow(/registered key/);
+      await expect(bobEngine.getCurrentEpoch('conv-1')).resolves.toBe(1);
+    });
+
+    it('refuses a leaf that is labelled as a different user than the device belongs to', async () => {
+      const { alice, aliceSession, bobEngine } = await groupWithBobVerifying();
+      const carol = await setUpDevice('user-carol');
+      const addCarol = await aliceSession.stageCommit({
+        added: [await offerFor(carol)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      await serveHandshake(
+        fakeHandshake({
+          epoch: 1,
+          senderDeviceId: alice.deviceId,
+          payload: addCarol.wireBytes,
+          declared: {
+            addedDevices: [attest(carol, { userId: 'user-somebody-else' })],
+            removedDevices: [],
+          },
+        }),
+      );
+
+      await expect(bobEngine.syncCommits('conv-1')).rejects.toThrow(/registered owner/);
+    });
+
+    it('once a group has had a declared commit, refuses a later one the server calls undeclared - even after a reload', async () => {
+      const { alice, aliceSession, bob, bobEngine, bobStorage } = await groupWithBobVerifying();
+      const carol = await setUpDevice('user-carol');
+      const dave = await setUpDevice('user-dave');
+      const addCarol = await aliceSession.stageCommit({
+        added: [await offerFor(carol)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      await serveHandshake(
+        fakeHandshake({
+          epoch: 1,
+          senderDeviceId: alice.deviceId,
+          payload: addCarol.wireBytes,
+          declared: { addedDevices: [attest(carol)], removedDevices: [] },
+        }),
+      );
+      await bobEngine.syncCommits('conv-1');
+
+      const addDave = await aliceSession.stageCommit({
+        added: [await offerFor(dave)],
+        removed: [],
+      });
+      await aliceSession.commitAccepted();
+      await serveHandshake(
+        fakeHandshake({
+          epoch: 2,
+          senderDeviceId: alice.deviceId,
+          payload: addDave.wireBytes,
+          // a server (or anyone) quietly reporting the commit as undeclared to skip the check
+        }),
+      );
+
+      // a fresh engine over the same storage, as after a reload: the rule must still hold
+      const reloaded = new SyncEngine(bob.factory, bob.deviceId, bob.userId, bobStorage);
+      await expect(reloaded.syncCommits('conv-1')).rejects.toThrow(/undeclared/);
+      await expect(reloaded.getCurrentEpoch('conv-1')).resolves.toBe(2);
     });
 
     it('refuses a commit that removed a device it did not declare', async () => {
@@ -371,7 +472,7 @@ describe('SyncEngine', () => {
           epoch: 1,
           senderDeviceId: alice.deviceId,
           payload: addCarol.wireBytes,
-          declared: { addedDeviceIds: [carol.deviceId], removedDeviceIds: [] },
+          declared: { addedDevices: [attest(carol)], removedDevices: [] },
         }),
       );
       await bobEngine.syncCommits('conv-1');
@@ -386,7 +487,7 @@ describe('SyncEngine', () => {
           epoch: 2,
           senderDeviceId: alice.deviceId,
           payload: removeCarol.wireBytes,
-          declared: { addedDeviceIds: [], removedDeviceIds: [] },
+          declared: { addedDevices: [], removedDevices: [] },
         }),
       );
 
@@ -407,7 +508,7 @@ describe('SyncEngine', () => {
           epoch: 1,
           senderDeviceId: alice.deviceId,
           payload: addCarol.wireBytes,
-          declared: { addedDeviceIds: [carol.deviceId], removedDeviceIds: [] },
+          declared: { addedDevices: [attest(carol)], removedDevices: [] },
         }),
       };
       delete row.membershipDeclared;
@@ -469,7 +570,7 @@ describe('SyncEngine', () => {
           epoch: 1,
           senderDeviceId: alice.deviceId,
           payload: winner.wireBytes,
-          declared: { addedDeviceIds: [], removedDeviceIds: [] },
+          declared: { addedDevices: [], removedDevices: [] },
         }),
       });
 

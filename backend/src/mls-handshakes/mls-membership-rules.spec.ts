@@ -8,7 +8,9 @@ import {
   assertAddedDevicesAuthorized,
   assertDeclarationIsConsistent,
   assertRemovedDevicesRemovable,
+  assertSenderIsActiveParticipant,
   assertSenderIsMember,
+  attestMembershipChange,
   planCommitTransitions,
   type DeviceFact,
 } from './mls-membership-rules';
@@ -17,7 +19,12 @@ const device = (
   id: string,
   userId: string,
   revokedAt: Date | null = null,
-): DeviceFact => ({ id, userId, revokedAt });
+): DeviceFact => ({
+  id,
+  userId,
+  revokedAt,
+  signaturePublicKey: new Uint8Array([1, 2, 3]),
+});
 
 const states = (entries: Array<[string, ChatParticipantState]>) =>
   new Map(entries);
@@ -117,6 +124,68 @@ describe('assertSenderIsMember', () => {
     expect(() => assertSenderIsMember(new Set(['d1']), 'd2')).toThrow(
       ForbiddenException,
     );
+  });
+});
+
+describe('assertSenderIsActiveParticipant', () => {
+  it('lets an ACTIVE participant commit', () => {
+    expect(() => assertSenderIsActiveParticipant('ACTIVE')).not.toThrow();
+  });
+
+  // a LEAVING or DECLINED user still has devices in the group, so being in it is not enough
+  it.each<ChatParticipantState | undefined>([
+    'LEAVING',
+    'DECLINED',
+    'JOINING',
+    'PENDING',
+    'ARCHIVED',
+    'BLOCKED',
+    undefined,
+  ])('refuses a sender whose user is %s', (state) => {
+    expect(() => assertSenderIsActiveParticipant(state)).toThrow(
+      ForbiddenException,
+    );
+  });
+});
+
+describe('attestMembershipChange', () => {
+  it('records, from the server’s registry, whose device and which key each added device must carry', () => {
+    const attested = attestMembershipChange({
+      addedDeviceIds: ['d2'],
+      removedDeviceIds: [],
+      deviceById: new Map([['d2', device('d2', 'u2')]]),
+      activeLeafUserIdByDeviceId: new Map(),
+    });
+
+    expect(attested.addedDevices).toEqual([
+      {
+        deviceId: 'd2',
+        userId: 'u2',
+        signaturePublicKey: Buffer.from([1, 2, 3]).toString('base64'),
+      },
+    ]);
+  });
+
+  it('records, from the roster, whose leaf each removed device was', () => {
+    const attested = attestMembershipChange({
+      addedDeviceIds: [],
+      removedDeviceIds: ['d3'],
+      deviceById: new Map(),
+      activeLeafUserIdByDeviceId: new Map([['d3', 'u3']]),
+    });
+
+    expect(attested.removedDevices).toEqual([{ deviceId: 'd3', userId: 'u3' }]);
+  });
+
+  it('attests nothing for a Commit that changes no one', () => {
+    expect(
+      attestMembershipChange({
+        addedDeviceIds: [],
+        removedDeviceIds: [],
+        deviceById: new Map(),
+        activeLeafUserIdByDeviceId: new Map(),
+      }),
+    ).toEqual({ addedDevices: [], removedDevices: [] });
   });
 });
 
