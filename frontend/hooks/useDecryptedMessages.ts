@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSyncEngine } from './useSyncEngine';
 import { base64ToBytes } from '../lib/mls/storage/base64';
+import { nextRetryDelayMs } from '../lib/mls/messaging/decryptRetry';
 import { EncryptedIndexedDbMessagePlaintextStore } from '../lib/mls/storage/messagePlaintextStore';
 import type { ConversationId, PlaintextEnvelope } from '../lib/mls/contract/types';
 
@@ -11,7 +12,7 @@ const plaintextStore = new EncryptedIndexedDbMessagePlaintextStore();
 export type DecryptedMessageState =
   | { status: 'pending' }
   | { status: 'ok'; envelope: PlaintextEnvelope }
-  /** Genuinely gone on this device - wrong key generation, missing history, or a decode failure. Not retried automatically. */
+  /** Genuinely gone on this device - wrong key generation, missing history, or a decode failure. Not retried. A message that only failed because the commit sync did, stays pending and is retried. */
   | { status: 'unavailable' };
 
 interface ChatMessageRow {
@@ -46,6 +47,13 @@ export function useDecryptedMessages(
   // second time - each MLS application message key is single-use, so the
   // second attempt fails and permanently reports "unavailable".
   const inFlightRef = useRef<Set<string>>(new Set());
+  // Bumped by a timer to run the effect again for messages that couldn't be decrypted
+  // only because catching up on commits failed.
+  const [retryTick, setRetryTick] = useState(0);
+  const retryAttemptsRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => clearTimeout(retryTimerRef.current), []);
 
   useEffect(() => {
     if (!syncEngine || !conversationId || messages.length === 0) {
@@ -122,14 +130,17 @@ export function useDecryptedMessages(
       );
       const needsSync = atCurrentEpoch.some((isCurrent) => !isCurrent);
 
+      let syncFailed = false;
       if (needsSync) {
         try {
           await syncEngine.syncCommits(conversationId);
         } catch (error) {
+          syncFailed = true;
           console.warn('Could not sync MLS commits before decrypting messages', error);
         }
       }
 
+      let needsRetry = false;
       await Promise.all(
         pendingIncoming.map(async (message) => {
           try {
@@ -158,14 +169,28 @@ export function useDecryptedMessages(
             }
           } catch (error) {
             console.warn(`Could not decrypt message ${message.id}`, error);
+            // Without the commit sync the message may just need a commit this device hasn't got yet.
+            const status = syncFailed ? 'pending' : 'unavailable';
+            needsRetry ||= syncFailed;
             if (!cancelled) {
-              setDecrypted((prev) => ({ ...prev, [message.id]: { status: 'unavailable' } }));
+              setDecrypted((prev) => ({ ...prev, [message.id]: { status } }));
             }
           } finally {
             inFlightRef.current.delete(message.id);
           }
         }),
       );
+
+      if (!needsRetry) {
+        retryAttemptsRef.current = 0;
+      } else if (!cancelled) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = setTimeout(
+          () => setRetryTick((tick) => tick + 1),
+          nextRetryDelayMs(retryAttemptsRef.current),
+        );
+        retryAttemptsRef.current += 1;
+      }
     })();
 
     return () => {
@@ -175,7 +200,13 @@ export function useDecryptedMessages(
     // underlying content hasn't changed - keying off the id list (not
     // `messages` itself) keeps this from re-running on every unrelated
     // re-render, e.g. from an unrelated parent state update.
-  }, [syncEngine, conversationId, messages.map((message) => message.id).join(','), currentUserId]);
+  }, [
+    syncEngine,
+    conversationId,
+    messages.map((message) => message.id).join(','),
+    currentUserId,
+    retryTick,
+  ]);
 
   return decrypted;
 }
