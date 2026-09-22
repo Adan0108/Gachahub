@@ -7,16 +7,7 @@ jest.mock('../prisma/prisma.service', () => ({
 import { ChatDevicesRepository } from './chat-devices.repository';
 
 describe('ChatDevicesRepository.revokeDevice', () => {
-  const tx = {
-    chatDevice: { updateMany: jest.fn() },
-    session: { findMany: jest.fn(), deleteMany: jest.fn() },
-  };
-  const prisma = {
-    $transaction: jest.fn((callback: (t: typeof tx) => unknown) =>
-      callback(tx),
-    ),
-  };
-
+  const prisma = { chatDevice: { updateMany: jest.fn() } };
   let repository: ChatDevicesRepository;
 
   beforeEach(() => {
@@ -24,45 +15,90 @@ describe('ChatDevicesRepository.revokeDevice', () => {
     repository = new ChatDevicesRepository(prisma as unknown as PrismaService);
   });
 
-  it('revokes the device and ends the logins linked to it or not linked yet, not the one asking', async () => {
-    tx.chatDevice.updateMany.mockResolvedValue({ count: 1 });
-    tx.session.findMany.mockResolvedValue([
-      { id: 's2', token: 't2' },
-      { id: 's3', token: 't3' },
-    ]);
+  it('only marks the device revoked - it does not touch any login', async () => {
+    await repository.revokeDevice('device-1', 'user-1');
 
-    const result = await repository.revokeDevice(
-      'device-1',
-      'user-1',
-      'session-1',
-    );
+    expect(prisma.chatDevice.updateMany).toHaveBeenCalledWith({
+      where: { id: 'device-1', userId: 'user-1' },
+      data: { revokedAt: expect.any(Date) as Date },
+    });
+  });
+});
 
-    expect(tx.session.findMany).toHaveBeenCalledWith({
+describe('ChatDevicesRepository.findLoginsOfDevice', () => {
+  const prisma = {
+    session: { findFirst: jest.fn(), findMany: jest.fn() },
+  };
+  let repository: ChatDevicesRepository;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    repository = new ChatDevicesRepository(prisma as unknown as PrismaService);
+    prisma.session.findMany.mockResolvedValue([{ id: 's2', token: 't2' }]);
+  });
+
+  it('finds the logins linked to the device, not the one asking', async () => {
+    prisma.session.findFirst.mockResolvedValue({
+      chatDeviceId: 'other-device',
+    });
+
+    await expect(
+      repository.findLoginsOfDevice('device-1', 'user-1', 'session-1'),
+    ).resolves.toEqual([{ id: 's2', token: 't2' }]);
+
+    expect(prisma.session.findMany).toHaveBeenCalledWith({
       where: {
         userId: 'user-1',
+        chatDeviceId: 'device-1',
         id: { not: 'session-1' },
-        OR: [{ chatDeviceId: 'device-1' }, { chatDeviceId: null }],
       },
       select: { id: true, token: true },
     });
-    expect(tx.session.deleteMany).toHaveBeenCalledWith({
-      where: { id: { in: ['s2', 's3'] } },
+  });
+
+  it('includes the caller login when it is the device being signed out', async () => {
+    prisma.session.findFirst.mockResolvedValue({ chatDeviceId: 'device-1' });
+
+    await repository.findLoginsOfDevice('device-1', 'user-1', 'session-1');
+
+    expect(prisma.session.findMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1', chatDeviceId: 'device-1' },
+      select: { id: true, token: true },
     });
-    expect(result).toEqual({
-      count: 1,
-      endedSessions: [
-        { id: 's2', token: 't2' },
-        { id: 's3', token: 't3' },
-      ],
+  });
+});
+
+describe('ChatDevicesRepository.linkSession', () => {
+  const prisma = {
+    session: { updateMany: jest.fn(), findFirst: jest.fn() },
+  };
+  let repository: ChatDevicesRepository;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    repository = new ChatDevicesRepository(prisma as unknown as PrismaService);
+  });
+
+  it('links a login only while it is not linked to any device', async () => {
+    await repository.linkSession('session-1', 'user-1', 'device-1');
+
+    expect(prisma.session.updateMany).toHaveBeenCalledWith({
+      where: { id: 'session-1', userId: 'user-1', chatDeviceId: null },
+      data: { chatDeviceId: 'device-1' },
     });
   });
 
-  it('logs nobody out when no device of theirs matched', async () => {
-    tx.chatDevice.updateMany.mockResolvedValue({ count: 0 });
+  it('reads which device a login is linked to, or null', async () => {
+    prisma.session.findFirst.mockResolvedValueOnce({
+      chatDeviceId: 'device-1',
+    });
+    prisma.session.findFirst.mockResolvedValueOnce(null);
 
-    await repository.revokeDevice('device-1', 'user-1', 'session-1');
-
-    expect(tx.session.deleteMany).not.toHaveBeenCalled();
-    expect(tx.session.findMany).not.toHaveBeenCalled();
+    await expect(
+      repository.findSessionDeviceId('session-1', 'user-1'),
+    ).resolves.toBe('device-1');
+    await expect(
+      repository.findSessionDeviceId('session-2', 'user-1'),
+    ).resolves.toBeNull();
   });
 });

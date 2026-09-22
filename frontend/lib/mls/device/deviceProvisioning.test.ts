@@ -1,11 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ensureDeviceProvisioned, revokeDeviceEverywhere } from './deviceProvisioning';
 import { TsMlsDeviceIdentityStore } from '../adapter/tsMlsAdapter';
+import { wipeAllLocalMlsSecrets, wipeGroupSessionState } from '../storage/mlsEncryptedStore';
+
+vi.mock('../storage/mlsEncryptedStore', () => ({
+  wipeAllLocalMlsSecrets: vi.fn().mockResolvedValue(undefined),
+  wipeGroupSessionState: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock('../../api', () => ({
   api: {
     registerChatDevice: vi.fn().mockResolvedValue({ id: 'device-1' }),
     revokeChatDevice: vi.fn().mockResolvedValue({ message: 'Device revoked successfully' }),
+    chatDeviceSessionChallenge: vi.fn().mockResolvedValue({ challenge: 'a-challenge' }),
     linkChatDeviceSession: vi.fn().mockResolvedValue({ message: 'Session linked to device' }),
   },
 }));
@@ -100,25 +107,71 @@ describe('linking the login to the device', () => {
     vi.clearAllMocks();
   });
 
-  it('links the login to the device on every call, provisioned already or not', async () => {
+  it('proves it holds the device key on every call, provisioned already or not', async () => {
     const { api } = await import('../../api');
     const store = new TsMlsDeviceIdentityStore();
 
     const first = await ensureDeviceProvisioned(store, 'user-1');
     await ensureDeviceProvisioned(store, 'user-1');
 
+    expect(api.chatDeviceSessionChallenge).toHaveBeenCalledWith(first.deviceId);
     expect(api.linkChatDeviceSession).toHaveBeenCalledTimes(2);
-    expect(api.linkChatDeviceSession).toHaveBeenCalledWith(first.deviceId);
+    expect(api.linkChatDeviceSession).toHaveBeenCalledWith(
+      first.deviceId,
+      expect.objectContaining({ challenge: 'a-challenge', signature: expect.any(String) }),
+    );
   });
 
-  it('still returns the device when linking fails', async () => {
+  it('skips the signing round trip when the server says this login is already linked', async () => {
+    const { api } = await import('../../api');
+    const store = new TsMlsDeviceIdentityStore();
+    await ensureDeviceProvisioned(store, 'user-1');
+    vi.mocked(api.chatDeviceSessionChallenge).mockResolvedValue({ alreadyLinked: true });
+    vi.mocked(api.linkChatDeviceSession).mockClear();
+
+    await ensureDeviceProvisioned(store, 'user-1');
+
+    expect(api.linkChatDeviceSession).not.toHaveBeenCalled();
+  });
+
+  it('replaces a retired identity with a fresh device, keeping the decrypted history store', async () => {
+    const { api } = await import('../../api');
+    const store = new TsMlsDeviceIdentityStore();
+    const old = await ensureDeviceProvisioned(store, 'user-1');
+    vi.mocked(api.registerChatDevice).mockClear();
+    vi.mocked(api.chatDeviceSessionChallenge).mockRejectedValueOnce(
+      Object.assign(new Error('This device has been revoked'), {
+        status: 409,
+        code: 'DEVICE_REVOKED',
+      }),
+    );
+
+    const fresh = await ensureDeviceProvisioned(store, 'user-1');
+
+    expect(fresh.deviceId).not.toBe(old.deviceId);
+    expect(api.registerChatDevice).toHaveBeenCalledTimes(1);
+    expect(wipeGroupSessionState).toHaveBeenCalledTimes(1);
+    expect(wipeAllLocalMlsSecrets).not.toHaveBeenCalled();
+    await expect(store.getOwnCredential()).resolves.toEqual(fresh);
+  });
+
+  it('wipes everything when a different user signs into this browser', async () => {
+    const store = new TsMlsDeviceIdentityStore();
+    await ensureDeviceProvisioned(store, 'user-1');
+
+    await ensureDeviceProvisioned(store, 'user-2');
+
+    expect(wipeAllLocalMlsSecrets).toHaveBeenCalledTimes(1);
+    expect(wipeGroupSessionState).not.toHaveBeenCalled();
+  });
+
+  it('still returns the device when linking fails for an ordinary reason', async () => {
     const { api } = await import('../../api');
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    vi.mocked(api.linkChatDeviceSession).mockRejectedValueOnce(new Error('offline'));
+    vi.mocked(api.chatDeviceSessionChallenge).mockRejectedValueOnce(new Error('offline'));
 
-    await expect(
-      ensureDeviceProvisioned(new TsMlsDeviceIdentityStore(), 'user-1'),
-    ).resolves.toBeDefined();
+    const store = new TsMlsDeviceIdentityStore();
+    await expect(ensureDeviceProvisioned(store, 'user-1')).resolves.toBeDefined();
   });
 });
 

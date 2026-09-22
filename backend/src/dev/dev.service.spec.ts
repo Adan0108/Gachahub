@@ -4,7 +4,6 @@ jest.mock('../auth/auth', () => ({
 
 import { InternalServerErrorException } from '@nestjs/common';
 import { env } from '../config/env';
-import { sessionStorage } from '../auth/session-storage';
 import { DevService } from './dev.service';
 
 /**
@@ -25,7 +24,7 @@ describe('DevService', () => {
   it('throws when nodeEnv is production', () => {
     env.nodeEnv = 'production';
 
-    expect(() => new DevService({} as never)).toThrow(
+    expect(() => new DevService({} as never, {} as never)).toThrow(
       InternalServerErrorException,
     );
   });
@@ -33,7 +32,7 @@ describe('DevService', () => {
   it('throws for an unexpected nodeEnv value such as staging', () => {
     env.nodeEnv = 'staging';
 
-    expect(() => new DevService({} as never)).toThrow(
+    expect(() => new DevService({} as never, {} as never)).toThrow(
       InternalServerErrorException,
     );
   });
@@ -41,7 +40,7 @@ describe('DevService', () => {
   it('does not throw when nodeEnv is development', () => {
     env.nodeEnv = 'development';
 
-    expect(() => new DevService({} as never)).not.toThrow();
+    expect(() => new DevService({} as never, {} as never)).not.toThrow();
   });
 
   describe('deleting test users', () => {
@@ -55,39 +54,40 @@ describe('DevService', () => {
         },
         session: {
           findMany: jest.fn().mockResolvedValue([
-            { userId: 'u1', token: 't1' },
-            { userId: 'u1', token: 't2' },
-            { userId: 'u2', token: 't3' },
+            { id: 's1', token: 't1' },
+            { id: 's2', token: 't2' },
           ]),
         },
       };
-      return { prisma, service: new DevService(prisma as never) };
+      const terminator = { end: jest.fn() };
+      return {
+        prisma,
+        terminator,
+        service: new DevService(prisma as never, terminator as never),
+      };
     };
 
-    beforeEach(() => {
-      for (const token of ['t1', 't2', 't3'])
-        sessionStorage.set(token, 'login');
-    });
-
-    it('signs a deleted user out of the login cache too', async () => {
-      const { service } = makeService();
+    it('ends the logins of a deleted user properly, before removing them', async () => {
+      const { service, terminator, prisma } = makeService();
 
       await service.deleteTestUser('u1');
 
-      expect(sessionStorage.get('t1')).toBeNull();
-      expect(sessionStorage.get('t2')).toBeNull();
+      expect(prisma.session.findMany).toHaveBeenCalledWith({
+        where: { user: { id: 'u1' } },
+        select: { id: true, token: true },
+      });
+      expect(terminator.end).toHaveBeenCalledWith([
+        { id: 's1', token: 't1' },
+        { id: 's2', token: 't2' },
+      ]);
     });
 
     it('does the same when deleting every test user', async () => {
-      const { service } = makeService();
+      const { service, terminator } = makeService();
 
       await service.deleteAllTestUsers();
 
-      expect(['t1', 't2', 't3'].map((t) => sessionStorage.get(t))).toEqual([
-        null,
-        null,
-        null,
-      ]);
+      expect(terminator.end).toHaveBeenCalledTimes(1);
     });
   });
 });

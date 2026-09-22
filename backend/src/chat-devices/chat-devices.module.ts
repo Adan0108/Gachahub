@@ -3,7 +3,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { FollowsModule } from '../follows/follows.module';
 import { BlocksModule } from '../blocks/blocks.module';
 import { CommonModule } from '../common/common.module';
-import { WebsocketModule } from '../websocket/websocket.module';
+import { SessionTerminatorModule } from '../auth/session-terminator.module';
 import { MlsGroupRosterModule } from '../mls-group-roster/mls-group-roster.module';
 import { ChatDevicesController } from './chat-devices.controller';
 import { ChatDevicesService } from './chat-devices.service';
@@ -19,7 +19,7 @@ import { MlsKeyPackageCleanupService } from './mls-key-package-cleanup.service';
     BlocksModule,
     CommonModule,
     MlsGroupRosterModule,
-    WebsocketModule,
+    SessionTerminatorModule,
   ],
   controllers: [ChatDevicesController],
   providers: [

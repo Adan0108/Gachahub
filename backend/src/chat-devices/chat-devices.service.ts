@@ -3,7 +3,9 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { BlocksService } from '../blocks/blocks.service';
 import { isEntitledToLeaf } from '../chat/membership/leaf-entitlement';
@@ -19,11 +21,25 @@ import {
   decodeAndVerifyKeyPackage,
   PINNED_CIPHERSUITE,
 } from './mls-key-package.util';
-import { sessionStorage } from '../auth/session-storage';
-import { SocketRegistry } from '../websocket/socket-registry.service';
+import { SessionTerminator } from '../auth/session-terminator.service';
+import { env } from '../config/env';
+import { DeviceRevokedException } from '../common/exceptions/device-revoked.exception';
+import {
+  isValidDeviceSignature,
+  isValidLinkChallenge,
+  issueLinkChallenge,
+} from './session-link-proof';
+import { LinkSessionDto } from './dto/link-session.dto';
 import { RegisterDeviceDto } from './dto/register-device.dto';
 import { UploadKeyPackagesDto } from './dto/upload-key-packages.dto';
 import { KeyPackageItemDto } from './dto/key-package-item.dto';
+
+/** Keeps groups small enough that their published snapshot always fits (see submit-handshake.dto groupInfo cap). */
+const MAX_ACTIVE_DEVICES_PER_USER = 10;
+/** A device idle this long quietly gives up its slot when the cap is hit. */
+const CAP_EVICTION_MIN_IDLE_MS = 14 * 24 * 60 * 60 * 1000;
+/** lastSeenAt is worth at most one write per device per hour. */
+const LAST_SEEN_WRITE_THROTTLE_MS = 60 * 60 * 1000;
 
 @Injectable()
 export class ChatDevicesService {
@@ -34,7 +50,7 @@ export class ChatDevicesService {
     private readonly fetchRateLimiter: KeyPackageFetchRateLimiterService,
     private readonly uploadRateLimiter: KeyPackageUploadRateLimiterService,
     private readonly mlsGroupRosterRepository: MlsGroupRosterRepository,
-    private readonly socketRegistry: SocketRegistry,
+    private readonly sessionTerminator: SessionTerminator,
   ) {}
 
   /**
@@ -59,6 +75,13 @@ export class ChatDevicesService {
     const existing = await this.chatDevicesRepository.findById(dto.deviceId);
     if (existing) {
       throw new ConflictException('This device id is already registered');
+    }
+
+    // Group snapshots carry every leaf, so unbounded devices would blow up group size (~10 mirrors Signal/WhatsApp).
+    const activeDevices =
+      await this.chatDevicesRepository.countActiveDevices(userId);
+    if (activeDevices >= MAX_ACTIVE_DEVICES_PER_USER) {
+      await this.retireStalestDeviceOrRefuse(userId);
     }
 
     const signaturePublicKey = Uint8Array.from(
@@ -105,40 +128,122 @@ export class ChatDevicesService {
     return { message: 'Key packages uploaded successfully' };
   }
 
-  /** Records which device this login is in, so that revoking the device also ends the login. */
-  async linkSessionToDevice(
+  /** Step 1 of linking a login to a device: a challenge only the holder of the device key can sign. */
+  async issueSessionLinkChallenge(
     userId: string,
     deviceId: string,
     sessionId: string,
   ) {
     await this.assertOwnActiveDevice(userId, deviceId);
-    await this.chatDevicesRepository.linkSession(sessionId, userId, deviceId);
+
+    // Already linked: tell the browser so it skips the signing round trip.
+    const linkedDeviceId = await this.chatDevicesRepository.findSessionDeviceId(
+      sessionId,
+      userId,
+    );
+    if (linkedDeviceId === deviceId) {
+      return { alreadyLinked: true as const };
+    }
+
+    return {
+      challenge: issueLinkChallenge(this.linkSecret(), { sessionId, deviceId }),
+    };
+  }
+
+  /**
+   * Step 2: records which device this login is in, so revoking the device also
+   * ends the login. Needs proof the browser holds the device key - a device id
+   * alone is not secret - and a login links once, to one device.
+   */
+  async linkSessionToDevice(
+    userId: string,
+    deviceId: string,
+    sessionId: string,
+    dto: LinkSessionDto,
+  ) {
+    const device = await this.assertOwnActiveDevice(userId, deviceId);
+
+    if (
+      !isValidLinkChallenge(this.linkSecret(), dto.challenge, {
+        sessionId,
+        deviceId,
+      })
+    ) {
+      throw new UnauthorizedException('The challenge is invalid or expired');
+    }
+    if (
+      !isValidDeviceSignature(
+        device.signaturePublicKey,
+        dto.challenge,
+        dto.signature,
+      )
+    ) {
+      throw new ForbiddenException('The signature does not match this device');
+    }
+
+    const linked = await this.chatDevicesRepository.linkSession(
+      sessionId,
+      userId,
+      deviceId,
+    );
+    if (linked.count === 0) {
+      const current = await this.chatDevicesRepository.findSessionDeviceId(
+        sessionId,
+        userId,
+      );
+      if (current !== deviceId) {
+        throw new ConflictException(
+          'This login is already linked to another device',
+        );
+      }
+    }
 
     return { message: 'Session linked to device' };
   }
 
-  async revokeDevice(userId: string, deviceId: string, keepSessionId: string) {
+  private linkSecret(): string {
+    if (!env.betterAuthSecret) {
+      throw new InternalServerErrorException('BETTER_AUTH_SECRET is missing');
+    }
+    return env.betterAuthSecret;
+  }
+
+  async revokeDevice(userId: string, deviceId: string) {
     const result = await this.chatDevicesRepository.revokeDevice(
       deviceId,
       userId,
-      keepSessionId,
     );
 
     if (result.count === 0) {
       throw new NotFoundException('Device not found');
     }
 
-    // Out of the cache, so the next request from those logins is refused; and any that
-    // are open right now are told over their sockets.
-    sessionStorage.forgetSessions(
-      userId,
-      result.endedSessions.map((session) => session.token),
-    );
-    this.socketRegistry.endSessions(
-      result.endedSessions.map((session) => session.id),
-    );
-
     return { message: 'Device revoked successfully' };
+  }
+
+  /**
+   * Signs a device out: its logins end at once, so it can no longer read or do
+   * anything in the app. The device itself, its keys and its place in every
+   * group are untouched, and it comes back by logging in again.
+   */
+  async signOutDevice(
+    userId: string,
+    deviceId: string,
+    callerSessionId: string,
+  ) {
+    const device = await this.chatDevicesRepository.findById(deviceId);
+    if (!device || device.userId !== userId) {
+      throw new NotFoundException('Device not found');
+    }
+
+    const logins = await this.chatDevicesRepository.findLoginsOfDevice(
+      deviceId,
+      userId,
+      callerSessionId,
+    );
+    await this.sessionTerminator.end(logins);
+
+    return { message: 'Device signed out' };
   }
 
   /**
@@ -336,10 +441,37 @@ export class ChatDevicesService {
       throw new NotFoundException('Device not found');
     }
     if (device.revokedAt) {
-      throw new ConflictException('This device has been revoked');
+      throw new DeviceRevokedException();
+    }
+
+    // Keeps "stale device" meaningful (cap eviction, dormant retirement) at one write per device per hour.
+    const lastSeenAt = device.lastSeenAt?.getTime() ?? Date.now();
+    if (lastSeenAt < Date.now() - LAST_SEEN_WRITE_THROTTLE_MS) {
+      void Promise.resolve(
+        this.chatDevicesRepository.touchLastSeen(deviceId),
+      ).catch(() => undefined);
     }
 
     return device;
+  }
+
+  /** At the cap the stalest device gives way, like re-linking on WhatsApp; refused only when all are in recent use. */
+  private async retireStalestDeviceOrRefuse(userId: string): Promise<void> {
+    const stalest =
+      await this.chatDevicesRepository.findLeastRecentlySeenActiveDevice(
+        userId,
+      );
+    const idleLongEnough =
+      stalest !== null &&
+      stalest.lastSeenAt.getTime() < Date.now() - CAP_EVICTION_MIN_IDLE_MS;
+
+    if (!idleLongEnough) {
+      throw new ConflictException(
+        `Device limit reached (${MAX_ACTIVE_DEVICES_PER_USER}) and every device was used recently - retire one first`,
+      );
+    }
+
+    await this.chatDevicesRepository.revokeDevice(stalest.id, userId);
   }
 
   private async verifyKeyPackages(

@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { auth } from '../auth/auth';
-import { sessionStorage } from '../auth/session-storage';
+import { SessionTerminator } from '../auth/session-terminator.service';
 import { env } from '../config/env';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -27,7 +27,10 @@ const TEST_USER_PASSWORD = 'DevTest123!';
 
 @Injectable()
 export class DevService {
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly sessionTerminator: SessionTerminator,
+  ) {
     // Defense in depth - DevModule should never even be registered outside
     // development (see app.module.ts), but a service that can mint a
     // session for any user id and mass-delete accounts is exactly the kind
@@ -109,22 +112,16 @@ export class DevService {
     return { deleted: result.count };
   }
 
-  /** Deleting a user removes their logins from the database by cascade, so the cache has to be told too. */
+  /** Deleting a user cascades their logins away in the database only, so end them properly first. */
   private async forgetLogins(
     userWhere: { id: string } | { name: { startsWith: string } },
   ) {
     const sessions = await this.prisma.session.findMany({
       where: { user: userWhere },
-      select: { userId: true, token: true },
+      select: { id: true, token: true },
     });
 
-    const tokensByUser = new Map<string, string[]>();
-    for (const { userId, token } of sessions) {
-      tokensByUser.set(userId, [...(tokensByUser.get(userId) ?? []), token]);
-    }
-    for (const [userId, tokens] of tokensByUser) {
-      sessionStorage.forgetSessions(userId, tokens);
-    }
+    await this.sessionTerminator.end(sessions);
   }
 
   private async assertTestUser(id: string) {

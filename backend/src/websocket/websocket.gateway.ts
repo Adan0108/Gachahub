@@ -57,16 +57,16 @@ export class WebsocketGateway
    * No session means no room and a straight disconnect — no anonymous sockets.
    */
   async handleConnection(socket: AppSocket) {
-    const auth = await this.authenticate(socket);
+    const identity = await this.authenticate(socket);
 
-    if (!auth) {
+    if (!identity) {
       socket.disconnect(true);
       return;
     }
 
-    socket.data.userId = auth.userId;
-    await socket.join(userRoom(auth.userId));
-    await socket.join(sessionRoom(auth.sessionId));
+    socket.data.userId = identity.userId;
+    await socket.join(userRoom(identity.userId));
+    await socket.join(sessionRoom(identity.sessionId));
   }
 
   handleDisconnect(socket: AppSocket) {

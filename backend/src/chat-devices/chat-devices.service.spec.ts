@@ -1,10 +1,17 @@
-import { sessionStorage } from '../auth/session-storage';
+jest.mock('../auth/session-terminator.service', () => ({
+  SessionTerminator: class {},
+}));
+
+import { generateKeyPairSync, sign } from 'node:crypto';
 import {
   ConflictException,
   ForbiddenException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { env } from '../config/env';
 import { ChatDevicesService } from './chat-devices.service';
+import { issueLinkChallenge } from './session-link-proof';
 import { buildTestKeyPackage } from './test-support/build-key-package';
 import { RateLimitedException } from '../common/exceptions/rate-limited.exception';
 
@@ -18,13 +25,18 @@ describe('ChatDevicesService', () => {
     claimSingleUseKeyPackage: jest.fn(),
     findLastResortKeyPackage: jest.fn(),
     revokeDevice: jest.fn(),
+    countActiveDevices: jest.fn(),
+    touchLastSeen: jest.fn(),
+    findLeastRecentlySeenActiveDevice: jest.fn(),
+    findLoginsOfDevice: jest.fn(),
     linkSession: jest.fn(),
+    findSessionDeviceId: jest.fn(),
     findParticipantStates: jest.fn(),
   };
 
   const roster = { findActiveLeaves: jest.fn(), hasRoster: jest.fn() };
 
-  const socketRegistry = { endSessions: jest.fn() };
+  const sessionTerminator = { end: jest.fn() };
 
   const followsService = {
     isFollowing: jest.fn(),
@@ -47,6 +59,8 @@ describe('ChatDevicesService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     blocksService.isBlocked.mockResolvedValue(false);
+    repository.countActiveDevices.mockResolvedValue(0);
+    repository.findLeastRecentlySeenActiveDevice.mockResolvedValue(null);
     service = new ChatDevicesService(
       repository as any,
       followsService as any,
@@ -54,7 +68,7 @@ describe('ChatDevicesService', () => {
       fetchRateLimiter as any,
       uploadRateLimiter as any,
       roster as any,
-      socketRegistry,
+      sessionTerminator as any,
     );
   });
 
@@ -646,15 +660,135 @@ describe('ChatDevicesService', () => {
     });
   });
 
-  describe('linkSessionToDevice', () => {
-    it('links the login to a device the caller owns', async () => {
-      repository.findById.mockResolvedValue({
-        id: 'device-1',
-        userId: 'user-1',
-        revokedAt: null,
+  describe('the device cap', () => {
+    const daysAgo = (days: number) =>
+      new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    it('quietly retires the stalest device when the cap is hit and that device has been idle for weeks', async () => {
+      repository.findById.mockResolvedValue(null);
+      repository.countActiveDevices.mockResolvedValue(10);
+      repository.findLeastRecentlySeenActiveDevice.mockResolvedValue({
+        id: 'zombie-device',
+        lastSeenAt: daysAgo(30),
+      });
+      repository.createDeviceWithKeyPackages.mockResolvedValue({
+        id: 'device-11',
+      });
+      const { payload, signaturePublicKey } = await base64KeyPackage(
+        'user-1',
+        'device-11',
+      );
+
+      await service.registerDevice('user-1', {
+        deviceId: 'device-11',
+        signaturePublicKey,
+        ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
+        keyPackages: [{ kind: 'SINGLE_USE', payload }],
+      } as never);
+
+      expect(repository.revokeDevice).toHaveBeenCalledWith(
+        'zombie-device',
+        'user-1',
+      );
+      expect(repository.createDeviceWithKeyPackages).toHaveBeenCalled();
+    });
+
+    it('refuses the 11th device while all ten were used recently, retiring nothing', async () => {
+      repository.findById.mockResolvedValue(null);
+      repository.countActiveDevices.mockResolvedValue(10);
+      repository.findLeastRecentlySeenActiveDevice.mockResolvedValue({
+        id: 'busy-device',
+        lastSeenAt: daysAgo(1),
       });
 
-      await service.linkSessionToDevice('user-1', 'device-1', 'session-1');
+      await expect(
+        service.registerDevice('user-1', {
+          deviceId: 'device-11',
+          signaturePublicKey: 'aaaa',
+          ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
+          keyPackages: [],
+        }),
+      ).rejects.toThrow(ConflictException);
+
+      expect(repository.revokeDevice).not.toHaveBeenCalled();
+    });
+
+    it('refuses an 11th active device, so group snapshots stay small enough to publish', async () => {
+      repository.findById.mockResolvedValue(null);
+      repository.countActiveDevices.mockResolvedValue(10);
+
+      await expect(
+        service.registerDevice('user-1', {
+          deviceId: 'device-11',
+          signaturePublicKey: 'aaaa',
+          ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
+          keyPackages: [],
+        }),
+      ).rejects.toThrow(ConflictException);
+
+      expect(repository.createDeviceWithKeyPackages).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('linking a login to a device', () => {
+    const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+    const rawKey = new Uint8Array(
+      publicKey.export({ format: 'der', type: 'spki' }).subarray(-32),
+    );
+    const secret = 'test-secret';
+    const originalSecret = env.betterAuthSecret;
+    const ownDevice = {
+      id: 'device-1',
+      userId: 'user-1',
+      revokedAt: null,
+      signaturePublicKey: rawKey,
+    };
+    const challengeFor = (sessionId = 'session-1', deviceId = 'device-1') =>
+      issueLinkChallenge(secret, { sessionId, deviceId });
+    const proof = (challenge: string) => ({
+      challenge,
+      signature: sign(null, Buffer.from(challenge), privateKey).toString(
+        'base64',
+      ),
+    });
+
+    beforeEach(() => {
+      env.betterAuthSecret = secret;
+      repository.findById.mockResolvedValue(ownDevice);
+      repository.findSessionDeviceId.mockResolvedValue(null);
+      repository.linkSession.mockResolvedValue({ count: 1 });
+    });
+
+    afterEach(() => {
+      env.betterAuthSecret = originalSecret;
+    });
+
+    it('issues a challenge only for a device the caller owns', async () => {
+      await expect(
+        service.issueSessionLinkChallenge('user-1', 'device-1', 'session-1'),
+      ).resolves.toEqual({ challenge: expect.any(String) as string });
+
+      repository.findById.mockResolvedValue({ ...ownDevice, userId: 'user-2' });
+      await expect(
+        service.issueSessionLinkChallenge('user-1', 'device-1', 'session-1'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('answers alreadyLinked instead of a challenge when this login is linked to this device', async () => {
+      repository.findSessionDeviceId.mockResolvedValue('device-1');
+
+      await expect(
+        service.issueSessionLinkChallenge('user-1', 'device-1', 'session-1'),
+      ).resolves.toEqual({ alreadyLinked: true });
+    });
+
+    it('links the login when the challenge is signed with the device key', async () => {
+      await service.linkSessionToDevice(
+        'user-1',
+        'device-1',
+        'session-1',
+        proof(challengeFor()),
+      );
 
       expect(repository.linkSession).toHaveBeenCalledWith(
         'session-1',
@@ -663,55 +797,109 @@ describe('ChatDevicesService', () => {
       );
     });
 
-    it('refuses a device that belongs to someone else', async () => {
-      repository.findById.mockResolvedValue({
-        id: 'device-1',
-        userId: 'user-2',
-        revokedAt: null,
-      });
+    it('refuses a stolen login that only knows the device id: a signature from another key', async () => {
+      const attacker = generateKeyPairSync('ed25519').privateKey;
+      const challenge = challengeFor();
 
       await expect(
-        service.linkSessionToDevice('user-1', 'device-1', 'session-1'),
-      ).rejects.toThrow(NotFoundException);
+        service.linkSessionToDevice('user-1', 'device-1', 'session-1', {
+          challenge,
+          signature: sign(null, Buffer.from(challenge), attacker).toString(
+            'base64',
+          ),
+        }),
+      ).rejects.toThrow(ForbiddenException);
       expect(repository.linkSession).not.toHaveBeenCalled();
+    });
+
+    it('refuses a challenge made for another login', async () => {
+      await expect(
+        service.linkSessionToDevice(
+          'user-1',
+          'device-1',
+          'session-1',
+          proof(challengeFor('session-other')),
+        ),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('accepts linking again to the same device, but not moving to another', async () => {
+      repository.linkSession.mockResolvedValue({ count: 0 });
+
+      repository.findSessionDeviceId.mockResolvedValue('device-1');
+      await expect(
+        service.linkSessionToDevice(
+          'user-1',
+          'device-1',
+          'session-1',
+          proof(challengeFor()),
+        ),
+      ).resolves.toBeDefined();
+
+      repository.findSessionDeviceId.mockResolvedValue('device-other');
+      await expect(
+        service.linkSessionToDevice(
+          'user-1',
+          'device-1',
+          'session-1',
+          proof(challengeFor()),
+        ),
+      ).rejects.toThrow(ConflictException);
     });
   });
 
   describe('revokeDevice', () => {
-    it('revokes an owned device', async () => {
-      sessionStorage.set('t2', 'cached login');
-      repository.revokeDevice.mockResolvedValue({
-        count: 1,
-        endedSessions: [{ id: 's2', token: 't2' }],
-      });
+    it('retires an owned device without touching any login', async () => {
+      repository.revokeDevice.mockResolvedValue({ count: 1 });
 
-      const result = await service.revokeDevice(
-        'user-1',
-        'device-1',
-        'session-1',
+      await expect(service.revokeDevice('user-1', 'device-1')).resolves.toEqual(
+        { message: 'Device revoked successfully' },
       );
-
-      expect(result).toEqual({ message: 'Device revoked successfully' });
-      expect(repository.revokeDevice).toHaveBeenCalledWith(
-        'device-1',
-        'user-1',
-        'session-1',
-      );
-      // the login can no longer be found in the cache, and is signed out over its socket
-      expect(sessionStorage.get('t2')).toBeNull();
-      expect(socketRegistry.endSessions).toHaveBeenCalledWith(['s2']);
+      expect(sessionTerminator.end).not.toHaveBeenCalled();
     });
 
     it('throws when nothing matched', async () => {
-      repository.revokeDevice.mockResolvedValue({
-        count: 0,
-        endedSessions: [],
+      repository.revokeDevice.mockResolvedValue({ count: 0 });
+
+      await expect(service.revokeDevice('user-1', 'device-1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('signOutDevice', () => {
+    it('ends the logins of an owned device and nothing else', async () => {
+      repository.findById.mockResolvedValue({
+        id: 'device-1',
+        userId: 'user-1',
+      });
+      repository.findLoginsOfDevice.mockResolvedValue([
+        { id: 's2', token: 't2' },
+      ]);
+
+      await service.signOutDevice('user-1', 'device-1', 'session-1');
+
+      expect(repository.findLoginsOfDevice).toHaveBeenCalledWith(
+        'device-1',
+        'user-1',
+        'session-1',
+      );
+      expect(sessionTerminator.end).toHaveBeenCalledWith([
+        { id: 's2', token: 't2' },
+      ]);
+      expect(repository.revokeDevice).not.toHaveBeenCalled();
+    });
+
+    it('refuses a device that belongs to someone else', async () => {
+      repository.findById.mockResolvedValue({
+        id: 'device-1',
+        userId: 'user-2',
       });
 
       await expect(
-        service.revokeDevice('user-1', 'device-1', 'session-1'),
+        service.signOutDevice('user-1', 'device-1', 'session-1'),
       ).rejects.toThrow(NotFoundException);
-      expect(socketRegistry.endSessions).not.toHaveBeenCalled();
+      expect(sessionTerminator.end).not.toHaveBeenCalled();
     });
   });
 });

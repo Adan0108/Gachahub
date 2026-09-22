@@ -88,6 +88,34 @@ export class ChatDevicesRepository {
     });
   }
 
+  touchLastSeen(deviceId: string) {
+    return this.prisma.chatDevice.updateMany({
+      where: { id: deviceId },
+      data: { lastSeenAt: new Date() },
+    });
+  }
+
+  findLeastRecentlySeenActiveDevice(userId: string) {
+    return this.prisma.chatDevice.findFirst({
+      where: { userId, revokedAt: null },
+      orderBy: { lastSeenAt: 'asc' },
+      select: { id: true, lastSeenAt: true },
+    });
+  }
+
+  /** Retires every device unseen since `cutoff`; returns how many. */
+  async retireDevicesUnseenSince(cutoff: Date): Promise<number> {
+    const result = await this.prisma.chatDevice.updateMany({
+      where: { revokedAt: null, lastSeenAt: { lt: cutoff } },
+      data: { revokedAt: new Date() },
+    });
+    return result.count;
+  }
+
+  countActiveDevices(userId: string): Promise<number> {
+    return this.prisma.chatDevice.count({ where: { userId, revokedAt: null } });
+  }
+
   findActiveDevicesForUser(userId: string) {
     return this.prisma.chatDevice.findMany({
       where: { userId, revokedAt: null },
@@ -167,37 +195,57 @@ export class ChatDevicesRepository {
     });
   }
 
-  /** Ties a login to the chat device of the browser it is in, so revoking the device can end it. */
+  /** Ties a login to the chat device of its browser, once: a link can never be moved to another device. */
   linkSession(sessionId: string, userId: string, deviceId: string) {
     return this.prisma.session.updateMany({
-      where: { id: sessionId, userId },
+      where: { id: sessionId, userId, chatDeviceId: null },
       data: { chatDeviceId: deviceId },
     });
   }
 
-  /** Revokes the device and ends the logins linked to it, plus any not linked to a device yet (older logins), except the one making the request. */
-  revokeDevice(deviceId: string, userId: string, keepSessionId: string) {
-    return this.prisma.$transaction(async (tx) => {
-      const result = await tx.chatDevice.updateMany({
-        where: { id: deviceId, userId },
-        data: { revokedAt: new Date() },
-      });
+  async findSessionDeviceId(
+    sessionId: string,
+    userId: string,
+  ): Promise<string | null> {
+    const session = await this.prisma.session.findFirst({
+      where: { id: sessionId, userId },
+      select: { chatDeviceId: true },
+    });
 
-      if (result.count === 0) return { count: 0, endedSessions: [] };
+    return session?.chatDeviceId ?? null;
+  }
 
-      const sessions = await tx.session.findMany({
-        where: {
-          userId,
-          id: { not: keepSessionId },
-          OR: [{ chatDeviceId: deviceId }, { chatDeviceId: null }],
-        },
-        select: { id: true, token: true },
-      });
-      await tx.session.deleteMany({
-        where: { id: { in: sessions.map((session) => session.id) } },
-      });
+  /** Retires a device for good (its identity is being replaced); it can never be used again. */
+  revokeDevice(deviceId: string, userId: string) {
+    return this.prisma.chatDevice.updateMany({
+      where: { id: deviceId, userId },
+      data: { revokedAt: new Date() },
+    });
+  }
 
-      return { count: result.count, endedSessions: sessions };
+  /**
+   * The logins to end when a device is signed out: those linked to it. The
+   * caller's own login is kept, unless it is linked to this device - signing
+   * out the device you are in signs you out too.
+   */
+  async findLoginsOfDevice(
+    deviceId: string,
+    userId: string,
+    callerSessionId: string,
+  ): Promise<Array<{ id: string; token: string }>> {
+    const caller = await this.prisma.session.findFirst({
+      where: { id: callerSessionId, userId },
+      select: { chatDeviceId: true },
+    });
+    const signingOutOwnDevice = caller?.chatDeviceId === deviceId;
+
+    return this.prisma.session.findMany({
+      where: {
+        userId,
+        chatDeviceId: deviceId,
+        ...(signingOutOwnDevice ? {} : { id: { not: callerSessionId } }),
+      },
+      select: { id: true, token: true },
     });
   }
 

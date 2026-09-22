@@ -31,9 +31,15 @@ export function useChatSocket() {
     const socket = io(API_BASE_URL, { withCredentials: true });
 
     // This login was ended from another device: leave at once, with a full reload so nothing stays in memory.
-    socket.on("session:revoked", () => {
+    const signOutHere = () => {
       queryClient.setQueryData(queryKeys.currentUser, null);
       window.location.assign("/login");
+    };
+    socket.on("session:revoked", signOutHere);
+
+    // The event above can be lost as the server closes the socket; a server-side close still means signed out.
+    socket.on("disconnect", (reason) => {
+      if (reason === "io server disconnect") signOutHere();
     });
 
     socket.on("message:created", (event) => {

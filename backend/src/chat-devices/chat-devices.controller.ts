@@ -12,6 +12,7 @@ import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { ChatDevicesService } from './chat-devices.service';
 import { ClaimKeyPackagesQueryDto } from './dto/claim-key-packages-query.dto';
+import { LinkSessionDto } from './dto/link-session.dto';
 import { RegisterDeviceDto } from './dto/register-device.dto';
 import { UploadKeyPackagesDto } from './dto/upload-key-packages.dto';
 
@@ -44,13 +45,48 @@ export class ChatDevicesController {
     );
   }
 
-  @Put(':deviceId/session')
-  @ApiOperation({ summary: 'Link the current login to an owned device' })
-  linkSession(
+  @Post(':deviceId/session/challenge')
+  @ApiOperation({
+    summary: 'Get a challenge to prove this login is in an owned device',
+  })
+  sessionLinkChallenge(
     @Session() session: UserSession,
     @Param('deviceId') deviceId: string,
   ) {
+    return this.chatDevicesService.issueSessionLinkChallenge(
+      session.user.id,
+      deviceId,
+      session.session.id,
+    );
+  }
+
+  @Put(':deviceId/session')
+  @ApiOperation({
+    summary:
+      'Link the current login to an owned device, given a signed challenge',
+  })
+  linkSession(
+    @Session() session: UserSession,
+    @Param('deviceId') deviceId: string,
+    @Body() dto: LinkSessionDto,
+  ) {
     return this.chatDevicesService.linkSessionToDevice(
+      session.user.id,
+      deviceId,
+      session.session.id,
+      dto,
+    );
+  }
+
+  @Post(':deviceId/sign-out')
+  @ApiOperation({
+    summary: 'Sign an owned device out of the app, everywhere, at once',
+  })
+  signOutDevice(
+    @Session() session: UserSession,
+    @Param('deviceId') deviceId: string,
+  ) {
+    return this.chatDevicesService.signOutDevice(
       session.user.id,
       deviceId,
       session.session.id,
@@ -58,18 +94,12 @@ export class ChatDevicesController {
   }
 
   @Delete(':deviceId')
-  @ApiOperation({
-    summary: 'Revoke an owned device and end the logins linked to it',
-  })
+  @ApiOperation({ summary: 'Retire an owned device for good' })
   revokeDevice(
     @Session() session: UserSession,
     @Param('deviceId') deviceId: string,
   ) {
-    return this.chatDevicesService.revokeDevice(
-      session.user.id,
-      deviceId,
-      session.session.id,
-    );
+    return this.chatDevicesService.revokeDevice(session.user.id, deviceId);
   }
 
   @Post('claim/:userId')

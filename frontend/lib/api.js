@@ -1,35 +1,35 @@
-import { mockCategories, mockGames, posts } from "./mockData";
+import { mockCategories, mockGames, posts } from './mockData';
 
 export const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000"
-).replace(/\/$/, "");
-export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
+  process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'
+).replace(/\/$/, '');
+export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === 'true';
 
 export const backendRoutes = {
-  health: "/health",
-  games: "/games",
+  health: '/health',
+  games: '/games',
   game: (slug) => `/games/${encodePathParam(slug)}`,
   gameCategories: (gameSlug) => `/games/${encodePathParam(gameSlug)}/categories`,
-  currentUser: "/users/me",
-  signInEmail: "/api/auth/sign-in/email",
-  signUpEmail: "/api/auth/sign-up/email",
-  signOut: "/api/auth/sign-out",
-  myPosts: "/posts/mine",
-  posts: "/posts",
-  latestFeed: "/feed/latest",
-  trendingFeed: "/feed/trending",
+  currentUser: '/users/me',
+  signInEmail: '/api/auth/sign-in/email',
+  signUpEmail: '/api/auth/sign-up/email',
+  signOut: '/api/auth/sign-out',
+  myPosts: '/posts/mine',
+  posts: '/posts',
+  latestFeed: '/feed/latest',
+  trendingFeed: '/feed/trending',
   gameFeed: (gameSlug) => `/games/${encodePathParam(gameSlug)}/feed`,
   postLike: (postId) => `/posts/${encodePathParam(postId)}/like`,
   userFollow: (userId) => `/users/${encodePathParam(userId)}/follow`,
   followStatus: (userId) => `/users/${encodePathParam(userId)}/follow-status`,
   postComments: (postId) => `/posts/${encodePathParam(postId)}/comments`,
   commentReplies: (commentId) => `/comments/${encodePathParam(commentId)}/replies`,
-  mediaSignatures: "/media/uploads/signatures",
-  mediaConfirm: "/media/uploads/confirm",
-  chatConversations: "/chat/conversations",
-  chatArchivedConversations: "/chat/conversations/archived",
-  chatRequests: "/chat/requests",
-  chatDirect: "/chat/direct",
+  mediaSignatures: '/media/uploads/signatures',
+  mediaConfirm: '/media/uploads/confirm',
+  chatConversations: '/chat/conversations',
+  chatArchivedConversations: '/chat/conversations/archived',
+  chatRequests: '/chat/requests',
+  chatDirect: '/chat/direct',
   chatMessages: (conversationId) =>
     `/chat/conversations/${encodePathParam(conversationId)}/messages`,
   chatAcceptRequest: (conversationId) => `/chat/requests/${encodePathParam(conversationId)}/accept`,
@@ -37,12 +37,15 @@ export const backendRoutes = {
     `/chat/requests/${encodePathParam(conversationId)}/decline`,
   chatBlockConversation: (conversationId) =>
     `/chat/conversations/${encodePathParam(conversationId)}/block`,
-  chatDelivered: "/chat/messages/delivered",
+  chatDelivered: '/chat/messages/delivered',
   chatRead: (conversationId) => `/chat/conversations/${encodePathParam(conversationId)}/read`,
-  chatDevices: "/chat-devices",
+  chatDevices: '/chat-devices',
   chatDeviceKeyPackages: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}/key-packages`,
   chatDevice: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}`,
+  chatDeviceSignOut: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}/sign-out`,
   chatDeviceSession: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}/session`,
+  chatDeviceSessionChallenge: (deviceId) =>
+    `/chat-devices/${encodePathParam(deviceId)}/session/challenge`,
   chatDeviceClaim: (userId, query) =>
     withQuery(`/chat-devices/claim/${encodePathParam(userId)}`, query),
   mlsHandshakes: (conversationId) =>
@@ -52,37 +55,44 @@ export const backendRoutes = {
     `/mls-handshakes/conversations/${encodePathParam(conversationId)}/faults`,
   mlsMembershipWork: (deviceId) =>
     `/mls-handshakes/devices/${encodePathParam(deviceId)}/membership-work`,
+  mlsExternalJoin: (conversationId) =>
+    `/mls-handshakes/conversations/${encodePathParam(conversationId)}/external-join`,
+  mlsGroupInfo: (conversationId) =>
+    `/mls-handshakes/conversations/${encodePathParam(conversationId)}/group-info`,
+  mlsPending: (deviceId) => `/mls-handshakes/devices/${encodePathParam(deviceId)}/pending`,
+  mlsJoinable: (deviceId) =>
+    `/mls-handshakes/devices/${encodePathParam(deviceId)}/joinable-conversations`,
   mlsRoster: (conversationId) =>
     `/mls-handshakes/conversations/${encodePathParam(conversationId)}/roster`,
   mlsReleaseMembershipWork: (deviceId, conversationId) =>
     `/mls-handshakes/devices/${encodePathParam(deviceId)}/membership-work/${encodePathParam(conversationId)}/release`,
   mlsConsumeWelcome: (deviceId, welcomeId) =>
     `/mls-handshakes/devices/${encodePathParam(deviceId)}/welcomes/${encodePathParam(welcomeId)}/consume`,
-  devTestUsers: "/dev/test-users",
+  devTestUsers: '/dev/test-users',
   devTestUser: (id) => `/dev/test-users/${encodePathParam(id)}`,
   devTestUserImpersonate: (id) => `/dev/test-users/${encodePathParam(id)}/impersonate`,
 };
 
 function encodePathParam(value) {
-  return encodeURIComponent(String(value || ""));
+  return encodeURIComponent(String(value || ''));
 }
 
 function decodePathParam(value) {
   try {
-    return decodeURIComponent(String(value || ""));
+    return decodeURIComponent(String(value || ''));
   } catch {
-    return String(value || "");
+    return String(value || '');
   }
 }
 
-export function communitySymbol(name = "") {
+export function communitySymbol(name = '') {
   const lower = name.toLowerCase();
-  if (lower.includes("wuthering")) return "\u263e";
-  if (lower.includes("honkai")) return "\u2727";
-  if (lower.includes("genshin")) return "\u2726";
-  if (lower.includes("zenless")) return "Z";
-  if (lower.includes("gray") || lower.includes("raven")) return "\u25c7";
-  return name.trim().charAt(0).toUpperCase() || "\u2726";
+  if (lower.includes('wuthering')) return '\u263e';
+  if (lower.includes('honkai')) return '\u2727';
+  if (lower.includes('genshin')) return '\u2726';
+  if (lower.includes('zenless')) return 'Z';
+  if (lower.includes('gray') || lower.includes('raven')) return '\u25c7';
+  return name.trim().charAt(0).toUpperCase() || '\u2726';
 }
 
 export function formatCount(value) {
@@ -115,15 +125,15 @@ export function normalizePost(post) {
   const elapsed = createdAt && !Number.isNaN(createdAt.valueOf()) ? Date.now() - createdAt : null;
   const hours = elapsed === null ? null : Math.max(1, Math.floor(elapsed / 3_600_000));
   const time =
-    hours === null ? "Recently" : hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
+    hours === null ? 'Recently' : hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
 
   return {
     id: post.id,
     title: post.title,
-    author: post.author?.name || "Unknown user",
+    author: post.author?.name || 'Unknown user',
     authorId: post.author?.id || post.authorId,
     time,
-    tag: post.category?.name || post.tags?.[0]?.name || "Discussion",
+    tag: post.category?.name || post.tags?.[0]?.name || 'Discussion',
     gameName: post.game?.name,
     gameSlug: post.game?.slug,
     likeCount: post.reactionCount ?? post.likeCount ?? 0,
@@ -133,7 +143,7 @@ export function normalizePost(post) {
   };
 }
 
-export function fallbackGames(search = "") {
+export function fallbackGames(search = '') {
   const query = search.trim().toLowerCase();
   const items = query
     ? mockGames.filter((game) =>
@@ -143,7 +153,7 @@ export function fallbackGames(search = "") {
 
   return {
     items: items.map(normalizeGame),
-    meta: { total: items.length, source: "local" },
+    meta: { total: items.length, source: 'local' },
   };
 }
 
@@ -152,14 +162,14 @@ export function fallbackGame(slug) {
   return game ? normalizeGame(game) : null;
 }
 
-export function fallbackPosts({ gameSlug, search = "" } = {}) {
+export function fallbackPosts({ gameSlug, search = '' } = {}) {
   const query = search.trim().toLowerCase();
   return posts
     .filter((post) => {
       const matchesGame = gameSlug ? post.gameSlug === gameSlug : true;
       const game = mockGames.find((item) => item.slug === post.gameSlug);
       const matchesSearch = query
-        ? `${post.title} ${post.author} ${post.tag} ${game?.name || ""}`
+        ? `${post.title} ${post.author} ${post.tag} ${game?.name || ''}`
             .toLowerCase()
             .includes(query)
         : true;
@@ -182,11 +192,13 @@ export function fallbackCategories() {
 function withQuery(path, query = {}) {
   const params = new URLSearchParams();
   Object.entries(query).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== "") params.set(key, value);
+    if (value !== undefined && value !== null && value !== '') params.set(key, value);
   });
 
-  return `${path}${params.toString() ? `?${params}` : ""}`;
+  return `${path}${params.toString() ? `?${params}` : ''}`;
 }
+
+const REQUEST_TIMEOUT_MS = 15_000;
 
 async function request(path, options = {}) {
   const { headers, body, allowUnauthorized = false, ...fetchOptions } = options;
@@ -194,14 +206,18 @@ async function request(path, options = {}) {
   if (USE_MOCKS) return mockResponse(path, options);
 
   const shouldSendJsonHeader = body !== undefined && !(body instanceof FormData);
+  // Uploads can be slow; everything else gets a deadline, because callers such as the MLS sync hold a lock while waiting.
+  const timeout =
+    body instanceof FormData ? {} : { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) };
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: "include",
+    credentials: 'include',
     headers: {
-      ...(shouldSendJsonHeader ? { "Content-Type": "application/json" } : {}),
+      ...(shouldSendJsonHeader ? { 'Content-Type': 'application/json' } : {}),
       ...headers,
     },
     ...(body !== undefined ? { body } : {}),
+    ...timeout,
     ...fetchOptions,
   });
 
@@ -213,9 +229,9 @@ async function request(path, options = {}) {
     try {
       const errorBody = await response.json();
       message = errorBody.message || errorBody.error || JSON.stringify(errorBody);
-      code = typeof errorBody.code === "string" ? errorBody.code : undefined;
+      code = typeof errorBody.code === 'string' ? errorBody.code : undefined;
     } catch {
-      message = await response.text().catch(() => "");
+      message = await response.text().catch(() => '');
     }
     const error = new Error(message || `API request failed: ${response.status}`);
     error.status = response.status;
@@ -234,18 +250,19 @@ async function request(path, options = {}) {
  * needs in full (the winning commit to catch up on) - request() would
  * collapse that down to just its `message` string and discard the rest.
  */
-async function submitMlsHandshake(conversationId, payload) {
-  if (USE_MOCKS) return mutation(backendRoutes.mlsHandshakes(conversationId), payload);
+async function submitMlsCommit(path, payload) {
+  if (USE_MOCKS) return mutation(path, payload);
 
-  const response = await fetch(`${API_BASE_URL}${backendRoutes.mlsHandshakes(conversationId)}`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   const body = await response.json().catch(() => null);
 
-  if (response.status === 409 && body?.outcome === "conflict") {
+  if (response.status === 409 && body?.outcome === 'conflict') {
     return body;
   }
   if (!response.ok) {
@@ -259,7 +276,7 @@ function mutation(path, payload, options = {}) {
   const body = payload === undefined ? undefined : JSON.stringify(payload);
   return request(path, {
     ...fetchOptions,
-    method: fetchOptions.method || "POST",
+    method: fetchOptions.method || 'POST',
     headers: {
       ...mutationAuthHeaders(authHeaders),
       ...headers,
@@ -274,10 +291,10 @@ function mutationAuthHeaders(headers) {
 
 async function mockResponse(path, options = {}) {
   await new Promise((resolve) => setTimeout(resolve, 120));
-  const [pathname, queryString] = path.split("?");
-  const params = new URLSearchParams(queryString || "");
+  const [pathname, queryString] = path.split('?');
+  const params = new URLSearchParams(queryString || '');
 
-  if (pathname === backendRoutes.health) return { status: "ok" };
+  if (pathname === backendRoutes.health) return { status: 'ok' };
   if (pathname === backendRoutes.currentUser) return null;
   if (pathname === backendRoutes.signInEmail || pathname === backendRoutes.signUpEmail)
     return { ok: true };
@@ -289,11 +306,11 @@ async function mockResponse(path, options = {}) {
     const items = fallbackPosts();
     return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
   }
-  if (pathname === backendRoutes.posts && options.method === "POST") {
-    return { id: `mock-post-${Date.now()}`, ...JSON.parse(options.body || "{}") };
+  if (pathname === backendRoutes.posts && options.method === 'POST') {
+    return { id: `mock-post-${Date.now()}`, ...JSON.parse(options.body || '{}') };
   }
   if (pathname === backendRoutes.posts) {
-    const items = fallbackPosts({ search: params.get("search") || "" });
+    const items = fallbackPosts({ search: params.get('search') || '' });
     return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
   }
   if (/^\/posts\/[^/]+\/comments$/.test(pathname)) {
@@ -303,12 +320,12 @@ async function mockResponse(path, options = {}) {
     return { items: [], meta: { page: 1, limit: 20, total: 0, totalPages: 0 } };
   }
   if (/^\/users\/[^/]+\/follow-status$/.test(pathname)) return { following: false };
-  if (pathname === backendRoutes.games) return fallbackGames(params.get("search") || "");
-  if (pathname.startsWith("/games/") && pathname.endsWith("/categories"))
+  if (pathname === backendRoutes.games) return fallbackGames(params.get('search') || '');
+  if (pathname.startsWith('/games/') && pathname.endsWith('/categories'))
     return fallbackCategories();
-  if (pathname.startsWith("/games/") && pathname.endsWith("/feed")) {
-    const slug = decodePathParam(pathname.split("/")[2]);
-    const categorySlug = params.get("categorySlug")?.toLowerCase();
+  if (pathname.startsWith('/games/') && pathname.endsWith('/feed')) {
+    const slug = decodePathParam(pathname.split('/')[2]);
+    const categorySlug = params.get('categorySlug')?.toLowerCase();
     const items = fallbackPosts({ gameSlug: slug }).filter((post) => {
       if (!categorySlug) return true;
       const tag = post.tag.toLowerCase();
@@ -316,30 +333,30 @@ async function mockResponse(path, options = {}) {
     });
     return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
   }
-  if (pathname.startsWith("/games/")) {
-    const slug = decodePathParam(pathname.split("/")[2]);
+  if (pathname.startsWith('/games/')) {
+    const slug = decodePathParam(pathname.split('/')[2]);
     const game = mockGames.find((item) => item.slug === slug || item.id === slug);
-    if (!game) throw new Error("Game not found");
+    if (!game) throw new Error('Game not found');
     return game;
   }
-  if (pathname.startsWith("/chat")) return [];
+  if (pathname.startsWith('/chat')) return [];
   return null;
 }
 
 async function uploadToCloudinary(file, authorization) {
   const form = new FormData();
-  form.append("file", file);
-  form.append("api_key", authorization.apiKey);
-  form.append("timestamp", String(authorization.timestamp));
-  form.append("signature", authorization.signature);
-  form.append("upload_preset", authorization.uploadPreset);
-  form.append("folder", authorization.folder);
-  form.append("public_id", authorization.publicId);
-  form.append("overwrite", "false");
+  form.append('file', file);
+  form.append('api_key', authorization.apiKey);
+  form.append('timestamp', String(authorization.timestamp));
+  form.append('signature', authorization.signature);
+  form.append('upload_preset', authorization.uploadPreset);
+  form.append('folder', authorization.folder);
+  form.append('public_id', authorization.publicId);
+  form.append('overwrite', 'false');
 
-  const response = await fetch(authorization.uploadUrl, { method: "POST", body: form });
+  const response = await fetch(authorization.uploadUrl, { method: 'POST', body: form });
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error?.message || "Cloudinary upload failed");
+  if (!response.ok) throw new Error(result.error?.message || 'Cloudinary upload failed');
 
   return {
     uploadId: authorization.uploadId,
@@ -359,7 +376,7 @@ async function uploadToCloudinary(file, authorization) {
 function encryptedMessagePayload({
   ciphertext,
   encryptionMeta,
-  contentType = "TEXT",
+  contentType = 'TEXT',
   clientMessageId,
   replyToId,
 }) {
@@ -418,11 +435,11 @@ export const api = {
   getGameFeed: (gameSlug, query = {}, options = {}) =>
     api.getPostCollection(backendRoutes.gameFeed(gameSlug), query, options),
   likePost: (postId) => mutation(backendRoutes.postLike(postId)),
-  unlikePost: (postId) => mutation(backendRoutes.postLike(postId), undefined, { method: "DELETE" }),
+  unlikePost: (postId) => mutation(backendRoutes.postLike(postId), undefined, { method: 'DELETE' }),
   getFollowStatus: (userId, options = {}) => request(backendRoutes.followStatus(userId), options),
   followUser: (userId) => mutation(backendRoutes.userFollow(userId)),
   unfollowUser: (userId) =>
-    mutation(backendRoutes.userFollow(userId), undefined, { method: "DELETE" }),
+    mutation(backendRoutes.userFollow(userId), undefined, { method: 'DELETE' }),
   getComments: (postId, query = {}, options = {}) =>
     request(withQuery(backendRoutes.postComments(postId), query), options),
   createComment: (postId, content) => mutation(backendRoutes.postComments(postId), { content }),
@@ -433,9 +450,9 @@ export const api = {
   createPost: (post) => mutation(backendRoutes.posts, post),
   createUploadSignatures: (files) =>
     mutation(backendRoutes.mediaSignatures, {
-      purpose: "POST",
+      purpose: 'POST',
       items: files.map((file) => ({
-        resourceType: file.type.startsWith("video/") ? "VIDEO" : "IMAGE",
+        resourceType: file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE',
       })),
     }),
   confirmMediaUploads: (items) => mutation(backendRoutes.mediaConfirm, { items }),
@@ -447,7 +464,7 @@ export const api = {
     );
     const confirmed = await api.confirmMediaUploads(uploaded);
     if (confirmed.failedCount) {
-      throw new Error(confirmed.failed?.[0]?.error || "Media confirmation failed");
+      throw new Error(confirmed.failed?.[0]?.error || 'Media confirmation failed');
     }
     return confirmed.successful.map(({ result }) => result);
   },
@@ -459,9 +476,9 @@ export const api = {
       meta: response.meta || { total: items.length },
     };
   },
-  getHome: async ({ search = "" } = {}) => {
+  getHome: async ({ search = '' } = {}) => {
     const [games, latest, trending] = await Promise.all([
-      api.getGames({ status: "ACTIVE", search, limit: 20 }),
+      api.getGames({ status: 'ACTIVE', search, limit: 20 }),
       api.getLatestFeed({ page: 1, limit: 10 }),
       api.getTrendingFeed({ page: 1, limit: 10 }),
     ]);
@@ -500,11 +517,16 @@ export const api = {
   registerChatDevice: (payload) => mutation(backendRoutes.chatDevices, payload),
   uploadChatDeviceKeyPackages: (deviceId, payload) =>
     mutation(backendRoutes.chatDeviceKeyPackages(deviceId), payload),
-  // Tells the server this login is in this device's browser, so revoking the device ends the login.
-  linkChatDeviceSession: (deviceId) =>
-    mutation(backendRoutes.chatDeviceSession(deviceId), undefined, { method: "PUT" }),
+  // Two steps that tell the server this login is in this device's browser, so revoking the device ends
+  // the login: get a challenge, then send it back signed with the device key.
+  chatDeviceSessionChallenge: (deviceId) =>
+    mutation(backendRoutes.chatDeviceSessionChallenge(deviceId)),
+  linkChatDeviceSession: (deviceId, proof) =>
+    mutation(backendRoutes.chatDeviceSession(deviceId), proof, { method: 'PUT' }),
+  // Signs a device out of the app everywhere, at once; the device keeps its keys and its groups.
+  signOutChatDevice: (deviceId) => mutation(backendRoutes.chatDeviceSignOut(deviceId)),
   revokeChatDevice: (deviceId) =>
-    mutation(backendRoutes.chatDevice(deviceId), undefined, { method: "DELETE" }),
+    mutation(backendRoutes.chatDevice(deviceId), undefined, { method: 'DELETE' }),
   // One key package per active device of `userId` (an array). Pass excludeDeviceId when claiming your own
   // devices, and conversationId when finishing a change to a group you are in - the server then skips
   // devices already in that group and the DM privacy settings, which no longer apply.
@@ -513,17 +535,31 @@ export const api = {
       backendRoutes.chatDeviceClaim(userId, {
         excludeDeviceId,
         conversationId,
-        deviceIds: deviceIds?.join(","),
+        deviceIds: deviceIds?.join(','),
       }),
     ),
-  submitMlsHandshake: (conversationId, payload) => submitMlsHandshake(conversationId, payload),
+  submitMlsHandshake: (conversationId, payload) =>
+    submitMlsCommit(backendRoutes.mlsHandshakes(conversationId), payload),
+  // A device adds itself to a group with no member online. Answers like submitMlsHandshake, incl. a lost race.
+  submitMlsExternalJoin: (conversationId, payload) =>
+    submitMlsCommit(backendRoutes.mlsExternalJoin(conversationId), payload),
+  // The public snapshot of a group to join from, for one of your devices.
+  getMlsGroupInfo: (conversationId, deviceId) =>
+    request(withQuery(backendRoutes.mlsGroupInfo(conversationId), { deviceId })),
+  // One cheap probe: does this device have welcomes, groups to join, or membership work waiting?
+  getMlsPendingSummary: (deviceId) => request(backendRoutes.mlsPending(deviceId)),
+  // Conversations this device could join by itself. scope "full" also finds a new device of an existing member.
+  getMlsJoinableConversations: (deviceId, { scope } = {}) =>
+    request(withQuery(backendRoutes.mlsJoinable(deviceId), { scope })),
   getMlsHandshakesSince: (conversationId, sinceEpoch = 0) =>
     request(withQuery(backendRoutes.mlsHandshakes(conversationId), { sinceEpoch })),
   getMlsPendingWelcomes: (deviceId) => request(backendRoutes.mlsPendingWelcomes(deviceId)),
   // Membership changes (devices to add or remove) this device can finish, and takes a lease on them.
   // scope "full" also finds new, revoked and leftover devices but costs more; conversationId looks at one conversation only.
   getMlsMembershipWork: (deviceId, { scope, after, conversationId } = {}) =>
-    mutation(withQuery(backendRoutes.mlsMembershipWork(deviceId), { scope, after, conversationId })),
+    mutation(
+      withQuery(backendRoutes.mlsMembershipWork(deviceId), { scope, after, conversationId }),
+    ),
   // Who the server has in the group at an epoch, to check a ratchet tree against.
   getMlsRoster: (conversationId, epoch) =>
     request(withQuery(backendRoutes.mlsRoster(conversationId), { epoch })),
@@ -542,7 +578,7 @@ export const api = {
   createDevTestUser: (label) => mutation(backendRoutes.devTestUsers, label ? { label } : {}),
   impersonateDevTestUser: (id) => mutation(backendRoutes.devTestUserImpersonate(id)),
   deleteDevTestUser: (id) =>
-    mutation(backendRoutes.devTestUser(id), undefined, { method: "DELETE" }),
+    mutation(backendRoutes.devTestUser(id), undefined, { method: 'DELETE' }),
   deleteAllDevTestUsers: () =>
-    mutation(backendRoutes.devTestUsers, undefined, { method: "DELETE" }),
+    mutation(backendRoutes.devTestUsers, undefined, { method: 'DELETE' }),
 };

@@ -349,7 +349,23 @@ model ChatConversation {
   @@index([status])
   @@index([updatedAt])
   @@index([createdBy])
+  mlsGroupInfo MlsGroupInfo?
+
   @@map("chat_conversations")
+}
+
+/// The newest public snapshot of a conversation's MLS group (a GroupInfo). A device joins the group by
+/// itself from this, with no member online. Kept only while it describes the group's current epoch.
+model MlsGroupInfo {
+  conversationId String   @id
+  /// The epoch this snapshot describes; only ever moves forward.
+  epoch          Int
+  payload        Bytes
+  updatedAt      DateTime @updatedAt
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("mls_group_infos")
 }
 
 model ChatParticipant {
