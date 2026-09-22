@@ -4,7 +4,7 @@ import { ChatDevicesModule } from '../chat-devices/chat-devices.module';
 import { MlsGroupRosterModule } from '../mls-group-roster/mls-group-roster.module';
 import { CommonModule } from '../common/common.module';
 import { MlsAuditRepository } from './mls-audit.repository';
-import { MlsAuditService } from './mls-audit.service';
+import { MlsIntegrityChecks } from './mls-integrity-checks';
 import { MlsCommitFaultsService } from './mls-commit-faults.service';
 import { MlsPendingService } from './mls-pending.service';
 import { MlsSelfJoinRateLimiterService } from './mls-self-join-rate-limiter.service';
@@ -37,7 +37,7 @@ import { MlsMembershipWorkService } from './mls-membership-work.service';
     MlsSelfJoinRateLimiterService,
     MlsPendingService,
     MlsAuditRepository,
-    MlsAuditService,
+    MlsIntegrityChecks,
   ],
 })
 export class MlsHandshakesModule {}

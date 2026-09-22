@@ -172,3 +172,28 @@ traces already are, not trusted to "just not come up."
 All four decisions above are locked in. Remaining open question before
 coding starts: the reordered plan's step 1 (`MlsClient` contract tests)
 and step 2 (library bake-off) are next.
+
+## 8. Update (2026-09-22): what the running code actually defends
+
+Written against the `feat/chat-e2e-encryption` branch, so §1's decision stays
+honest as features land.
+
+**The server is the key directory AND the membership authority.** Every check
+clients run (per-commit declarations, the whole-tree-vs-roster comparison, the
+self-join rules) compares against the server's own records. They catch buggy
+or tampered *clients*, and passive database compromise - not a fully malicious
+server, which can register keys and fabricate membership it then attests.
+
+- The one-way "declared" marker stops a server *downgrading* verification for
+  a group, nothing more.
+- The integrity sweep (`common/integrity`, checks in `mls-integrity-checks.ts`) runs on the same server and data
+  it checks: it catches bugs and stuck flows, not tampering.
+- Session-link signatures are domain-separated (`gachahub/session-link/v1`),
+  so the server cannot use the link flow as an oracle to obtain a device's
+  signature over an MLS structure.
+- Self-join commits are signature-verified server side, so holding a login
+  cookie without the device's private key is not enough to submit one.
+
+Planned upgrades, in cost order: client-generated "X joined" notices, a
+per-user device list, member-signed invites, key transparency / safety
+numbers (see BACKLOG.md).
