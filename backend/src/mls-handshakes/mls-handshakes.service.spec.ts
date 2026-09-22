@@ -20,6 +20,7 @@ describe('MlsHandshakesService', () => {
     isEntitledParticipant: jest.fn(),
     acceptHandshake: jest.fn(),
     acceptExternalJoin: jest.fn(),
+    getCurrentEpoch: jest.fn(),
     findHandshakesSince: jest.fn(),
     findRosterAtEpoch: jest.fn(),
     findPendingWelcomes: jest.fn(),
@@ -346,6 +347,7 @@ describe('MlsHandshakesService', () => {
       chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
         registeredKey(join.joinerSignatureKey),
       );
+      repository.getCurrentEpoch.mockResolvedValue(join.epoch);
       groupInfos.findCurrent.mockResolvedValue({
         epoch: join.epoch,
         payload: join.groupInfoPayload,
@@ -391,6 +393,7 @@ describe('MlsHandshakesService', () => {
       chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
         registeredKey(join.joinerSignatureKey),
       );
+      repository.getCurrentEpoch.mockResolvedValue(join.epoch);
       groupInfos.findCurrent.mockResolvedValue({
         epoch: join.epoch,
         payload: join.groupInfoPayload,
@@ -421,6 +424,7 @@ describe('MlsHandshakesService', () => {
       chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
         registeredKey(join.joinerSignatureKey),
       );
+      repository.getCurrentEpoch.mockResolvedValue(join.epoch);
       groupInfos.findCurrent.mockResolvedValue(null);
 
       await expect(
@@ -461,6 +465,7 @@ describe('MlsHandshakesService', () => {
       chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
         registeredKey(join.joinerSignatureKey),
       );
+      repository.getCurrentEpoch.mockResolvedValue(join.epoch);
       groupInfos.findCurrent.mockResolvedValue({
         epoch: join.epoch,
         payload: join.groupInfoPayload,
@@ -484,6 +489,7 @@ describe('MlsHandshakesService', () => {
       chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
         registeredKey(join.joinerSignatureKey),
       );
+      repository.getCurrentEpoch.mockResolvedValue(join.epoch);
       groupInfos.findCurrent.mockResolvedValue({
         epoch: join.epoch,
         payload: join.groupInfoPayload,
@@ -507,6 +513,7 @@ describe('MlsHandshakesService', () => {
       chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
         registeredKey(join.joinerSignatureKey),
       );
+      repository.getCurrentEpoch.mockResolvedValue(join.epoch);
       groupInfos.findCurrent.mockResolvedValue({
         epoch: join.epoch,
         payload: join.groupInfoPayload,
@@ -534,6 +541,104 @@ describe('MlsHandshakesService', () => {
           groupInfo: b64(join.nextGroupInfoPayload),
         }),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('refuses a join for a conversation that does not exist', async () => {
+      const join = await buildTestExternalJoin('conv-1', {
+        userId: 'user-1',
+        deviceId: 'device-1',
+      });
+      chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+        registeredKey(join.joinerSignatureKey),
+      );
+      repository.getCurrentEpoch.mockResolvedValue(null);
+
+      await expect(
+        service.submitExternalJoin('user-1', 'conv-1', {
+          deviceId: 'device-1',
+          epoch: join.epoch,
+          payload: b64(join.commitPayload),
+          groupInfo: b64(join.nextGroupInfoPayload),
+        }),
+      ).rejects.toThrow(NotFoundException);
+      expect(groupInfos.findCurrent).not.toHaveBeenCalled();
+    });
+
+    describe('resubmitting an epoch that already settled - recovering from a crash', () => {
+      // The epoch is no longer the live frontier, so a fresh snapshot/signature check is skipped: a
+      // forged resubmission can still never mutate anything, because acceptExternalJoin's own epoch
+      // compare-and-set only ever accepts the FIRST commit at a given epoch. What resubmitting the exact
+      // same, already-verified bytes is FOR is telling apart "my own join won" (duplicate) from "a
+      // different change one this epoch" (conflict) - see syncEngine.ts's resolvePendingJoin.
+      it('does not re-verify the signature against a live snapshot - the epoch has already moved on', async () => {
+        const join = await buildTestExternalJoin('conv-1', {
+          userId: 'user-1',
+          deviceId: 'device-1',
+        });
+        chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+          registeredKey(join.joinerSignatureKey),
+        );
+        // the epoch this device is resubmitting for has already been decided; there is no live snapshot for it any more
+        repository.getCurrentEpoch.mockResolvedValue(join.epoch + 1);
+        repository.acceptExternalJoin.mockResolvedValue({
+          outcome: 'duplicate',
+          handshake: {
+            id: 'hs-1',
+            conversationId: 'conv-1',
+            epoch: join.epoch,
+            senderDeviceId: 'device-1',
+            payload: join.commitPayload,
+            membershipDeclared: true,
+            addedDevices: [],
+            removedDevices: [],
+            createdAt: new Date(),
+          },
+        });
+
+        const result = await service.submitExternalJoin('user-1', 'conv-1', {
+          deviceId: 'device-1',
+          epoch: join.epoch,
+          payload: b64(join.commitPayload),
+          groupInfo: b64(join.nextGroupInfoPayload),
+        });
+
+        expect(result.outcome).toBe('duplicate');
+        expect(groupInfos.findCurrent).not.toHaveBeenCalled();
+      });
+
+      it('reports conflict, not accepted, when a different commit is what actually won that epoch', async () => {
+        const join = await buildTestExternalJoin('conv-1', {
+          userId: 'user-1',
+          deviceId: 'device-1',
+        });
+        chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+          registeredKey(join.joinerSignatureKey),
+        );
+        repository.getCurrentEpoch.mockResolvedValue(join.epoch + 1);
+        repository.acceptExternalJoin.mockResolvedValue({
+          outcome: 'conflict',
+          handshake: {
+            id: 'hs-other',
+            conversationId: 'conv-1',
+            epoch: join.epoch,
+            senderDeviceId: 'device-9',
+            payload: new Uint8Array([1]),
+            membershipDeclared: true,
+            addedDevices: [],
+            removedDevices: [],
+            createdAt: new Date(),
+          },
+        });
+
+        await expect(
+          service.submitExternalJoin('user-1', 'conv-1', {
+            deviceId: 'device-1',
+            epoch: join.epoch,
+            payload: b64(join.commitPayload),
+            groupInfo: b64(join.nextGroupInfoPayload),
+          }),
+        ).rejects.toThrow(ConflictException);
+      });
     });
   });
 

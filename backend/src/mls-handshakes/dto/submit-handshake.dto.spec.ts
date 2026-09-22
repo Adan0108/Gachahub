@@ -45,6 +45,45 @@ describe('SubmitHandshakeDto', () => {
     expect(errors.some((error) => error.property === 'welcomes')).toBe(true);
   });
 
+  describe('the published snapshot (groupInfo)', () => {
+    const valid = {
+      deviceId: 'device-1',
+      epoch: 1,
+      payload: validPayload,
+      welcomes: [],
+      addedDeviceIds: [],
+      removedDeviceIds: [],
+    };
+
+    // regression: a group too big to publish a snapshot for must still be able to accept ordinary
+    // Commits - the client omits the field entirely, and this must not be a 400 on every add/remove.
+    it('accepts a Commit with the snapshot omitted', async () => {
+      const errors = await validate(plainToInstance(SubmitHandshakeDto, valid));
+
+      expect(errors).toHaveLength(0);
+    });
+
+    it('accepts a Commit with a snapshot under the cap', async () => {
+      const dto = plainToInstance(SubmitHandshakeDto, {
+        ...valid,
+        groupInfo: Buffer.from('group-info-bytes').toString('base64'),
+      });
+
+      expect(await validate(dto)).toHaveLength(0);
+    });
+
+    it('rejects a snapshot over the size cap', async () => {
+      const dto = plainToInstance(SubmitHandshakeDto, {
+        ...valid,
+        groupInfo: Buffer.from('x'.repeat(60_000)).toString('base64'),
+      });
+
+      const errors = await validate(dto);
+
+      expect(errors.some((error) => error.property === 'groupInfo')).toBe(true);
+    });
+  });
+
   describe('declared membership changes', () => {
     const valid = {
       deviceId: 'device-1',

@@ -41,8 +41,15 @@ export class MlsAuditRepository {
       LIMIT ${SAMPLE_LIMIT}`;
   }
 
-  /** Devices sitting in a group's encryption whose owner is not in that conversation any more (or never was). */
+  /**
+   * Devices sitting in a group's encryption whose owner is not in that conversation any more (or never
+   * was). LEAVING is allowed here: a removed member keeps their leaves BY DESIGN until the Remove Commit
+   * lands (findStuckParticipants below is what catches that taking too long), so it must not count as
+   * "outsider" or this would fire on every ordinary removal in progress.
+   */
   findLeavesOfOutsiders(): Promise<SuspectLeaf[]> {
+    const allowedStates = [...ENTITLED_TO_LEAF_STATES, 'LEAVING'];
+
     return this.prisma.$queryRaw<SuspectLeaf[]>`
       SELECT member."conversationId", member."deviceId", member."userId"
       FROM "mls_group_members" AS member
@@ -52,12 +59,12 @@ export class MlsAuditRepository {
       WHERE member."removedEpoch" IS NULL
         AND (
           participant."id" IS NULL
-          OR participant."state"::text NOT IN (${Prisma.join([...ENTITLED_TO_LEAF_STATES])})
+          OR participant."state"::text NOT IN (${Prisma.join(allowedStates)})
         )
       LIMIT ${SAMPLE_LIMIT}`;
   }
 
-  /** People stuck half-joined or half-removed for over a day: some change never finished. */
+  /** People stuck half-joined (a week) or half-removed (a day) - see the two thresholds above. */
   async findStuckParticipants(): Promise<StuckParticipant[]> {
     const rows = await this.prisma.chatParticipant.findMany({
       where: {

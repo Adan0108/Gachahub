@@ -51,6 +51,12 @@ holding its own MLS identity and key packages.
   becomes a dead member of every group it was in — it can never come back
   online to be cooperatively removed. Needs a cleanup mechanism (staleness
   timeout + forced removal via `external_senders`, see §5).
+  **Superseded (2026-09-22):** built without `external_senders`, which was
+  never implemented. A 10-device-per-user cap plus a nightly job that retires
+  devices unseen for 60 days keeps the count bounded; membership work
+  (`membership-work.ts`) then removes a retired device's leaf the next time
+  any online member's client does a full reconcile pass — an ordinary Remove
+  by that member's own client, not a server-proposed one.
 
 **Decision (2026-09-14):** no formal device-approval flow for v1. GachaHub
 is web-only today — no iOS/Android app — so "a new device" mostly just
@@ -87,6 +93,15 @@ never as something to silently paper over.
   — never accept an external Add, or the server could silently insert an
   attacker's device using the same mechanism meant for cleanup.
 
+**Superseded (2026-09-22):** `external_senders` was never built. Removals of
+every kind — voluntary leave, ban, stale device — instead go through
+`membership-work.ts`: the server marks who is no longer entitled to a leaf
+(participant state, revocation, dormancy), and any online member's client
+picks that up as ordinary Remove work on its next poll and commits it itself.
+No server-proposed Remove exists, so the "never accept an external Add"
+client rule above was never load-bearing — there is no external proposal
+path in the shipped design for a client to accept or reject.
+
 **Decision (2026-09-14):** option (a) — a pending group invitee is added to
 the MLS group only once they accept, matching today's product behavior
 (pending = no history access).
@@ -99,6 +114,14 @@ complete immediately. Needs a queued/retry design (process the pending add
 the next time any existing member's client comes online) plus a "syncing…"
 UI state for the accepter instead of a silent failure. Not solved yet —
 flagging so it isn't discovered mid-implementation.
+
+**Superseded (2026-09-22):** solved by MLS external commits, not the
+queued/retry design sketched above. Every accepted Commit publishes a signed
+snapshot (`mls_group_infos`); a device with nobody online to add it fetches
+that snapshot and joins by itself (`mls-self-join.*`, `syncEngine.ts`'s
+`joinByExternalCommit`), with the server verifying the join's signature
+against the same snapshot before accepting it. No existing member needs to
+be online at accept time. The "syncing…" UI state is still not built.
 
 ## 4. Direct messages need devices to exist first
 

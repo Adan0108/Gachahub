@@ -3,6 +3,7 @@ import {
   isValidDeviceSignature,
   isValidLinkChallenge,
   issueLinkChallenge,
+  SESSION_LINK_LABEL,
 } from './session-link-proof';
 
 describe('session link challenge', () => {
@@ -85,5 +86,13 @@ describe('device signature', () => {
     expect(
       isValidDeviceSignature(new Uint8Array(3), 'hello', signed('hello')),
     ).toBe(false);
+  });
+});
+
+describe('SESSION_LINK_LABEL', () => {
+  it('is pinned to the exact string the frontend adapter must also use', () => {
+    // Any change here without the matching change in frontend/lib/mls/adapter/tsMlsAdapter.ts
+    // makes every session link fail signature verification.
+    expect(SESSION_LINK_LABEL).toBe(`gachahub/session-link/v1\n`);
   });
 });

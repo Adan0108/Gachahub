@@ -110,7 +110,7 @@ export class MlsHandshakesRepository {
     userId: string;
     payload: Uint8Array;
     payloadSha256: string;
-    groupInfo: Uint8Array;
+    groupInfo?: Uint8Array;
   }): Promise<HandshakeAcceptResult> {
     const { deviceId, userId, ...rest } = params;
 
@@ -415,6 +415,16 @@ export class MlsHandshakesRepository {
     });
 
     return result.count === 1;
+  }
+
+  /** The conversation's current epoch, or null if it doesn't exist. */
+  async getCurrentEpoch(conversationId: string): Promise<number | null> {
+    const conversation = await this.prisma.chatConversation.findUnique({
+      where: { id: conversationId },
+      select: { mlsEpoch: true },
+    });
+
+    return conversation?.mlsEpoch ?? null;
   }
 
   /** The leaves at `epoch` with each device's registered key; the key is null for a device whose record is gone. */

@@ -75,4 +75,59 @@ describe('IntegrityService', () => {
       expect.objectContaining({ dedupKey: 'Integrity:healthy-but-violated' }),
     );
   });
+
+  it('does not let one hung check hold up the ones after it', async () => {
+    jest.useFakeTimers();
+    registry.register(
+      {
+        name: 'hangs-forever',
+        title: 'x',
+        source: 'mls',
+        findViolations: () => new Promise(() => undefined),
+      },
+      {
+        name: 'runs-fine',
+        title: 'Runs fine invariant broken',
+        source: 'mls',
+        findViolations: () => Promise.resolve(['row-1']),
+      },
+    );
+
+    const run = service.runChecks();
+    await jest.runAllTimersAsync();
+    await run;
+
+    expect(discordLogger.sendError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Integrity check failed to run: hangs-forever',
+      }),
+    );
+    expect(discordLogger.sendError).toHaveBeenCalledWith(
+      expect.objectContaining({ dedupKey: 'Integrity:runs-fine' }),
+    );
+    jest.useRealTimers();
+  });
+
+  it('skips a sweep that starts while the last one is still running', async () => {
+    let releaseFirstCheck: () => void = () => undefined;
+    const findViolations = jest.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseFirstCheck = () => resolve([]);
+        }),
+    );
+    registry.register({
+      name: 'slow',
+      title: 'x',
+      source: 'mls',
+      findViolations,
+    });
+
+    const first = service.runChecks();
+    const second = service.runChecks();
+    releaseFirstCheck();
+    await Promise.all([first, second]);
+
+    expect(findViolations).toHaveBeenCalledTimes(1);
+  });
 });

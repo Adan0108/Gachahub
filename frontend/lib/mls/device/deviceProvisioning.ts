@@ -23,9 +23,6 @@ interface ApiError extends Error {
 /** The backend's codes for a device that is retired or unknown; a bare 404 (proxy, deploy) must never count. */
 const DEVICE_REVOKED = 'DEVICE_REVOKED';
 const DEVICE_NOT_FOUND = 'DEVICE_NOT_FOUND';
-/** Prefixed before signing so the device key never signs raw server bytes. Duplicated in backend session-link-proof.ts - keep in step. */
-const SESSION_LINK_LABEL = 'gachahub/session-link/v1\n';
-const CHALLENGE_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 
 // Keyed by store instance (not userId alone) so unrelated store instances -
 // e.g. in tests - never share an in-flight entry. Without this, several
@@ -95,10 +92,7 @@ async function linkSession(
     if (response.alreadyLinked || !response.challenge) return 'linked';
 
     const { challenge } = response;
-    if (!CHALLENGE_SHAPE.test(challenge)) {
-      throw new Error('Unexpected challenge format');
-    }
-    const signature = await store.sign(new TextEncoder().encode(SESSION_LINK_LABEL + challenge));
+    const signature = await store.signSessionLinkChallenge(challenge);
     await api.linkChatDeviceSession(credential.deviceId, {
       challenge,
       signature: bytesToBase64(signature),

@@ -43,12 +43,6 @@ export class MlsCommitFaultsService {
       throw new NotFoundException('No Commit was accepted at that epoch');
     }
 
-    // The faulted commit produced epoch+1; its snapshot must not seed anyone's self-join.
-    await this.groupInfoRepository.deleteIfDescribesEpoch(
-      conversationId,
-      dto.epoch + 1,
-    );
-
     const isNew = await this.mlsHandshakesRepository.recordCommitFault({
       conversationId,
       epoch: dto.epoch,
@@ -57,8 +51,15 @@ export class MlsCommitFaultsService {
       reason: dto.reason,
     });
 
-    // Filing the same fault again (every poll re-detects it) must not re-alert.
+    // Filing the same fault again (every poll re-detects it) must not re-alert, and must not let one
+    // member keep self-join off for a group by re-reporting the same epoch after every new Commit.
     if (isNew) {
+      // The faulted commit produced epoch+1; its snapshot must not seed anyone's self-join.
+      await this.groupInfoRepository.deleteIfDescribesEpoch(
+        conversationId,
+        dto.epoch + 1,
+      );
+
       void this.discordLogger.sendError({
         source: 'mls',
         title: 'A member refused an MLS commit',

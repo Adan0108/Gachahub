@@ -69,6 +69,12 @@ import {
  */
 export const CIPHERSUITE_NAME = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519';
 
+// Prefixed before signing a session-link challenge, so the device key never signs raw server bytes that
+// could double as an MLS structure. Duplicated in backend session-link-proof.ts - keep both in step; each
+// side has a test that pins this exact string.
+export const SESSION_LINK_LABEL = 'gachahub/session-link/v1\n';
+const SESSION_LINK_CHALLENGE_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+
 // ts-mls's own defaultLifetime is notBefore=0/notAfter=max-int64 - an
 // effectively-infinite key package a real server should never accept.
 // Matches the backend's MAX_KEY_PACKAGE_LIFETIME_SECONDS
@@ -162,11 +168,15 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
     return this.credential;
   }
 
-  async sign(message: Uint8Array): Promise<Uint8Array> {
+  async signSessionLinkChallenge(challenge: string): Promise<Uint8Array> {
+    if (!SESSION_LINK_CHALLENGE_SHAPE.test(challenge)) {
+      throw new Error('Unexpected challenge format');
+    }
     await this.ensureHydrated();
     if (!this.signatureKeyPair) {
       throw new Error('Device not provisioned yet');
     }
+    const message = new TextEncoder().encode(SESSION_LINK_LABEL + challenge);
     return (await getImpl()).signature.sign(this.signatureKeyPair.signKey, message);
   }
 

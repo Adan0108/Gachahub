@@ -44,8 +44,13 @@ export interface DeviceIdentityStore {
    */
   provision(userId: UserId): Promise<DeviceCredential>;
 
-  /** Signs `message` with this device's signature key: proof, to the server, that this browser holds the device. */
-  sign(message: Uint8Array): Promise<Uint8Array>;
+  /**
+   * Proves to the server, when linking a login to this device, that this browser holds the device key.
+   * Domain-separated (a fixed label is prefixed before signing) so a server that shapes the challenge to
+   * look like an MLS structure can never turn this into a signature over that structure - the device key
+   * signs nothing else, ever. Throws on a challenge that isn't the expected two-part token shape.
+   */
+  signSessionLinkChallenge(challenge: string): Promise<Uint8Array>;
 
   /** This device's own credential. Throws if not yet provisioned. */
   getOwnCredential(): Promise<DeviceCredential>;

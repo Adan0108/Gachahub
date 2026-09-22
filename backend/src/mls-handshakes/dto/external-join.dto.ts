@@ -3,6 +3,7 @@ import {
   IsBase64,
   IsInt,
   IsNotEmpty,
+  IsOptional,
   IsString,
   MaxLength,
   Min,
@@ -31,10 +32,12 @@ export class ExternalJoinDto {
   payload!: string;
 
   @ApiProperty({
-    description: 'Base64 GroupInfo for the epoch this join creates',
+    required: false,
+    description:
+      'Base64 GroupInfo for the epoch this join creates, omitted when the group is too big to publish one',
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsBase64()
   @MaxLength(60000)
-  groupInfo!: string;
+  groupInfo?: string;
 }

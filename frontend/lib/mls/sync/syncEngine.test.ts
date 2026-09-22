@@ -1384,7 +1384,36 @@ describe('SyncEngine', () => {
       await expect(carol.engine.joinByExternalCommit('conv-1')).resolves.toBe(false);
 
       await expect(carol.storage.load('conv-1#pending-join')).resolves.toBeUndefined();
+      await expect(carol.storage.load('conv-1#pending-join-request')).resolves.toBeUndefined();
       await expect(carol.engine.getCurrentEpoch('conv-1')).rejects.toThrow();
+    });
+
+    it('recovering after a crash adopts its OWN join, not a different device merely sharing the same leaf epoch', async () => {
+      // this is the #3 race: another change (e.g. membership work adding the same device via an ordinary
+      // Add) could land at the epoch carol's join was also targeting - a leaf-presence check alone cannot
+      // tell "my commit won" from "a different commit that happens to add me too won" apart.
+      const { aliceSession, carol, submittedCommit } = await groupWithPublishedSnapshot();
+      const { api } = await import('../../api');
+      const realSave = carol.storage.save.bind(carol.storage);
+      const save = vi
+        .spyOn(carol.storage, 'save')
+        .mockImplementation(async (key: string, bytes: Uint8Array) => {
+          if (key === 'conv-1') throw new Error('tab died');
+          return realSave(key, bytes);
+        });
+      await expect(carol.engine.joinByExternalCommit('conv-1')).rejects.toThrow('tab died');
+      save.mockRestore();
+
+      // the server tells the truth on resubmit: a DIFFERENT commit won this epoch, not carol's
+      vi.mocked(api.submitMlsExternalJoin).mockResolvedValue({ outcome: 'conflict' });
+      // the members moved on with whatever else won - carol's own attempted commit was never applied
+      await aliceSession.stageCommit({ added: [], removed: [] });
+      await aliceSession.commitAccepted();
+
+      await expect(carol.engine.getCurrentEpoch('conv-1')).rejects.toThrow();
+      await expect(carol.storage.load('conv-1#pending-join')).resolves.toBeUndefined();
+      await expect(carol.storage.load('conv-1#pending-join-request')).resolves.toBeUndefined();
+      expect(submittedCommit()).toBeDefined(); // sanity: carol's commit really was built and sent once
     });
 
     it('does nothing for a group this device already has', async () => {

@@ -39,6 +39,16 @@ export function useChatSocket() {
     // again from the gateway, and a plain drop or backend hiccup must never log anyone out.
     socket.on('session:revoked', signOutHere);
 
+    // socket.io does NOT auto-reconnect after a server-initiated disconnect (the gateway calls
+    // socket.disconnect() on both a backend hiccup and a dead login) - without this, that tab stays
+    // cut off from new messages and future sign-out events until the page is reloaded by hand. A dead
+    // login just gets session:revoked again on the reconnect the gateway sees.
+    socket.on('disconnect', (reason) => {
+      if (reason === 'io server disconnect') {
+        setTimeout(() => socket.connect(), 2000);
+      }
+    });
+
     socket.on('message:created', (event) => {
       queryClient.setQueryData(queryKeys.chatMessages(event.conversationId), (old) => {
         if (!old || old.items.some((item) => item.id === event.messageId)) {

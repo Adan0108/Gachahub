@@ -125,24 +125,31 @@ export class MlsHandshakesService {
       },
     );
 
-    // The signature is checked against the server's OWN stored snapshot for that epoch, never the caller's bytes.
-    const snapshot = await this.groupInfoRepository.findCurrent(conversationId);
-    if (!snapshot || snapshot.epoch !== dto.epoch) {
-      throw new ConflictException(
-        'The group moved on - fetch a fresh snapshot and rejoin',
+    // Only the live frontier needs a fresh signature check: a forged commit can only mutate state there -
+    // the epoch compare-and-set below refuses anything targeting an epoch that already settled. Resubmitting
+    // THIS device's own already-accepted join (recovering from a crash between accept and save) lands here
+    // too, with the exact same bytes; acceptExternalJoin's own duplicate-vs-conflict check (identical to the
+    // one every ordinary Commit resubmission already relies on) is what tells that apart from a real race.
+    const currentEpoch =
+      await this.mlsHandshakesRepository.getCurrentEpoch(conversationId);
+    if (currentEpoch === null) {
+      throw new NotFoundException('Conversation not found');
+    }
+    if (currentEpoch === dto.epoch) {
+      // The signature is checked against the server's OWN stored snapshot for that epoch, never the caller's bytes.
+      const snapshot =
+        await this.groupInfoRepository.findCurrent(conversationId);
+      if (!snapshot || snapshot.epoch !== dto.epoch) {
+        throw new ConflictException(
+          'The group moved on - fetch a fresh snapshot and rejoin',
+        );
+      }
+      await assertExternalJoinSigned(
+        payload,
+        snapshot.payload,
+        device.signaturePublicKey,
       );
     }
-    await assertExternalJoinSigned(
-      payload,
-      snapshot.payload,
-      device.signaturePublicKey,
-    );
-
-    const groupInfo = this.decodeGroupInfo(
-      dto.groupInfo,
-      conversationId,
-      dto.epoch,
-    );
 
     const result = await this.mlsHandshakesRepository.acceptExternalJoin({
       conversationId,
@@ -151,7 +158,9 @@ export class MlsHandshakesService {
       userId,
       payload,
       payloadSha256: createHash('sha256').update(payload).digest('hex'),
-      groupInfo,
+      groupInfo: dto.groupInfo
+        ? this.decodeGroupInfo(dto.groupInfo, conversationId, dto.epoch)
+        : undefined,
     });
 
     return this.toSubmitResponse(result);

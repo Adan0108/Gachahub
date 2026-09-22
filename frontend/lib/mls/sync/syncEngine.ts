@@ -2,8 +2,8 @@ import { api } from '../../api';
 import { bytesToBase64, base64ToBytes } from '../storage/base64';
 import type { GroupSession, GroupSessionFactory } from '../contract/client';
 import { CommitVerifier } from './commitVerifier';
-import { parseRoster } from './rosterCheck';
 import { withCrossTabLock } from './crossTabLock';
+import { publishableGroupInfo } from './groupInfoPublishing';
 import { toKeyPackageOffer, type ClaimedKeyPackage } from './keyPackageOffer';
 import {
   MembershipReconciler,
@@ -36,8 +36,17 @@ import type {
 const versionKey = (conversationId: ConversationId) => `${conversationId}#version`;
 // A self-join saved before the server answered, so a crash between the two loses nothing.
 const pendingJoinKey = (conversationId: ConversationId) => `${conversationId}#pending-join`;
-// The submit-handshake DTO refuses a bigger snapshot; past it, self-join pauses but commits still flow.
-const MAX_GROUP_INFO_B64_CHARS = 60_000;
+// The exact request that was submitted for it, so recovering can resubmit those same bytes and let the
+// server's own duplicate-vs-conflict check (identical to any Commit resubmission) say whether it won.
+const pendingJoinRequestKey = (conversationId: ConversationId) =>
+  `${conversationId}#pending-join-request`;
+
+interface PendingJoinRequest {
+  deviceId: DeviceId;
+  epoch: Epoch;
+  payload: string;
+  groupInfo: string | undefined;
+}
 
 /**
  * Orchestrates one device's MLS group sessions against the real backend
@@ -190,60 +199,79 @@ export class SyncEngine {
         excludeDeviceId: this.deviceId,
       });
 
-      // Saved BEFORE submitting: if this tab dies right after the server accepts, the join is recoverable.
-      await this.storage.save(pendingJoinKey(conversationId), await joined.session.serialize());
-
-      const nextGroupInfo = bytesToBase64(joined.groupInfoBytes);
-      const response = await api.submitMlsExternalJoin(conversationId, {
+      const request: PendingJoinRequest = {
         deviceId: this.deviceId,
         epoch: snapshot.epoch,
         payload: bytesToBase64(joined.commitBytes),
-        // Too big to publish: this group pauses self-join until it shrinks, commits still flow.
-        groupInfo: nextGroupInfo.length <= MAX_GROUP_INFO_B64_CHARS ? nextGroupInfo : undefined,
-      });
+        // Too big to publish: this group pauses self-join until it shrinks, the join itself still goes through.
+        groupInfo: publishableGroupInfo(joined.groupInfoBytes),
+      };
+      // Saved BEFORE submitting: if this tab dies right after the server accepts, the join is recoverable
+      // by resubmitting these exact bytes (see resolvePendingJoin).
+      await this.storage.save(pendingJoinKey(conversationId), await joined.session.serialize());
+      await this.storage.save(
+        pendingJoinRequestKey(conversationId),
+        new TextEncoder().encode(JSON.stringify(request)),
+      );
+
+      const response = await api.submitMlsExternalJoin(conversationId, request);
       if (response.outcome !== 'accepted') {
-        await this.storage.delete(pendingJoinKey(conversationId));
+        await this.discardPendingJoin(conversationId);
         return false;
       }
 
       this.sessions.set(conversationId, joined.session);
       await this.persistSession(conversationId, joined.session);
       await this.verifier.markDeclaredSeen(conversationId);
-      await this.storage.delete(pendingJoinKey(conversationId));
+      await this.discardPendingJoin(conversationId);
       return true;
     });
   }
 
   /**
-   * Finishes or discards a self-join saved before its submit was answered. The
-   * server's roster at the pending epoch says whether that join was accepted:
-   * if this device is a leaf there, adopt the state; if not, throw it away.
+   * Finishes or discards a self-join saved before its submit was answered, by resubmitting the EXACT bytes
+   * that were sent - not by checking whether this device merely appears as a leaf, which membership work
+   * adding the same device through an ordinary Add at the same epoch would satisfy just as well, adopting
+   * the wrong (and different) group state. The server's own duplicate-vs-conflict check, identical to the
+   * one every ordinary Commit resubmission already relies on, is what actually tells the two apart:
+   * `duplicate`/`accepted` means this device's own join won, anything else means a different change did.
    */
   private async resolvePendingJoin(conversationId: ConversationId): Promise<boolean> {
-    const pendingBytes = await this.storage.load(pendingJoinKey(conversationId));
-    if (!pendingBytes) return false;
-
-    let session: GroupSession;
-    try {
-      session = await this.factory.restore(conversationId, pendingBytes);
-    } catch {
-      await this.storage.delete(pendingJoinKey(conversationId));
+    const [pendingBytes, requestBytes] = await Promise.all([
+      this.storage.load(pendingJoinKey(conversationId)),
+      this.storage.load(pendingJoinRequestKey(conversationId)),
+    ]);
+    if (!pendingBytes || !requestBytes) {
+      await this.discardPendingJoin(conversationId);
       return false;
     }
 
-    const roster = parseRoster(
-      await api.getMlsRoster(conversationId, await session.currentEpoch()),
-    );
-    if (!roster?.some((leaf) => leaf.deviceId === this.deviceId)) {
-      await this.storage.delete(pendingJoinKey(conversationId));
+    let session: GroupSession;
+    let request: PendingJoinRequest;
+    try {
+      session = await this.factory.restore(conversationId, pendingBytes);
+      request = JSON.parse(new TextDecoder().decode(requestBytes)) as PendingJoinRequest;
+    } catch {
+      await this.discardPendingJoin(conversationId);
+      return false;
+    }
+
+    const response = await api.submitMlsExternalJoin(conversationId, request);
+    if (response.outcome !== 'accepted' && response.outcome !== 'duplicate') {
+      await this.discardPendingJoin(conversationId);
       return false;
     }
 
     this.sessions.set(conversationId, session);
     await this.persistSession(conversationId, session);
     await this.verifier.markDeclaredSeen(conversationId);
-    await this.storage.delete(pendingJoinKey(conversationId));
+    await this.discardPendingJoin(conversationId);
     return true;
+  }
+
+  private async discardPendingJoin(conversationId: ConversationId): Promise<void> {
+    await this.storage.delete(pendingJoinKey(conversationId));
+    await this.storage.delete(pendingJoinRequestKey(conversationId));
   }
 
   /**
@@ -270,7 +298,7 @@ export class SyncEngine {
         // What this Commit does to the group. The server checks it against the
         // authorized roster; every other member checks it against the Commit.
         // Published so another device can join by itself later, with no member online.
-        groupInfo: bytesToBase64(groupInfo),
+        groupInfo: publishableGroupInfo(groupInfo),
         addedDeviceIds: change.added.map((offer) => offer.credential.deviceId),
         removedDeviceIds: change.removed.map((credential) => credential.deviceId),
       });
@@ -510,7 +538,7 @@ export class SyncEngine {
       this.versions.delete(conversationId);
       await this.storage.delete(conversationId);
       await this.storage.delete(versionKey(conversationId));
-      await this.storage.delete(pendingJoinKey(conversationId));
+      await this.discardPendingJoin(conversationId);
       await this.verifier.forget(conversationId);
     });
   }
