@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useSyncEngine } from './useSyncEngine';
+import { useDeviceIdentity } from './useDeviceIdentity';
+import { wasSentByDevice } from '../lib/mls/messaging/messageOrigin';
 import { base64ToBytes } from '../lib/mls/storage/base64';
-import { nextRetryDelayMs } from '../lib/mls/messaging/decryptRetry';
+import { nextRetryDelayMs, shouldRetryDecrypt } from '../lib/mls/messaging/decryptRetry';
 import { EncryptedIndexedDbMessagePlaintextStore } from '../lib/mls/storage/messagePlaintextStore';
 import type { ConversationId, PlaintextEnvelope } from '../lib/mls/contract/types';
 
@@ -20,16 +22,18 @@ interface ChatMessageRow {
   conversationId?: string;
   senderId: string;
   ciphertext: string;
+  encryptionMeta?: unknown;
 }
 
 /**
  * Decrypts a conversation's messages once each and caches the plaintext
  * locally forever after (threat-model §5: MLS deletes each message's key
  * right after one decrypt, so this is the only chance to ever read it).
- * A message this device itself sent is never re-decrypted - the sender's
+ * A message this device itself sent is never re-decrypted - this device's
  * own copy of that generation's key is already gone by send time, so only
- * the local cache saved at send time (see useSendEncryptedMessage) can ever
- * produce its content again.
+ * the local cache saved at send time can ever produce its content again.
+ * A message another device of the same user sent is decrypted like any other
+ * member's, which is how a message you send shows up on all of your devices.
  */
 export function useDecryptedMessages(
   conversationId: ConversationId,
@@ -37,6 +41,7 @@ export function useDecryptedMessages(
   currentUserId: string | undefined,
 ): Record<string, DecryptedMessageState> {
   const syncEngine = useSyncEngine();
+  const ownDeviceId = useDeviceIdentity().credential?.deviceId;
   const [decrypted, setDecrypted] = useState<Record<string, DecryptedMessageState>>({});
   // Message ids some still-running effect invocation has already claimed.
   // A ref (not per-invocation state) so it survives across re-runs: a new
@@ -54,6 +59,12 @@ export function useDecryptedMessages(
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => () => clearTimeout(retryTimerRef.current), []);
+
+  // Another conversation starts with a clean slate: its own attempts, and no timer left from the last one.
+  useEffect(() => {
+    retryAttemptsRef.current = 0;
+    clearTimeout(retryTimerRef.current);
+  }, [conversationId]);
 
   useEffect(() => {
     if (!syncEngine || !conversationId || messages.length === 0) {
@@ -82,11 +93,13 @@ export function useDecryptedMessages(
             return;
           }
 
-          if (message.senderId === currentUserId) {
-            // Our own message with no local cache (a different device/
-            // session, or a cleared profile) - the sender's own ratchet
-            // already consumed this generation's key at send time, so
-            // there is no decrypting it again from here.
+          if (
+            message.senderId === currentUserId &&
+            ownDeviceId !== undefined &&
+            wasSentByDevice(message.encryptionMeta, ownDeviceId)
+          ) {
+            // Sent from this device with no local copy left (a cleared profile): this
+            // device's key for it is gone, so there is no decrypting it again from here.
             if (!cancelled) {
               setDecrypted((prev) => ({ ...prev, [message.id]: { status: 'unavailable' } }));
             }
@@ -130,15 +143,16 @@ export function useDecryptedMessages(
       );
       const needsSync = atCurrentEpoch.some((isCurrent) => !isCurrent);
 
-      let syncFailed = false;
+      let syncError: unknown;
       if (needsSync) {
         try {
           await syncEngine.syncCommits(conversationId);
         } catch (error) {
-          syncFailed = true;
+          syncError = error;
           console.warn('Could not sync MLS commits before decrypting messages', error);
         }
       }
+      const retryable = shouldRetryDecrypt(syncError, retryAttemptsRef.current);
 
       let needsRetry = false;
       await Promise.all(
@@ -170,8 +184,8 @@ export function useDecryptedMessages(
           } catch (error) {
             console.warn(`Could not decrypt message ${message.id}`, error);
             // Without the commit sync the message may just need a commit this device hasn't got yet.
-            const status = syncFailed ? 'pending' : 'unavailable';
-            needsRetry ||= syncFailed;
+            const status = retryable ? 'pending' : 'unavailable';
+            needsRetry ||= retryable;
             if (!cancelled) {
               setDecrypted((prev) => ({ ...prev, [message.id]: { status } }));
             }
@@ -205,6 +219,7 @@ export function useDecryptedMessages(
     conversationId,
     messages.map((message) => message.id).join(','),
     currentUserId,
+    ownDeviceId,
     retryTick,
   ]);
 

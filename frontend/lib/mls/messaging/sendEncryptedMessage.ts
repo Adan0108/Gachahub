@@ -1,6 +1,7 @@
 import { api } from '../../api';
 import { bytesToBase64 } from '../storage/base64';
 import { ensureConversationGroup } from './ensureConversationGroup';
+import { senderMeta } from './messageOrigin';
 import type { SyncEngine } from '../sync/syncEngine';
 import { EncryptedIndexedDbMessagePlaintextStore } from '../storage/messagePlaintextStore';
 import type { ConversationId, DeviceId, UserId } from '../contract/types';
@@ -82,6 +83,7 @@ async function encryptAndSend(
     ciphertext: bytesToBase64(wireBytes),
     contentType: 'TEXT',
     clientMessageId,
+    encryptionMeta: senderMeta(deviceId),
   });
 
   await plaintextStore.save({

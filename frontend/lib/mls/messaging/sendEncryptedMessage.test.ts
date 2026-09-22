@@ -50,7 +50,11 @@ describe('sendEncryptedChatMessage', () => {
     });
     expect(api.sendChatMessage).toHaveBeenCalledWith(
       'conv-1',
-      expect.objectContaining({ contentType: 'TEXT', clientMessageId: 'client-1' }),
+      expect.objectContaining({
+        contentType: 'TEXT',
+        clientMessageId: 'client-1',
+        encryptionMeta: { senderDeviceId: 'device-1' },
+      }),
     );
     expect(result.message.id).toBe('msg-1');
   });
