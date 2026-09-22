@@ -1,5 +1,5 @@
 const SWEEP_INTERVAL_MS = 10 * 60_000;
-// How long a known-missing key is answered from memory, so junk cookies cannot hammer the database.
+// The SAME junk cookie is answered from memory for a minute; distinct junk still costs one read each.
 const MISS_TTL_MS = 60_000;
 const ACTIVE_SESSIONS_PREFIX = 'active-sessions-';
 // better-auth session tokens are 32 random letters and digits; anything else (rate-limit keys, ...) is not one
@@ -25,8 +25,8 @@ export interface SessionLoader {
  * Where better-auth keeps logins for fast lookups, so a request doesn't read the
  * database. It lives in this server's memory, and a miss (after a restart, say)
  * is filled from the database and cached, so it is never slower for long.
- * Deleting an entry takes effect at once. With more than one server this needs a
- * shared store (Redis) behind the same methods.
+ * Deleting an entry takes effect at once. Single-instance only - see
+ * docs/single-instance.md before running more than one backend.
  */
 export class InMemorySessionStorage {
   private readonly entries = new Map<string, Entry>();

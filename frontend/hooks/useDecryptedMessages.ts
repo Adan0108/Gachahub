@@ -93,6 +93,7 @@ export function useDecryptedMessages(
             return;
           }
 
+          // senderId is server-authenticated; the meta is the sender's own word, so a lie here can only mislabel your own account's messages.
           if (
             message.senderId === currentUserId &&
             ownDeviceId !== undefined &&

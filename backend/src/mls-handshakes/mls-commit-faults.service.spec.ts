@@ -12,6 +12,9 @@ jest.mock('../common/discord/discord-logger.service', () => ({
 jest.mock('./mls-handshakes.repository', () => ({
   MlsHandshakesRepository: class {},
 }));
+jest.mock('./mls-group-info.repository', () => ({
+  MlsGroupInfoRepository: class {},
+}));
 
 import { MlsCommitFaultsService } from './mls-commit-faults.service';
 
@@ -23,6 +26,7 @@ describe('MlsCommitFaultsService', () => {
   };
   const chatDevicesService = { assertOwnActiveDevice: jest.fn() };
   const discordLogger = { sendError: jest.fn() };
+  const groupInfoRepository = { deleteIfDescribesEpoch: jest.fn() };
 
   let service: MlsCommitFaultsService;
 
@@ -45,6 +49,7 @@ describe('MlsCommitFaultsService', () => {
       repository as unknown as MlsHandshakesRepository,
       chatDevicesService as unknown as ChatDevicesService,
       discordLogger as unknown as DiscordLoggerService,
+      groupInfoRepository as never,
     );
   });
 
@@ -60,6 +65,15 @@ describe('MlsCommitFaultsService', () => {
       reporterDeviceId: 'device-2',
       reason: 'added an unrecorded device',
     });
+  });
+
+  it('discards the snapshot the faulted commit published, so nobody self-joins from a refused state', async () => {
+    await service.reportFault('user-1', 'conv-1', dto);
+
+    expect(groupInfoRepository.deleteIfDescribesEpoch).toHaveBeenCalledWith(
+      'conv-1',
+      dto.epoch + 1,
+    );
   });
 
   it('alerts Discord the first time, naming the sender', async () => {

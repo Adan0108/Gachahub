@@ -17,6 +17,7 @@ describe('WebsocketGateway', () => {
     data: {} as { userId?: string },
     handshake: { headers: {} },
     join: jest.fn(),
+    emit: jest.fn(),
     disconnect: jest.fn(),
     ...overrides,
   });
@@ -43,22 +44,24 @@ describe('WebsocketGateway', () => {
       expect(socket.disconnect).not.toHaveBeenCalled();
     });
 
-    it('disconnects when there is no session', async () => {
+    it('tells the browser it is signed out, then disconnects, when there is no session', async () => {
       getSession.mockResolvedValue(null);
       const socket = makeSocket();
 
       await gateway.handleConnection(socket as any);
 
+      expect(socket.emit).toHaveBeenCalledWith('session:revoked');
       expect(socket.disconnect).toHaveBeenCalledWith(true);
       expect(socket.join).not.toHaveBeenCalled();
     });
 
-    it('disconnects when session lookup throws', async () => {
+    it('disconnects on a backend error WITHOUT any signed-out signal - a hiccup must not log people out', async () => {
       getSession.mockRejectedValue(new Error('boom'));
       const socket = makeSocket();
 
       await gateway.handleConnection(socket as any);
 
+      expect(socket.emit).not.toHaveBeenCalled();
       expect(socket.disconnect).toHaveBeenCalledWith(true);
       expect(socket.join).not.toHaveBeenCalled();
     });

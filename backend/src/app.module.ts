@@ -39,7 +39,8 @@ import { env } from './config/env';
     CloudinaryModule,
     PrismaModule,
     RedisModule,
-    AuthModule.forRoot({ auth }),
+    // MLS commits carry welcomes plus a group snapshot; express's default 100 KB json cap would refuse them.
+    AuthModule.forRoot({ auth, bodyParser: { json: { limit: '2mb' } } }),
     HealthModule,
     UsersModule,
     GamesModule,

@@ -24,10 +24,12 @@ import {
 import { SessionTerminator } from '../auth/session-terminator.service';
 import { env } from '../config/env';
 import { DeviceRevokedException } from '../common/exceptions/device-revoked.exception';
+import { DeviceNotFoundException } from '../common/exceptions/device-not-found.exception';
 import {
   isValidDeviceSignature,
   isValidLinkChallenge,
   issueLinkChallenge,
+  SESSION_LINK_LABEL,
 } from './session-link-proof';
 import { LinkSessionDto } from './dto/link-session.dto';
 import { RegisterDeviceDto } from './dto/register-device.dto';
@@ -77,7 +79,7 @@ export class ChatDevicesService {
       throw new ConflictException('This device id is already registered');
     }
 
-    // Group snapshots carry every leaf, so unbounded devices would blow up group size (~10 mirrors Signal/WhatsApp).
+    // Bounds how much one member multiplies every group they are in (~10 mirrors Signal/WhatsApp); a group's snapshot still grows with its TOTAL leaves (see the submit-handshake DTO caps).
     const activeDevices =
       await this.chatDevicesRepository.countActiveDevices(userId);
     if (activeDevices >= MAX_ACTIVE_DEVICES_PER_USER) {
@@ -174,7 +176,7 @@ export class ChatDevicesService {
     if (
       !isValidDeviceSignature(
         device.signaturePublicKey,
-        dto.challenge,
+        SESSION_LINK_LABEL + dto.challenge,
         dto.signature,
       )
     ) {
@@ -438,7 +440,7 @@ export class ChatDevicesService {
     const device = await this.chatDevicesRepository.findById(deviceId);
 
     if (!device || device.userId !== userId) {
-      throw new NotFoundException('Device not found');
+      throw new DeviceNotFoundException();
     }
     if (device.revokedAt) {
       throw new DeviceRevokedException();

@@ -6,6 +6,7 @@ import {
 import { ChatDevicesService } from '../chat-devices/chat-devices.service';
 import { DiscordLoggerService } from '../common/discord/discord-logger.service';
 import { ReportCommitFaultDto } from './dto/report-commit-fault.dto';
+import { MlsGroupInfoRepository } from './mls-group-info.repository';
 import { MlsHandshakesRepository } from './mls-handshakes.repository';
 
 /**
@@ -21,6 +22,7 @@ export class MlsCommitFaultsService {
     private readonly mlsHandshakesRepository: MlsHandshakesRepository,
     private readonly chatDevicesService: ChatDevicesService,
     private readonly discordLogger: DiscordLoggerService,
+    private readonly groupInfoRepository: MlsGroupInfoRepository,
   ) {}
 
   async reportFault(
@@ -40,6 +42,12 @@ export class MlsCommitFaultsService {
     if (!handshake) {
       throw new NotFoundException('No Commit was accepted at that epoch');
     }
+
+    // The faulted commit produced epoch+1; its snapshot must not seed anyone's self-join.
+    await this.groupInfoRepository.deleteIfDescribesEpoch(
+      conversationId,
+      dto.epoch + 1,
+    );
 
     const isNew = await this.mlsHandshakesRepository.recordCommitFault({
       conversationId,

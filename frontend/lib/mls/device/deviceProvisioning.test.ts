@@ -12,7 +12,7 @@ vi.mock('../../api', () => ({
   api: {
     registerChatDevice: vi.fn().mockResolvedValue({ id: 'device-1' }),
     revokeChatDevice: vi.fn().mockResolvedValue({ message: 'Device revoked successfully' }),
-    chatDeviceSessionChallenge: vi.fn().mockResolvedValue({ challenge: 'a-challenge' }),
+    chatDeviceSessionChallenge: vi.fn().mockResolvedValue({ challenge: 'head.tail' }),
     linkChatDeviceSession: vi.fn().mockResolvedValue({ message: 'Session linked to device' }),
   },
 }));
@@ -118,7 +118,7 @@ describe('linking the login to the device', () => {
     expect(api.linkChatDeviceSession).toHaveBeenCalledTimes(2);
     expect(api.linkChatDeviceSession).toHaveBeenCalledWith(
       first.deviceId,
-      expect.objectContaining({ challenge: 'a-challenge', signature: expect.any(String) }),
+      expect.objectContaining({ challenge: 'head.tail', signature: expect.any(String) }),
     );
   });
 
@@ -132,6 +132,23 @@ describe('linking the login to the device', () => {
     await ensureDeviceProvisioned(store, 'user-1');
 
     expect(api.linkChatDeviceSession).not.toHaveBeenCalled();
+  });
+
+  it('treats a plain 404 without a code as an ordinary failure - a proxy or deploy must never wipe the device', async () => {
+    const { api } = await import('../../api');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const store = new TsMlsDeviceIdentityStore();
+    const first = await ensureDeviceProvisioned(store, 'user-1');
+    vi.mocked(api.registerChatDevice).mockClear();
+    vi.mocked(api.chatDeviceSessionChallenge).mockRejectedValueOnce(
+      Object.assign(new Error('Not found'), { status: 404 }),
+    );
+
+    const again = await ensureDeviceProvisioned(store, 'user-1');
+
+    expect(again.deviceId).toBe(first.deviceId);
+    expect(api.registerChatDevice).not.toHaveBeenCalled();
+    expect(wipeGroupSessionState).not.toHaveBeenCalled();
   });
 
   it('replaces a retired identity with a fresh device, keeping the decrypted history store', async () => {

@@ -2,6 +2,7 @@ import { api } from '../../api';
 import { bytesToBase64, base64ToBytes } from '../storage/base64';
 import type { GroupSession, GroupSessionFactory } from '../contract/client';
 import { CommitVerifier } from './commitVerifier';
+import { parseRoster } from './rosterCheck';
 import { withCrossTabLock } from './crossTabLock';
 import { toKeyPackageOffer, type ClaimedKeyPackage } from './keyPackageOffer';
 import {
@@ -33,6 +34,10 @@ import type {
 
 // Stored beside the group state, under a key of its own.
 const versionKey = (conversationId: ConversationId) => `${conversationId}#version`;
+// A self-join saved before the server answered, so a crash between the two loses nothing.
+const pendingJoinKey = (conversationId: ConversationId) => `${conversationId}#pending-join`;
+// The submit-handshake DTO refuses a bigger snapshot; past it, self-join pauses but commits still flow.
+const MAX_GROUP_INFO_B64_CHARS = 60_000;
 
 /**
  * Orchestrates one device's MLS group sessions against the real backend
@@ -170,6 +175,7 @@ export class SyncEngine {
   async joinByExternalCommit(conversationId: ConversationId): Promise<boolean> {
     return this.runExclusive(conversationId, async () => {
       if ((await this.savedEpoch(conversationId)) !== undefined) return false;
+      if (await this.resolvePendingJoin(conversationId)) return true;
 
       const snapshot = (await api.getMlsGroupInfo(conversationId, this.deviceId)) as {
         epoch: Epoch;
@@ -184,19 +190,60 @@ export class SyncEngine {
         excludeDeviceId: this.deviceId,
       });
 
+      // Saved BEFORE submitting: if this tab dies right after the server accepts, the join is recoverable.
+      await this.storage.save(pendingJoinKey(conversationId), await joined.session.serialize());
+
+      const nextGroupInfo = bytesToBase64(joined.groupInfoBytes);
       const response = await api.submitMlsExternalJoin(conversationId, {
         deviceId: this.deviceId,
         epoch: snapshot.epoch,
         payload: bytesToBase64(joined.commitBytes),
-        groupInfo: bytesToBase64(joined.groupInfoBytes),
+        // Too big to publish: this group pauses self-join until it shrinks, commits still flow.
+        groupInfo: nextGroupInfo.length <= MAX_GROUP_INFO_B64_CHARS ? nextGroupInfo : undefined,
       });
-      if (response.outcome !== 'accepted') return false;
+      if (response.outcome !== 'accepted') {
+        await this.storage.delete(pendingJoinKey(conversationId));
+        return false;
+      }
 
       this.sessions.set(conversationId, joined.session);
       await this.persistSession(conversationId, joined.session);
       await this.verifier.markDeclaredSeen(conversationId);
+      await this.storage.delete(pendingJoinKey(conversationId));
       return true;
     });
+  }
+
+  /**
+   * Finishes or discards a self-join saved before its submit was answered. The
+   * server's roster at the pending epoch says whether that join was accepted:
+   * if this device is a leaf there, adopt the state; if not, throw it away.
+   */
+  private async resolvePendingJoin(conversationId: ConversationId): Promise<boolean> {
+    const pendingBytes = await this.storage.load(pendingJoinKey(conversationId));
+    if (!pendingBytes) return false;
+
+    let session: GroupSession;
+    try {
+      session = await this.factory.restore(conversationId, pendingBytes);
+    } catch {
+      await this.storage.delete(pendingJoinKey(conversationId));
+      return false;
+    }
+
+    const roster = parseRoster(
+      await api.getMlsRoster(conversationId, await session.currentEpoch()),
+    );
+    if (!roster?.some((leaf) => leaf.deviceId === this.deviceId)) {
+      await this.storage.delete(pendingJoinKey(conversationId));
+      return false;
+    }
+
+    this.sessions.set(conversationId, session);
+    await this.persistSession(conversationId, session);
+    await this.verifier.markDeclaredSeen(conversationId);
+    await this.storage.delete(pendingJoinKey(conversationId));
+    return true;
   }
 
   /**
@@ -463,6 +510,7 @@ export class SyncEngine {
       this.versions.delete(conversationId);
       await this.storage.delete(conversationId);
       await this.storage.delete(versionKey(conversationId));
+      await this.storage.delete(pendingJoinKey(conversationId));
       await this.verifier.forget(conversationId);
     });
   }
@@ -502,11 +550,20 @@ export class SyncEngine {
     session: GroupSession,
     handshake: { epoch: Epoch; payload: string },
   ): Promise<void> {
-    const result = await session.process(base64ToBytes(handshake.payload));
+    let result: ProcessResult;
+    try {
+      result = await session.process(base64ToBytes(handshake.payload));
+    } catch (error) {
+      // The server accepted bytes MLS itself refuses (bad signature, bad tag): a fault, like a wrong declaration.
+      throw this.refusedCommit(conversationId, handshake.epoch, `MLS refused it: ${String(error)}`);
+    }
 
     if (result.kind === 'rejected') {
-      // The backend already validated framing before storing this Commit, so this is a local bug.
-      throw new Error(`Could not apply handshake at epoch ${handshake.epoch}: ${result.reason}`);
+      throw this.refusedCommit(
+        conversationId,
+        handshake.epoch,
+        `this device could not apply it: ${result.reason}`,
+      );
     }
     if (result.kind !== 'commit') return;
 
@@ -516,9 +573,18 @@ export class SyncEngine {
       parseDeclaredMembership(handshake),
     );
     if (problem) {
-      this.verifier.reportFault(conversationId, handshake.epoch, problem);
-      throw new MembershipMismatchError(conversationId, problem);
+      throw this.refusedCommit(conversationId, handshake.epoch, problem);
     }
+  }
+
+  /** Every refused Commit is reported: silence here is how a group freezes with no trace. */
+  private refusedCommit(
+    conversationId: ConversationId,
+    epoch: Epoch,
+    problem: string,
+  ): MembershipMismatchError {
+    this.verifier.reportFault(conversationId, epoch, problem);
+    return new MembershipMismatchError(conversationId, problem);
   }
 
   /** Applies a live wire item and saves it at once: replaying a consumed message generation isn't safe. */
@@ -552,6 +618,10 @@ export class SyncEngine {
 
     const stateBytes = await this.storage.load(conversationId);
     if (!stateBytes) {
+      // A crash between the server accepting a self-join and the save leaves the join pending: finish it now.
+      if (await this.resolvePendingJoin(conversationId)) {
+        return this.sessions.get(conversationId)!;
+      }
       throw new GroupStateUnavailableError(conversationId);
     }
 

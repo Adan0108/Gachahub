@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { io } from "socket.io-client";
-import { useCurrentUser } from "./useCurrentUser";
-import { API_BASE_URL } from "../lib/api";
-import { queryKeys } from "../lib/queries";
+import { useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { io } from 'socket.io-client';
+import { useCurrentUser } from './useCurrentUser';
+import { API_BASE_URL } from '../lib/api';
+import { queryKeys } from '../lib/queries';
 
 /**
  * Live push for new chat messages, so one shows up as soon as it's sent
@@ -33,16 +33,13 @@ export function useChatSocket() {
     // This login was ended from another device: leave at once, with a full reload so nothing stays in memory.
     const signOutHere = () => {
       queryClient.setQueryData(queryKeys.currentUser, null);
-      window.location.assign("/login");
+      window.location.assign('/login');
     };
-    socket.on("session:revoked", signOutHere);
+    // Only this explicit event signs the browser out - a reconnect with a dead login receives it
+    // again from the gateway, and a plain drop or backend hiccup must never log anyone out.
+    socket.on('session:revoked', signOutHere);
 
-    // The event above can be lost as the server closes the socket; a server-side close still means signed out.
-    socket.on("disconnect", (reason) => {
-      if (reason === "io server disconnect") signOutHere();
-    });
-
-    socket.on("message:created", (event) => {
+    socket.on('message:created', (event) => {
       queryClient.setQueryData(queryKeys.chatMessages(event.conversationId), (old) => {
         if (!old || old.items.some((item) => item.id === event.messageId)) {
           return old;

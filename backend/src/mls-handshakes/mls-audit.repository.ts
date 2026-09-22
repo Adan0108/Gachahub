@@ -5,8 +5,12 @@ import { PrismaService } from '../prisma/prisma.service';
 
 /** How many examples of each problem to include in an alert. */
 const SAMPLE_LIMIT = 20;
-/** A join or removal older than this has clearly stalled. */
-const STUCK_AFTER_MS = 24 * 60 * 60 * 1000;
+/** A removal not finished within a day has stalled - it blocks sends, someone should look. */
+const LEAVING_STUCK_AFTER_MS = 24 * 60 * 60 * 1000;
+/** Joins self-heal (welcome, self-join), so only a week-old one is worth an alarm. */
+const JOINING_STUCK_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+/** Retired devices leave groups on the next full pass; only one lingering longer is wrong. */
+const REVOKED_LEAF_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface SuspectLeaf {
   conversationId: string;
@@ -32,7 +36,8 @@ export class MlsAuditRepository {
       FROM "mls_group_members" AS member
       LEFT JOIN "chat_devices" AS device ON device."id" = member."deviceId"
       WHERE member."removedEpoch" IS NULL
-        AND (device."id" IS NULL OR device."revokedAt" IS NOT NULL)
+        AND (device."id" IS NULL
+          OR device."revokedAt" < ${new Date(Date.now() - REVOKED_LEAF_GRACE_MS)})
       LIMIT ${SAMPLE_LIMIT}`;
   }
 
@@ -56,8 +61,16 @@ export class MlsAuditRepository {
   async findStuckParticipants(): Promise<StuckParticipant[]> {
     const rows = await this.prisma.chatParticipant.findMany({
       where: {
-        state: { in: ['JOINING', 'LEAVING'] },
-        updatedAt: { lt: new Date(Date.now() - STUCK_AFTER_MS) },
+        OR: [
+          {
+            state: 'LEAVING',
+            updatedAt: { lt: new Date(Date.now() - LEAVING_STUCK_AFTER_MS) },
+          },
+          {
+            state: 'JOINING',
+            updatedAt: { lt: new Date(Date.now() - JOINING_STUCK_AFTER_MS) },
+          },
+        ],
       },
       select: { conversationId: true, userId: true, state: true },
       take: SAMPLE_LIMIT,

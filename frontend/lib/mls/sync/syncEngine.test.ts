@@ -476,6 +476,26 @@ describe('SyncEngine', () => {
       expect(api.getMlsRoster).toHaveBeenCalledTimes(1);
     });
 
+    it('reports and refuses a commit the server accepted but this device could not even apply', async () => {
+      const { api } = await import('../../api');
+      const { bobEngine } = await groupWithBobVerifying();
+      vi.mocked(api.reportMlsFault).mockResolvedValue({ recorded: true } as never);
+      await serveHandshake(
+        fakeHandshake({
+          epoch: 1,
+          senderDeviceId: 'device-x',
+          payload: new Uint8Array([9, 9, 9]),
+          declared: { addedDevices: [], removedDevices: [] },
+        }),
+      );
+
+      await expect(bobEngine.syncCommits('conv-1')).rejects.toThrow(MembershipMismatchError);
+      expect(api.reportMlsFault).toHaveBeenCalledWith(
+        'conv-1',
+        expect.objectContaining({ epoch: 1 }),
+      );
+    });
+
     it('lets the device being removed process its own removal, as declared', async () => {
       const { alice, aliceSession, bob, bobEngine } = await groupWithBobVerifying();
       const removeBob = await aliceSession.stageCommit({
@@ -1335,6 +1355,35 @@ describe('SyncEngine', () => {
 
       await expect(carol.engine.joinByExternalCommit('conv-1')).resolves.toBe(false);
 
+      await expect(carol.engine.getCurrentEpoch('conv-1')).rejects.toThrow();
+    });
+
+    it('recovers a join the server accepted when the tab died before saving', async () => {
+      const { aliceSession, carol, submittedCommit } = await groupWithPublishedSnapshot();
+      const realSave = carol.storage.save.bind(carol.storage);
+      const save = vi
+        .spyOn(carol.storage, 'save')
+        .mockImplementation(async (key: string, bytes: Uint8Array) => {
+          if (key === 'conv-1') throw new Error('tab died');
+          return realSave(key, bytes);
+        });
+
+      await expect(carol.engine.joinByExternalCommit('conv-1')).rejects.toThrow('tab died');
+      save.mockRestore();
+
+      // the members moved on with the accepted join; the roster now has carol
+      await aliceSession.process(submittedCommit()!);
+
+      await expect(carol.engine.getCurrentEpoch('conv-1')).resolves.toBe(2);
+    });
+
+    it('leaves nothing pending when the join loses the race', async () => {
+      const { api, carol } = await groupWithPublishedSnapshot();
+      vi.mocked(api.submitMlsExternalJoin).mockResolvedValue({ outcome: 'conflict' });
+
+      await expect(carol.engine.joinByExternalCommit('conv-1')).resolves.toBe(false);
+
+      await expect(carol.storage.load('conv-1#pending-join')).resolves.toBeUndefined();
       await expect(carol.engine.getCurrentEpoch('conv-1')).rejects.toThrow();
     });
 

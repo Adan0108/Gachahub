@@ -19,9 +19,11 @@ import { ExternalJoinDto } from './dto/external-join.dto';
 import { assertIsGroupInfoFor } from './mls-group-info.util';
 import { MlsSelfJoinRateLimiterService } from './mls-self-join-rate-limiter.service';
 import {
+  assertExternalJoinSigned,
   assertJoinerMatchesDevice,
   readExternalJoin,
 } from './mls-external-commit.util';
+import { MlsGroupInfoRepository } from './mls-group-info.repository';
 import { assertDeclarationIsConsistent } from './mls-membership-rules';
 
 interface SerializableHandshake {
@@ -45,6 +47,7 @@ export class MlsHandshakesService {
     private readonly mlsHandshakesRepository: MlsHandshakesRepository,
     private readonly chatDevicesService: ChatDevicesService,
     private readonly selfJoinRateLimiter: MlsSelfJoinRateLimiterService,
+    private readonly groupInfoRepository: MlsGroupInfoRepository,
   ) {}
 
   async submitHandshake(
@@ -120,6 +123,19 @@ export class MlsHandshakesService {
         deviceId: dto.deviceId,
         signaturePublicKey: device.signaturePublicKey,
       },
+    );
+
+    // The signature is checked against the server's OWN stored snapshot for that epoch, never the caller's bytes.
+    const snapshot = await this.groupInfoRepository.findCurrent(conversationId);
+    if (!snapshot || snapshot.epoch !== dto.epoch) {
+      throw new ConflictException(
+        'The group moved on - fetch a fresh snapshot and rejoin',
+      );
+    }
+    await assertExternalJoinSigned(
+      payload,
+      snapshot.payload,
+      device.signaturePublicKey,
     );
 
     const groupInfo = this.decodeGroupInfo(

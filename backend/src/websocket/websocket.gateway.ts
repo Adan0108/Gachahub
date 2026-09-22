@@ -59,7 +59,14 @@ export class WebsocketGateway
   async handleConnection(socket: AppSocket) {
     const identity = await this.authenticate(socket);
 
-    if (!identity) {
+    if (identity === 'error') {
+      // A backend hiccup: drop the socket without any signed-out signal.
+      socket.disconnect(true);
+      return;
+    }
+    if (identity === 'no-session') {
+      // Explicit, so the browser signs out only when told - never on a plain drop.
+      socket.emit('session:revoked');
       socket.disconnect(true);
       return;
     }
@@ -80,7 +87,7 @@ export class WebsocketGateway
    */
   private async authenticate(
     socket: Socket,
-  ): Promise<{ userId: string; sessionId: string } | null> {
+  ): Promise<{ userId: string; sessionId: string } | 'no-session' | 'error'> {
     try {
       const result = await auth.api.getSession({
         headers: this.toHeaders(socket.handshake.headers),
@@ -88,10 +95,10 @@ export class WebsocketGateway
 
       return result
         ? { userId: result.user.id, sessionId: result.session.id }
-        : null;
+        : 'no-session';
     } catch (error) {
       this.logger.warn(`Socket auth failed: ${(error as Error).message}`);
-      return null;
+      return 'error';
     }
   }
 

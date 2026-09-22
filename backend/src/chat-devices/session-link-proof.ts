@@ -6,6 +6,8 @@ import {
 } from 'node:crypto';
 
 const CHALLENGE_TTL_MS = 60_000;
+/** Prefixed to every signed challenge so the device key can never be tricked into signing an MLS structure. Duplicated in frontend deviceProvisioning.ts - keep in step. */
+export const SESSION_LINK_LABEL = 'gachahub/session-link/v1\n';
 // wraps a raw 32-byte Ed25519 public key into the DER form node expects
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 

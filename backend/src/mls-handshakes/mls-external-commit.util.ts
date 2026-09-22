@@ -1,4 +1,18 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  getCiphersuiteFromName,
+  getCiphersuiteImpl,
+  type CiphersuiteImpl,
+} from 'ts-mls';
+// Not re-exported from the package root - reachable via ts-mls's own "./*.js" subpath export map.
+import { verifyFramedContentSignature } from 'ts-mls/framedContent.js';
+import { PINNED_CIPHERSUITE } from '../chat-devices/mls-key-package.util';
+
+let cachedImpl: Promise<CiphersuiteImpl> | undefined;
+function getImpl(): Promise<CiphersuiteImpl> {
+  cachedImpl ??= getCiphersuiteImpl(getCiphersuiteFromName(PINNED_CIPHERSUITE));
+  return cachedImpl;
+}
 import { decodeMlsMessage } from 'ts-mls';
 import { bytesEqual } from '../common/utils/bytes';
 
@@ -123,6 +137,43 @@ export function assertJoinerMatchesDevice(
   ) {
     throw new ForbiddenException(
       'The join commit is not for this device and its registered key',
+    );
+  }
+}
+
+/**
+ * RFC 9420 §6.1: a join commit is signed over the group context, which the
+ * server holds in its stored snapshot. Verifying it here means a stolen login
+ * alone (the device's PUBLIC key is in every roster response, its private key
+ * is not) cannot submit a garbage join that every member would refuse - the
+ * one move that would freeze the group.
+ */
+export async function assertExternalJoinSigned(
+  commitPayload: Uint8Array,
+  storedGroupInfoPayload: Uint8Array,
+  signaturePublicKey: Uint8Array,
+): Promise<void> {
+  const commit = decodeMlsMessage(commitPayload, 0)?.[0];
+  const snapshot = decodeMlsMessage(storedGroupInfoPayload, 0)?.[0];
+  if (
+    commit?.wireformat !== 'mls_public_message' ||
+    snapshot?.wireformat !== 'mls_group_info'
+  ) {
+    throw new BadRequestException('Cannot verify this join commit');
+  }
+
+  const valid = await verifyFramedContentSignature(
+    signaturePublicKey,
+    'mls_public_message',
+    commit.publicMessage.content,
+    commit.publicMessage.auth,
+    snapshot.groupInfo.groupContext,
+    (await getImpl()).signature,
+  );
+
+  if (!valid) {
+    throw new ForbiddenException(
+      'The join commit is not signed by this device',
     );
   }
 }

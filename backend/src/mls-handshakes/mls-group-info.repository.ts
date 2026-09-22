@@ -27,6 +27,16 @@ export class MlsGroupInfoRepository {
     }
   }
 
+  /** Removes the snapshot if it describes `epoch`: nobody should join from a state its members refused. */
+  async deleteIfDescribesEpoch(
+    conversationId: string,
+    epoch: number,
+  ): Promise<void> {
+    await this.prisma.mlsGroupInfo.deleteMany({
+      where: { conversationId, epoch },
+    });
+  }
+
   /** The snapshot, only while it describes the group's current epoch: an older one would make a join fail. */
   async findCurrent(
     conversationId: string,

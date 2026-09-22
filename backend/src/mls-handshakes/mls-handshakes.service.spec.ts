@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { MlsHandshakesService } from './mls-handshakes.service';
+import { decodeMlsMessage, encodeMlsMessage } from 'ts-mls';
 import { buildTestCommitWithWelcome } from './test-support/build-test-commit';
 import { buildTestExternalJoin } from './test-support/build-test-external-join';
 
@@ -31,10 +32,13 @@ describe('MlsHandshakesService', () => {
 
   const selfJoinRateLimiter = { assertMayJoin: jest.fn() };
 
+  const groupInfos = { findCurrent: jest.fn() };
+
   let service: MlsHandshakesService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    groupInfos.findCurrent.mockResolvedValue(null);
     repository.isActiveParticipant.mockResolvedValue(true);
     repository.isEntitledParticipant.mockResolvedValue(true);
     chatDevicesService.assertOwnActiveDevice.mockResolvedValue({
@@ -46,6 +50,7 @@ describe('MlsHandshakesService', () => {
       repository as any,
       chatDevicesService as any,
       selfJoinRateLimiter as any,
+      groupInfos as any,
     );
   });
 
@@ -341,6 +346,10 @@ describe('MlsHandshakesService', () => {
       chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
         registeredKey(join.joinerSignatureKey),
       );
+      groupInfos.findCurrent.mockResolvedValue({
+        epoch: join.epoch,
+        payload: join.groupInfoPayload,
+      });
       repository.acceptExternalJoin.mockResolvedValue({
         outcome: 'accepted',
         handshake: {
@@ -374,6 +383,56 @@ describe('MlsHandshakesService', () => {
       );
     });
 
+    it('refuses a commit whose signature is forged, even with the right identity and public key in the leaf', async () => {
+      const join = await buildTestExternalJoin('conv-1', {
+        userId: 'user-1',
+        deviceId: 'device-1',
+      });
+      chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+        registeredKey(join.joinerSignatureKey),
+      );
+      groupInfos.findCurrent.mockResolvedValue({
+        epoch: join.epoch,
+        payload: join.groupInfoPayload,
+      });
+      // a stolen login knows the public key but not the private one: garbage signature
+      const decoded = decodeMlsMessage(join.commitPayload, 0)![0];
+      if (decoded.wireformat !== 'mls_public_message') throw new Error('x');
+      decoded.publicMessage.auth.signature =
+        decoded.publicMessage.auth.signature.map((byte) => byte ^ 0xff);
+      const forged = encodeMlsMessage(decoded);
+
+      await expect(
+        service.submitExternalJoin('user-1', 'conv-1', {
+          deviceId: 'device-1',
+          epoch: join.epoch,
+          payload: b64(forged),
+          groupInfo: b64(join.nextGroupInfoPayload),
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(repository.acceptExternalJoin).not.toHaveBeenCalled();
+    });
+
+    it('refuses a join when the server has no snapshot for that epoch any more', async () => {
+      const join = await buildTestExternalJoin('conv-1', {
+        userId: 'user-1',
+        deviceId: 'device-1',
+      });
+      chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+        registeredKey(join.joinerSignatureKey),
+      );
+      groupInfos.findCurrent.mockResolvedValue(null);
+
+      await expect(
+        service.submitExternalJoin('user-1', 'conv-1', {
+          deviceId: 'device-1',
+          epoch: join.epoch,
+          payload: b64(join.commitPayload),
+          groupInfo: b64(join.nextGroupInfoPayload),
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+
     it('refuses a commit that adds a leaf other than the callers registered device key', async () => {
       const join = await buildTestExternalJoin('conv-1', {
         userId: 'user-1',
@@ -402,6 +461,10 @@ describe('MlsHandshakesService', () => {
       chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
         registeredKey(join.joinerSignatureKey),
       );
+      groupInfos.findCurrent.mockResolvedValue({
+        epoch: join.epoch,
+        payload: join.groupInfoPayload,
+      });
 
       await expect(
         service.submitExternalJoin('user-1', 'conv-1', {
@@ -421,6 +484,10 @@ describe('MlsHandshakesService', () => {
       chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
         registeredKey(join.joinerSignatureKey),
       );
+      groupInfos.findCurrent.mockResolvedValue({
+        epoch: join.epoch,
+        payload: join.groupInfoPayload,
+      });
 
       await expect(
         service.submitExternalJoin('user-1', 'conv-1', {
@@ -440,6 +507,10 @@ describe('MlsHandshakesService', () => {
       chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
         registeredKey(join.joinerSignatureKey),
       );
+      groupInfos.findCurrent.mockResolvedValue({
+        epoch: join.epoch,
+        payload: join.groupInfoPayload,
+      });
       repository.acceptExternalJoin.mockResolvedValue({
         outcome: 'conflict',
         handshake: {

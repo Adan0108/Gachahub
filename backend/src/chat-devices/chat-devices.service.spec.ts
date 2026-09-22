@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { env } from '../config/env';
 import { ChatDevicesService } from './chat-devices.service';
-import { issueLinkChallenge } from './session-link-proof';
+import { issueLinkChallenge, SESSION_LINK_LABEL } from './session-link-proof';
 import { buildTestKeyPackage } from './test-support/build-key-package';
 import { RateLimitedException } from '../common/exceptions/rate-limited.exception';
 
@@ -747,9 +747,11 @@ describe('ChatDevicesService', () => {
       issueLinkChallenge(secret, { sessionId, deviceId });
     const proof = (challenge: string) => ({
       challenge,
-      signature: sign(null, Buffer.from(challenge), privateKey).toString(
-        'base64',
-      ),
+      signature: sign(
+        null,
+        Buffer.from(SESSION_LINK_LABEL + challenge),
+        privateKey,
+      ).toString('base64'),
     });
 
     beforeEach(() => {
