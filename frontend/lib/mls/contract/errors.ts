@@ -69,3 +69,11 @@ export class GroupStateUnavailableError extends Error {
     this.name = 'GroupStateUnavailableError';
   }
 }
+
+/** A Welcome that is not a later epoch than the group this device already has: nothing to join, and its key package is spent. */
+export class StaleWelcomeError extends Error {
+  constructor() {
+    super('This Welcome is not newer than the group this device already has');
+    this.name = 'StaleWelcomeError';
+  }
+}

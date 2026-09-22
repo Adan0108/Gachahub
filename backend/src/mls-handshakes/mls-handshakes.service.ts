@@ -15,6 +15,13 @@ import {
   type HandshakeAcceptResult,
 } from './mls-handshakes.repository';
 import { SubmitHandshakeDto } from './dto/submit-handshake.dto';
+import { ExternalJoinDto } from './dto/external-join.dto';
+import { assertIsGroupInfoFor } from './mls-group-info.util';
+import { MlsSelfJoinRateLimiterService } from './mls-self-join-rate-limiter.service';
+import {
+  assertJoinerMatchesDevice,
+  readExternalJoin,
+} from './mls-external-commit.util';
 import { assertDeclarationIsConsistent } from './mls-membership-rules';
 
 interface SerializableHandshake {
@@ -37,6 +44,7 @@ export class MlsHandshakesService {
   constructor(
     private readonly mlsHandshakesRepository: MlsHandshakesRepository,
     private readonly chatDevicesService: ChatDevicesService,
+    private readonly selfJoinRateLimiter: MlsSelfJoinRateLimiterService,
   ) {}
 
   async submitHandshake(
@@ -80,9 +88,68 @@ export class MlsHandshakesService {
       addedDeviceIds: dto.addedDeviceIds,
       removedDeviceIds: dto.removedDeviceIds,
       welcomes,
+      groupInfo: dto.groupInfo
+        ? this.decodeGroupInfo(dto.groupInfo, conversationId, dto.epoch)
+        : undefined,
     });
 
     return this.toSubmitResponse(result);
+  }
+
+  /**
+   * A device adds itself to the group with no member online. The server sees the
+   * whole commit (it is public), and accepts only a plain join by the caller's
+   * own registered device; every member then checks it like any other add.
+   */
+  async submitExternalJoin(
+    userId: string,
+    conversationId: string,
+    dto: ExternalJoinDto,
+  ) {
+    this.selfJoinRateLimiter.assertMayJoin(userId);
+    const device = await this.chatDevicesService.assertOwnActiveDevice(
+      userId,
+      dto.deviceId,
+    );
+
+    const payload = new Uint8Array(Buffer.from(dto.payload, 'base64'));
+    assertJoinerMatchesDevice(
+      readExternalJoin(payload, conversationId, dto.epoch),
+      {
+        userId,
+        deviceId: dto.deviceId,
+        signaturePublicKey: device.signaturePublicKey,
+      },
+    );
+
+    const groupInfo = this.decodeGroupInfo(
+      dto.groupInfo,
+      conversationId,
+      dto.epoch,
+    );
+
+    const result = await this.mlsHandshakesRepository.acceptExternalJoin({
+      conversationId,
+      expectedEpoch: dto.epoch,
+      deviceId: dto.deviceId,
+      userId,
+      payload,
+      payloadSha256: createHash('sha256').update(payload).digest('hex'),
+      groupInfo,
+    });
+
+    return this.toSubmitResponse(result);
+  }
+
+  /** The snapshot a Commit publishes for the epoch it creates, checked to be exactly that. */
+  private decodeGroupInfo(
+    encoded: string,
+    conversationId: string,
+    commitEpoch: number,
+  ): Uint8Array {
+    const groupInfo = new Uint8Array(Buffer.from(encoded, 'base64'));
+    assertIsGroupInfoFor(groupInfo, conversationId, commitEpoch + 1);
+    return groupInfo;
   }
 
   async getHandshakesSince(

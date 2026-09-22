@@ -8,8 +8,10 @@ import { applyParticipantTransitions } from '../chat/membership/apply-participan
 import { isEntitledToLeaf } from '../chat/membership/leaf-entitlement';
 import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
 import { PrismaService } from '../prisma/prisma.service';
+import { MlsGroupInfoRepository } from './mls-group-info.repository';
 import {
   assertAddedDevicesAuthorized,
+  assertJoinerIsEntitled,
   assertRemovedDevicesRemovable,
   assertSenderIsActiveParticipant,
   assertSenderIsMember,
@@ -23,6 +25,25 @@ import {
 /** senderDeviceId is null once the sending device (and its account) has been deleted - the Commit is kept regardless. */
 type HandshakeRow = MlsHandshake;
 
+/** What a Commit changes and who sent it, for whichever way it reached the server. */
+interface CommitToAccept {
+  conversationId: string;
+  expectedEpoch: number;
+  senderDeviceId: string;
+  senderUserId: string;
+  payload: Uint8Array;
+  payloadSha256: string;
+  /** Devices this Commit adds, as declared by the sender. Each needs a Welcome. */
+  addedDeviceIds: string[];
+  /** Devices this Commit removes, as declared by the sender. */
+  removedDeviceIds: string[];
+  welcomes: { recipientDeviceId: string; payload: Uint8Array }[];
+  /** The snapshot of the group after this Commit, for devices that join by themselves. */
+  groupInfo?: Uint8Array;
+  /** A member changing the group, or a device outside it joining by itself. */
+  sender: 'member' | 'external';
+}
+
 export type HandshakeAcceptResult =
   | { outcome: 'accepted'; handshake: HandshakeRow }
   | { outcome: 'duplicate'; handshake: HandshakeRow }
@@ -33,6 +54,7 @@ export class MlsHandshakesRepository {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mlsGroupRosterRepository: MlsGroupRosterRepository,
+    private readonly mlsGroupInfoRepository: MlsGroupInfoRepository,
   ) {}
 
   /** Only an ACTIVE member may submit a Commit. */
@@ -73,19 +95,39 @@ export class MlsHandshakesRepository {
    * rolled back, including the epoch bump, rather than leaving an epoch
    * advanced with no matching handshake row or the two rosters out of step.
    */
-  async acceptHandshake(params: {
+  /** A Commit from a member of the group. */
+  acceptHandshake(
+    params: Omit<CommitToAccept, 'sender'>,
+  ): Promise<HandshakeAcceptResult> {
+    return this.acceptCommit({ ...params, sender: 'member' });
+  }
+
+  /** A device outside the group adding itself, by an external commit. No Welcome is involved. */
+  acceptExternalJoin(params: {
     conversationId: string;
     expectedEpoch: number;
-    senderDeviceId: string;
-    senderUserId: string;
+    deviceId: string;
+    userId: string;
     payload: Uint8Array;
     payloadSha256: string;
-    /** Devices this Commit adds, as declared by the sender. Each needs a Welcome. */
-    addedDeviceIds: string[];
-    /** Devices this Commit removes, as declared by the sender. */
-    removedDeviceIds: string[];
-    welcomes: { recipientDeviceId: string; payload: Uint8Array }[];
+    groupInfo: Uint8Array;
   }): Promise<HandshakeAcceptResult> {
+    const { deviceId, userId, ...rest } = params;
+
+    return this.acceptCommit({
+      ...rest,
+      senderDeviceId: deviceId,
+      senderUserId: userId,
+      addedDeviceIds: [deviceId],
+      removedDeviceIds: [],
+      welcomes: [],
+      sender: 'external',
+    });
+  }
+
+  private async acceptCommit(
+    params: CommitToAccept,
+  ): Promise<HandshakeAcceptResult> {
     const {
       conversationId,
       expectedEpoch,
@@ -124,6 +166,15 @@ export class MlsHandshakesRepository {
           removedDevices: attested.removedDevices,
         },
       });
+
+      if (params.groupInfo) {
+        await this.mlsGroupInfoRepository.save(
+          conversationId,
+          expectedEpoch + 1,
+          params.groupInfo,
+          tx,
+        );
+      }
 
       if (welcomes.length > 0) {
         await tx.mlsWelcome.createMany({
@@ -181,6 +232,7 @@ export class MlsHandshakesRepository {
       senderUserId: string;
       addedDeviceIds: string[];
       removedDeviceIds: string[];
+      sender: 'member' | 'external';
     },
   ): Promise<{
     addedDevices: AttestedAddedDevice[];
@@ -193,6 +245,7 @@ export class MlsHandshakesRepository {
       senderUserId,
       addedDeviceIds,
       removedDeviceIds,
+      sender,
     } = params;
     const newEpoch = expectedEpoch + 1;
 
@@ -200,6 +253,10 @@ export class MlsHandshakesRepository {
       conversationId,
       tx,
     ));
+
+    if (groupJustActivated && sender === 'external') {
+      throw new BadRequestException('There is no group to join yet');
+    }
 
     if (groupJustActivated && expectedEpoch !== 0) {
       // The group already ran before membership was tracked, so who is in it
@@ -219,7 +276,7 @@ export class MlsHandshakesRepository {
       activeLeaves.map((leaf) => leaf.deviceId),
     );
 
-    if (!groupJustActivated) {
+    if (sender === 'member' && !groupJustActivated) {
       assertSenderIsMember(activeLeafDeviceIds, senderDeviceId);
     }
 
@@ -250,7 +307,12 @@ export class MlsHandshakesRepository {
       activeLeaves.map((leaf) => [leaf.deviceId, leaf.userId]),
     );
 
-    assertSenderIsActiveParticipant(participantStateByUserId.get(senderUserId));
+    const senderState = participantStateByUserId.get(senderUserId);
+    if (sender === 'member') {
+      assertSenderIsActiveParticipant(senderState);
+    } else {
+      assertJoinerIsEntitled(senderState);
+    }
 
     assertAddedDevicesAuthorized({
       addedDeviceIds,
@@ -380,6 +442,12 @@ export class MlsHandshakesRepository {
     return this.prisma.mlsHandshake.findMany({
       where: { conversationId, epoch: { gte: fromEpoch } },
       orderBy: { epoch: 'asc' },
+    });
+  }
+
+  countPendingWelcomes(recipientDeviceId: string): Promise<number> {
+    return this.prisma.mlsWelcome.count({
+      where: { recipientDeviceId, consumedAt: null },
     });
   }
 

@@ -51,16 +51,24 @@ export class CommitVerifier {
     return undefined;
   }
 
-  /** Throws MembershipMismatchError (and reports it) when the tree differs from the roster at its epoch. */
+  /**
+   * Throws MembershipMismatchError (and reports it) when the tree differs from the roster at its epoch.
+   * To check a group before joining it by itself, pass the epoch the snapshot was for and the joining
+   * device to leave out: the tree already has its leaf, the roster does not.
+   */
   async assertTreeMatchesRoster(
     conversationId: ConversationId,
     session: GroupSession,
+    options: { epoch?: Epoch; excludeDeviceId?: DeviceId } = {},
   ): Promise<void> {
-    const epoch = await session.currentEpoch();
+    const epoch = options.epoch ?? (await session.currentEpoch());
     const roster = parseRoster(await api.getMlsRoster(conversationId, epoch));
+    const leaves = (await session.listLeaves())?.filter(
+      (leaf) => leaf.deviceId !== options.excludeDeviceId,
+    );
 
     const problem = roster
-      ? describeTreeMismatch(await session.listLeaves(), roster)
+      ? describeTreeMismatch(leaves, roster)
       : 'the server did not return a roster to check the group against';
 
     if (problem) {

@@ -42,14 +42,9 @@ function checkForPendingWork(engine: SyncEngine): void {
   if (!scope) return;
   if (scope === 'full') lastFullReconcileAt = Date.now();
 
-  // Welcomes first: joining a conversation is what makes this device able to
-  // carry out that conversation's pending membership changes.
-  engine
-    .processPendingWelcomes()
-    .then(() => engine.reconcileMembership({ scope }))
-    .catch((error: unknown) => {
-      console.warn('Could not process pending MLS work', error);
-    });
+  engine.processPendingMlsWork(scope).catch((error: unknown) => {
+    console.warn('Could not process pending MLS work', error);
+  });
 }
 
 // Reference-counted so several components can call useSyncEngine() for the

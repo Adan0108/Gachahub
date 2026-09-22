@@ -44,6 +44,9 @@ export interface DeviceIdentityStore {
    */
   provision(userId: UserId): Promise<DeviceCredential>;
 
+  /** Signs `message` with this device's signature key: proof, to the server, that this browser holds the device. */
+  sign(message: Uint8Array): Promise<Uint8Array>;
+
   /** This device's own credential. Throws if not yet provisioned. */
   getOwnCredential(): Promise<DeviceCredential>;
 
@@ -138,6 +141,11 @@ export interface GroupSession {
   stageCommit(change: MembershipChangeRequest): Promise<{
     wireBytes: Uint8Array;
     expectedEpoch: Epoch;
+    /**
+     * A signed, public snapshot of the group as it will be AFTER this commit. The server keeps the
+     * newest one so a device can join by itself (joinExternally) with no member online.
+     */
+    groupInfo: Uint8Array;
     /** One Welcome per newly-added device. Empty when the commit only removed members. */
     welcomes: Array<{ deviceId: DeviceId; welcomeBytes: Uint8Array }>;
   }>;
@@ -182,14 +190,26 @@ export interface GroupSessionFactory {
    * conversationId, or if it's addressed to a different device than this
    * store's own credential (critique C2's required test cases).
    */
+  /**
+   * Joins a group with no help from any member, from its published GroupInfo (an MLS "external
+   * commit"). Returns the joined session at the epoch AFTER the join, plus the public commit that
+   * makes it happen and the GroupInfo for that new epoch. Nothing is final until the server accepts
+   * the commit: the caller must not save or use the session before that.
+   */
+  joinExternally(
+    conversationId: ConversationId,
+    groupInfoBytes: Uint8Array,
+  ): Promise<{ session: GroupSession; commitBytes: Uint8Array; groupInfoBytes: Uint8Array }>;
+
   joinFromWelcome(
     conversationId: ConversationId,
     welcomeBytes: Uint8Array,
     options?: {
       /**
        * Runs on the joined session before its key package is spent. Throwing
-       * MembershipMismatchError refuses the group for good and spends the
-       * package; any other error keeps it, so the same Welcome can be retried.
+       * MembershipMismatchError refuses the group for good, and StaleWelcomeError
+       * drops a Welcome that is not newer than the caller's group; both spend the
+       * package. Any other error keeps it, so the same Welcome can be retried.
        */
       verify?: (session: GroupSession) => Promise<void>;
     },

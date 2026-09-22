@@ -10,12 +10,16 @@ import type { ChatParticipantState } from '../../generated/prisma/client';
  * someone the server has authorized to join. Everyone else (PENDING, DECLINED,
  * LEAVING, or no participant row at all) is not entitled.
  */
-const ENTITLED_TO_LEAF: ReadonlySet<ChatParticipantState> = new Set([
+export const ENTITLED_TO_LEAF_STATES: readonly ChatParticipantState[] = [
   'JOINING',
   'ACTIVE',
   'ARCHIVED',
   'BLOCKED',
-]);
+];
+
+const ENTITLED_TO_LEAF: ReadonlySet<ChatParticipantState> = new Set(
+  ENTITLED_TO_LEAF_STATES,
+);
 
 export function isEntitledToLeaf(
   state: ChatParticipantState | undefined,

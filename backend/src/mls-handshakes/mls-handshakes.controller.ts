@@ -14,6 +14,9 @@ import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { MlsHandshakesService } from './mls-handshakes.service';
 import { MlsCommitFaultsService } from './mls-commit-faults.service';
 import { MlsMembershipWorkService } from './mls-membership-work.service';
+import { ExternalJoinDto } from './dto/external-join.dto';
+import { MlsPendingService } from './mls-pending.service';
+import { MlsSelfJoinService } from './mls-self-join.service';
 import { ReportCommitFaultDto } from './dto/report-commit-fault.dto';
 import { SubmitHandshakeDto } from './dto/submit-handshake.dto';
 
@@ -25,6 +28,8 @@ export class MlsHandshakesController {
     private readonly mlsHandshakesService: MlsHandshakesService,
     private readonly mlsMembershipWorkService: MlsMembershipWorkService,
     private readonly mlsCommitFaultsService: MlsCommitFaultsService,
+    private readonly mlsSelfJoinService: MlsSelfJoinService,
+    private readonly mlsPendingService: MlsPendingService,
   ) {}
 
   @Post('conversations/:conversationId')
@@ -40,6 +45,57 @@ export class MlsHandshakesController {
       session.user.id,
       conversationId,
       dto,
+    );
+  }
+
+  @Post('conversations/:conversationId/external-join')
+  @ApiOperation({
+    summary:
+      'Join the group by yourself with an external commit, when no member has to be online',
+  })
+  submitExternalJoin(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: ExternalJoinDto,
+  ) {
+    return this.mlsHandshakesService.submitExternalJoin(
+      session.user.id,
+      conversationId,
+      dto,
+    );
+  }
+
+  @Get('conversations/:conversationId/group-info')
+  @ApiOperation({
+    summary:
+      'The public snapshot of the group to join from, for a device of someone entitled to join',
+  })
+  getGroupInfo(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+    @Query('deviceId') deviceId: string,
+  ) {
+    return this.mlsSelfJoinService.getGroupInfo(
+      session.user.id,
+      conversationId,
+      deviceId,
+    );
+  }
+
+  @Get('devices/:deviceId/joinable-conversations')
+  @ApiOperation({
+    summary:
+      'Conversations this device could join by itself. scope=full also finds a new device of an existing member.',
+  })
+  listJoinable(
+    @Session() session: UserSession,
+    @Param('deviceId') deviceId: string,
+    @Query('scope') scope?: string,
+  ) {
+    return this.mlsSelfJoinService.listJoinable(
+      session.user.id,
+      deviceId,
+      scope === 'full' ? 'full' : 'pending',
     );
   }
 
@@ -92,6 +148,18 @@ export class MlsHandshakesController {
       conversationId,
       epoch,
     );
+  }
+
+  @Get('devices/:deviceId/pending')
+  @ApiOperation({
+    summary:
+      'Whether this device has anything waiting: welcomes, groups to join by itself, or membership work',
+  })
+  getPendingSummary(
+    @Session() session: UserSession,
+    @Param('deviceId') deviceId: string,
+  ) {
+    return this.mlsPendingService.getPendingSummary(session.user.id, deviceId);
   }
 
   @Get('devices/:deviceId/welcomes')

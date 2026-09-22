@@ -18,10 +18,8 @@ import {
   GroupStateUnavailableError,
   EpochConflictError,
   MembershipMismatchError,
+  StaleWelcomeError,
 } from '../contract/errors';
-
-/** A Welcome that is not a later epoch than the session this device already has. */
-class StaleWelcomeError extends Error {}
 import { parseDeclaredMembership } from './declaredMembership';
 import type {
   ConversationId,
@@ -32,6 +30,9 @@ import type {
   ProcessResult,
   UserId,
 } from '../contract/types';
+
+// Stored beside the group state, under a key of its own.
+const versionKey = (conversationId: ConversationId) => `${conversationId}#version`;
 
 /**
  * Orchestrates one device's MLS group sessions against the real backend
@@ -46,6 +47,8 @@ import type {
  */
 export class SyncEngine {
   private readonly sessions = new Map<ConversationId, GroupSession>();
+  // The version stamp of the saved session each cached one was loaded or last saved at, so another tab's write is noticed.
+  private readonly versions = new Map<ConversationId, string | undefined>();
   // Serializes process()/stageCommit() calls per conversation (client.ts:
   // "the caller ... is responsible for never calling this concurrently for
   // the same conversationId"). Only covers this browser tab - a second tab
@@ -115,10 +118,85 @@ export class SyncEngine {
     return run;
   }
 
-  /** Revokes one of this user's devices, then removes it from their groups right away instead of at the next scheduled scan. */
-  async revokeOtherDevice(deviceId: DeviceId): Promise<ReconcileSummary> {
-    await api.revokeChatDevice(deviceId);
-    return this.reconcileMembership({ scope: 'full' });
+  /**
+   * Everything the regular poll does: welcomes first (they make this device able to act), then joins,
+   * then membership work. On the frequent 'pending' pass one cheap probe decides which steps run at all,
+   * so an idle tab costs one request per poll instead of three.
+   */
+  async processPendingMlsWork(scope: 'pending' | 'full'): Promise<void> {
+    const pending =
+      scope === 'pending'
+        ? ((await api.getMlsPendingSummary(this.deviceId)) as {
+            welcomes: number;
+            joinable: boolean;
+            membershipWork: boolean;
+          })
+        : { welcomes: 1, joinable: true, membershipWork: true };
+
+    if (pending.welcomes > 0) await this.processPendingWelcomes();
+    if (pending.joinable) await this.joinGroupsByItself({ scope });
+    if (pending.membershipWork) await this.reconcileMembership({ scope });
+  }
+
+  /**
+   * Joins every group this device is entitled to be in but is not part of yet, by itself, with no member
+   * online (see joinByExternalCommit). One that fails is left for the next time.
+   */
+  async joinGroupsByItself(
+    options: { scope?: 'pending' | 'full' } = {},
+  ): Promise<ConversationId[]> {
+    const { conversationIds } = (await api.getMlsJoinableConversations(this.deviceId, options)) as {
+      conversationIds: ConversationId[];
+    };
+
+    const joined: ConversationId[] = [];
+    for (const conversationId of conversationIds) {
+      try {
+        // eslint-disable-next-line no-await-in-loop -- one group at a time: each join advances that group's epoch
+        if (await this.joinByExternalCommit(conversationId)) joined.push(conversationId);
+      } catch (error) {
+        console.warn(`Could not join ${conversationId} by itself`, error);
+      }
+    }
+    return joined;
+  }
+
+  /**
+   * Adds this device to a group from its published snapshot. The snapshot comes from a member, so the group
+   * inside it is checked against the server's roster BEFORE the join is sent, and nothing is saved unless
+   * the server accepts. Returns false when there is nothing to do, or another change to the group won first
+   * (the next attempt starts from the new snapshot).
+   */
+  async joinByExternalCommit(conversationId: ConversationId): Promise<boolean> {
+    return this.runExclusive(conversationId, async () => {
+      if ((await this.savedEpoch(conversationId)) !== undefined) return false;
+
+      const snapshot = (await api.getMlsGroupInfo(conversationId, this.deviceId)) as {
+        epoch: Epoch;
+        groupInfo: string;
+      };
+      const joined = await this.factory.joinExternally(
+        conversationId,
+        base64ToBytes(snapshot.groupInfo),
+      );
+      await this.verifier.assertTreeMatchesRoster(conversationId, joined.session, {
+        epoch: snapshot.epoch,
+        excludeDeviceId: this.deviceId,
+      });
+
+      const response = await api.submitMlsExternalJoin(conversationId, {
+        deviceId: this.deviceId,
+        epoch: snapshot.epoch,
+        payload: bytesToBase64(joined.commitBytes),
+        groupInfo: bytesToBase64(joined.groupInfoBytes),
+      });
+      if (response.outcome !== 'accepted') return false;
+
+      this.sessions.set(conversationId, joined.session);
+      await this.persistSession(conversationId, joined.session);
+      await this.verifier.markDeclaredSeen(conversationId);
+      return true;
+    });
   }
 
   /**
@@ -132,7 +210,7 @@ export class SyncEngine {
   ): Promise<Epoch> {
     return this.runExclusive(conversationId, async () => {
       const session = await this.getSession(conversationId);
-      const { wireBytes, expectedEpoch, welcomes } = await session.stageCommit(change);
+      const { wireBytes, expectedEpoch, welcomes, groupInfo } = await session.stageCommit(change);
 
       const response = await api.submitMlsHandshake(conversationId, {
         deviceId: this.deviceId,
@@ -144,6 +222,8 @@ export class SyncEngine {
         })),
         // What this Commit does to the group. The server checks it against the
         // authorized roster; every other member checks it against the Commit.
+        // Published so another device can join by itself later, with no member online.
+        groupInfo: bytesToBase64(groupInfo),
         addedDeviceIds: change.added.map((offer) => offer.credential.deviceId),
         removedDeviceIds: change.removed.map((credential) => credential.deviceId),
       });
@@ -380,7 +460,9 @@ export class SyncEngine {
   async forgetConversation(conversationId: ConversationId): Promise<void> {
     return this.runExclusive(conversationId, async () => {
       this.sessions.delete(conversationId);
+      this.versions.delete(conversationId);
       await this.storage.delete(conversationId);
+      await this.storage.delete(versionKey(conversationId));
       await this.verifier.forget(conversationId);
     });
   }
@@ -488,19 +570,34 @@ export class SyncEngine {
     session: GroupSession,
   ): Promise<void> {
     const stateBytes = await session.serialize();
+    // Stamp first: if a crash lands between the two writes, other tabs reload the older state, which is still consistent.
+    const stamp = crypto.randomUUID();
+    await this.storage.save(versionKey(conversationId), new TextEncoder().encode(stamp));
     await this.storage.save(conversationId, stateBytes);
+    this.versions.set(conversationId, stamp);
+  }
+
+  /** Drops the cached session when the saved one was written by another tab since it was loaded. */
+  private async dropCachedSessionIfStale(conversationId: ConversationId): Promise<void> {
+    const saved = await this.storage.load(versionKey(conversationId));
+    const stamp = saved ? new TextDecoder().decode(saved) : undefined;
+
+    if (this.versions.get(conversationId) !== stamp) {
+      this.sessions.delete(conversationId);
+    }
+    this.versions.set(conversationId, stamp);
   }
 
   /**
    * Runs `task` alone for this device and conversation - across tabs too, via a
-   * Web Lock - after reloading the saved session, since another tab may have
-   * advanced it. The in-tab chain keeps calls in order and a failure from
+   * Web Lock - on a session that is as new as the saved one: another tab may
+   * have advanced it. The in-tab chain keeps calls in order and a failure from
    * wedging later ones.
    */
   private runExclusive<T>(conversationId: ConversationId, task: () => Promise<T>): Promise<T> {
     const locked = async () =>
       withCrossTabLock(`mls:${this.deviceId}:${conversationId}`, async () => {
-        this.sessions.delete(conversationId);
+        await this.dropCachedSessionIfStale(conversationId);
         return task();
       });
 

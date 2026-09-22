@@ -7,6 +7,7 @@ import {
   IsBase64,
   IsInt,
   IsNotEmpty,
+  IsOptional,
   IsString,
   MaxLength,
   Min,
@@ -33,6 +34,16 @@ export class SubmitHandshakeDto {
   @IsBase64()
   @MaxLength(20000)
   payload!: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Base64 GroupInfo for the epoch this Commit creates, so a device can later join by itself',
+  })
+  @IsOptional()
+  @IsBase64()
+  @MaxLength(60000)
+  groupInfo?: string;
 
   @ApiProperty({
     type: [WelcomeItemDto],

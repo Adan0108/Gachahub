@@ -7,6 +7,7 @@ import {
   EpochConflictError,
   GroupStateUnavailableError,
   MembershipMismatchError,
+  StaleWelcomeError,
 } from '../contract/errors';
 import type { DeviceCredential, KeyPackageOffer } from '../contract/types';
 
@@ -20,7 +21,10 @@ vi.mock('../../api', () => ({
     consumeMlsWelcome: vi.fn(),
     reportMlsFault: vi.fn(),
     getMlsRoster: vi.fn(),
-    revokeChatDevice: vi.fn(),
+    getMlsJoinableConversations: vi.fn(),
+    getMlsPendingSummary: vi.fn(),
+    getMlsGroupInfo: vi.fn(),
+    submitMlsExternalJoin: vi.fn(),
   },
 }));
 
@@ -850,28 +854,6 @@ describe('SyncEngine', () => {
     });
   });
 
-  describe('revokeOtherDevice', () => {
-    it('revokes the device, then looks for leftover devices in full straight away', async () => {
-      const { api } = await import('../../api');
-      const alice = await setUpDevice('user-alice');
-      const order: string[] = [];
-      vi.mocked(api.revokeChatDevice).mockImplementation(async () => {
-        order.push('revoke');
-      });
-      vi.mocked(api.getMlsMembershipWork).mockImplementation(
-        async (_device: string, options: { scope?: string } = {}) => {
-          order.push(`work:${options.scope}`);
-          return { items: [], nextCursor: null };
-        },
-      );
-
-      await alice.engine.revokeOtherDevice('old-phone');
-
-      expect(api.revokeChatDevice).toHaveBeenCalledWith('old-phone');
-      expect(order).toEqual(['revoke', 'work:full']);
-    });
-  });
-
   describe('syncCommits', () => {
     it('applies missed handshakes in order and advances the epoch', async () => {
       const { api } = await import('../../api');
@@ -1140,6 +1122,29 @@ describe('SyncEngine', () => {
       await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(1);
     });
 
+    it('spends the key package of a Welcome it discards as stale, so no private key is left to open it', async () => {
+      const alice = await setUpDevice('user-alice');
+      const bob = await setUpDevice('user-bob');
+      const aliceSession = await alice.engine.createGroup('conv-1');
+      const added = await aliceSession.stageCommit({ added: [await offerFor(bob)], removed: [] });
+      await aliceSession.commitAccepted();
+      const before = bob.store.keyPackagesById.size;
+
+      await expect(
+        bob.factory.joinFromWelcome(
+          'conv-1',
+          added.welcomes.find((w) => w.deviceId === bob.deviceId)!.welcomeBytes,
+          {
+            verify: async () => {
+              throw new StaleWelcomeError();
+            },
+          },
+        ),
+      ).rejects.toBeInstanceOf(StaleWelcomeError);
+
+      expect(bob.store.keyPackagesById.size).toBe(before - 1);
+    });
+
     it('records a failure and does not consume a Welcome that fails to join, without aborting the batch', async () => {
       const { api } = await import('../../api');
       const bob = await setUpDevice('user-bob');
@@ -1183,7 +1188,242 @@ describe('SyncEngine', () => {
       await engine.encryptMessage('conv-1', { v: 1, type: 'text', body: 'hi' });
       await engine.encryptMessage('conv-1', { v: 1, type: 'text', body: 'again' });
 
-      expect(saveSpy).toHaveBeenCalledTimes(2);
+      const stateSaves = saveSpy.mock.calls.filter(([key]) => key === 'conv-1');
+      expect(stateSaves).toHaveLength(2);
+    });
+  });
+
+  describe('the regular poll (processPendingMlsWork)', () => {
+    const spyAll = (engine: SyncEngine) => ({
+      welcomes: vi
+        .spyOn(engine, 'processPendingWelcomes')
+        .mockResolvedValue({ joined: [], failures: [] }),
+      joins: vi.spyOn(engine, 'joinGroupsByItself').mockResolvedValue([]),
+      work: vi.spyOn(engine, 'reconcileMembership').mockResolvedValue({ outcomes: [] }),
+    });
+
+    it('costs one probe and nothing else when nothing is waiting', async () => {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      const spies = spyAll(alice.engine);
+      vi.mocked(api.getMlsPendingSummary).mockResolvedValue({
+        welcomes: 0,
+        joinable: false,
+        membershipWork: false,
+      });
+
+      await alice.engine.processPendingMlsWork('pending');
+
+      expect(api.getMlsPendingSummary).toHaveBeenCalledWith(alice.deviceId);
+      expect(spies.welcomes).not.toHaveBeenCalled();
+      expect(spies.joins).not.toHaveBeenCalled();
+      expect(spies.work).not.toHaveBeenCalled();
+    });
+
+    it('runs only the steps the probe says are waiting', async () => {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      const spies = spyAll(alice.engine);
+      vi.mocked(api.getMlsPendingSummary).mockResolvedValue({
+        welcomes: 1,
+        joinable: false,
+        membershipWork: true,
+      });
+
+      await alice.engine.processPendingMlsWork('pending');
+
+      expect(spies.welcomes).toHaveBeenCalled();
+      expect(spies.joins).not.toHaveBeenCalled();
+      expect(spies.work).toHaveBeenCalledWith({ scope: 'pending' });
+    });
+
+    it('skips the probe on a full pass and runs everything', async () => {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      const spies = spyAll(alice.engine);
+
+      await alice.engine.processPendingMlsWork('full');
+
+      expect(api.getMlsPendingSummary).not.toHaveBeenCalled();
+      expect(spies.welcomes).toHaveBeenCalled();
+      expect(spies.joins).toHaveBeenCalledWith({ scope: 'full' });
+      expect(spies.work).toHaveBeenCalledWith({ scope: 'full' });
+    });
+  });
+
+  describe('joining a group by itself (real MLS)', () => {
+    /** alice and bob are in a group whose newest snapshot is published; carol wants in with no member online. */
+    async function groupWithPublishedSnapshot() {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      const bob = await setUpDevice('user-bob');
+      const carol = await setUpDevice('user-carol');
+      const aliceSession = await alice.engine.createGroup('conv-1');
+      const staged = await aliceSession.stageCommit({ added: [await offerFor(bob)], removed: [] });
+      await aliceSession.commitAccepted();
+      await saveSession(alice, aliceSession);
+      await serveRosterOf(aliceSession);
+      vi.mocked(api.getMlsGroupInfo).mockResolvedValue({
+        epoch: 1,
+        groupInfo: bytesToBase64(staged.groupInfo),
+      });
+      // the server accepting the join: hand the members the commit, exactly as it would be stored
+      let submitted: Uint8Array | undefined;
+      vi.mocked(api.submitMlsExternalJoin).mockImplementation(
+        async (_c: string, body: { payload: string }) => {
+          submitted = base64ToBytes(body.payload);
+          return { outcome: 'accepted' };
+        },
+      );
+      return { api, alice, aliceSession, carol, submittedCommit: () => submitted };
+    }
+
+    it('joins, saves the group, and reads what the members send afterwards', async () => {
+      const { alice, aliceSession, carol, submittedCommit } = await groupWithPublishedSnapshot();
+
+      await expect(carol.engine.joinByExternalCommit('conv-1')).resolves.toBe(true);
+
+      await expect(aliceSession.process(submittedCommit()!)).resolves.toMatchObject({
+        kind: 'commit',
+        epoch: 2,
+      });
+      await expect(carol.engine.getCurrentEpoch('conv-1')).resolves.toBe(2);
+      const { wireBytes } = await alice.engine.encryptMessage('conv-1', {
+        v: 1,
+        type: 'text',
+        body: 'welcome carol',
+      });
+      await expect(carol.engine.processIncoming('conv-1', wireBytes)).resolves.toMatchObject({
+        kind: 'application',
+        envelope: { body: 'welcome carol' },
+      });
+    });
+
+    it('sends the snapshot of the epoch the join creates, so the next device can join too', async () => {
+      const { api, carol } = await groupWithPublishedSnapshot();
+
+      await carol.engine.joinByExternalCommit('conv-1');
+
+      expect(api.submitMlsExternalJoin).toHaveBeenCalledWith(
+        'conv-1',
+        expect.objectContaining({
+          deviceId: carol.deviceId,
+          epoch: 1,
+          groupInfo: expect.any(String),
+        }),
+      );
+    });
+
+    it('refuses a snapshot whose group is not what the server has, before sending anything', async () => {
+      const { api, aliceSession, carol } = await groupWithPublishedSnapshot();
+      await serveRosterOf(aliceSession, (leaves) => {
+        leaves[0]!.userId = 'user-someone-else';
+      });
+      vi.mocked(api.reportMlsFault).mockResolvedValue({ recorded: true } as never);
+
+      await expect(carol.engine.joinByExternalCommit('conv-1')).rejects.toBeInstanceOf(
+        MembershipMismatchError,
+      );
+
+      expect(api.submitMlsExternalJoin).not.toHaveBeenCalled();
+      await expect(carol.engine.getCurrentEpoch('conv-1')).rejects.toThrow();
+    });
+
+    it('saves nothing when another change to the group won first', async () => {
+      const { api, carol } = await groupWithPublishedSnapshot();
+      vi.mocked(api.submitMlsExternalJoin).mockResolvedValue({ outcome: 'conflict' });
+
+      await expect(carol.engine.joinByExternalCommit('conv-1')).resolves.toBe(false);
+
+      await expect(carol.engine.getCurrentEpoch('conv-1')).rejects.toThrow();
+    });
+
+    it('does nothing for a group this device already has', async () => {
+      const { api, carol } = await groupWithPublishedSnapshot();
+      await carol.engine.createGroup('conv-1');
+
+      await expect(carol.engine.joinByExternalCommit('conv-1')).resolves.toBe(false);
+
+      expect(api.getMlsGroupInfo).not.toHaveBeenCalled();
+    });
+
+    it('goes through every joinable group, and one that fails does not stop the rest', async () => {
+      const { api, carol } = await groupWithPublishedSnapshot();
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      vi.mocked(api.getMlsJoinableConversations).mockResolvedValue({
+        conversationIds: ['conv-broken', 'conv-1'],
+      });
+      vi.mocked(api.getMlsGroupInfo).mockImplementation(async (conversationId: string) => {
+        if (conversationId === 'conv-broken') throw new Error('no snapshot');
+        return { epoch: 1, groupInfo: bytesToBase64(new Uint8Array()) };
+      });
+      vi.spyOn(carol.engine, 'joinByExternalCommit').mockImplementation(async (id) => {
+        if (id === 'conv-broken') throw new Error('no snapshot');
+        return true;
+      });
+
+      await expect(carol.engine.joinGroupsByItself({ scope: 'full' })).resolves.toEqual(['conv-1']);
+
+      expect(api.getMlsJoinableConversations).toHaveBeenCalledWith(carol.deviceId, {
+        scope: 'full',
+      });
+    });
+  });
+
+  describe('the cross-tab reload', () => {
+    it('does not reload the saved session for every operation - only when another tab wrote a newer one', async () => {
+      const alice = await setUpDevice('user-alice');
+      await alice.engine.createGroup('conv-1');
+      const restore = vi.spyOn(alice.factory, 'restore');
+
+      await alice.engine.getCurrentEpoch('conv-1');
+      await alice.engine.encryptMessage('conv-1', { v: 1, type: 'text', body: 'a' });
+      await alice.engine.encryptMessage('conv-1', { v: 1, type: 'text', body: 'b' });
+
+      expect(restore).not.toHaveBeenCalled();
+    });
+
+    it('reloads once after another tab wrote, then keeps the fresh copy', async () => {
+      const alice = await setUpDevice('user-alice');
+      await alice.engine.createGroup('conv-1');
+      const otherTab = new SyncEngine(alice.factory, alice.deviceId, alice.userId, alice.storage);
+      await otherTab.encryptMessage('conv-1', { v: 1, type: 'text', body: 'from the other tab' });
+      const restore = vi.spyOn(alice.factory, 'restore');
+
+      await alice.engine.getCurrentEpoch('conv-1');
+      await alice.engine.getCurrentEpoch('conv-1');
+
+      expect(restore).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('a message you send from one device', () => {
+    it('is readable on your other device, but not on the device that sent it', async () => {
+      const phone = await setUpDevice('user-mai');
+      const laptop = await setUpDevice('user-mai');
+      const phoneSession = await phone.engine.createGroup('conv-1');
+      const added = await phoneSession.stageCommit({
+        added: [await offerFor(laptop)],
+        removed: [],
+      });
+      await phoneSession.commitAccepted();
+      const laptopSession = await laptop.factory.joinFromWelcome(
+        'conv-1',
+        added.welcomes.find((w) => w.deviceId === laptop.deviceId)!.welcomeBytes,
+      );
+      await saveSession(phone, phoneSession);
+
+      const { wireBytes } = await phone.engine.encryptMessage('conv-1', {
+        v: 1,
+        type: 'text',
+        body: 'from my phone',
+      });
+
+      await expect(laptopSession.process(wireBytes)).resolves.toMatchObject({
+        kind: 'application',
+        envelope: { body: 'from my phone' },
+      });
+      await expect(phoneSession.process(wireBytes)).rejects.toThrow();
     });
   });
 

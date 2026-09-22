@@ -80,6 +80,22 @@ export class MlsMembershipWorkRepository {
     }));
   }
 
+  /** Whether any conversation this device is in has someone half-joined or half-removed: the poll's cheap probe. */
+  async hasPendingWork(deviceId: string, userId: string): Promise<boolean> {
+    const row = await this.prisma.chatConversation.findFirst({
+      where: {
+        mlsMembers: { some: { deviceId, removedEpoch: null } },
+        AND: [
+          { participants: { some: { userId, state: 'ACTIVE' } } },
+          { participants: { some: { state: { in: PENDING_STATES } } } },
+        ],
+      },
+      select: { id: true },
+    });
+
+    return row !== null;
+  }
+
   /**
    * Hands these conversations to `deviceId` for a while and returns the ones it
    * now holds. A conversation another device holds a live lease on is left out,

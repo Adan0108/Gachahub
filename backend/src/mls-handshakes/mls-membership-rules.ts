@@ -346,3 +346,12 @@ export function planCommitTransitions(params: {
 
   return transitions;
 }
+
+/** Someone joining a group by themselves is not in it yet, so what matters is that they are entitled to a leaf. */
+export function assertJoinerIsEntitled(
+  state: ChatParticipantState | undefined,
+): void {
+  if (!isEntitledToLeaf(state)) {
+    throw new ForbiddenException('Not entitled to join this conversation');
+  }
+}

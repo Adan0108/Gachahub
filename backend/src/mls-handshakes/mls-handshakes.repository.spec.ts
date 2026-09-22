@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
+import type { MlsGroupInfoRepository } from './mls-group-info.repository';
 
 jest.mock('../prisma/prisma.service', () => ({ PrismaService: class {} }));
 jest.mock('../mls-group-roster/mls-group-roster.repository', () => ({
@@ -43,6 +44,8 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
     removeLeaves: jest.fn(),
     findLeavesAtEpoch: jest.fn(),
   };
+
+  const groupInfos = { save: jest.fn() };
 
   let tx: ReturnType<typeof buildTx>;
   let prisma: {
@@ -99,6 +102,7 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
     repository = new MlsHandshakesRepository(
       prisma as unknown as PrismaService,
       roster as unknown as MlsGroupRosterRepository,
+      groupInfos as unknown as MlsGroupInfoRepository,
     );
   });
 
@@ -536,6 +540,130 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
       expect(roster.addLeaves).toHaveBeenCalledWith('conv-1', [], 1, tx);
       expect(tx.chatParticipant.updateMany).not.toHaveBeenCalled();
     });
+  });
+
+  describe('a device joining by itself (external commit)', () => {
+    const join = {
+      conversationId: 'conv-1',
+      expectedEpoch: 3,
+      deviceId: 'device-2',
+      userId: 'user-2',
+      payload: new Uint8Array([7]),
+      payloadSha256: 'hash-join',
+      groupInfo: new Uint8Array([8]),
+    };
+
+    it('adds the device to the roster, activates its user and stores the snapshot, all in one transaction', async () => {
+      devices(['device-2', 'user-2']);
+      participants(['user-1', 'ACTIVE'], ['user-2', 'JOINING']);
+
+      const result = await repository.acceptExternalJoin(join);
+
+      expect(result.outcome).toBe('accepted');
+      expect(roster.addLeaves).toHaveBeenCalledWith(
+        'conv-1',
+        [{ deviceId: 'device-2', userId: 'user-2' }],
+        4,
+        tx,
+      );
+      expect(tx.chatParticipant.updateMany).toHaveBeenCalledWith({
+        where: { conversationId: 'conv-1', userId: 'user-2', state: 'JOINING' },
+        data: { state: 'ACTIVE' },
+      });
+      expect(groupInfos.save).toHaveBeenCalledWith(
+        'conv-1',
+        4,
+        join.groupInfo,
+        tx,
+      );
+    });
+
+    it('is recorded as sent by the joining device, with no Welcome, attesting the device it added', async () => {
+      devices(['device-2', 'user-2']);
+      participants(['user-1', 'ACTIVE'], ['user-2', 'JOINING']);
+
+      await repository.acceptExternalJoin(join);
+
+      expect(createdHandshakeData()).toMatchObject({
+        senderDeviceId: 'device-2',
+        addedDevices: [{ deviceId: 'device-2', userId: 'user-2' }],
+        removedDevices: [],
+      });
+      expect(tx.mlsWelcome.createMany).not.toHaveBeenCalled();
+    });
+
+    it('does not need the joining device to be in the group already, or its user to be ACTIVE', async () => {
+      devices(['device-2', 'user-2']);
+      participants(['user-1', 'ACTIVE'], ['user-2', 'ARCHIVED']);
+
+      await expect(repository.acceptExternalJoin(join)).resolves.toMatchObject({
+        outcome: 'accepted',
+      });
+    });
+
+    it.each(['PENDING', 'DECLINED', 'LEAVING', 'MISSING'])(
+      'refuses a joiner whose user is %s',
+      async (state) => {
+        devices(['device-2', 'user-2']);
+        participants(
+          ['user-1', 'ACTIVE'],
+          ...(state === 'MISSING'
+            ? []
+            : ([['user-2', state]] as Array<[string, string]>)),
+        );
+
+        await expect(repository.acceptExternalJoin(join)).rejects.toThrow(
+          ForbiddenException,
+        );
+      },
+    );
+
+    it('refuses a revoked joining device', async () => {
+      devices(['device-2', 'user-2', new Date()]);
+      participants(['user-1', 'ACTIVE'], ['user-2', 'JOINING']);
+
+      await expect(repository.acceptExternalJoin(join)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('refuses to start a group: there has to be one to join', async () => {
+      roster.hasRoster.mockResolvedValue(false);
+      devices(['device-2', 'user-2']);
+      participants(['user-2', 'JOINING']);
+
+      await expect(
+        repository.acceptExternalJoin({ ...join, expectedEpoch: 0 }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('loses to another commit at the same epoch like any other, touching nothing', async () => {
+      tx.chatConversation.updateMany.mockResolvedValue({ count: 0 });
+      prisma.mlsHandshake.findUnique.mockResolvedValue({
+        id: 'hs-winner',
+        payloadSha256: 'some-other-hash',
+      });
+
+      const result = await repository.acceptExternalJoin(join);
+
+      expect(result.outcome).toBe('conflict');
+      expect(roster.addLeaves).not.toHaveBeenCalled();
+      expect(groupInfos.save).not.toHaveBeenCalled();
+    });
+  });
+
+  it('stores the snapshot a member Commit publishes, for the epoch it creates', async () => {
+    devices();
+    participants(['user-1', 'ACTIVE']);
+    const groupInfo = new Uint8Array([5]);
+
+    await repository.acceptHandshake({
+      ...baseParams,
+      expectedEpoch: 3,
+      groupInfo,
+    });
+
+    expect(groupInfos.save).toHaveBeenCalledWith('conv-1', 4, groupInfo, tx);
   });
 
   describe('findRosterAtEpoch', () => {

@@ -1,4 +1,9 @@
+jest.mock('../auth/session-terminator.service', () => ({
+  SessionTerminator: class {},
+}));
+
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -6,12 +11,14 @@ import {
 import { createHash } from 'crypto';
 import { MlsHandshakesService } from './mls-handshakes.service';
 import { buildTestCommitWithWelcome } from './test-support/build-test-commit';
+import { buildTestExternalJoin } from './test-support/build-test-external-join';
 
 describe('MlsHandshakesService', () => {
   const repository = {
     isActiveParticipant: jest.fn(),
     isEntitledParticipant: jest.fn(),
     acceptHandshake: jest.fn(),
+    acceptExternalJoin: jest.fn(),
     findHandshakesSince: jest.fn(),
     findRosterAtEpoch: jest.fn(),
     findPendingWelcomes: jest.fn(),
@@ -21,6 +28,8 @@ describe('MlsHandshakesService', () => {
   const chatDevicesService = {
     assertOwnActiveDevice: jest.fn(),
   };
+
+  const selfJoinRateLimiter = { assertMayJoin: jest.fn() };
 
   let service: MlsHandshakesService;
 
@@ -36,6 +45,7 @@ describe('MlsHandshakesService', () => {
     service = new MlsHandshakesService(
       repository as any,
       chatDevicesService as any,
+      selfJoinRateLimiter as any,
     );
   });
 
@@ -311,6 +321,148 @@ describe('MlsHandshakesService', () => {
       ).rejects.toThrow(ForbiddenException);
 
       expect(chatDevicesService.assertOwnActiveDevice).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('submitExternalJoin', () => {
+    const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
+    const registeredKey = (key: Uint8Array) => ({
+      id: 'device-1',
+      userId: 'user-1',
+      revokedAt: null,
+      signaturePublicKey: key,
+    });
+
+    it('accepts a real external commit from the callers own device, with the snapshot for the epoch it creates', async () => {
+      const join = await buildTestExternalJoin('conv-1', {
+        userId: 'user-1',
+        deviceId: 'device-1',
+      });
+      chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+        registeredKey(join.joinerSignatureKey),
+      );
+      repository.acceptExternalJoin.mockResolvedValue({
+        outcome: 'accepted',
+        handshake: {
+          id: 'hs-1',
+          conversationId: 'conv-1',
+          epoch: join.epoch,
+          senderDeviceId: 'device-1',
+          payload: join.commitPayload,
+          membershipDeclared: true,
+          addedDevices: [],
+          removedDevices: [],
+          createdAt: new Date(),
+        },
+      });
+
+      const result = await service.submitExternalJoin('user-1', 'conv-1', {
+        deviceId: 'device-1',
+        epoch: join.epoch,
+        payload: b64(join.commitPayload),
+        groupInfo: b64(join.nextGroupInfoPayload),
+      });
+
+      expect(result.outcome).toBe('accepted');
+      expect(repository.acceptExternalJoin).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationId: 'conv-1',
+          expectedEpoch: join.epoch,
+          deviceId: 'device-1',
+          userId: 'user-1',
+        }),
+      );
+    });
+
+    it('refuses a commit that adds a leaf other than the callers registered device key', async () => {
+      const join = await buildTestExternalJoin('conv-1', {
+        userId: 'user-1',
+        deviceId: 'device-1',
+      });
+      chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+        registeredKey(new Uint8Array([9, 9, 9])),
+      );
+
+      await expect(
+        service.submitExternalJoin('user-1', 'conv-1', {
+          deviceId: 'device-1',
+          epoch: join.epoch,
+          payload: b64(join.commitPayload),
+          groupInfo: b64(join.nextGroupInfoPayload),
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(repository.acceptExternalJoin).not.toHaveBeenCalled();
+    });
+
+    it('refuses a commit that adds someone elses device, even with the right key', async () => {
+      const join = await buildTestExternalJoin('conv-1', {
+        userId: 'victim',
+        deviceId: 'device-1',
+      });
+      chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+        registeredKey(join.joinerSignatureKey),
+      );
+
+      await expect(
+        service.submitExternalJoin('user-1', 'conv-1', {
+          deviceId: 'device-1',
+          epoch: join.epoch,
+          payload: b64(join.commitPayload),
+          groupInfo: b64(join.nextGroupInfoPayload),
+        }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('refuses a snapshot for the wrong epoch', async () => {
+      const join = await buildTestExternalJoin('conv-1', {
+        userId: 'user-1',
+        deviceId: 'device-1',
+      });
+      chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+        registeredKey(join.joinerSignatureKey),
+      );
+
+      await expect(
+        service.submitExternalJoin('user-1', 'conv-1', {
+          deviceId: 'device-1',
+          epoch: join.epoch,
+          payload: b64(join.commitPayload),
+          groupInfo: b64(join.groupInfoPayload),
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('answers a lost race with the winning commit, like any other submit', async () => {
+      const join = await buildTestExternalJoin('conv-1', {
+        userId: 'user-1',
+        deviceId: 'device-1',
+      });
+      chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+        registeredKey(join.joinerSignatureKey),
+      );
+      repository.acceptExternalJoin.mockResolvedValue({
+        outcome: 'conflict',
+        handshake: {
+          id: 'hs-w',
+          conversationId: 'conv-1',
+          epoch: join.epoch,
+          senderDeviceId: 'device-9',
+          payload: new Uint8Array([1]),
+          membershipDeclared: true,
+          addedDevices: [],
+          removedDevices: [],
+          createdAt: new Date(),
+        },
+      });
+
+      await expect(
+        service.submitExternalJoin('user-1', 'conv-1', {
+          deviceId: 'device-1',
+          epoch: join.epoch,
+          payload: b64(join.commitPayload),
+          groupInfo: b64(join.nextGroupInfoPayload),
+        }),
+      ).rejects.toThrow(ConflictException);
     });
   });
 
