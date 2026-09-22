@@ -961,3 +961,37 @@ model MlsWelcome {
   @@index([recipientDeviceId, consumedAt])
   @@map("mls_welcomes")
 }
+
+enum OutboxEventStatus {
+  PENDING
+  PROCESSING
+  PUBLISHED
+  FAILED
+}
+
+model OutboxEvent {
+  id String @id
+
+  type        String
+  version     Int
+  aggregateId String
+
+  payload Json
+
+  occurredAt DateTime
+
+  status OutboxEventStatus @default(PENDING)
+
+  attemptCount Int       @default(0)
+  availableAt  DateTime  @default(now())
+  processingAt DateTime?
+  publishedAt  DateTime?
+  lastError    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, availableAt, createdAt])
+  @@index([aggregateId, createdAt])
+  @@map("outbox_events")
+}
