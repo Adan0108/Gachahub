@@ -19,6 +19,7 @@ import {
   GroupStateUnavailableError,
   EpochConflictError,
   MembershipMismatchError,
+  NoEncryptableMembersError,
   StaleWelcomeError,
 } from '../contract/errors';
 import { parseDeclaredMembership } from './declaredMembership';
@@ -127,14 +128,15 @@ export class SyncEngine {
     );
     added.push(...myOtherDevices.map((claimed) => toKeyPackageOffer(this.ownUserId, claimed)));
 
-    // A group whose only initial members are all still PENDING (nobody
-    // mutually follows the creator yet) has nobody to add, and a solo
-    // device has no other devices of its own either - nothing to commit.
-    // Leaves the group at epoch 0 rather than sending an untested
-    // zero-proposal Commit; membership work adds the real members once
-    // they accept and become ACTIVE.
+    // A group whose only initial members are all still PENDING (nobody mutually follows the
+    // creator yet) has nobody to add, and a solo device has no other devices of its own either -
+    // nothing to commit. This is NOT safe to leave at epoch 0 and move on: without a Commit,
+    // this device's leaf is never recorded server-side, so nothing can ever bootstrap the group
+    // afterward - not membership work (needs this device already in the roster) and not
+    // self-join (needs a published snapshot, which only a Commit creates). Every message sent
+    // into it would be encrypted to an audience of one, forever, with no error shown.
     if (added.length === 0) {
-      return this.getCurrentEpoch(conversationId);
+      throw new NoEncryptableMembersError(conversationId);
     }
 
     return this.submitMembershipChange(conversationId, { added, removed: [] });

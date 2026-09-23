@@ -7,6 +7,7 @@ import {
   EpochConflictError,
   GroupStateUnavailableError,
   MembershipMismatchError,
+  NoEncryptableMembersError,
   StaleWelcomeError,
 } from '../contract/errors';
 import type { DeviceCredential, KeyPackageOffer } from '../contract/types';
@@ -324,15 +325,20 @@ describe('SyncEngine', () => {
       );
     });
 
-    it('stays at epoch 0 without submitting a commit when there is nobody to add', async () => {
+    // regression: this used to return epoch 0 and quietly move on. Without a Commit, this
+    // device's leaf is never recorded server-side, so nothing can ever bootstrap the group
+    // afterward - not membership work (needs this device already in the roster) and not
+    // self-join (needs a published snapshot). Every message sent into that group was encrypted
+    // to an audience of one, forever, with no error shown.
+    it('refuses to seed a group with nobody to add, instead of silently leaving it at epoch 0', async () => {
       const { api } = await import('../../api');
       const alice = await setUpDevice('user-alice');
       await alice.engine.createGroup('conv-1');
       await mockClaims({}); // nobody is ACTIVE yet (all invitees still PENDING), and alice has no other devices
 
-      const epoch = await alice.engine.seedNewGroupWithMembers('conv-1', []);
-
-      expect(epoch).toBe(0);
+      await expect(alice.engine.seedNewGroupWithMembers('conv-1', [])).rejects.toThrow(
+        NoEncryptableMembersError,
+      );
       expect(api.submitMlsHandshake).not.toHaveBeenCalled();
     });
 

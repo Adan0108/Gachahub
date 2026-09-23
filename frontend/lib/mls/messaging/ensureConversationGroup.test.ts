@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ensureConversationGroup } from './ensureConversationGroup';
-import { EpochConflictError, GroupStateUnavailableError } from '../contract/errors';
+import {
+  EpochConflictError,
+  GroupStateUnavailableError,
+  NoEncryptableMembersError,
+} from '../contract/errors';
 
 function fakeSyncEngine() {
   return {
@@ -97,5 +101,23 @@ describe('ensureConversationGroup', () => {
     );
 
     expect(engine.forgetConversation).not.toHaveBeenCalled();
+  });
+
+  // regression: a group whose founding members are all still PENDING used to seed successfully
+  // at epoch 0 with no Commit sent at all - a group nothing could ever bootstrap afterward. Now
+  // seedNewGroupWithMembers refuses instead, and that refusal must discard the local group (like
+  // any other non-EpochConflict failure) so the next send retries seeding from scratch once
+  // someone has actually accepted.
+  it('drops the local group when nobody has accepted a new group invite yet', async () => {
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockRejectedValue(new GroupStateUnavailableError('conv-1'));
+    engine.createGroup.mockResolvedValue(undefined);
+    engine.seedNewGroupWithMembers.mockRejectedValue(new NoEncryptableMembersError('conv-1'));
+
+    await expect(
+      ensureConversationGroup(engine as any, 'conv-1', ['user-bob', 'user-carol']),
+    ).rejects.toThrow(NoEncryptableMembersError);
+
+    expect(engine.forgetConversation).toHaveBeenCalledWith('conv-1');
   });
 });

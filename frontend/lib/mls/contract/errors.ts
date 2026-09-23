@@ -77,3 +77,21 @@ export class StaleWelcomeError extends Error {
     this.name = 'StaleWelcomeError';
   }
 }
+
+/**
+ * Thrown when seeding a brand-new group finds nobody to add: every initial member is still
+ * PENDING (hasn't accepted) and this device has no other devices of its own either. Committing
+ * nothing would leave the group entirely private to this one device, with no way for the server
+ * or any other client to ever bootstrap it afterward - membership work needs this device's own
+ * leaf already in the roster, and self-join needs a published snapshot, and both of those are
+ * only ever created by an accepted Commit, which never happens if none is sent. Not a silent
+ * no-op: the caller discards the local group rather than leaving it half-set-up at epoch 0.
+ */
+export class NoEncryptableMembersError extends Error {
+  constructor(public readonly conversationId: ConversationId) {
+    super(
+      "Nobody has accepted this group invite yet, so there's no one to encrypt this message to.",
+    );
+    this.name = 'NoEncryptableMembersError';
+  }
+}
