@@ -37,6 +37,16 @@ export const backendRoutes = {
     `/chat/requests/${encodePathParam(conversationId)}/decline`,
   chatBlockConversation: (conversationId) =>
     `/chat/conversations/${encodePathParam(conversationId)}/block`,
+  chatGroups: '/chat/groups',
+  chatGroup: (conversationId) => `/chat/groups/${encodePathParam(conversationId)}`,
+  chatGroupMembers: (conversationId) =>
+    `/chat/groups/${encodePathParam(conversationId)}/members`,
+  chatGroupTransferOwnership: (conversationId) =>
+    `/chat/groups/${encodePathParam(conversationId)}/transfer-ownership`,
+  chatGroupMemberRole: (conversationId, userId) =>
+    `/chat/groups/${encodePathParam(conversationId)}/members/${encodePathParam(userId)}/role`,
+  chatGroupLeave: (conversationId) =>
+    `/chat/groups/${encodePathParam(conversationId)}/leave`,
   chatDelivered: '/chat/messages/delivered',
   chatRead: (conversationId) => `/chat/conversations/${encodePathParam(conversationId)}/read`,
   chatDevices: '/chat-devices',
@@ -508,6 +518,19 @@ export const api = {
     mutation(backendRoutes.chatDeclineRequest(conversationId)),
   blockChatConversation: (conversationId) =>
     mutation(backendRoutes.chatBlockConversation(conversationId)),
+  createGroupChat: ({ title, photoUrl, memberUserIds }) =>
+    mutation(backendRoutes.chatGroups, { title, photoUrl, memberUserIds }),
+  updateGroupChat: (conversationId, { title, photoUrl }) =>
+    mutation(backendRoutes.chatGroup(conversationId), { title, photoUrl }, { method: 'PATCH' }),
+  addGroupMembers: (conversationId, userIds) =>
+    mutation(backendRoutes.chatGroupMembers(conversationId), { userIds }),
+  removeGroupMembers: (conversationId, userIds) =>
+    mutation(backendRoutes.chatGroupMembers(conversationId), { userIds }, { method: 'DELETE' }),
+  transferGroupOwnership: (conversationId, newOwnerUserId) =>
+    mutation(backendRoutes.chatGroupTransferOwnership(conversationId), { newOwnerUserId }),
+  updateGroupMemberRole: (conversationId, userId, role) =>
+    mutation(backendRoutes.chatGroupMemberRole(conversationId, userId), { role }, { method: 'PATCH' }),
+  leaveGroup: (conversationId) => mutation(backendRoutes.chatGroupLeave(conversationId)),
   markChatDelivered: (messageIds) => mutation(backendRoutes.chatDelivered, { messageIds }),
   markChatRead: (conversationId, lastReadMessageId) =>
     mutation(
