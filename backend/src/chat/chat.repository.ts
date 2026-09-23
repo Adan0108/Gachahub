@@ -7,6 +7,7 @@ import {
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
 import { lockConversation } from './membership/lock-conversation';
 import {
   claimUploadsForAttachment,
@@ -39,7 +40,10 @@ export type ChatMessageMediaInput = {
  */
 @Injectable()
 export class ChatRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mlsGroupRosterRepository: MlsGroupRosterRepository,
+  ) {}
 
   /**
    * Finds a user by id
@@ -733,6 +737,46 @@ export class ChatRepository {
         blockedAt: state === 'BLOCKED' ? now : undefined,
         archivedAt: state === 'ARCHIVED' ? now : undefined,
       },
+    });
+  }
+
+  /**
+   * Closes a group when its owner leaves as the sole remaining active member - nobody left to
+   * transfer ownership to, and nobody left online to ever commit removing the owner's own leaf
+   * (a member cannot commit their own removal; another member's client has to). Marks the owner
+   * DECLINED and retires their device leaves in the roster in the same transaction, so the MLS
+   * side doesn't keep claiming a device whose owner has left, with nobody ever left to notice or
+   * fix it - unlike an ordinary removal, this is a direct administrative close, not a real
+   * Commit, since nobody remains to ever read this group's tree again either way.
+   */
+  async closeSoleOwnerGroup(
+    conversationId: string,
+    userId: string,
+    currentEpoch: number,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const participant = await tx.chatParticipant.update({
+        where: {
+          conversationId_userId: { conversationId, userId },
+        },
+        data: { state: 'DECLINED' },
+      });
+
+      const activeLeaves = await this.mlsGroupRosterRepository.findActiveLeaves(
+        conversationId,
+        tx,
+      );
+      const ownDeviceIds = activeLeaves
+        .filter((leaf) => leaf.userId === userId)
+        .map((leaf) => leaf.deviceId);
+      await this.mlsGroupRosterRepository.removeLeaves(
+        conversationId,
+        ownDeviceIds,
+        currentEpoch,
+        tx,
+      );
+
+      return participant;
     });
   }
 

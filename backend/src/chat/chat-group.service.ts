@@ -251,11 +251,13 @@ export class ChatGroupService {
         );
       }
 
-      // sole remaining member, nobody left to transfer to, group closes with them
-      return this.chatRepository.updateParticipantState(
+      // sole remaining member, nobody left to transfer to, group closes with them - and
+      // retires their device leaves too, not just their participant row (see
+      // ChatRepository.closeSoleOwnerGroup)
+      return this.chatRepository.closeSoleOwnerGroup(
         conversationId,
         userId,
-        'DECLINED',
+        conversation.mlsEpoch,
       );
     }
 

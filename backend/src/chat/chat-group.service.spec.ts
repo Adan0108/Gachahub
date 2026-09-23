@@ -64,6 +64,7 @@ describe('ChatGroupService', () => {
     findUsableChatEmote: jest.fn(),
     deleteMessageReaction: jest.fn(),
     updateParticipantState: jest.fn(),
+    closeSoleOwnerGroup: jest.fn(),
     updateParticipantNotificationLevel: jest.fn(),
     updateParticipantPinnedAt: jest.fn(),
     markMessagesDelivered: jest.fn(),
@@ -135,6 +136,7 @@ describe('ChatGroupService', () => {
   ) => ({
     id: 'conversation-1',
     type: 'GROUP',
+    mlsEpoch: 3,
     participants,
   });
 
@@ -543,27 +545,31 @@ describe('ChatGroupService', () => {
       ).rejects.toThrow(BadRequestException);
 
       expect(membershipService.removeMembers).not.toHaveBeenCalled();
-      expect(repository.updateParticipantState).not.toHaveBeenCalled();
+      expect(repository.closeSoleOwnerGroup).not.toHaveBeenCalled();
     });
 
-    it('allows the owner to leave when they are the only active member', async () => {
+    // regression: this used to write DECLINED straight to the participant row and stop there,
+    // never retiring the owner's device leaves in the MLS roster - nobody was ever left online
+    // to submit a real Remove Commit for them, so those leaves sat there forever, permanently
+    // tripping the mls-outsider-leaf integrity check for a conversation everyone had left.
+    it('allows the owner to leave when they are the only active member, retiring their MLS leaves too', async () => {
       repository.findConversationWithParticipants.mockResolvedValue(
         groupConversation([
           { userId: 'user-1', role: 'OWNER', state: 'ACTIVE' },
           { userId: 'user-2', role: 'MEMBER', state: 'DECLINED' },
         ]),
       );
-      repository.updateParticipantState.mockResolvedValue({
+      repository.closeSoleOwnerGroup.mockResolvedValue({
         userId: 'user-1',
         state: 'DECLINED',
       });
 
       await service.leaveGroup('user-1', 'conversation-1');
 
-      expect(repository.updateParticipantState).toHaveBeenCalledWith(
+      expect(repository.closeSoleOwnerGroup).toHaveBeenCalledWith(
         'conversation-1',
         'user-1',
-        'DECLINED',
+        3,
       );
       expect(membershipService.removeMembers).not.toHaveBeenCalled();
     });
