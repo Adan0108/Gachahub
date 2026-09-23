@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSyncEngine } from './useSyncEngine';
 import { useDeviceIdentity } from './useDeviceIdentity';
+import { GroupStateUnavailableError } from '../lib/mls/contract/errors';
 import { wasSentByDevice } from '../lib/mls/messaging/messageOrigin';
 import { base64ToBytes } from '../lib/mls/storage/base64';
 import { nextRetryDelayMs, shouldRetryDecrypt } from '../lib/mls/messaging/decryptRetry';
@@ -149,8 +150,28 @@ export function useDecryptedMessages(
         try {
           await syncEngine.syncCommits(conversationId);
         } catch (error) {
-          syncError = error;
-          console.warn('Could not sync MLS commits before decrypting messages', error);
+          // No local group state at all yet is not necessarily permanent: the very first message
+          // into a brand-new conversation can arrive (over the socket) before this device's own
+          // Welcome-polling loop has processed the Welcome that was created moments earlier by the
+          // same send. Process pending Welcomes once and retry before falling back to the pessimistic
+          // "this device genuinely has no way into this group" path shouldRetryDecrypt takes below.
+          // Deliberately NOT extended to MembershipMismatchError: that can mean a genuinely refused
+          // commit (a group problem, not a missing-Welcome problem, see decryptRetry.ts), and this
+          // device's syncEngine intentionally keeps its own last-verified-good state on disk when
+          // that happens rather than clearing it - retrying processPendingWelcomes wouldn't help and
+          // could mask a real refusal behind a misleading "still catching up" retry state.
+          if (error instanceof GroupStateUnavailableError) {
+            try {
+              await syncEngine.processPendingWelcomes();
+              await syncEngine.syncCommits(conversationId);
+            } catch (retryError) {
+              syncError = retryError;
+              console.warn('Could not sync MLS commits before decrypting messages', retryError);
+            }
+          } else {
+            syncError = error;
+            console.warn('Could not sync MLS commits before decrypting messages', error);
+          }
         }
       }
       const retryable = shouldRetryDecrypt(syncError, retryAttemptsRef.current);
