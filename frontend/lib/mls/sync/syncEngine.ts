@@ -92,32 +92,52 @@ export class SyncEngine {
   }
 
   /**
+   * Seeds a group this device has JUST created with a single other member -
+   * convenience wrapper over seedNewGroupWithMembers for the DM case.
+   */
+  async seedNewGroup(conversationId: ConversationId, userId: UserId): Promise<Epoch> {
+    return this.seedNewGroupWithMembers(conversationId, [userId]);
+  }
+
+  /**
    * Seeds a group this device has JUST created: claims a key package for EVERY
-   * active device of `userId`, plus every other active device of this user (this
-   * device created the group, so it is already in), and commits them all into
-   * the conversation in one Commit. Only for a brand-new group - on a group that
-   * already exists this user's other devices are members, so the server would
-   * refuse it and the packages would be wasted. Changes to a live group (a new
-   * member, a new device, a removal) go through reconcileMembership.
-   * MLS membership is per device, so adding only one device would
-   * leave the rest unable to read the conversation. Throws
+   * active device of each of `userIds`, plus every other active device of this
+   * user (this device created the group, so it is already in), and commits
+   * them all into the conversation in one Commit. Only for a brand-new group -
+   * on a group that already exists these users' other devices are members, so
+   * the server would refuse it and the packages would be wasted. Changes to a
+   * live group (a new member, a new device, a removal) go through
+   * reconcileMembership. MLS membership is per device, so adding only one
+   * device would leave the rest unable to read the conversation. Throws
    * EpochConflictError if another device's commit won the race first - the
    * group is already caught up on the winner by the time this throws, so
    * the caller can decide whether to retry.
    */
-  async seedNewGroup(conversationId: ConversationId, userId: UserId): Promise<Epoch> {
-    const [theirDevices, myOtherDevices] = (await Promise.all([
-      api.claimChatDeviceKeyPackages(userId),
+  async seedNewGroupWithMembers(
+    conversationId: ConversationId,
+    userIds: UserId[],
+  ): Promise<Epoch> {
+    const [theirClaims, myOtherDevices] = (await Promise.all([
+      Promise.all(userIds.map((userId) => api.claimChatDeviceKeyPackages(userId))),
       api.claimChatDeviceKeyPackages(this.ownUserId, { excludeDeviceId: this.deviceId }),
-    ])) as [ClaimedKeyPackage[], ClaimedKeyPackage[]];
+    ])) as [ClaimedKeyPackage[][], ClaimedKeyPackage[]];
 
-    return this.submitMembershipChange(conversationId, {
-      added: [
-        ...theirDevices.map((claimed) => toKeyPackageOffer(userId, claimed)),
-        ...myOtherDevices.map((claimed) => toKeyPackageOffer(this.ownUserId, claimed)),
-      ],
-      removed: [],
-    });
+    const added = userIds.flatMap((userId, index) =>
+      theirClaims[index]!.map((claimed) => toKeyPackageOffer(userId, claimed)),
+    );
+    added.push(...myOtherDevices.map((claimed) => toKeyPackageOffer(this.ownUserId, claimed)));
+
+    // A group whose only initial members are all still PENDING (nobody
+    // mutually follows the creator yet) has nobody to add, and a solo
+    // device has no other devices of its own either - nothing to commit.
+    // Leaves the group at epoch 0 rather than sending an untested
+    // zero-proposal Commit; membership work adds the real members once
+    // they accept and become ACTIVE.
+    if (added.length === 0) {
+      return this.getCurrentEpoch(conversationId);
+    }
+
+    return this.submitMembershipChange(conversationId, { added, removed: [] });
   }
 
   /** Finishes the server-authorized adds and removals (see MembershipReconciler); calls queue so none claims key packages twice. */

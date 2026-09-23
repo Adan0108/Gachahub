@@ -7,6 +7,7 @@ function fakeSyncEngine() {
     getCurrentEpoch: vi.fn(),
     createGroup: vi.fn(),
     seedNewGroup: vi.fn(),
+    seedNewGroupWithMembers: vi.fn(),
     forgetConversation: vi.fn(),
   };
 }
@@ -84,5 +85,19 @@ describe('ensureConversationGroup', () => {
     );
 
     expect(engine.forgetConversation).not.toHaveBeenCalled();
+  });
+
+  it('seeds every founding member when given an array, for a group just created', async () => {
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockRejectedValue(new GroupStateUnavailableError('conv-1'));
+
+    await ensureConversationGroup(engine as any, 'conv-1', ['user-bob', 'user-carol']);
+
+    expect(engine.createGroup).toHaveBeenCalledWith('conv-1');
+    expect(engine.seedNewGroupWithMembers).toHaveBeenCalledWith('conv-1', [
+      'user-bob',
+      'user-carol',
+    ]);
+    expect(engine.seedNewGroup).not.toHaveBeenCalled();
   });
 });

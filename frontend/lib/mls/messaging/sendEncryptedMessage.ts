@@ -20,13 +20,14 @@ const plaintextStore = new EncryptedIndexedDbMessagePlaintextStore();
  * Ensures a local MLS group exists first (see ensureConversationGroup) so
  * this doubles as "finish setting up encryption" for a conversation that
  * was just created, or a request that just got accepted - the caller
- * doesn't need a separate step for that.
+ * doesn't need a separate step for that. `recipientUserId` takes an array
+ * for a group conversation's other initial active members.
  */
 export async function sendEncryptedChatMessage(
   syncEngine: SyncEngine,
   deviceId: DeviceId,
   conversationId: ConversationId,
-  recipientUserId: UserId,
+  recipientUserId: UserId | UserId[],
   text: string,
   clientMessageId: string,
 ) {
@@ -70,7 +71,7 @@ async function encryptAndSend(
   syncEngine: SyncEngine,
   deviceId: DeviceId,
   conversationId: ConversationId,
-  recipientUserId: UserId,
+  recipientUserId: UserId | UserId[],
   text: string,
   clientMessageId: string,
 ) {

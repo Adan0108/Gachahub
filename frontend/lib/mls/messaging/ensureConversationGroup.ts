@@ -4,8 +4,9 @@ import type { ConversationId, UserId } from '../contract/types';
 
 /**
  * Ensures a local MLS group exists for `conversationId`, creating one and
- * adding `recipientUserId` if this device has never set one up for it -
- * lets a brand-new conversation (or a message request that just got
+ * adding `recipientUserId` (a single DM recipient, or every other initial
+ * member of a group just created) if this device has never set one up for
+ * it - lets a brand-new conversation (or a message request that just got
  * accepted) get real encryption on its first send, without a separate
  * "start chat" wizard duplicating this logic.
  *
@@ -21,7 +22,7 @@ import type { ConversationId, UserId } from '../contract/types';
 export async function ensureConversationGroup(
   syncEngine: SyncEngine,
   conversationId: ConversationId,
-  recipientUserId: UserId,
+  recipientUserId: UserId | UserId[],
 ): Promise<void> {
   try {
     await syncEngine.getCurrentEpoch(conversationId);
@@ -34,7 +35,11 @@ export async function ensureConversationGroup(
 
   await syncEngine.createGroup(conversationId);
   try {
-    await syncEngine.seedNewGroup(conversationId, recipientUserId);
+    if (Array.isArray(recipientUserId)) {
+      await syncEngine.seedNewGroupWithMembers(conversationId, recipientUserId);
+    } else {
+      await syncEngine.seedNewGroup(conversationId, recipientUserId);
+    }
   } catch (error) {
     // An EpochConflictError means the commit lost the race, NOT that
     // adding the recipient was rejected - SyncEngine.submitMembershipChange

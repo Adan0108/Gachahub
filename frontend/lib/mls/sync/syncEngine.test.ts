@@ -280,6 +280,84 @@ describe('SyncEngine', () => {
     });
   });
 
+  describe('seedNewGroupWithMembers', () => {
+    it('adds every device of every founding member, plus the creator\'s other devices, in one commit', async () => {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      const alicePhone = await setUpDevice('user-alice');
+      const bob = await setUpDevice('user-bob');
+      const carolLaptop = await setUpDevice('user-carol');
+      const carolPhone = await setUpDevice('user-carol');
+      await alice.engine.createGroup('conv-1');
+
+      await mockClaims({
+        'user-bob': [bob],
+        'user-carol': [carolLaptop, carolPhone],
+        'user-alice': [alicePhone],
+      });
+      vi.mocked(api.submitMlsHandshake).mockImplementation(async (_conversationId, payload) => ({
+        outcome: 'accepted',
+        handshake: fakeHandshake({
+          epoch: payload.epoch,
+          senderDeviceId: payload.deviceId,
+          payload: base64ToBytes(payload.payload),
+        }),
+      }));
+
+      const epoch = await alice.engine.seedNewGroupWithMembers('conv-1', [
+        'user-bob',
+        'user-carol',
+      ]);
+
+      expect(epoch).toBe(1);
+      expect(api.submitMlsHandshake).toHaveBeenCalledTimes(1);
+      const [, submitted] = vi.mocked(api.submitMlsHandshake).mock.calls[0]!;
+      expect(submitted.addedDeviceIds.sort()).toEqual(
+        [bob.deviceId, carolLaptop.deviceId, carolPhone.deviceId, alicePhone.deviceId].sort(),
+      );
+      expect(
+        submitted.welcomes
+          .map((welcome: { recipientDeviceId: string }) => welcome.recipientDeviceId)
+          .sort(),
+      ).toEqual(
+        [bob.deviceId, carolLaptop.deviceId, carolPhone.deviceId, alicePhone.deviceId].sort(),
+      );
+    });
+
+    it('stays at epoch 0 without submitting a commit when there is nobody to add', async () => {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      await alice.engine.createGroup('conv-1');
+      await mockClaims({}); // nobody is ACTIVE yet (all invitees still PENDING), and alice has no other devices
+
+      const epoch = await alice.engine.seedNewGroupWithMembers('conv-1', []);
+
+      expect(epoch).toBe(0);
+      expect(api.submitMlsHandshake).not.toHaveBeenCalled();
+    });
+
+    it('seeds a group for a single member the same way seedNewGroup does', async () => {
+      const { api } = await import('../../api');
+      const alice = await setUpDevice('user-alice');
+      const bob = await setUpDevice('user-bob');
+      await alice.engine.createGroup('conv-1');
+      await mockClaims({ 'user-bob': [bob] });
+      vi.mocked(api.submitMlsHandshake).mockImplementation(async (_conversationId, payload) => ({
+        outcome: 'accepted',
+        handshake: fakeHandshake({
+          epoch: payload.epoch,
+          senderDeviceId: payload.deviceId,
+          payload: base64ToBytes(payload.payload),
+        }),
+      }));
+
+      const epoch = await alice.engine.seedNewGroupWithMembers('conv-1', ['user-bob']);
+
+      expect(epoch).toBe(1);
+      expect(api.claimChatDeviceKeyPackages).toHaveBeenCalledWith('user-bob');
+    });
+  });
+
   describe('submitMembershipChange', () => {
     it('declares the devices it removes, so the server can check them against the roster', async () => {
       const { api } = await import('../../api');
