@@ -92,6 +92,25 @@ export function useDecryptedMessages(
     clearTimeout(retryTimerRef.current);
   }, [conversationId]);
 
+  // Regaining connectivity is a stronger, more specific signal than "five timed retries have
+  // simply elapsed": without this, a message that failed to sync during an outage longer than the
+  // backoff schedule (5s, 10s, 20s, 40s, 60s) stays marked unavailable forever once the budget
+  // runs out, even after the network comes back - nothing else re-triggers the effect for it
+  // unless some unrelated event (a new message arriving) happens to. Resets the budget and forces
+  // an immediate rescan instead. Still safe for a genuinely refused commit: shouldRetryDecrypt
+  // already keeps that class of failure from ever being scheduled as a timed retry in the first
+  // place, so this can only revisit messages an outage - not a real refusal - left stuck.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const handleOnline = () => {
+      retryAttemptsRef.current = 0;
+      clearTimeout(retryTimerRef.current);
+      setRetryTick((tick) => tick + 1);
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, []);
+
   useEffect(() => {
     if (!syncEngine || !conversationId || messages.length === 0) {
       return;
@@ -110,12 +129,10 @@ export function useDecryptedMessages(
         messages.map(async (message) => {
           const cached = await plaintextStore.get(message.id);
           if (cached) {
-            if (!cancelled) {
-              setDecrypted((prev) => ({
-                ...prev,
-                [message.id]: { status: 'ok', envelope: cached.envelope },
-              }));
-            }
+            setDecrypted((prev) => ({
+              ...prev,
+              [message.id]: { status: 'ok', envelope: cached.envelope },
+            }));
             return;
           }
 
@@ -127,9 +144,7 @@ export function useDecryptedMessages(
           ) {
             // Sent from this device with no local copy left (a cleared profile): this
             // device's key for it is gone, so there is no decrypting it again from here.
-            if (!cancelled) {
-              setDecrypted((prev) => ({ ...prev, [message.id]: { status: 'unavailable' } }));
-            }
+            setDecrypted((prev) => ({ ...prev, [message.id]: { status: 'unavailable' } }));
             return;
           }
 
@@ -181,6 +196,14 @@ export function useDecryptedMessages(
       }
       const retryable = shouldRetryDecrypt(syncError, retryAttemptsRef.current);
 
+      // Every setDecrypted below runs unconditionally, cancelled or not: once a message reaches
+      // this point it's already claimed in inFlightRef (nothing else will ever attempt it again),
+      // decrypting it consumes its one-time key whether or not a newer effect run has since
+      // superseded this one, and each write only touches its own message's slot - so a "stale"
+      // run's result is not stale data, it's the one and only outcome that will ever exist for
+      // that message. Suppressing it here used to mean the outcome was computed, the plaintext
+      // was already saved to plaintextStore, and the message still never showed up in the UI
+      // until some unrelated, later effect run happened to re-scan and find it in the cache.
       let needsRetry = false;
       await Promise.all(
         pendingIncoming.map(async (message) => {
@@ -190,9 +213,7 @@ export function useDecryptedMessages(
               wireBytesByMessageId.get(message.id)!,
             );
             if (result.kind !== 'application') {
-              if (!cancelled) {
-                setDecrypted((prev) => ({ ...prev, [message.id]: { status: 'unavailable' } }));
-              }
+              setDecrypted((prev) => ({ ...prev, [message.id]: { status: 'unavailable' } }));
               return;
             }
             await plaintextStore.save({
@@ -202,20 +223,16 @@ export function useDecryptedMessages(
               epoch: result.epoch,
               envelope: result.envelope,
             });
-            if (!cancelled) {
-              setDecrypted((prev) => ({
-                ...prev,
-                [message.id]: { status: 'ok', envelope: result.envelope },
-              }));
-            }
+            setDecrypted((prev) => ({
+              ...prev,
+              [message.id]: { status: 'ok', envelope: result.envelope },
+            }));
           } catch (error) {
             console.warn(`Could not decrypt message ${message.id}`, error);
             // Without the commit sync the message may just need a commit this device hasn't got yet.
             const status = retryable ? 'pending' : 'unavailable';
             needsRetry ||= retryable;
-            if (!cancelled) {
-              setDecrypted((prev) => ({ ...prev, [message.id]: { status } }));
-            }
+            setDecrypted((prev) => ({ ...prev, [message.id]: { status } }));
           } finally {
             inFlightRef.current.delete(message.id);
           }
@@ -224,7 +241,7 @@ export function useDecryptedMessages(
 
       if (!needsRetry) {
         retryAttemptsRef.current = 0;
-      } else if (!cancelled) {
+      } else {
         clearTimeout(retryTimerRef.current);
         retryTimerRef.current = setTimeout(
           () => setRetryTick((tick) => tick + 1),
