@@ -1,8 +1,11 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
+import type { Prisma } from '../generated/prisma/client';
 import type { CommentsRepository } from './comments.repository';
 import type { FollowsService } from '../follows/follows.service';
 import type { UserInterestService } from '../recommendation/user-interest.service';
+import { EventPublisherPort } from '../domain-events/event-publisher.port';
+import { PrismaService } from '../prisma/prisma.service';
 
 /*
  * These dependencies are mocked at module level so Jest does not load their
@@ -41,15 +44,33 @@ describe('CommentsService', () => {
     recordPostInteraction: jest.fn(),
   };
 
+  const eventPublisher = {
+    publish: jest.fn(),
+  };
+
+  const transaction = {} as Prisma.TransactionClient;
+
+  const prisma = {
+    $transaction: jest.fn(),
+  };
+
   let service: CommentsService;
 
   beforeEach(() => {
     jest.clearAllMocks();
 
+    prisma.$transaction.mockImplementation(
+      async (
+        work: (transaction: Prisma.TransactionClient) => Promise<unknown>,
+      ) => work(transaction),
+    );
+
     service = new CommentsService(
       commentsRepository as unknown as CommentsRepository,
       followsService as unknown as FollowsService,
       userInterestService as unknown as UserInterestService,
+      eventPublisher as EventPublisherPort,
+      prisma as unknown as PrismaService,
     );
   });
 
@@ -309,7 +330,7 @@ describe('CommentsService', () => {
   });
 
   describe('create', () => {
-    it('creates comment and records COMMENT interest', async () => {
+    it('creates comment, publishes comment.created and records COMMENT interest', async () => {
       commentsRepository.findPostById.mockResolvedValue({
         id: 'post-1',
         authorId: 'author-1',
@@ -342,11 +363,27 @@ describe('CommentsService', () => {
         'user-1',
       );
 
-      expect(commentsRepository.create).toHaveBeenCalledWith({
+      expect(commentsRepository.create).toHaveBeenCalledWith(transaction, {
         postId: 'post-1',
         authorId: 'user-1',
         content: 'Nice post',
       });
+
+      expect(eventPublisher.publish).toHaveBeenCalledWith(
+        {
+          type: 'comment.created',
+          aggregateId: 'comment-1',
+          payload: {
+            commentId: 'comment-1',
+            postId: 'post-1',
+            postAuthorId: 'author-1',
+            actorId: 'user-1',
+            parentCommentId: null,
+            parentCommentAuthorId: null,
+          },
+        },
+        transaction,
+      );
 
       expect(userInterestService.recordPostInteraction).toHaveBeenCalledWith(
         'user-1',
@@ -363,7 +400,7 @@ describe('CommentsService', () => {
       );
     });
 
-    it('does not record interest when comment creation fails', async () => {
+    it('does not publish event or record interest when comment creation fails', async () => {
       commentsRepository.findPostById.mockResolvedValue({
         id: 'post-1',
         authorId: 'author-1',
@@ -384,6 +421,8 @@ describe('CommentsService', () => {
         ),
       ).rejects.toThrow('Database error');
 
+      expect(eventPublisher.publish).not.toHaveBeenCalled();
+
       expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
     });
 
@@ -401,6 +440,8 @@ describe('CommentsService', () => {
       ).rejects.toThrow(NotFoundException);
 
       expect(commentsRepository.create).not.toHaveBeenCalled();
+
+      expect(eventPublisher.publish).not.toHaveBeenCalled();
 
       expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
     });
@@ -498,7 +539,7 @@ describe('CommentsService', () => {
   });
 
   describe('reply', () => {
-    it('creates reply and records COMMENT interest', async () => {
+    it('creates reply, publishes comment.created and records COMMENT interest', async () => {
       commentsRepository.findById.mockResolvedValue({
         id: 'comment-1',
         postId: 'post-1',
@@ -540,12 +581,28 @@ describe('CommentsService', () => {
         'user-1',
       );
 
-      expect(commentsRepository.create).toHaveBeenCalledWith({
+      expect(commentsRepository.create).toHaveBeenCalledWith(transaction, {
         postId: 'post-1',
         authorId: 'user-1',
         parentId: 'comment-1',
         content: 'I agree',
       });
+
+      expect(eventPublisher.publish).toHaveBeenCalledWith(
+        {
+          type: 'comment.created',
+          aggregateId: 'reply-1',
+          payload: {
+            commentId: 'reply-1',
+            postId: 'post-1',
+            postAuthorId: 'author-1',
+            actorId: 'user-1',
+            parentCommentId: 'comment-1',
+            parentCommentAuthorId: 'user-2',
+          },
+        },
+        transaction,
+      );
 
       expect(userInterestService.recordPostInteraction).toHaveBeenCalledWith(
         'user-1',
@@ -583,6 +640,8 @@ describe('CommentsService', () => {
 
       expect(commentsRepository.create).not.toHaveBeenCalled();
 
+      expect(eventPublisher.publish).not.toHaveBeenCalled();
+
       expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
     });
 
@@ -607,6 +666,8 @@ describe('CommentsService', () => {
       ).rejects.toThrow(NotFoundException);
 
       expect(commentsRepository.create).not.toHaveBeenCalled();
+
+      expect(eventPublisher.publish).not.toHaveBeenCalled();
 
       expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
     });

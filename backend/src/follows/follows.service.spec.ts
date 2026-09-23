@@ -1,4 +1,10 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+
+import type { Prisma } from '../generated/prisma/client';
+import type { FollowsRepository } from './follows.repository';
+import { EventPublisherPort } from '../domain-events/event-publisher.port';
+import { PrismaService } from '../prisma/prisma.service';
+
 jest.mock('./follows.repository', () => ({
   FollowsRepository: class {},
 }));
@@ -14,11 +20,32 @@ describe('FollowsService', () => {
     findFollowingIdsAmong: jest.fn(),
   };
 
+  const eventPublisher = {
+    publish: jest.fn(),
+  };
+
+  const transaction = {} as Prisma.TransactionClient;
+
+  const prisma = {
+    $transaction: jest.fn(),
+  };
+
   let service: FollowsService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new FollowsService(repository as any);
+
+    prisma.$transaction.mockImplementation(
+      async (
+        work: (transaction: Prisma.TransactionClient) => Promise<unknown>,
+      ) => work(transaction),
+    );
+
+    service = new FollowsService(
+      repository as unknown as FollowsRepository,
+      eventPublisher as EventPublisherPort,
+      prisma as unknown as PrismaService,
+    );
   });
 
   describe('follow', () => {
@@ -28,6 +55,10 @@ describe('FollowsService', () => {
       );
 
       expect(repository.findActiveUserById).not.toHaveBeenCalled();
+
+      expect(repository.create).not.toHaveBeenCalled();
+
+      expect(eventPublisher.publish).not.toHaveBeenCalled();
     });
 
     it('rejects when the target user does not exist or is not active', async () => {
@@ -38,48 +69,110 @@ describe('FollowsService', () => {
       );
 
       expect(repository.create).not.toHaveBeenCalled();
+
+      expect(eventPublisher.publish).not.toHaveBeenCalled();
     });
 
-    it('creates a follow row when none exists yet', async () => {
-      repository.findActiveUserById.mockResolvedValue({ id: 'user-2' });
-      repository.find.mockResolvedValue(null);
+    it('creates a follow row and publishes user.followed when state changes', async () => {
+      repository.findActiveUserById.mockResolvedValue({
+        id: 'user-2',
+      });
 
-      const result = await service.follow('user-1', 'user-2');
-
-      expect(repository.create).toHaveBeenCalledWith('user-1', 'user-2');
-      expect(result).toEqual({ following: true });
-    });
-
-    it('is idempotent when already following', async () => {
-      repository.findActiveUserById.mockResolvedValue({ id: 'user-2' });
-      repository.find.mockResolvedValue({
-        followerId: 'user-1',
-        followingId: 'user-2',
+      repository.create.mockResolvedValue({
+        count: 1,
       });
 
       const result = await service.follow('user-1', 'user-2');
 
-      expect(repository.create).not.toHaveBeenCalled();
-      expect(result).toEqual({ following: true });
+      expect(repository.create).toHaveBeenCalledWith(
+        transaction,
+        'user-1',
+        'user-2',
+      );
+
+      expect(eventPublisher.publish).toHaveBeenCalledWith(
+        {
+          type: 'user.followed',
+          aggregateId: 'user-2',
+          payload: {
+            targetUserId: 'user-2',
+            actorId: 'user-1',
+          },
+        },
+        transaction,
+      );
+
+      expect(result).toEqual({
+        following: true,
+      });
+    });
+
+    it('is idempotent when already following', async () => {
+      repository.findActiveUserById.mockResolvedValue({
+        id: 'user-2',
+      });
+
+      repository.create.mockResolvedValue({
+        count: 0,
+      });
+
+      const result = await service.follow('user-1', 'user-2');
+
+      expect(repository.create).toHaveBeenCalledWith(
+        transaction,
+        'user-1',
+        'user-2',
+      );
+
+      expect(eventPublisher.publish).not.toHaveBeenCalled();
+
+      expect(result).toEqual({
+        following: true,
+      });
+    });
+
+    it('does not publish event when follow creation fails', async () => {
+      repository.findActiveUserById.mockResolvedValue({
+        id: 'user-2',
+      });
+
+      repository.create.mockRejectedValue(new Error('Database error'));
+
+      await expect(service.follow('user-1', 'user-2')).rejects.toThrow(
+        'Database error',
+      );
+
+      expect(eventPublisher.publish).not.toHaveBeenCalled();
     });
   });
 
   describe('unfollow', () => {
     it('deletes the follow row and reports not following', async () => {
-      repository.delete.mockResolvedValue({ count: 1 });
+      repository.delete.mockResolvedValue({
+        count: 1,
+      });
 
       const result = await service.unfollow('user-1', 'user-2');
 
       expect(repository.delete).toHaveBeenCalledWith('user-1', 'user-2');
-      expect(result).toEqual({ following: false });
+
+      expect(result).toEqual({
+        following: false,
+      });
     });
 
     it('is idempotent when no follow row exists', async () => {
-      repository.delete.mockResolvedValue({ count: 0 });
+      repository.delete.mockResolvedValue({
+        count: 0,
+      });
 
       const result = await service.unfollow('user-1', 'user-2');
 
-      expect(result).toEqual({ following: false });
+      expect(repository.delete).toHaveBeenCalledWith('user-1', 'user-2');
+
+      expect(result).toEqual({
+        following: false,
+      });
     });
   });
 
@@ -92,7 +185,11 @@ describe('FollowsService', () => {
 
       const result = await service.isFollowing('user-1', 'user-2');
 
-      expect(result).toEqual({ following: true });
+      expect(repository.find).toHaveBeenCalledWith('user-1', 'user-2');
+
+      expect(result).toEqual({
+        following: true,
+      });
     });
 
     it('reports false when no follow row exists', async () => {
@@ -100,15 +197,23 @@ describe('FollowsService', () => {
 
       const result = await service.isFollowing('user-1', 'user-2');
 
-      expect(result).toEqual({ following: false });
+      expect(repository.find).toHaveBeenCalledWith('user-1', 'user-2');
+
+      expect(result).toEqual({
+        following: false,
+      });
     });
   });
 
   describe('getFollowingIdsAmong', () => {
     it('returns a Set of the followed ids among the candidates', async () => {
       repository.findFollowingIdsAmong.mockResolvedValue([
-        { followingId: 'user-2' },
-        { followingId: 'user-3' },
+        {
+          followingId: 'user-2',
+        },
+        {
+          followingId: 'user-3',
+        },
       ]);
 
       const result = await service.getFollowingIdsAmong('user-1', [
@@ -122,6 +227,7 @@ describe('FollowsService', () => {
         'user-3',
         'user-4',
       ]);
+
       expect(result).toEqual(new Set(['user-2', 'user-3']));
     });
 

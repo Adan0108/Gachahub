@@ -9,6 +9,8 @@ import { UpdateCommentDto } from './dto/update-comment.dto';
 import { CommentsRepository } from './comments.repository';
 import { FollowsService } from '../follows/follows.service';
 import { UserInterestService } from '../recommendation/user-interest.service';
+import { EventPublisherPort } from '../domain-events/event-publisher.port';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class CommentsService {
@@ -16,6 +18,8 @@ export class CommentsService {
     private readonly commentsRepository: CommentsRepository,
     private readonly followsService: FollowsService,
     private readonly userInterestService: UserInterestService,
+    private readonly eventPublisher: EventPublisherPort,
+    private readonly prisma: PrismaService,
   ) {}
 
   async findByPost(postId: string, query: PaginationQueryDto, userId?: string) {
@@ -78,18 +82,34 @@ export class CommentsService {
   }
 
   async create(postId: string, dto: CreateCommentDto, userId: string) {
-    await this.ensurePostCanBeCommentedOn(postId, userId);
+    const post = await this.ensurePostCanBeCommentedOn(postId, userId);
 
-    const comment = await this.commentsRepository.create({
-      postId,
-      authorId: userId,
-      content: dto.content.trim(),
+    const comment = await this.prisma.$transaction(async (transaction) => {
+      const createdComment = await this.commentsRepository.create(transaction, {
+        postId,
+        authorId: userId,
+        content: dto.content.trim(),
+      });
+
+      await this.eventPublisher.publish(
+        {
+          type: 'comment.created',
+          aggregateId: createdComment.id,
+          payload: {
+            commentId: createdComment.id,
+            postId,
+            postAuthorId: post.authorId,
+            actorId: userId,
+            parentCommentId: null,
+            parentCommentAuthorId: null,
+          },
+        },
+        transaction,
+      );
+
+      return createdComment;
     });
 
-    /**
-     * Recommendation updates are best-effort and should not block
-     * the core comment interaction.
-     */
     void this.userInterestService.recordPostInteraction(
       userId,
       postId,
@@ -106,31 +126,39 @@ export class CommentsService {
       throw new NotFoundException('Comment thread not found');
     }
 
-    /*
-     * MVP supports only one level:
-     *
-     * Comment
-     * └── Reply
-     *
-     * Reply → Reply is intentionally not supported yet.
-     */
     if (parent.parentId !== null) {
       throw new ForbiddenException('Replies to replies are not supported');
     }
 
-    await this.ensurePostCanBeCommentedOn(parent.postId, userId);
+    const post = await this.ensurePostCanBeCommentedOn(parent.postId, userId);
 
-    const reply = await this.commentsRepository.create({
-      postId: parent.postId,
-      authorId: userId,
-      parentId: parent.id,
-      content: dto.content.trim(),
+    const reply = await this.prisma.$transaction(async (transaction) => {
+      const createdReply = await this.commentsRepository.create(transaction, {
+        postId: parent.postId,
+        authorId: userId,
+        parentId: parent.id,
+        content: dto.content.trim(),
+      });
+
+      await this.eventPublisher.publish(
+        {
+          type: 'comment.created',
+          aggregateId: createdReply.id,
+          payload: {
+            commentId: createdReply.id,
+            postId: parent.postId,
+            postAuthorId: post.authorId,
+            actorId: userId,
+            parentCommentId: parent.id,
+            parentCommentAuthorId: parent.authorId,
+          },
+        },
+        transaction,
+      );
+
+      return createdReply;
     });
 
-    /**
-     * Recommendation updates are best-effort and should not block
-     * the core reply interaction.
-     */
     void this.userInterestService.recordPostInteraction(
       userId,
       parent.postId,

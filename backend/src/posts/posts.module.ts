@@ -5,9 +5,15 @@ import { PostsService } from './posts.service';
 import { MediaModule } from '../media/media.module';
 import { FollowsModule } from '../follows/follows.module';
 import { RecommendationModule } from '../recommendation/recommendation.module';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
 
 @Module({
-  imports: [MediaModule, FollowsModule, RecommendationModule],
+  imports: [
+    MediaModule,
+    FollowsModule,
+    RecommendationModule,
+    DomainEventsModule,
+  ],
   controllers: [PostsController],
   providers: [PostsService, PostsRepository],
   exports: [PostsService, PostsRepository],

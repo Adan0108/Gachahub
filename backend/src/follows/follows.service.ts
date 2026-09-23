@@ -3,11 +3,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { EventPublisherPort } from '../domain-events/event-publisher.port';
+import { PrismaService } from '../prisma/prisma.service';
 import { FollowsRepository } from './follows.repository';
 
 @Injectable()
 export class FollowsService {
-  constructor(private readonly followsRepository: FollowsRepository) {}
+  constructor(
+    private readonly followsRepository: FollowsRepository,
+    private readonly eventPublisher: EventPublisherPort,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async follow(followerId: string, followingId: string) {
     if (followerId === followingId) {
@@ -21,16 +27,27 @@ export class FollowsService {
       throw new NotFoundException('User not found');
     }
 
-    const existing = await this.followsRepository.find(followerId, followingId);
+    await this.prisma.$transaction(async (transaction) => {
+      const result = await this.followsRepository.create(
+        transaction,
+        followerId,
+        followingId,
+      );
 
-    // Keep follow endpoint idempotent.
-    if (existing) {
-      return {
-        following: true,
-      };
-    }
-
-    await this.followsRepository.create(followerId, followingId);
+      if (result.count > 0) {
+        await this.eventPublisher.publish(
+          {
+            type: 'user.followed',
+            aggregateId: followingId,
+            payload: {
+              targetUserId: followingId,
+              actorId: followerId,
+            },
+          },
+          transaction,
+        );
+      }
+    });
 
     return {
       following: true,

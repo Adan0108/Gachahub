@@ -32,7 +32,18 @@ jest.mock('../recommendation/user-interest.service', () => ({
   UserInterestService: class {},
 }));
 
+jest.mock('../domain-events/event-publisher.port', () => ({
+  EventPublisherPort: class {},
+}));
+
+jest.mock('../prisma/prisma.service', () => ({
+  PrismaService: class {},
+}));
+
 import { PostsService } from './posts.service';
+import type { EventPublisherPort } from '../domain-events/event-publisher.port';
+import type { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '../generated/prisma/client';
 
 describe('PostsService', () => {
   const postsRepository = {
@@ -64,6 +75,16 @@ describe('PostsService', () => {
 
   const userInterestService = {
     recordPostInteraction: jest.fn(),
+  };
+
+  const eventPublisherPort = {
+    publish: jest.fn(),
+  };
+
+  const transaction = {} as Prisma.TransactionClient;
+
+  const prisma = {
+    $transaction: jest.fn(),
   };
 
   let service: PostsService;
@@ -123,11 +144,19 @@ describe('PostsService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
+    prisma.$transaction.mockImplementation(
+      async (
+        work: (transaction: Prisma.TransactionClient) => Promise<unknown>,
+      ) => work(transaction),
+    );
+
     service = new PostsService(
       postsRepository as unknown as PostsRepository,
       mediaService as unknown as MediaService,
       followsService as unknown as FollowsService,
       userInterestService as unknown as UserInterestService,
+      eventPublisherPort as EventPublisherPort,
+      prisma as unknown as PrismaService,
     );
   });
 
@@ -566,7 +595,24 @@ describe('PostsService', () => {
 
       const result = await service.like('post-1', 'user-1');
 
-      expect(postsRepository.like).toHaveBeenCalledWith('post-1', 'user-1');
+      expect(postsRepository.like).toHaveBeenCalledWith(
+        transaction,
+        'post-1',
+        'user-1',
+      );
+
+      expect(eventPublisherPort.publish).toHaveBeenCalledWith(
+        {
+          type: 'post.liked',
+          aggregateId: 'post-1',
+          payload: {
+            postId: 'post-1',
+            postAuthorId: 'author-1',
+            actorId: 'user-1',
+          },
+        },
+        transaction,
+      );
 
       expect(userInterestService.recordPostInteraction).toHaveBeenCalledWith(
         'user-1',
@@ -597,6 +643,7 @@ describe('PostsService', () => {
 
       await service.like('post-1', 'user-1');
 
+      expect(eventPublisherPort.publish).not.toHaveBeenCalled();
       expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
     });
 
@@ -626,7 +673,11 @@ describe('PostsService', () => {
         'author-1',
       );
 
-      expect(postsRepository.like).toHaveBeenCalledWith('post-1', 'user-1');
+      expect(postsRepository.like).toHaveBeenCalledWith(
+        transaction,
+        'post-1',
+        'user-1',
+      );
     });
 
     it('allows author to like own FOLLOWERS_ONLY post without follow lookup', async () => {
@@ -648,7 +699,11 @@ describe('PostsService', () => {
 
       expect(followsService.isFollowing).not.toHaveBeenCalled();
 
-      expect(postsRepository.like).toHaveBeenCalledWith('post-1', 'author-1');
+      expect(postsRepository.like).toHaveBeenCalledWith(
+        transaction,
+        'post-1',
+        'author-1',
+      );
     });
 
     it('rejects non-follower from liking FOLLOWERS_ONLY post', async () => {
