@@ -150,6 +150,7 @@ export default function ChatPage() {
     isReady: isDeviceReady,
     error: deviceError,
     retry: retryDeviceSetup,
+    reprovision: reprovisionDevice,
   } = useDeviceIdentity();
   const syncEngine = useSyncEngine();
   const decryptableMessages = useMemo(
@@ -165,17 +166,34 @@ export default function ChatPage() {
   // id since the server hasn't assigned one yet.
   const [pendingMessages, setPendingMessages] = useState([]);
   const sendMessage = useMutation({
-    mutationFn: ({ text, clientId }) =>
-      sendEncryptedChatMessage(
-        syncEngine,
-        deviceCredential.deviceId,
-        activeId,
+    mutationFn: async ({ text, clientId }) => {
+      const recipientIds =
         activeConversation?.type === "GROUP"
           ? otherActiveMemberIds(activeConversation, user?.id)
-          : peer?.id,
-        text,
-        clientId,
-      ),
+          : peer?.id;
+      try {
+        return await sendEncryptedChatMessage(
+          syncEngine,
+          deviceCredential.deviceId,
+          activeId,
+          recipientIds,
+          text,
+          clientId,
+        );
+      } catch (error) {
+        if (error?.code !== "DEVICE_REVOKED" && error?.code !== "SESSION_NOT_LINKED") throw error;
+        // This device was retired (dormancy, cap eviction) or its login lost its link
+        // server-side. Reprovisions so the NEXT attempt uses a live, linked device - but
+        // doesn't retry THIS send: a freshly provisioned device starts with no local state
+        // for any group (self-join runs on its own independent poll, see useSyncEngine), so
+        // an immediate retry here would just fail the same way for a different reason.
+        await reprovisionDevice();
+        throw new Error(
+          "Your device needed to be reconnected. Give it a few seconds to rejoin your conversations, then try sending again.",
+          { cause: error },
+        );
+      }
+    },
     onSuccess: (response, variables) => {
       setPendingMessages((prev) => prev.filter((pending) => pending.clientId !== variables.clientId));
       // Merge the sent message straight into the cache instead of
@@ -316,6 +334,13 @@ export default function ChatPage() {
   // Not ACTIVE covers a still-pending invite, and being removed/declined/blocked - the backend
   // rejects a send in every one of those states, so the composer shouldn't invite trying at all.
   const canSendMessages = myGroupParticipant?.state === "ACTIVE";
+  // A group whose only invitees are all still PENDING has nobody to encrypt to yet - sending
+  // would throw (see syncEngine's NoEncryptableMembersError), so the composer says why up front
+  // instead of only surfacing that as an error after the attempt.
+  const isGroupAwaitingAcceptance =
+    canSendMessages &&
+    activeConversation?.type === "GROUP" &&
+    otherActiveMemberIds(activeConversation, user?.id).length === 0;
 
   return (
     <div className="page chat-page">
@@ -671,6 +696,17 @@ export default function ChatPage() {
                       {isPendingGroupInvite
                         ? "Accept the invite to start chatting."
                         : "You are no longer an active participant in this conversation."}
+                    </small>
+                  </div>
+                </div>
+              ) : isGroupAwaitingAcceptance ? (
+                <div className="chat-composer-disabled">
+                  <FiLock />
+                  <div>
+                    <b>Waiting for someone to accept</b>
+                    <small>
+                      Nobody has accepted this group invite yet, so messages can&apos;t be
+                      encrypted to anyone but you.
                     </small>
                   </div>
                 </div>
