@@ -86,10 +86,15 @@ export function useDecryptedMessages(
 
   useEffect(() => () => clearTimeout(retryTimerRef.current), []);
 
-  // Another conversation starts with a clean slate: its own attempts, and no timer left from the last one.
+  // Another conversation starts with a clean slate: its own attempts, no timer left from the
+  // last one, and none of the previous conversation's entries still sitting in state - this map
+  // is never otherwise pruned, so without this it grows for the lifetime of the page as someone
+  // switches between conversations. Nothing is lost: a cache hit against plaintextStore
+  // repopulates any of these instantly the next time that conversation is reopened.
   useEffect(() => {
     retryAttemptsRef.current = 0;
     clearTimeout(retryTimerRef.current);
+    setDecrypted({});
   }, [conversationId]);
 
   // Regaining connectivity is a stronger, more specific signal than "five timed retries have

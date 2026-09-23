@@ -141,6 +141,34 @@ describe('useDecryptedMessages', () => {
     hook.unmount();
   });
 
+  // regression: this map was never pruned, so switching conversations only ever added to it -
+  // every message ever decrypted this session stayed in memory for the page's whole lifetime.
+  it('clears previously decrypted entries when the conversation changes', async () => {
+    const engine = fakeEngine();
+    engine.isAtCurrentEpoch.mockResolvedValue(true);
+    engine.processIncoming.mockResolvedValue({
+      kind: 'application',
+      senderDeviceId: 'device-2',
+      epoch: 0,
+      envelope: { v: 1, type: 'text', body: 'hi' },
+    });
+    vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+
+    const msgInA = message('a1');
+    const hook = renderHook();
+
+    await hook.render({ conversationId: 'conv-a', messages: [msgInA], currentUserId: 'me' });
+    expect(hook.value).toMatchObject({ a1: { status: 'ok' } });
+
+    const msgInB = message('b1');
+    await hook.render({ conversationId: 'conv-b', messages: [msgInB], currentUserId: 'me' });
+
+    expect(hook.value.a1).toBeUndefined();
+    expect(hook.value).toMatchObject({ b1: { status: 'ok' } });
+
+    hook.unmount();
+  });
+
   // regression: once the timed retry budget (MAX_RETRY_ATTEMPTS) runs out, the message is marked
   // permanently unavailable even if the underlying cause (a network outage) was purely transient
   // and has since cleared - nothing re-triggers a recheck unless an unrelated event happens to.
