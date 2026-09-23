@@ -35,11 +35,10 @@ export async function ensureConversationGroup(
 
   await syncEngine.createGroup(conversationId);
   try {
-    if (Array.isArray(recipientUserId)) {
-      await syncEngine.seedNewGroupWithMembers(conversationId, recipientUserId);
-    } else {
-      await syncEngine.seedNewGroup(conversationId, recipientUserId);
-    }
+    const recipientUserIds = Array.isArray(recipientUserId)
+      ? recipientUserId
+      : [recipientUserId];
+    await syncEngine.seedNewGroupWithMembers(conversationId, recipientUserIds);
   } catch (error) {
     // An EpochConflictError means the commit lost the race, NOT that
     // adding the recipient was rejected - SyncEngine.submitMembershipChange

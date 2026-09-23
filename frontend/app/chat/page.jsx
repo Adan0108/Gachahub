@@ -156,6 +156,11 @@ export default function ChatPage() {
     ? selectedId
     : currentList[0]?.id || "";
   const activeConversation = currentList.find((conversation) => conversation.id === activeId);
+  // DM-only - a group's send recipients are recomputed per-send inside sendMessage below, since
+  // they can change between sends (an added member). Declared here, not down by the other
+  // derived values after the loading gate, since sendMessage's mutation (which closes over it)
+  // is itself declared before that gate too.
+  const peer = conversationPeer(activeConversation, user?.id);
   // A pending group invite hides history until accepted (unlike a DM request, which can be
   // previewed) - fetching it 403s, which must not surface as a generic "backend unavailable".
   const isPendingGroupInvite =
@@ -387,8 +392,8 @@ export default function ChatPage() {
     return <ChatSkeleton />;
   }
 
-  const peer = conversationPeer(activeConversation, user?.id);
   const actionError = acceptRequest.error || declineRequest.error || blockConversation.error;
+  const activeConversationName = conversationDisplayName(activeConversation, user?.id);
   const activeGroupMembers = activeMembers(activeConversation);
   const myGroupParticipant = myParticipant(activeConversation, user?.id);
   const isGroupOwner = myGroupParticipant?.role === "OWNER";
@@ -581,10 +586,10 @@ export default function ChatPage() {
               <header className="chat-thread-head">
                 <div>
                   <span className="chat-avatar">
-                    {initialOf(conversationDisplayName(activeConversation, user?.id))}
+                    {initialOf(activeConversationName)}
                   </span>
                   <span>
-                    <b>{conversationDisplayName(activeConversation, user?.id)}</b>
+                    <b>{activeConversationName}</b>
                     <small>
                       {activeConversation.type === "GROUP" ? (
                         <>
@@ -640,103 +645,106 @@ export default function ChatPage() {
               </header>
 
               <div className="chat-messages" aria-live="polite">
-                {isPendingGroupInvite && (
+                {isPendingGroupInvite ? (
                   <div className="chat-empty-thread">
                     <FiShield />
                     <b>Accept this invite to see messages</b>
                     <small>Group messages stay hidden until you accept or decline.</small>
                   </div>
-                )}
-                {!isPendingGroupInvite && (
-                  <QueryNotice isLoading={messages.isLoading} isError={messages.isError} />
-                )}
-                {!isPendingGroupInvite &&
-                  (messages.data?.items || []).map((message, index, allMessages) => {
-                  if (message.contentType === "SYSTEM") {
-                    return (
-                      <div className="chat-system-message" key={message.id}>
-                        <span>Conversation started</span>
-                      </div>
-                    );
-                  }
-                  const mine = message.senderId === user?.id;
-                  const sender = participantUser(activeConversation, message.senderId);
-                  const decrypted = decryptedMessages[message.id];
-                  // Not decrypted yet - render nothing rather than a
-                  // "Decrypting..." placeholder bubble, so the message pops
-                  // in fully formed once it's actually ready instead of
-                  // changing content right after appearing.
-                  if (!decrypted) {
-                    return null;
-                  }
-                  return (
-                    <div className={`chat-message-row ${mine ? "mine" : ""}`} key={message.id}>
-                      {!mine && <span className="chat-avatar small">{initialOf(sender?.name)}</span>}
-                      <article className={`chat-message ${mine ? "mine" : ""}`}>
-                        {decrypted.status === "ok" ? (
-                          <div>
-                            {!mine && activeConversation.type === "GROUP" && (
-                              <small>{sender?.name || "GachaHub member"}</small>
-                            )}
-                            <p>
-                              {typeof decrypted.envelope.body === "string"
-                                ? decrypted.envelope.body
-                                : JSON.stringify(decrypted.envelope.body)}
-                            </p>
-                            <small>{relativeTime(message.createdAt)}</small>
+                ) : (
+                  <>
+                    <QueryNotice isLoading={messages.isLoading} isError={messages.isError} />
+                    {(messages.data?.items || []).map((message, index, allMessages) => {
+                      if (message.contentType === "SYSTEM") {
+                        return (
+                          <div className="chat-system-message" key={message.id}>
+                            <span>Conversation started</span>
                           </div>
-                        ) : (
-                          <>
-                            <FiLock aria-hidden="true" />
-                            <div>
-                              <b>Message unavailable</b>
-                              <p>
-                                {wasLikelySentDuringAbsence(allMessages, decryptedMessages, index)
-                                  ? "Sent while you weren't in the group."
-                                  : "This device can't decrypt this message."}
-                              </p>
-                              <small>{relativeTime(message.createdAt)}</small>
-                            </div>
-                          </>
-                        )}
-                      </article>
-                    </div>
-                  );
-                })}
-                {pendingMessages
-                  .filter((pending) => pending.conversationId === activeId)
-                  .map((pending) => (
-                    <div className="chat-message-row mine" key={pending.clientId}>
-                      <article className={`chat-message mine pending ${pending.failed ? "failed" : ""}`}>
-                        <div>
-                          <p>{pending.text}</p>
-                          <small>
-                            {pending.failed ? (
-                              <button
-                                className="chat-message-retry"
-                                onClick={() => retryPendingMessage(pending)}
-                                type="button"
-                              >
-                                Failed to send - tap to retry
-                              </button>
+                        );
+                      }
+                      const mine = message.senderId === user?.id;
+                      const sender = participantUser(activeConversation, message.senderId);
+                      const decrypted = decryptedMessages[message.id];
+                      // Not decrypted yet - render nothing rather than a
+                      // "Decrypting..." placeholder bubble, so the message pops
+                      // in fully formed once it's actually ready instead of
+                      // changing content right after appearing.
+                      if (!decrypted) {
+                        return null;
+                      }
+                      return (
+                        <div className={`chat-message-row ${mine ? "mine" : ""}`} key={message.id}>
+                          {!mine && (
+                            <span className="chat-avatar small">{initialOf(sender?.name)}</span>
+                          )}
+                          <article className={`chat-message ${mine ? "mine" : ""}`}>
+                            {decrypted.status === "ok" ? (
+                              <div>
+                                {!mine && activeConversation.type === "GROUP" && (
+                                  <small>{sender?.name || "GachaHub member"}</small>
+                                )}
+                                <p>
+                                  {typeof decrypted.envelope.body === "string"
+                                    ? decrypted.envelope.body
+                                    : JSON.stringify(decrypted.envelope.body)}
+                                </p>
+                                <small>{relativeTime(message.createdAt)}</small>
+                              </div>
                             ) : (
-                              "Sending..."
+                              <>
+                                <FiLock aria-hidden="true" />
+                                <div>
+                                  <b>Message unavailable</b>
+                                  <p>
+                                    {wasLikelySentDuringAbsence(allMessages, decryptedMessages, index)
+                                      ? "Sent while you weren't in the group."
+                                      : "This device can't decrypt this message."}
+                                  </p>
+                                  <small>{relativeTime(message.createdAt)}</small>
+                                </div>
+                              </>
                             )}
-                          </small>
+                          </article>
                         </div>
-                      </article>
-                    </div>
-                  ))}
-                {!isPendingGroupInvite &&
-                  !messages.isLoading &&
-                  !messages.isError &&
-                  !messages.data?.items?.length &&
-                  pendingMessages.length === 0 && (
-                    <div className="chat-empty-thread">
-                      <FiMessageCircle />
-                      <b>No messages in this conversation</b>
-                    </div>
-                  )}
+                      );
+                    })}
+                    {pendingMessages
+                      .filter((pending) => pending.conversationId === activeId)
+                      .map((pending) => (
+                        <div className="chat-message-row mine" key={pending.clientId}>
+                          <article
+                            className={`chat-message mine pending ${pending.failed ? "failed" : ""}`}
+                          >
+                            <div>
+                              <p>{pending.text}</p>
+                              <small>
+                                {pending.failed ? (
+                                  <button
+                                    className="chat-message-retry"
+                                    onClick={() => retryPendingMessage(pending)}
+                                    type="button"
+                                  >
+                                    Failed to send - tap to retry
+                                  </button>
+                                ) : (
+                                  "Sending..."
+                                )}
+                              </small>
+                            </div>
+                          </article>
+                        </div>
+                      ))}
+                    {!messages.isLoading &&
+                      !messages.isError &&
+                      !messages.data?.items?.length &&
+                      pendingMessages.length === 0 && (
+                        <div className="chat-empty-thread">
+                          <FiMessageCircle />
+                          <b>No messages in this conversation</b>
+                        </div>
+                      )}
+                  </>
+                )}
                 <div ref={messagesEndRef} />
               </div>
 

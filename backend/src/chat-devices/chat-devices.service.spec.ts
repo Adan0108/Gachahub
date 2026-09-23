@@ -904,4 +904,46 @@ describe('ChatDevicesService', () => {
       expect(sessionTerminator.end).not.toHaveBeenCalled();
     });
   });
+
+  describe('assertSessionLinkedToActiveDevice', () => {
+    it('refuses a login that has never been linked to a device', async () => {
+      repository.findSessionDeviceId.mockResolvedValue(null);
+
+      await expect(
+        service.assertSessionLinkedToActiveDevice('user-1', 'session-1'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(repository.findById).not.toHaveBeenCalled();
+    });
+
+    it('refuses a login linked to a revoked device', async () => {
+      repository.findSessionDeviceId.mockResolvedValue('device-1');
+      repository.findById.mockResolvedValue({
+        id: 'device-1',
+        userId: 'user-1',
+        revokedAt: new Date(),
+      });
+
+      await expect(
+        service.assertSessionLinkedToActiveDevice('user-1', 'session-1'),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('resolves the device id for a login linked to an active device', async () => {
+      repository.findSessionDeviceId.mockResolvedValue('device-1');
+      repository.findById.mockResolvedValue({
+        id: 'device-1',
+        userId: 'user-1',
+        revokedAt: null,
+        lastSeenAt: new Date(),
+      });
+
+      await expect(
+        service.assertSessionLinkedToActiveDevice('user-1', 'session-1'),
+      ).resolves.toBe('device-1');
+      expect(repository.findSessionDeviceId).toHaveBeenCalledWith(
+        'session-1',
+        'user-1',
+      );
+    });
+  });
 });

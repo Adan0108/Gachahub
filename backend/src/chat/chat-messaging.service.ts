@@ -11,6 +11,7 @@ import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
 import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
+import { ChatDevicesService } from '../chat-devices/chat-devices.service';
 import { ChatMessageRateLimiterService } from './chat-message-rate-limiter.service';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
 import { SendMessageDto } from './dto/send-message.dto';
@@ -38,6 +39,7 @@ export class ChatMessagingService {
     @Inject(CHAT_DELIVERY_PORT)
     private readonly chatDelivery: ChatDeliveryPort,
     private readonly chatMessageRateLimiter: ChatMessageRateLimiterService,
+    private readonly chatDevicesService: ChatDevicesService,
   ) {}
 
   /**
@@ -51,8 +53,19 @@ export class ChatMessagingService {
    *   sender and recipient mutually follow each other, in which case it
    *   starts ACTIVE for both — no stranger-request step needed.
    * - Pending stranger messages are stored but should not notify the receiver.
+   *
+   * Requires this login to be linked to a device that is still active - same gate as
+   * sendMessage, since this is just as much an encrypted-message send as a follow-up one is.
    */
-  async createDirectMessage(senderId: string, dto: CreateDirectMessageDto) {
+  async createDirectMessage(
+    senderId: string,
+    sessionId: string,
+    dto: CreateDirectMessageDto,
+  ) {
+    await this.chatDevicesService.assertSessionLinkedToActiveDevice(
+      senderId,
+      sessionId,
+    );
     this.chatMessageRateLimiter.assertNotRateLimited(senderId);
 
     if (senderId === dto.recipientUserId) {
@@ -234,12 +247,22 @@ export class ChatMessagingService {
    *
    * The encryption port keeps message handling opaque to the backend
    * Service logic only validates chat rules and passes ciphertext to the repository.
+   *
+   * Requires this login to be linked to a device that is still active: membership work only
+   * schedules the Remove Commit that evicts a revoked device's leaf, it doesn't block sends
+   * before that Commit lands, so a revoked device's still-valid session could otherwise keep
+   * submitting encrypted messages in the meantime.
    */
   async sendMessage(
     senderId: string,
+    sessionId: string,
     conversationId: string,
     dto: SendMessageDto,
   ) {
+    await this.chatDevicesService.assertSessionLinkedToActiveDevice(
+      senderId,
+      sessionId,
+    );
     this.chatMessageRateLimiter.assertNotRateLimited(senderId);
 
     const preparedPayload = await this.messageEncryption.preparePayload(

@@ -22,6 +22,9 @@ jest.mock('../blocks/blocks.service', () => ({
 jest.mock('../media/media.service', () => ({
   MediaService: class {},
 }));
+jest.mock('../chat-devices/chat-devices.service', () => ({
+  ChatDevicesService: class {},
+}));
 // real Prisma namespace, not a stub - the code under test checks `instanceof`
 // Prisma.PrismaClientKnownRequestError, which only works against the same class
 function loadActualPrisma() {
@@ -107,6 +110,10 @@ describe('ChatMessagingService', () => {
     assertNotRateLimited: jest.fn(),
   };
 
+  const chatDevicesService = {
+    assertSessionLinkedToActiveDevice: jest.fn(),
+  };
+
   const mediaService = {
     resolveAttachableMedia: jest.fn(),
     releaseAttachedUpload: jest.fn(),
@@ -140,10 +147,14 @@ describe('ChatMessagingService', () => {
       messageEncryption,
       chatDelivery,
       chatMessageRateLimiter as any,
+      chatDevicesService as any,
     );
     blocksService.getBlockedIdsAmong.mockResolvedValue(new Set());
     blocksService.isBlocked.mockResolvedValue(false);
     followsService.isFollowing.mockResolvedValue({ following: false });
+    chatDevicesService.assertSessionLinkedToActiveDevice.mockResolvedValue(
+      'device-1',
+    );
     repository.countUnreadMessagesForConversations.mockResolvedValue([]);
   });
 
@@ -191,9 +202,44 @@ describe('ChatMessagingService', () => {
       });
     });
 
+    it('rejects a send from a login never linked to a device, before touching the recipient', async () => {
+      const notLinked = new Error('session not linked');
+      chatDevicesService.assertSessionLinkedToActiveDevice.mockRejectedValue(
+        notLinked,
+      );
+
+      await expect(
+        service.createDirectMessage('user-1', 'session-1', {
+          recipientUserId: 'user-2',
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toBe(notLinked);
+
+      expect(
+        chatDevicesService.assertSessionLinkedToActiveDevice,
+      ).toHaveBeenCalledWith('user-1', 'session-1');
+      expect(repository.findUserById).not.toHaveBeenCalled();
+    });
+
+    it('rejects a send from a revoked device, before touching the recipient', async () => {
+      const revoked = new Error('device revoked');
+      chatDevicesService.assertSessionLinkedToActiveDevice.mockRejectedValue(
+        revoked,
+      );
+
+      await expect(
+        service.createDirectMessage('user-1', 'session-1', {
+          recipientUserId: 'user-2',
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toBe(revoked);
+
+      expect(repository.findUserById).not.toHaveBeenCalled();
+    });
+
     it('rejects messaging yourself', async () => {
       await expect(
-        service.createDirectMessage('user-1', {
+        service.createDirectMessage('user-1', 'session-1', {
           recipientUserId: 'user-1',
           message: { clientMessageId: 'client-1' },
         } as any),
@@ -204,7 +250,7 @@ describe('ChatMessagingService', () => {
       repository.findUserById.mockResolvedValue(null);
 
       await expect(
-        service.createDirectMessage('user-1', {
+        service.createDirectMessage('user-1', 'session-1', {
           recipientUserId: 'user-2',
           message: { clientMessageId: 'client-1' },
         } as any),
@@ -218,7 +264,7 @@ describe('ChatMessagingService', () => {
       });
 
       await expect(
-        service.createDirectMessage('user-1', {
+        service.createDirectMessage('user-1', 'session-1', {
           recipientUserId: 'user-2',
           message: { clientMessageId: 'client-1' },
         } as any),
@@ -233,7 +279,7 @@ describe('ChatMessagingService', () => {
       blocksService.isBlocked.mockResolvedValue(true);
 
       await expect(
-        service.createDirectMessage('user-1', {
+        service.createDirectMessage('user-1', 'session-1', {
           recipientUserId: 'user-2',
           message: { clientMessageId: 'client-1' },
         } as any),
@@ -254,7 +300,7 @@ describe('ChatMessagingService', () => {
         conversationId: 'conversation-1',
       });
 
-      const result = await service.createDirectMessage('user-1', {
+      const result = await service.createDirectMessage('user-1', 'session-1', {
         recipientUserId: 'user-2',
         message: { clientMessageId: 'client-1' },
       } as any);
@@ -279,7 +325,7 @@ describe('ChatMessagingService', () => {
       });
 
       await expect(
-        service.createDirectMessage('user-1', {
+        service.createDirectMessage('user-1', 'session-1', {
           recipientUserId: 'user-2',
           message: { clientMessageId: 'client-1' },
         } as any),
@@ -296,7 +342,7 @@ describe('ChatMessagingService', () => {
       repository.findDirectPair.mockResolvedValue(null);
 
       await expect(
-        service.createDirectMessage('user-1', {
+        service.createDirectMessage('user-1', 'session-1', {
           recipientUserId: 'user-2',
           message: { clientMessageId: 'client-1', replyToId: 'message-x' },
         } as any),
@@ -320,7 +366,7 @@ describe('ChatMessagingService', () => {
         message: { id: 'message-1' },
       });
 
-      const result = await service.createDirectMessage('user-1', {
+      const result = await service.createDirectMessage('user-1', 'session-1', {
         recipientUserId: 'user-2',
         message: { clientMessageId: 'client-1' },
       } as any);
@@ -381,7 +427,7 @@ describe('ChatMessagingService', () => {
           message: { id: 'message-1' },
         });
 
-        await service.createDirectMessage('user-1', {
+        await service.createDirectMessage('user-1', 'session-1', {
           recipientUserId: 'user-2',
           message: {
             clientMessageId: 'client-1',
@@ -429,7 +475,7 @@ describe('ChatMessagingService', () => {
         );
 
         await expect(
-          service.createDirectMessage('user-1', {
+          service.createDirectMessage('user-1', 'session-1', {
             recipientUserId: 'user-2',
             message: {
               clientMessageId: 'client-1',
@@ -449,7 +495,7 @@ describe('ChatMessagingService', () => {
           message: { id: 'message-1' },
         });
 
-        await service.createDirectMessage('user-1', {
+        await service.createDirectMessage('user-1', 'session-1', {
           recipientUserId: 'user-2',
           message: {
             clientMessageId: 'client-1',
@@ -475,7 +521,7 @@ describe('ChatMessagingService', () => {
       repository.findDirectPair.mockResolvedValue(null);
 
       await expect(
-        service.createDirectMessage('user-1', {
+        service.createDirectMessage('user-1', 'session-1', {
           recipientUserId: 'user-2',
           message: { clientMessageId: 'client-1' },
         } as any),
@@ -498,7 +544,7 @@ describe('ChatMessagingService', () => {
       followsService.isFollowing.mockResolvedValue({ following: false });
 
       await expect(
-        service.createDirectMessage('user-1', {
+        service.createDirectMessage('user-1', 'session-1', {
           recipientUserId: 'user-2',
           message: { clientMessageId: 'client-1' },
         } as any),
@@ -532,7 +578,7 @@ describe('ChatMessagingService', () => {
         message: { id: 'message-1' },
       });
 
-      await service.createDirectMessage('user-1', {
+      await service.createDirectMessage('user-1', 'session-1', {
         recipientUserId: 'user-2',
         message: { clientMessageId: 'client-1' },
       } as any);
@@ -559,7 +605,7 @@ describe('ChatMessagingService', () => {
         message: { id: 'message-1' },
       });
 
-      await service.createDirectMessage('user-1', {
+      await service.createDirectMessage('user-1', 'session-1', {
         recipientUserId: 'user-2',
         message: { clientMessageId: 'client-1' },
       } as any);
@@ -594,7 +640,7 @@ describe('ChatMessagingService', () => {
         message: { id: 'message-1' },
       });
 
-      const result = await service.createDirectMessage('user-1', {
+      const result = await service.createDirectMessage('user-1', 'session-1', {
         recipientUserId: 'user-2',
         message: { clientMessageId: 'client-1' },
       } as any);
@@ -634,7 +680,7 @@ describe('ChatMessagingService', () => {
         message: { id: 'message-1' },
       });
 
-      await service.createDirectMessage('user-1', {
+      await service.createDirectMessage('user-1', 'session-1', {
         recipientUserId: 'user-2',
         message: { clientMessageId: 'client-1' },
       } as any);
@@ -675,7 +721,7 @@ describe('ChatMessagingService', () => {
       );
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-      await service.createDirectMessage('user-1', {
+      await service.createDirectMessage('user-1', 'session-1', {
         recipientUserId: 'user-2',
         message: { clientMessageId: 'client-1' },
       } as any);
@@ -711,7 +757,7 @@ describe('ChatMessagingService', () => {
           conversationId: 'conversation-1',
         });
 
-        const result = await service.createDirectMessage('user-1', {
+        const result = await service.createDirectMessage('user-1', 'session-1', {
           recipientUserId: 'user-2',
           message: { clientMessageId: 'client-1' },
         } as any);
@@ -749,7 +795,7 @@ describe('ChatMessagingService', () => {
         );
         repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-        const result = await service.createDirectMessage('user-1', {
+        const result = await service.createDirectMessage('user-1', 'session-1', {
           recipientUserId: 'user-2',
           message: { clientMessageId: 'client-1' },
         } as any);
@@ -772,7 +818,7 @@ describe('ChatMessagingService', () => {
         repository.findDirectPair.mockResolvedValueOnce(null);
 
         await expect(
-          service.createDirectMessage('user-1', {
+          service.createDirectMessage('user-1', 'session-1', {
             recipientUserId: 'user-2',
             message: { clientMessageId: 'client-1' },
           } as any),
@@ -788,7 +834,7 @@ describe('ChatMessagingService', () => {
         );
 
         await expect(
-          service.createDirectMessage('user-1', {
+          service.createDirectMessage('user-1', 'session-1', {
             recipientUserId: 'user-2',
             message: { clientMessageId: 'client-1' },
           } as any),
@@ -807,13 +853,47 @@ describe('ChatMessagingService', () => {
       blocksService.isBlocked.mockResolvedValue(false);
     });
 
+    it('rejects a send from a login never linked to a device, before touching the conversation', async () => {
+      const notLinked = new Error('session not linked');
+      chatDevicesService.assertSessionLinkedToActiveDevice.mockRejectedValue(
+        notLinked,
+      );
+
+      await expect(
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toBe(notLinked);
+
+      expect(
+        chatDevicesService.assertSessionLinkedToActiveDevice,
+      ).toHaveBeenCalledWith('user-1', 'session-1');
+      expect(repository.findMessageBySenderClientMessageId).not.toHaveBeenCalled();
+      expect(messageEncryption.preparePayload).not.toHaveBeenCalled();
+    });
+
+    it('rejects a send from a revoked device, before touching the conversation', async () => {
+      const revoked = new Error('device revoked');
+      chatDevicesService.assertSessionLinkedToActiveDevice.mockRejectedValue(
+        revoked,
+      );
+
+      await expect(
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toBe(revoked);
+
+      expect(repository.findMessageBySenderClientMessageId).not.toHaveBeenCalled();
+    });
+
     it('returns duplicate immediately without checking the sender', async () => {
       repository.findMessageBySenderClientMessageId.mockResolvedValue({
         id: 'message-1',
         conversationId: 'conversation-1',
       });
 
-      const result = await service.sendMessage('user-1', 'conversation-1', {
+      const result = await service.sendMessage('user-1', 'session-1', 'conversation-1', {
         message: { clientMessageId: 'client-1' },
       } as any);
 
@@ -827,7 +907,7 @@ describe('ChatMessagingService', () => {
       );
 
       await expect(
-        service.sendMessage('user-1', 'conversation-1', {
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
           message: { clientMessageId: 'client-1' },
         } as any),
       ).rejects.toThrow(NotFoundException);
@@ -839,7 +919,7 @@ describe('ChatMessagingService', () => {
       );
 
       await expect(
-        service.sendMessage('user-1', 'conversation-1', {
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
           message: { clientMessageId: 'client-1' },
         } as any),
       ).rejects.toThrow(ForbiddenException);
@@ -853,7 +933,7 @@ describe('ChatMessagingService', () => {
         ]),
       );
 
-      const rejection = service.sendMessage('user-1', 'conversation-1', {
+      const rejection = service.sendMessage('user-1', 'session-1', 'conversation-1', {
         message: { clientMessageId: 'client-1' },
       } as any);
 
@@ -869,7 +949,7 @@ describe('ChatMessagingService', () => {
       );
 
       await expect(
-        service.sendMessage('user-1', 'conversation-1', {
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
           message: { clientMessageId: 'client-1' },
         } as any),
       ).rejects.toThrow(NotFoundException);
@@ -883,7 +963,7 @@ describe('ChatMessagingService', () => {
       repository.findConversationWithParticipants.mockResolvedValue(null);
 
       await expect(
-        service.sendMessage('user-1', 'conversation-1', {
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
           message: { clientMessageId: 'client-1' },
         } as any),
       ).rejects.toThrow(NotFoundException);
@@ -903,7 +983,7 @@ describe('ChatMessagingService', () => {
       blocksService.isBlocked.mockResolvedValue(true);
 
       await expect(
-        service.sendMessage('user-1', 'conversation-1', {
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
           message: { clientMessageId: 'client-1' },
         } as any),
       ).rejects.toThrow(ForbiddenException);
@@ -924,7 +1004,7 @@ describe('ChatMessagingService', () => {
       );
 
       await expect(
-        service.sendMessage('user-1', 'conversation-1', {
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
           message: { clientMessageId: 'client-1' },
         } as any),
       ).rejects.toThrow(ForbiddenException);
@@ -944,7 +1024,7 @@ describe('ChatMessagingService', () => {
       repository.findSentMessageInConversation.mockResolvedValue(null);
 
       await expect(
-        service.sendMessage('user-1', 'conversation-1', {
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
           message: {
             clientMessageId: 'client-1',
             replyToId: 'missing-message',
@@ -975,7 +1055,7 @@ describe('ChatMessagingService', () => {
         conversationId: 'conversation-1',
       });
 
-      await service.sendMessage('user-1', 'conversation-1', {
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
         message: { clientMessageId: 'client-1', replyToId: 'message-x' },
       } as any);
 
@@ -1000,7 +1080,7 @@ describe('ChatMessagingService', () => {
       );
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-      await service.sendMessage('user-1', 'conversation-1', {
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
         message: { clientMessageId: 'client-1' },
       } as any);
 
@@ -1028,7 +1108,7 @@ describe('ChatMessagingService', () => {
       );
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-      await service.sendMessage('user-1', 'conversation-1', {
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
         message: { clientMessageId: 'client-1' },
       } as any);
 
@@ -1065,7 +1145,7 @@ describe('ChatMessagingService', () => {
       );
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-      await service.sendMessage('user-1', 'conversation-1', {
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
         message: { clientMessageId: 'client-1' },
       } as any);
 
@@ -1115,7 +1195,7 @@ describe('ChatMessagingService', () => {
       );
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-      await service.sendMessage('user-1', 'conversation-1', {
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
         message: { clientMessageId: 'client-1' },
       } as any);
 
@@ -1152,7 +1232,7 @@ describe('ChatMessagingService', () => {
       blocksService.isBlocked.mockResolvedValue(false);
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-      await service.sendMessage('user-1', 'conversation-1', {
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
         message: { clientMessageId: 'client-1' },
       } as any);
 
@@ -1183,7 +1263,7 @@ describe('ChatMessagingService', () => {
       blocksService.isBlocked.mockResolvedValue(false);
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-      await service.sendMessage('user-1', 'conversation-1', {
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
         message: { clientMessageId: 'client-1' },
       } as any);
 
@@ -1208,7 +1288,7 @@ describe('ChatMessagingService', () => {
       );
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-      await service.sendMessage('user-1', 'conversation-1', {
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
         message: { clientMessageId: 'client-1' },
       } as any);
 
@@ -1229,7 +1309,7 @@ describe('ChatMessagingService', () => {
       );
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-      await service.sendMessage('user-1', 'conversation-1', {
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
         message: { clientMessageId: 'client-1' },
       } as any);
 
@@ -1245,7 +1325,7 @@ describe('ChatMessagingService', () => {
       );
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-      await service.sendMessage('user-1', 'conversation-1', {
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
         message: { clientMessageId: 'client-1' },
       } as any);
 
@@ -1264,7 +1344,7 @@ describe('ChatMessagingService', () => {
       );
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-      await service.sendMessage('user-1', 'conversation-1', {
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
         message: { clientMessageId: 'client-1' },
       } as any);
 
@@ -1302,7 +1382,7 @@ describe('ChatMessagingService', () => {
       ]);
       repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-      await service.sendMessage('user-1', 'conversation-1', {
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
         message: {
           clientMessageId: 'client-1',
           media: [{ mediaUploadId: 'upload-1', sortOrder: 0 }],
@@ -1350,7 +1430,7 @@ describe('ChatMessagingService', () => {
       );
 
       await expect(
-        service.sendMessage('user-1', 'conversation-1', {
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
           message: {
             clientMessageId: 'client-1',
             media: [{ mediaUploadId: 'upload-1' }],
@@ -1369,7 +1449,7 @@ describe('ChatMessagingService', () => {
       });
 
       await expect(
-        service.sendMessage('user-1', 'conversation-1', {
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
           message: { clientMessageId: 'client-1' },
         } as any),
       ).rejects.toThrow(ConflictException);
@@ -1397,7 +1477,7 @@ describe('ChatMessagingService', () => {
           conversationId: 'conversation-1',
         });
 
-        const result = await service.sendMessage('user-1', 'conversation-1', {
+        const result = await service.sendMessage('user-1', 'session-1', 'conversation-1', {
           message: { clientMessageId: 'client-1' },
         } as any);
 
@@ -1424,7 +1504,7 @@ describe('ChatMessagingService', () => {
           conversationId: 'conversation-1',
         });
 
-        const result = await service.sendMessage('user-1', 'conversation-1', {
+        const result = await service.sendMessage('user-1', 'session-1', 'conversation-1', {
           message: { clientMessageId: 'client-1' },
         } as any);
 
@@ -1438,7 +1518,7 @@ describe('ChatMessagingService', () => {
         repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
 
         await expect(
-          service.sendMessage('user-1', 'conversation-1', {
+          service.sendMessage('user-1', 'session-1', 'conversation-1', {
             message: { clientMessageId: 'client-1' },
           } as any),
         ).rejects.toThrow(ConflictException);
@@ -1449,7 +1529,7 @@ describe('ChatMessagingService', () => {
         repository.createMessage.mockRejectedValue(unrelated);
 
         await expect(
-          service.sendMessage('user-1', 'conversation-1', {
+          service.sendMessage('user-1', 'session-1', 'conversation-1', {
             message: { clientMessageId: 'client-1' },
           } as any),
         ).rejects.toBe(unrelated);

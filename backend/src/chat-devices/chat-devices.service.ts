@@ -25,6 +25,7 @@ import { SessionTerminator } from '../auth/session-terminator.service';
 import { env } from '../config/env';
 import { DeviceRevokedException } from '../common/exceptions/device-revoked.exception';
 import { DeviceNotFoundException } from '../common/exceptions/device-not-found.exception';
+import { SessionNotLinkedException } from '../common/exceptions/session-not-linked.exception';
 import {
   isValidDeviceSignature,
   isValidLinkChallenge,
@@ -455,6 +456,31 @@ export class ChatDevicesService {
     }
 
     return device;
+  }
+
+  /**
+   * Confirms this login is linked to a device (see linkSessionToDevice) and that
+   * device is still owned and active - the gate a message-send endpoint runs
+   * before accepting ciphertext. Membership work only schedules the Remove Commit
+   * that evicts a revoked device's leaf; it doesn't block sends before that
+   * Commit lands, so a revoked device's still-valid session cookie could
+   * otherwise keep submitting encrypted messages in the meantime.
+   */
+  async assertSessionLinkedToActiveDevice(
+    userId: string,
+    sessionId: string,
+  ): Promise<string> {
+    const deviceId = await this.chatDevicesRepository.findSessionDeviceId(
+      sessionId,
+      userId,
+    );
+
+    if (!deviceId) {
+      throw new SessionNotLinkedException();
+    }
+
+    await this.assertOwnActiveDevice(userId, deviceId);
+    return deviceId;
   }
 
   /** At the cap the stalest device gives way, like re-linking on WhatsApp; refused only when all are in recent use. */

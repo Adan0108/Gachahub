@@ -13,7 +13,7 @@ function fakeSyncEngine() {
   return {
     getCurrentEpoch: vi.fn(),
     createGroup: vi.fn(),
-    seedNewGroup: vi.fn(),
+    seedNewGroupWithMembers: vi.fn(),
     encryptMessage: vi.fn(),
     reconcileMembership: vi.fn(),
   };
@@ -78,7 +78,7 @@ describe('sendEncryptedChatMessage', () => {
     );
 
     expect(engine.createGroup).toHaveBeenCalledWith('conv-1');
-    expect(engine.seedNewGroup).toHaveBeenCalledWith('conv-1', 'user-bob');
+    expect(engine.seedNewGroupWithMembers).toHaveBeenCalledWith('conv-1', ['user-bob']);
   });
 
   describe('when a member is still being removed', () => {
