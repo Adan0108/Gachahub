@@ -518,6 +518,8 @@ export class ChatInboxService {
       id: conversation.id,
       type: conversation.type,
       status: conversation.status,
+      title: conversation.title,
+      photoUrl: conversation.photoUrl,
       participantState: currentParticipant?.state ?? null,
       pinnedAt: currentParticipant?.pinnedAt ?? null,
       participants: conversation.participants.map((participant) =>

@@ -326,6 +326,14 @@ export class ChatRepository {
       if (promoted.count !== 1 || demoted.count !== 1) {
         throw new ConflictException('Group membership changed, try again');
       }
+
+      // A $transaction callback that resolves to undefined sends an empty response body -
+      // fetch's response.json() throws on that client side, even though the transfer itself committed.
+      return tx.chatParticipant.findUniqueOrThrow({
+        where: {
+          conversationId_userId: { conversationId, userId: newOwnerUserId },
+        },
+      });
     });
   }
 

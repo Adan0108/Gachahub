@@ -598,6 +598,27 @@ describe('ChatInboxService', () => {
       );
       expect(otherParticipant?.state).toBe('ACTIVE');
     });
+
+    // regression: title/photoUrl come back from Prisma on every conversation
+    // (include doesn't restrict scalars) but were being dropped when shaping
+    // the summary, leaving the frontend with no name to show for a group.
+    it('includes a group conversation title and photo in the summary', async () => {
+      repository.findInboxConversations.mockResolvedValue([
+        {
+          ...buildConversation('group-1', new Date('2024-01-01'), null),
+          type: 'GROUP',
+          title: 'Team Build Chat',
+          photoUrl: 'https://cdn.gachahub.com/chat/groups/team-build.png',
+        },
+      ]);
+
+      const [result] = await service.listConversations('user-1');
+
+      expect(result.title).toBe('Team Build Chat');
+      expect(result.photoUrl).toBe(
+        'https://cdn.gachahub.com/chat/groups/team-build.png',
+      );
+    });
   });
 
   describe('listMessageRequests', () => {
