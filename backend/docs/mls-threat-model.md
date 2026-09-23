@@ -167,6 +167,16 @@ Written down so nobody assumes more privacy than actually exists:
   message text. This is real added scope for the frontend/backend media
   flow, not a small tweak — needs its own pass once the core message
   encryption is working.
+
+  **Superseded (2026-09-23):** not built, and deliberately deferred rather
+  than in progress. Chat messages still attach `mediaUploadId`s, and
+  `uploadPostMedia`/`uploadToCloudinary` (`frontend/lib/api.js`) still post
+  raw files straight to Cloudinary. This is the one gap of the four
+  2026-09-14 decisions this doc doesn't otherwise mark superseded or done -
+  written down explicitly so "required for v1" above doesn't read as
+  current status. Media sent through chat today is plaintext to the
+  storage provider, same as any other attachment on this app; nothing in
+  the product UI currently says so.
 - "Delete for everyone" only works if every recipient's client cooperates
   (deletes its local plaintext copy). The server can't force this. UI copy
   must not promise permanent deletion from other people's devices.
@@ -190,11 +200,13 @@ traces already are, not trusted to "just not come up."
    needs a queued/retry design for "no existing member is online at
    accept-time" (see §3).
 4. Media encryption — required for v1. Files encrypted client-side before
-   upload, key travels inside the MLS message.
+   upload, key travels inside the MLS message. **Superseded (2026-09-23):**
+   deferred, not built - see §6.
 
-All four decisions above are locked in. Remaining open question before
-coding starts: the reordered plan's step 1 (`MlsClient` contract tests)
-and step 2 (library bake-off) are next.
+All four decisions above are locked in as the intended design; #4 is not yet
+implemented (see §6). Remaining open question before coding starts: the
+reordered plan's step 1 (`MlsClient` contract tests) and step 2 (library
+bake-off) are next.
 
 ## 8. Update (2026-09-22): what the running code actually defends
 
