@@ -30,6 +30,7 @@ describe('ChatDevicesService', () => {
     findLeastRecentlySeenActiveDevice: jest.fn(),
     findLoginsOfDevice: jest.fn(),
     linkSession: jest.fn(),
+    relinkSession: jest.fn(),
     findSessionDeviceId: jest.fn(),
     findParticipantStates: jest.fn(),
   };
@@ -847,6 +848,61 @@ describe('ChatDevicesService', () => {
           proof(challengeFor()),
         ),
       ).rejects.toThrow(ConflictException);
+    });
+
+    // regression: a login's device link is write-once, so once its device is retired (dormancy,
+    // cap eviction) every future device this same browser provisions hit the same conflict
+    // forever - the login could never send again short of signing out.
+    it('relinks a login whose device was retired, instead of leaving it stuck', async () => {
+      repository.linkSession.mockResolvedValue({ count: 0 });
+      repository.findSessionDeviceId.mockResolvedValue('device-old');
+      repository.findById.mockImplementation((deviceId: string) =>
+        Promise.resolve(
+          deviceId === 'device-old'
+            ? { ...ownDevice, id: 'device-old', revokedAt: new Date() }
+            : ownDevice,
+        ),
+      );
+      repository.relinkSession.mockResolvedValue({ count: 1 });
+
+      await expect(
+        service.linkSessionToDevice(
+          'user-1',
+          'device-1',
+          'session-1',
+          proof(challengeFor()),
+        ),
+      ).resolves.toBeDefined();
+
+      expect(repository.relinkSession).toHaveBeenCalledWith(
+        'session-1',
+        'user-1',
+        'device-1',
+      );
+    });
+
+    it('relinks a login whose device row is gone entirely', async () => {
+      repository.linkSession.mockResolvedValue({ count: 0 });
+      repository.findSessionDeviceId.mockResolvedValue('device-old');
+      repository.findById.mockImplementation((deviceId: string) =>
+        Promise.resolve(deviceId === 'device-old' ? null : ownDevice),
+      );
+      repository.relinkSession.mockResolvedValue({ count: 1 });
+
+      await expect(
+        service.linkSessionToDevice(
+          'user-1',
+          'device-1',
+          'session-1',
+          proof(challengeFor()),
+        ),
+      ).resolves.toBeDefined();
+
+      expect(repository.relinkSession).toHaveBeenCalledWith(
+        'session-1',
+        'user-1',
+        'device-1',
+      );
     });
   });
 

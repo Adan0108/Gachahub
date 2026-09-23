@@ -195,10 +195,27 @@ export class ChatDevicesRepository {
     });
   }
 
-  /** Ties a login to the chat device of its browser, once: a link can never be moved to another device. */
+  /**
+   * Ties a login to the chat device of its browser, once. A link is only ever moved afterward via
+   * relinkSession below, and only when the device it currently points to is dead.
+   */
   linkSession(sessionId: string, userId: string, deviceId: string) {
     return this.prisma.session.updateMany({
       where: { id: sessionId, userId, chatDeviceId: null },
+      data: { chatDeviceId: deviceId },
+    });
+  }
+
+  /**
+   * Repoints a login already linked to a device that's since been revoked or gone, to a live one -
+   * the one case the write-once link in linkSession is allowed to move. Without this, a login
+   * whose device got retired (dormancy, cap eviction) could never link a replacement: every future
+   * device this browser provisions would hit the same write-once conflict forever, with no way
+   * back short of signing out.
+   */
+  relinkSession(sessionId: string, userId: string, deviceId: string) {
+    return this.prisma.session.updateMany({
+      where: { id: sessionId, userId },
       data: { chatDeviceId: deviceId },
     });
   }

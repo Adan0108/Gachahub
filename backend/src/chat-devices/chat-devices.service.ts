@@ -195,8 +195,25 @@ export class ChatDevicesService {
         userId,
       );
       if (current !== deviceId) {
-        throw new ConflictException(
-          'This login is already linked to another device',
+        const currentDevice = current
+          ? await this.chatDevicesRepository.findById(current)
+          : null;
+
+        // The link is write-once so revoking a device ends the login it's tied to - but that
+        // only works while the linked device is still the one actually being used. Once it's
+        // retired (dormancy, cap eviction) or gone outright, refusing to move the link would
+        // leave this login permanently unable to send: every future device this browser
+        // provisions would hit this same conflict, with no way back short of signing out.
+        if (currentDevice && !currentDevice.revokedAt) {
+          throw new ConflictException(
+            'This login is already linked to another device',
+          );
+        }
+
+        await this.chatDevicesRepository.relinkSession(
+          sessionId,
+          userId,
+          deviceId,
         );
       }
     }
