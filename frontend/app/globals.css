@@ -1737,6 +1737,248 @@ button {
   color: white;
 }
 
+.admin-page-count {
+  padding: 7px 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 999px;
+  color: var(--admin-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.admin-type-badge,
+.admin-priority {
+  display: inline-flex;
+  padding: 4px 7px;
+  border: 1px solid #444b59;
+  border-radius: 6px;
+  background: #232833;
+  color: #bbc2cf;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.admin-priority-high {
+  border-color: #783a4a;
+  background: #301921;
+  color: #ff94aa;
+}
+
+.admin-priority-medium {
+  border-color: #6d582d;
+  background: #2d2719;
+  color: #e2c56f;
+}
+
+.admin-status-open,
+.admin-status-in_review {
+  border-color: #6c4e2c;
+  background: #2e2318;
+  color: #e5b56c;
+}
+
+.admin-status-resolved {
+  border-color: #315167;
+  background: #172934;
+  color: #7bc7ef;
+}
+
+.admin-status-banned {
+  border-color: #783a4a;
+  background: #301921;
+  color: #ff94aa;
+}
+
+.admin-content-cell,
+.admin-user-cell > div {
+  display: grid;
+  gap: 3px;
+}
+
+.admin-content-cell {
+  min-width: 240px;
+}
+
+.admin-content-cell small,
+.admin-user-cell small {
+  color: var(--admin-muted);
+  font-size: 10px;
+}
+
+.admin-action-dialog {
+  width: min(500px, 100%);
+  padding: 24px;
+}
+
+.admin-action-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.admin-action-heading button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #3a4352;
+  border-radius: 8px;
+  background: #202631;
+  color: #cdd2dc;
+}
+
+.admin-action-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #7d3b4a;
+  border-radius: 50%;
+  background: #311921;
+  color: #ff8fa5;
+}
+
+.admin-action-icon-primary {
+  border-color: #584995;
+  background: #251e40;
+  color: #b4a3ff;
+}
+
+.admin-action-dialog h2 {
+  margin: 17px 0 6px;
+}
+
+.admin-action-dialog > p:not(.admin-form-error) {
+  margin: 0 0 18px;
+  color: var(--admin-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.admin-dialog-fields {
+  display: grid;
+  gap: 13px;
+  margin-bottom: 18px;
+}
+
+.admin-dialog-fields label {
+  display: grid;
+  gap: 7px;
+}
+
+.admin-dialog-fields label > span {
+  color: #c7ccd6;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.admin-dialog-fields textarea,
+.admin-dialog-fields select {
+  width: 100%;
+  border: 1px solid #343c4a;
+  border-radius: 8px;
+  padding: 10px 11px;
+  outline: 0;
+  background: #11151c;
+  color: var(--admin-text);
+  font: inherit;
+}
+
+.admin-dialog-fields textarea:focus,
+.admin-dialog-fields select:focus {
+  border-color: #7c5cff;
+  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.12);
+}
+
+.admin-moderation-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.admin-moderation-summary article {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 13px;
+  padding: 18px;
+  border: 1px solid var(--admin-line);
+  border-radius: 12px;
+  background: var(--admin-panel);
+}
+
+.admin-moderation-summary article > span {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: #25203c;
+  color: #ae9aff;
+}
+
+.admin-moderation-summary article > div {
+  display: grid;
+  gap: 3px;
+}
+
+.admin-moderation-summary small {
+  color: var(--admin-muted);
+  font-size: 10px;
+}
+
+.admin-moderation-summary strong {
+  font-size: 19px;
+}
+
+.admin-moderation-summary a,
+.admin-panel-heading a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #a995ff;
+  font-size: 10px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.admin-review-list {
+  display: grid;
+  margin: 0;
+  padding: 0 18px;
+  list-style: none;
+}
+
+.admin-review-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--admin-line);
+}
+
+.admin-review-list li:last-child {
+  border-bottom: 0;
+}
+
+.admin-review-list li > div {
+  display: grid;
+  gap: 3px;
+}
+
+.admin-review-list small {
+  color: var(--admin-muted);
+  font-size: 10px;
+}
+
+.admin-review-list strong {
+  color: var(--admin-muted);
+  font-size: 10px;
+}
+
 .admin-form-actions {
   display: flex;
   justify-content: flex-end;
@@ -1844,6 +2086,10 @@ button {
   .admin-scope-picker {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .admin-moderation-summary {
+    grid-template-columns: 1fr;
   }
 }
 
