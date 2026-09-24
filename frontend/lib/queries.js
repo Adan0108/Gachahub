@@ -4,6 +4,7 @@ export const queryKeys = {
   health: ["health"],
   home: (search) => ["home", { search }],
   games: (search) => ["games", { search }],
+  adminGames: (search, status) => ["admin", "games", { search, status }],
   community: (slug) => ["community", slug],
   categories: (slug) => ["community-categories", slug],
   currentUser: ["current-user"],
@@ -39,6 +40,12 @@ export const queries = {
     queryFn: ({ signal }) => api.getGames({ status: "ACTIVE", search, limit: 20 }, { signal }),
     retry: 1,
     staleTime: 30_000,
+  }),
+  adminGames: (search = "", status = "") => ({
+    queryKey: queryKeys.adminGames(search, status),
+    queryFn: ({ signal }) => api.getGames({ search, status, page: 1, limit: 100 }, { signal }),
+    retry: 1,
+    staleTime: 15_000,
   }),
   community: (slug) => ({
     queryKey: queryKeys.community(slug),

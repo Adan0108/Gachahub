@@ -357,6 +357,9 @@ export const api = {
   },
   getCommunity: async (slug) => normalizeGame(await request(backendRoutes.game(slug))),
   getCategories: (gameSlug) => request(backendRoutes.gameCategories(gameSlug)),
+  createGame: (game) => mutation(backendRoutes.games, game),
+  updateGame: (gameId, updates) =>
+    mutation(backendRoutes.game(gameId), updates, { method: "PATCH" }),
   getCurrentUser: (options = {}) =>
     request(backendRoutes.currentUser, { ...options, allowUnauthorized: true }),
   getProfile: (options = {}) => api.getCurrentUser(options),
