@@ -8,6 +8,7 @@ export const queryKeys = {
   community: (slug) => ["community", slug],
   categories: (slug) => ["community-categories", slug],
   adminCategories: (slug, active) => ["admin", "categories", slug, { active }],
+  adminModerators: (slug) => ["admin", "moderators", slug],
   currentUser: ["current-user"],
   profile: ["current-user"],
   myPosts: ["posts", "mine"],
@@ -64,6 +65,13 @@ export const queries = {
     queryKey: queryKeys.adminCategories(slug, active),
     queryFn: ({ signal }) =>
       api.getCategories(slug, active === "" ? {} : { isActive: active }, { signal }),
+    enabled: Boolean(slug),
+    retry: 1,
+    staleTime: 15_000,
+  }),
+  adminModerators: (slug) => ({
+    queryKey: queryKeys.adminModerators(slug),
+    queryFn: ({ signal }) => api.getGameModerators(slug, { signal }),
     enabled: Boolean(slug),
     retry: 1,
     staleTime: 15_000,

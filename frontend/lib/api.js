@@ -16,6 +16,9 @@ export const backendRoutes = {
   games: "/games",
   game: (slug) => `/games/${encodePathParam(slug)}`,
   gameCategories: (gameSlug) => `/games/${encodePathParam(gameSlug)}/categories`,
+  gameModerators: (gameSlug) => `/games/${encodePathParam(gameSlug)}/moderators`,
+  gameModerator: (gameSlug, userId) =>
+    `/games/${encodePathParam(gameSlug)}/moderators/${encodePathParam(userId)}`,
   currentUser: "/users/me",
   signInEmail: "/api/auth/sign-in/email",
   signUpEmail: "/api/auth/sign-up/email",
@@ -362,6 +365,12 @@ export const api = {
     mutation(backendRoutes.gameCategories(gameSlug), category),
   updateCategory: (categoryId, updates) =>
     mutation(`/game-categories/${encodePathParam(categoryId)}`, updates, { method: "PATCH" }),
+  getGameModerators: (gameSlug, options = {}) =>
+    request(backendRoutes.gameModerators(gameSlug), options),
+  assignGameModerator: (gameSlug, target) =>
+    mutation(backendRoutes.gameModerators(gameSlug), target),
+  removeGameModerator: (gameSlug, userId) =>
+    mutation(backendRoutes.gameModerator(gameSlug, userId), undefined, { method: "DELETE" }),
   createGame: (game) => mutation(backendRoutes.games, game),
   updateGame: (gameId, updates) =>
     mutation(backendRoutes.game(gameId), updates, { method: "PATCH" }),
