@@ -1,8 +1,9 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import { FiEdit2, FiPlus, FiSearch, FiX } from "react-icons/fi";
+import { FiEdit2, FiList, FiPlus, FiSearch, FiX } from "react-icons/fi";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
 import { useRequireAdmin } from "../../../hooks/useRequireAdmin";
@@ -312,6 +313,13 @@ export default function AdminCommunitiesPage() {
                       </span>
                     </td>
                     <td>
+                      <Link
+                        aria-label={`Manage categories for ${game.name}`}
+                        className="admin-icon-button"
+                        href={`/admin/communities/${encodeURIComponent(game.slug)}/categories`}
+                      >
+                        <FiList />
+                      </Link>
                       <button
                         aria-label={`Edit ${game.name}`}
                         className="admin-icon-button"

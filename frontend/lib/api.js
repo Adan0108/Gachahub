@@ -356,7 +356,12 @@ export const api = {
     };
   },
   getCommunity: async (slug) => normalizeGame(await request(backendRoutes.game(slug))),
-  getCategories: (gameSlug) => request(backendRoutes.gameCategories(gameSlug)),
+  getCategories: (gameSlug, query = {}, options = {}) =>
+    request(withQuery(backendRoutes.gameCategories(gameSlug), query), options),
+  createCategory: (gameSlug, category) =>
+    mutation(backendRoutes.gameCategories(gameSlug), category),
+  updateCategory: (categoryId, updates) =>
+    mutation(`/game-categories/${encodePathParam(categoryId)}`, updates, { method: "PATCH" }),
   createGame: (game) => mutation(backendRoutes.games, game),
   updateGame: (gameId, updates) =>
     mutation(backendRoutes.game(gameId), updates, { method: "PATCH" }),

@@ -1457,6 +1457,10 @@ button {
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
 }
 
+.admin-dialog-compact {
+  width: min(620px, 100%);
+}
+
 .admin-dialog-heading {
   display: flex;
   align-items: center;
@@ -1487,6 +1491,73 @@ button {
   color: #c7ccd6;
   font-size: 11px;
   font-weight: 800;
+}
+
+.admin-checkbox {
+  display: flex !important;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px !important;
+}
+
+.admin-checkbox input {
+  width: 16px;
+  min-height: 16px;
+  accent-color: #7c5cff;
+}
+
+.admin-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 20px;
+  color: var(--admin-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.admin-back-link:hover {
+  color: var(--admin-text);
+}
+
+.admin-toolbar-compact {
+  grid-template-columns: 220px 1fr;
+}
+
+.admin-category-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 150px;
+}
+
+.admin-category-name > span {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid #3c4352;
+  border-radius: 7px;
+  background: #222733;
+  color: #b7a9ff;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.admin-description-cell {
+  max-width: 340px;
+  overflow: hidden;
+  color: var(--admin-muted);
+  text-overflow: ellipsis;
+}
+
+.admin-table td:last-child {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
 }
 
 .admin-form textarea {

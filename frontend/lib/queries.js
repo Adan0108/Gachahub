@@ -7,6 +7,7 @@ export const queryKeys = {
   adminGames: (search, status) => ["admin", "games", { search, status }],
   community: (slug) => ["community", slug],
   categories: (slug) => ["community-categories", slug],
+  adminCategories: (slug, active) => ["admin", "categories", slug, { active }],
   currentUser: ["current-user"],
   profile: ["current-user"],
   myPosts: ["posts", "mine"],
@@ -58,6 +59,14 @@ export const queries = {
     queryFn: () => api.getCategories(slug),
     retry: 1,
     staleTime: 30_000,
+  }),
+  adminCategories: (slug, active = "") => ({
+    queryKey: queryKeys.adminCategories(slug, active),
+    queryFn: ({ signal }) =>
+      api.getCategories(slug, active === "" ? {} : { isActive: active }, { signal }),
+    enabled: Boolean(slug),
+    retry: 1,
+    staleTime: 15_000,
   }),
   currentUser: () => ({
     queryKey: queryKeys.currentUser,
