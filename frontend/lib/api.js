@@ -1,4 +1,10 @@
 import { mockCategories, mockGames, posts } from "./mockData";
+import {
+  adminContentMock,
+  adminOverviewMock,
+  adminReportsMock,
+  adminUsersMock,
+} from "./adminMockData";
 
 export const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000"
@@ -333,6 +339,10 @@ function encryptedMessagePayload({
   };
 }
 
+function cloneAdminMock(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 export const api = {
   baseUrl: API_BASE_URL,
   usingMocks: USE_MOCKS,
@@ -466,6 +476,26 @@ export const api = {
       meta: games.meta,
     };
   },
+  getAdminOverview: async () => cloneAdminMock(adminOverviewMock),
+  listReports: async () => cloneAdminMock(adminReportsMock),
+  resolveReport: async (reportId, { resolution, note = "" }) => ({
+    id: reportId,
+    status: "RESOLVED",
+    resolution,
+    note,
+    resolvedAt: new Date().toISOString(),
+  }),
+  hidePost: async (postId, { reason }) => ({ id: postId, status: "HIDDEN", reason }),
+  hideComment: async (commentId, { reason }) => ({ id: commentId, status: "HIDDEN", reason }),
+  listAdminUsers: async () => cloneAdminMock(adminUsersMock),
+  banUser: async (userId, { reason, durationDays = null }) => ({
+    id: userId,
+    status: "BANNED",
+    reason,
+    durationDays,
+    bannedAt: new Date().toISOString(),
+  }),
+  listAdminContent: async () => cloneAdminMock(adminContentMock),
   getChatConversations: () => request(backendRoutes.chatConversations),
   getChatRequests: () => request(backendRoutes.chatRequests),
   getChatMessages: (conversationId, query = {}) =>

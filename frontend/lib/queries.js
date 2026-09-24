@@ -15,6 +15,7 @@ export const queryKeys = {
   followStatus: (userId) => ["follow-status", userId],
   comments: (postId) => ["comments", postId],
   replies: (commentId) => ["comment-replies", commentId],
+  adminOverview: ["admin", "overview"],
   chatConversations: ["chat", "conversations"],
   chatRequests: ["chat", "requests"],
   chatMessages: (conversationId) => ["chat", "messages", conversationId],
@@ -106,6 +107,12 @@ export const queries = {
     enabled: Boolean(commentId),
     retry: 1,
     staleTime: 15_000,
+  }),
+  adminOverview: () => ({
+    queryKey: queryKeys.adminOverview,
+    queryFn: api.getAdminOverview,
+    retry: 1,
+    staleTime: 30_000,
   }),
   chatConversations: () => ({
     queryKey: queryKeys.chatConversations,

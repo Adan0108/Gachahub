@@ -80,6 +80,7 @@ export function AppShell({ children, initialTheme = "dark" }) {
   const pathname = usePathname();
   const studio = pathname === "/studio";
   const auth = pathname === "/login" || pathname === "/register";
+  const admin = pathname.startsWith("/admin");
 
   useEffect(() => {
     if (menu) {
@@ -102,6 +103,8 @@ export function AppShell({ children, initialTheme = "dark" }) {
   if (auth) {
     return <div className="auth-shell">{children}</div>;
   }
+
+  if (admin) return children;
 
   return (
     <div className={`app-shell ${studio ? "studio-shell" : ""}`}>
