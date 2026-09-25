@@ -365,23 +365,27 @@ export default function ChatPage() {
         <aside className="panel chat-sidebar">
           <div className="chat-sidebar-head">
             <span>Conversations</span>
-            <div className="chat-sidebar-actions">
+            <div className="chat-sidebar-tools">
               <button
                 aria-label="Your devices"
+                title="Your devices"
                 onClick={() => setIsDevicesOpen(true)}
                 ref={devicesButtonRef}
                 type="button"
               >
-                <FiMonitor /> Devices
+                <FiMonitor />
               </button>
               <button
                 aria-label="Message backup"
+                title="Message backup"
                 onClick={() => setIsBackupOpen(true)}
                 ref={backupButtonRef}
                 type="button"
               >
-                <FiDatabase /> Backup
+                <FiDatabase />
               </button>
+            </div>
+            <div className="chat-sidebar-actions">
               <button
                 aria-label="New chat"
                 onClick={() => {
