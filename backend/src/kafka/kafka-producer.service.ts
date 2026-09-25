@@ -6,8 +6,17 @@ import {
 } from '@nestjs/common';
 import { Kafka, type Producer } from 'kafkajs';
 
-import type { DomainEvent } from '../domain-events/domain-event.types';
+import type { DomainEventType } from '../domain-events/domain-event.types';
 import { resolveDomainEventTopic } from './kafka-topics';
+
+export interface KafkaDomainEvent {
+  eventId: string;
+  type: DomainEventType;
+  version: number;
+  occurredAt: string;
+  aggregateId: string;
+  payload: unknown;
+}
 
 @Injectable()
 export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
@@ -49,7 +58,7 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('Kafka producer disconnected');
   }
 
-  async publish(event: DomainEvent): Promise<void> {
+  async publish(event: KafkaDomainEvent): Promise<void> {
     const topic = resolveDomainEventTopic(event.type);
 
     await this.producer.send({
