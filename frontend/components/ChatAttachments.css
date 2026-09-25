@@ -1,0 +1,170 @@
+.chat-attachments {
+  display: grid;
+  gap: 6px;
+  width: 320px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.chat-message:has(.chat-attachments) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px 6px 8px;
+}
+
+.chat-message:has(.chat-attachments) > small {
+  padding: 0 4px;
+}
+
+.chat-attachment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 4px;
+}
+
+.chat-attachment-grid > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-attachment-grid .chat-attachment-action {
+  justify-self: start;
+  border: 0;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+}
+
+.chat-attachment-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 80px;
+  max-height: 320px;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--muted-strong);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chat-attachment-tile img,
+.chat-attachment-tile video {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+}
+
+.chat-attachment-tile video {
+  width: 100%;
+  height: auto;
+  max-height: 320px;
+  object-fit: contain;
+  background: #000;
+}
+
+.chat-attachment-tile.busy {
+  cursor: progress;
+}
+
+.chat-attachment-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 26px;
+}
+
+.chat-attachment-status {
+  padding: 8px;
+  text-align: center;
+}
+
+.chat-attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+
+.chat-attachment-chip > svg {
+  flex: 0 0 auto;
+}
+
+.chat-attachment-chip .chat-attachment-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-attachment-chip small {
+  flex: 0 0 auto;
+}
+
+.chat-attachment-action {
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chat-attachment-action:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.chat-attachment-error {
+  color: var(--pink);
+  font-size: 11px;
+}
+
+.chat-message-unsupported {
+  font-style: italic;
+  opacity: 0.8;
+}
+
+.chat-composer {
+  flex-wrap: wrap;
+}
+
+/* first child of the composer form, on its own row above the input */
+.chat-attachment-tray {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-attachment-tray .chat-attachment-chip {
+  max-width: 240px;
+}
+
+.chat-composer .chat-attachment-remove {
+  width: auto;
+  height: auto;
+  padding: 2px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.chat-composer .chat-attach-button {
+  background: transparent;
+  color: var(--muted-strong);
+}

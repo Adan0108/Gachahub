@@ -19,6 +19,12 @@ import { CommentsModule } from './comments/comments.module';
 import { FollowsModule } from './follows/follows.module';
 import { FeedModule } from './feed/feed.module';
 import { CommonModule } from './common/common.module';
+import { ChatDevicesModule } from './chat-devices/chat-devices.module';
+import { ChatBackupModule } from './chat-backup/chat-backup.module';
+import { MlsHandshakesModule } from './mls-handshakes/mls-handshakes.module';
+import { MlsRetentionModule } from './mls-retention/mls-retention.module';
+import { DevModule } from './dev/dev.module';
+import { env } from './config/env';
 
 /**
  * Root application module.
@@ -35,18 +41,28 @@ import { CommonModule } from './common/common.module';
     CloudinaryModule,
     PrismaModule,
     RedisModule,
-    AuthModule.forRoot({ auth }),
+    // MLS commits carry welcomes plus a group snapshot; express's default 100 KB json cap would refuse them.
+    AuthModule.forRoot({ auth, bodyParser: { json: { limit: '2mb' } } }),
     HealthModule,
     UsersModule,
     GamesModule,
     GameCategoriesModule,
     GameModeratorsModule,
     ChatModule,
+    ChatDevicesModule,
+    ChatBackupModule,
+    MlsHandshakesModule,
+    MlsRetentionModule,
     MediaModule,
     PostsModule,
     CommentsModule,
     FollowsModule,
     FeedModule,
+    // Test-user spawn/impersonate/delete tooling - registered only in
+    // development so the routes don't exist at all (not just guarded) once
+    // NODE_ENV is anything else. Fail-closed on purpose: this module can
+    // mint a session for any user id with no password check.
+    ...(env.nodeEnv === 'development' ? [DevModule] : []),
   ],
   controllers: [AppController],
   providers: [AppService],

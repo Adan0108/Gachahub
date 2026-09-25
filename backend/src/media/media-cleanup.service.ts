@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { DiscordLoggerService } from '../common/discord/discord-logger.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { MediaRepository } from './media.repository';
+import { cloudinaryResourceTypeFor } from './opaque-blob';
 
 @Injectable()
 export class MediaCleanupService {
@@ -14,10 +15,7 @@ export class MediaCleanupService {
     private readonly discordLogger: DiscordLoggerService,
   ) {}
 
-  /**
-   * Cron entry point, delegates to runCleanup and reports any failure
-   * to discord instead of letting it fail silently
-   */
+  /** Cron entry point; reports a runCleanup failure to Discord. */
   @Cron(CronExpression.EVERY_HOUR)
   async cleanupExpiredUploads(): Promise<void> {
     try {
@@ -49,16 +47,7 @@ export class MediaCleanupService {
     }
   }
 
-  /**
-   * Removes orphaned uploads that were never attached to a Post, Comment
-   * or ChatMessage.
-   *
-   * The job processes a small batch so one run cannot monopolize the
-   * application or Cloudinary API.
-   *
-   * Stale CLEANING rows are retried because a previous cleanup attempt
-   * may have failed or the application may have stopped mid-cleanup.
-   */
+  /** Removes orphaned uploads never attached, in small batches; stale CLEANING rows are retried. */
   private async runCleanup(): Promise<void> {
     const expiryHours = Number(process.env.MEDIA_UPLOAD_EXPIRES_HOURS ?? 24);
 
@@ -68,19 +57,10 @@ export class MediaCleanupService {
 
     const now = Date.now();
 
-    /**
-     * INITIATED and UPLOADED uploads older than this are considered
-     * orphaned and eligible for cleanup.
-     */
+    /** INITIATED and UPLOADED uploads older than this count as orphaned. */
     const normalCutoff = new Date(now - expiryHours * 60 * 60 * 1000);
 
-    /**
-     * CLEANING normally lasts only a few seconds.
-     *
-     * If a row has remained CLEANING for more than one hour, a previous
-     * cleanup attempt likely failed or the process stopped before the
-     * database could be updated to DELETED.
-     */
+    /** CLEANING rows older than an hour are treated as failed attempts and retried. */
     const cleaningCutoff = new Date(now - 60 * 60 * 1000);
 
     const uploads = await this.mediaRepository.findExpiredUploads(
@@ -91,12 +71,7 @@ export class MediaCleanupService {
 
     for (const upload of uploads) {
       try {
-        /**
-         * Normal expired uploads must first be atomically claimed.
-         *
-         * This prevents an upload from being attached to a feature while
-         * the cleanup job is deleting the corresponding Cloudinary asset.
-         */
+        // Expired uploads are claimed atomically so they cannot be attached mid-delete.
         if (upload.status !== 'CLEANING') {
           const claimed = await this.mediaRepository.claimForCleanup(upload.id);
 
@@ -104,12 +79,7 @@ export class MediaCleanupService {
             continue;
           }
         } else {
-          /**
-           * A stale CLEANING upload is reclaimed before retrying.
-           *
-           * The updatedAt condition ensures that only one application
-           * instance can successfully reclaim the stale row.
-           */
+          // Reclaims a stale CLEANING row; the updatedAt condition lets only one instance win.
           const reclaimed = await this.mediaRepository.reclaimStaleCleanup(
             upload.id,
             cleaningCutoff,
@@ -120,31 +90,16 @@ export class MediaCleanupService {
           }
         }
 
-        /**
-         * Always attempt to remove the Cloudinary asset after successfully
-         * claiming the upload.
-         *
-         * INITIATED rows are included because the frontend may have
-         * successfully uploaded the asset to Cloudinary but failed to call
-         * the backend confirmation endpoint afterwards.
-         */
+        // Always delete the Cloudinary asset once claimed; INITIATED rows may have uploaded without confirming.
         await this.cloudinaryService.deleteAsset(
           upload.publicId,
-          upload.resourceType === 'IMAGE' ? 'image' : 'video',
+          cloudinaryResourceTypeFor(upload),
         );
 
-        /**
-         * Only mark the database row as deleted after the Cloudinary
-         * cleanup completes successfully.
-         */
+        // Mark deleted only after Cloudinary cleanup succeeds.
         await this.mediaRepository.markDeleted(upload.id);
       } catch (error) {
-        /**
-         * Leave the upload in CLEANING when cleanup fails.
-         *
-         * Once it has remained CLEANING for more than one hour, a future
-         * cron execution will pick it up and retry the cleanup.
-         */
+        // On failure leave the row CLEANING; it is retried after an hour.
         this.logger.error(
           `Failed to clean media upload ${upload.id}`,
           error instanceof Error ? error.stack : undefined,

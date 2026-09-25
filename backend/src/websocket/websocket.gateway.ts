@@ -9,7 +9,7 @@ import {
 import type { IncomingHttpHeaders } from 'node:http';
 import type { DefaultEventsMap, Server, Socket } from 'socket.io';
 import { SocketRegistry } from './socket-registry.service';
-import { userRoom } from './socket.util';
+import { sessionRoom, userRoom } from './socket.util';
 import { websocketGatewayOptions } from './websocket-gateway.options';
 import { auth } from '../auth/auth';
 
@@ -57,15 +57,23 @@ export class WebsocketGateway
    * No session means no room and a straight disconnect — no anonymous sockets.
    */
   async handleConnection(socket: AppSocket) {
-    const userId = await this.authenticate(socket);
+    const identity = await this.authenticate(socket);
 
-    if (!userId) {
+    if (identity === 'error') {
+      // A backend hiccup: drop the socket without any signed-out signal.
+      socket.disconnect(true);
+      return;
+    }
+    if (identity === 'no-session') {
+      // Explicit, so the browser signs out only when told - never on a plain drop.
+      socket.emit('session:revoked');
       socket.disconnect(true);
       return;
     }
 
-    socket.data.userId = userId;
-    await socket.join(userRoom(userId));
+    socket.data.userId = identity.userId;
+    await socket.join(userRoom(identity.userId));
+    await socket.join(sessionRoom(identity.sessionId));
   }
 
   handleDisconnect(socket: AppSocket) {
@@ -77,16 +85,20 @@ export class WebsocketGateway
    *
    * The handshake is still plain HTTP under the hood, so this works the same way.
    */
-  private async authenticate(socket: Socket): Promise<string | null> {
+  private async authenticate(
+    socket: Socket,
+  ): Promise<{ userId: string; sessionId: string } | 'no-session' | 'error'> {
     try {
       const result = await auth.api.getSession({
         headers: this.toHeaders(socket.handshake.headers),
       });
 
-      return result?.user.id ?? null;
+      return result
+        ? { userId: result.user.id, sessionId: result.session.id }
+        : 'no-session';
     } catch (error) {
       this.logger.warn(`Socket auth failed: ${(error as Error).message}`);
-      return null;
+      return 'error';
     }
   }
 

@@ -115,10 +115,10 @@ describe('ChatMessageRateLimiterService', () => {
       service.assertNotRateLimited(`user-${i}`);
     }
 
-    const recentSends = (
-      service as unknown as { recentSends: Map<string, number[]> }
-    ).recentSends;
+    const { limiter } = service as unknown as {
+      limiter: { trackedKeyCount: number };
+    };
 
-    expect(recentSends.size).toBeLessThanOrEqual(10000);
+    expect(limiter.trackedKeyCount).toBeLessThanOrEqual(10000);
   });
 });

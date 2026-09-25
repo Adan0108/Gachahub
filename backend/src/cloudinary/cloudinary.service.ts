@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { v2 as CloudinaryType } from 'cloudinary';
 import { CLOUDINARY } from './cloudinary.constants';
 
-type ResourceType = 'image' | 'video';
+type ResourceType = 'image' | 'video' | 'raw';
 
 interface GenerateUploadSignatureParams {
   publicId: string;
@@ -40,12 +40,7 @@ export class CloudinaryService {
     private readonly cloudinary: typeof CloudinaryType,
   ) {}
 
-  /**
-   * Generates a signed upload authorization.
-   *
-   * Only parameters returned here should be sent by the frontend to
-   * Cloudinary. Changing any signed parameter invalidates the signature.
-   */
+  /** Signs an upload authorization; only the returned parameters may be sent to Cloudinary. */
   generateUploadSignature(params: GenerateUploadSignatureParams) {
     const timestamp = Math.floor(Date.now() / 1000);
 
@@ -75,13 +70,7 @@ export class CloudinaryService {
     };
   }
 
-  /**
-   * Verifies the signature included in Cloudinary's successful upload
-   * response.
-   *
-   * This prevents the backend from trusting arbitrary metadata submitted
-   * by the browser without requiring another Cloudinary Admin API request.
-   */
+  /** Verifies the signature on Cloudinary's upload response. */
   verifyUploadResponse(params: VerifyUploadResponseParams): boolean {
     const apiSecret = process.env.CLOUDINARY_API_SECRET;
 
@@ -100,12 +89,7 @@ export class CloudinaryService {
     return expectedSignature === params.signature;
   }
 
-  /**
-   * Deletes one Cloudinary asset.
-   *
-   * invalidate=true requests CDN invalidation for already-cached derived
-   * URLs. Asset deletion remains server-side because it requires signing.
-   */
+  /** Deletes one Cloudinary asset, invalidating cached CDN URLs. */
   async deleteAsset(
     publicId: string,
     resourceType: ResourceType,
@@ -118,13 +102,7 @@ export class CloudinaryService {
     return result as CloudinaryDeleteResult;
   }
 
-  /**
-   * Optional strong verification.
-   *
-   * This makes a network request to Cloudinary and should not be required
-   * for every successful upload when response signatures are verified.
-   * It can be used for auditing or suspicious uploads.
-   */
+  /** Optional strong verification via a Cloudinary API request; not needed when response signatures are verified. */
   async getAsset(
     publicId: string,
     resourceType: ResourceType,

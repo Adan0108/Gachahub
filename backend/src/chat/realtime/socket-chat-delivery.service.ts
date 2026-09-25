@@ -20,20 +20,19 @@ export class SocketChatDeliveryService implements ChatDeliveryPort {
   constructor(private readonly socketRegistry: SocketRegistry) {}
 
   publishMessageCreated(event: ChatMessageCreatedEvent): Promise<void> {
-    if (!event.shouldNotify) {
-      return Promise.resolve();
-    }
     // recipientUserIds stay out, it leaks who else got this batch
     return this.emitToRecipients('message:created', event.recipientUserIds, {
       conversationId: event.conversationId,
       messageId: event.messageId,
       senderId: event.senderId,
+      shouldNotify: event.shouldNotify,
       ciphertext: event.ciphertext,
       encryptionMeta: event.encryptionMeta,
       contentType: event.contentType,
       createdAt: event.createdAt,
       clientMessageId: event.clientMessageId,
       replyToId: event.replyToId,
+      media: event.media,
     });
   }
 
