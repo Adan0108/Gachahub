@@ -71,15 +71,13 @@ describe('TsMlsDeviceIdentityStore persistence', () => {
     const bobFactoryAfterReload = new TsMlsGroupSessionFactory(bobAfterReload);
 
     const aliceGroup = await aliceFactory.create('conversation-1');
-    const { welcomes } = await aliceGroup.stageCommit({
+    const { welcome } = await aliceGroup.stageCommit({
       added: [{ credential: bobCredential, keyPackage: bobOffer }],
       removed: [],
     });
     await aliceGroup.commitAccepted();
 
-    const bobWelcome = welcomes.find(
-      (item) => item.deviceId === bobCredential.deviceId,
-    );
+    const bobWelcome = welcome;
     if (!bobWelcome) {
       throw new Error('missing Bob Welcome');
     }

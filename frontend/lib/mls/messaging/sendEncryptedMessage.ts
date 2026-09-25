@@ -4,7 +4,7 @@ import { ensureConversationGroup } from './ensureConversationGroup';
 import { senderMeta } from './messageOrigin';
 import type { SyncEngine } from '../sync/syncEngine';
 import { EncryptedIndexedDbMessagePlaintextStore } from '../storage/messagePlaintextStore';
-import type { ConversationId, DeviceId, UserId } from '../contract/types';
+import type { ConversationId, DeviceId, PlaintextEnvelope, UserId } from '../contract/types';
 
 const plaintextStore = new EncryptedIndexedDbMessagePlaintextStore();
 
@@ -23,7 +23,7 @@ const plaintextStore = new EncryptedIndexedDbMessagePlaintextStore();
  * doesn't need a separate step for that. `recipientUserId` takes an array
  * for a group conversation's other initial active members.
  */
-export async function sendEncryptedChatMessage(
+export function sendEncryptedChatMessage(
   syncEngine: SyncEngine,
   deviceId: DeviceId,
   conversationId: ConversationId,
@@ -31,14 +31,35 @@ export async function sendEncryptedChatMessage(
   text: string,
   clientMessageId: string,
 ) {
+  return sendEncryptedEnvelope(
+    syncEngine,
+    deviceId,
+    conversationId,
+    recipientUserId,
+    { v: 1, type: 'text', body: text },
+    clientMessageId,
+  );
+}
+
+/** Same send path for any envelope; `mediaUploadIds` are the already-uploaded encrypted blobs to attach. */
+export async function sendEncryptedEnvelope(
+  syncEngine: SyncEngine,
+  deviceId: DeviceId,
+  conversationId: ConversationId,
+  recipientUserId: UserId | UserId[],
+  envelope: PlaintextEnvelope,
+  clientMessageId: string,
+  mediaUploadIds: string[] = [],
+) {
   try {
     return await encryptAndSend(
       syncEngine,
       deviceId,
       conversationId,
       recipientUserId,
-      text,
+      envelope,
       clientMessageId,
+      mediaUploadIds,
     );
   } catch (error) {
     if (!isMembershipChangePending(error)) throw error;
@@ -53,8 +74,9 @@ export async function sendEncryptedChatMessage(
       deviceId,
       conversationId,
       recipientUserId,
-      text,
+      envelope,
       clientMessageId,
+      mediaUploadIds,
     );
   }
 }
@@ -72,12 +94,12 @@ async function encryptAndSend(
   deviceId: DeviceId,
   conversationId: ConversationId,
   recipientUserId: UserId | UserId[],
-  text: string,
+  envelope: PlaintextEnvelope,
   clientMessageId: string,
+  mediaUploadIds: string[],
 ) {
   await ensureConversationGroup(syncEngine, conversationId, recipientUserId);
 
-  const envelope = { v: 1 as const, type: 'text' as const, body: text };
   const { wireBytes, epoch } = await syncEngine.encryptMessage(conversationId, envelope);
 
   const response = await api.sendChatMessage(conversationId, {
@@ -85,6 +107,9 @@ async function encryptAndSend(
     contentType: 'TEXT',
     clientMessageId,
     encryptionMeta: senderMeta(deviceId),
+    ...(mediaUploadIds.length
+      ? { media: mediaUploadIds.map((mediaUploadId, sortOrder) => ({ mediaUploadId, sortOrder })) }
+      : {}),
   });
 
   await plaintextStore.save({

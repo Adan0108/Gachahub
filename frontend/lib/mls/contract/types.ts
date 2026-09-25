@@ -39,11 +39,43 @@ export interface DeviceCredential {
  * deletes/reactions can travel as new encrypted messages clients apply
  * locally instead of the server mutating ciphertext in place.
  */
-export interface PlaintextEnvelope {
+export interface BodyEnvelope {
   v: 1;
   type: 'text' | 'edit' | 'delete' | 'reaction';
   body: unknown;
 }
+
+/** An encrypted blob uploaded as opaque bytes; `blob` is its upload id, the rest decrypts it. */
+export interface EncryptedBlobRef {
+  blob: string;
+  /** base64 AES-256 key. */
+  key: string;
+  /** base64 96-bit GCM IV. */
+  iv: string;
+  /** base64 SHA-256 of the plaintext. */
+  sha256: string;
+}
+
+export interface AttachmentThumb extends EncryptedBlobRef {
+  width: number;
+  height: number;
+}
+
+export interface AttachmentFile extends EncryptedBlobRef {
+  name: string;
+  mime: string;
+  size: number;
+  thumb?: AttachmentThumb;
+}
+
+export interface AttachmentEnvelope {
+  v: 1;
+  type: 'attachment';
+  body?: string;
+  files: AttachmentFile[];
+}
+
+export type PlaintextEnvelope = BodyEnvelope | AttachmentEnvelope;
 
 /** Why an incoming wire item was rejected instead of processed. */
 export type RejectReason =

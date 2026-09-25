@@ -2,6 +2,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { GroupStateCorruptedError } from '../lib/mls/contract/errors';
 import { MAX_RETRY_ATTEMPTS, nextRetryDelayMs } from '../lib/mls/messaging/decryptRetry';
 import { useDecryptedMessages } from './useDecryptedMessages';
 
@@ -28,6 +29,8 @@ function fakeEngine() {
     syncCommits: vi.fn(),
     processPendingWelcomes: vi.fn(),
     processIncoming: vi.fn(),
+    recoverUnreadableGroup: vi.fn().mockResolvedValue(false),
+    recoveryWaitMs: vi.fn().mockReturnValue(0),
   };
 }
 
@@ -224,5 +227,115 @@ describe('useDecryptedMessages', () => {
     });
 
     hook.unmount();
+  });
+  // regression: a run still finishing for the old conversation scheduled a retry that re-ran the new one
+  it('does not let a run from the previous conversation schedule retries for the new one', async () => {
+    vi.useFakeTimers();
+    const engine = fakeEngine();
+    engine.isAtCurrentEpoch.mockImplementation(async (conversationId: string) => conversationId === 'conv-b');
+    engine.syncCommits.mockRejectedValue(new Error('network down'));
+    let failA: (error: Error) => void = () => undefined;
+    engine.processIncoming.mockImplementation((conversationId: string) =>
+      conversationId === 'conv-a'
+        ? new Promise((_resolve, reject) => (failA = reject))
+        : Promise.resolve({
+            kind: 'application',
+            senderDeviceId: 'device-2',
+            epoch: 0,
+            envelope: { v: 1, type: 'text', body: 'in b' },
+          }),
+    );
+    vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+    const hook = renderHook();
+
+    await hook.render({ conversationId: 'conv-a', messages: [message('a1')], currentUserId: 'me' });
+    await hook.render({ conversationId: 'conv-b', messages: [message('b1')], currentUserId: 'me' });
+    expect(hook.value).toMatchObject({ b1: { status: 'ok' } });
+    const decryptsInB = engine.processIncoming.mock.calls.filter(([id]) => id === 'conv-b').length;
+
+    // the old conversation's decrypt fails only now, which would schedule a retry
+    await act(async () => {
+      failA(new Error('not caught up'));
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(nextRetryDelayMs(0) + 1_000);
+    });
+
+    expect(engine.processIncoming.mock.calls.filter(([id]) => id === 'conv-b')).toHaveLength(
+      decryptsInB,
+    );
+    hook.unmount();
+  });
+
+  describe('a group that could not be recovered yet', () => {
+    async function advanceAndFlush(ms: number) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+        for (let i = 0; i < 10; i += 1) await Promise.resolve();
+      });
+    }
+
+    it('keeps the message pending and tries once more when the recovery cooldown ends', async () => {
+      vi.useFakeTimers();
+      const engine = fakeEngine();
+      engine.isAtCurrentEpoch.mockResolvedValue(false);
+      engine.recoveryWaitMs.mockReturnValue(30_000);
+      engine.syncCommits.mockRejectedValueOnce(new GroupStateCorruptedError('conv-1'));
+      engine.syncCommits.mockResolvedValue(1 as never);
+      engine.processIncoming.mockRejectedValueOnce(new Error('no group'));
+      engine.processIncoming.mockResolvedValue({
+        kind: 'application',
+        senderDeviceId: 'device-2',
+        epoch: 1,
+        envelope: { v: 1, type: 'text', body: 'after the cooldown' },
+      });
+      vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+      const hook = renderHook();
+
+      await hook.render({ conversationId: 'conv-1', messages: [message('m1')], currentUserId: 'me' });
+      expect(hook.value.m1).toEqual({ status: 'pending' });
+
+      await advanceAndFlush(29_000);
+      expect(engine.syncCommits).toHaveBeenCalledTimes(1);
+      await advanceAndFlush(2_000);
+
+      expect(engine.syncCommits).toHaveBeenCalledTimes(2);
+      expect(hook.value.m1).toMatchObject({ status: 'ok' });
+      hook.unmount();
+    });
+
+    it('waits for the cooldown only once, then settles as unavailable', async () => {
+      vi.useFakeTimers();
+      const engine = fakeEngine();
+      engine.isAtCurrentEpoch.mockResolvedValue(false);
+      engine.recoveryWaitMs.mockReturnValue(30_000);
+      engine.syncCommits.mockRejectedValue(new GroupStateCorruptedError('conv-1'));
+      engine.processIncoming.mockRejectedValue(new Error('no group'));
+      vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+      const hook = renderHook();
+
+      await hook.render({ conversationId: 'conv-1', messages: [message('m1')], currentUserId: 'me' });
+      await advanceAndFlush(31_000);
+      await advanceAndFlush(600_000);
+
+      expect(engine.syncCommits).toHaveBeenCalledTimes(2);
+      expect(hook.value.m1).toEqual({ status: 'unavailable' });
+      hook.unmount();
+    });
+
+    it('settles at once when no cooldown is running, since waiting would change nothing', async () => {
+      const engine = fakeEngine();
+      engine.isAtCurrentEpoch.mockResolvedValue(false);
+      engine.syncCommits.mockRejectedValue(new GroupStateCorruptedError('conv-1'));
+      engine.processIncoming.mockRejectedValue(new Error('no group'));
+      vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+      const hook = renderHook();
+
+      await hook.render({ conversationId: 'conv-1', messages: [message('m1')], currentUserId: 'me' });
+
+      expect(hook.value.m1).toEqual({ status: 'unavailable' });
+      hook.unmount();
+    });
   });
 });

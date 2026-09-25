@@ -32,9 +32,9 @@ interface UseDeviceIdentityResult {
    * (retired by dormancy, or cap eviction) since the last successful provision. Unlike retry(),
    * this is awaitable: the caller needs the fresh credential's deviceId back, not just a
    * re-render. Updates the same state retry() does, so useSyncEngine picks up the new device on
-   * its very next call.
+   * its very next call. Never rejects: a failure lands in `error` and resolves undefined.
    */
-  reprovision: () => Promise<DeviceCredential>;
+  reprovision: () => Promise<DeviceCredential | undefined>;
 }
 
 /**
@@ -89,15 +89,21 @@ export function useDeviceIdentity(): UseDeviceIdentityResult {
     setAttempt((current) => current + 1);
   }
 
-  async function reprovision(): Promise<DeviceCredential> {
+  async function reprovision(): Promise<DeviceCredential | undefined> {
     if (!user?.id) {
-      throw new Error('Cannot reprovision a device with no signed-in user');
+      setError(new Error('Cannot reprovision a device with no signed-in user'));
+      return undefined;
     }
-    const fresh = await ensureDeviceProvisioned(getSharedDeviceIdentityStore(), user.id);
-    setCredential(fresh);
-    setError(undefined);
-    provisioningUserIdRef.current = user.id;
-    return fresh;
+    try {
+      const fresh = await ensureDeviceProvisioned(getSharedDeviceIdentityStore(), user.id);
+      setCredential(fresh);
+      setError(undefined);
+      provisioningUserIdRef.current = user.id;
+      return fresh;
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError : new Error(String(caughtError)));
+      return undefined;
+    }
   }
 
   return {

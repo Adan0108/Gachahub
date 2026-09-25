@@ -28,6 +28,14 @@ describe('InMemoryMessagePlaintextStore', () => {
     await expect(store.get('msg-1')).resolves.toEqual(message);
   });
 
+  it('saveWithoutNotify stores like save', async () => {
+    const store = new InMemoryMessagePlaintextStore();
+
+    await store.saveWithoutNotify(sampleMessage());
+
+    await expect(store.get('msg-1')).resolves.toEqual(sampleMessage());
+  });
+
   it('returns undefined for an unknown message', async () => {
     const store = new InMemoryMessagePlaintextStore();
     await expect(store.get('never-saved')).resolves.toBeUndefined();

@@ -3,10 +3,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSyncEngine } from './useSyncEngine';
 import { useDeviceIdentity } from './useDeviceIdentity';
-import { GroupStateUnavailableError } from '../lib/mls/contract/errors';
+import { GroupStateCorruptedError, GroupStateUnavailableError } from '../lib/mls/contract/errors';
 import { wasSentByDevice } from '../lib/mls/messaging/messageOrigin';
 import { base64ToBytes } from '../lib/mls/storage/base64';
-import { nextRetryDelayMs, shouldRetryDecrypt } from '../lib/mls/messaging/decryptRetry';
+import {
+  nextRetryDelayMs,
+  recoveryRetryDelayMs,
+  shouldRetryDecrypt,
+} from '../lib/mls/messaging/decryptRetry';
 import { EncryptedIndexedDbMessagePlaintextStore } from '../lib/mls/storage/messagePlaintextStore';
 import type { SyncEngine } from '../lib/mls/sync/syncEngine';
 import type { ConversationId, PlaintextEnvelope } from '../lib/mls/contract/types';
@@ -31,9 +35,21 @@ async function syncCommitsRecoveringMissingWelcome(
   try {
     await syncEngine.syncCommits(conversationId);
   } catch (error) {
+    if (error instanceof GroupStateCorruptedError) {
+      if (!(await syncEngine.recoverUnreadableGroup(conversationId))) throw error;
+      await syncEngine.syncCommits(conversationId);
+      return;
+    }
     if (!(error instanceof GroupStateUnavailableError)) throw error;
     await syncEngine.processPendingWelcomes();
-    await syncEngine.syncCommits(conversationId);
+    try {
+      await syncEngine.syncCommits(conversationId);
+    } catch (retryError) {
+      // Still no group: one bounded self-join try, otherwise the group is flagged as a problem.
+      if (!(retryError instanceof GroupStateUnavailableError)) throw retryError;
+      if (!(await syncEngine.recoverMissingGroup(conversationId))) throw retryError;
+      await syncEngine.syncCommits(conversationId);
+    }
   }
 }
 
@@ -82,7 +98,11 @@ export function useDecryptedMessages(
   // only because catching up on commits failed.
   const [retryTick, setRetryTick] = useState(0);
   const retryAttemptsRef = useRef(0);
+  // Retries spent waiting for a group recovery cooldown to end; separate from the backoff budget.
+  const recoveryRetriesRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Bumped when the conversation changes, so a run from the old one cannot touch the new one's counters or timer.
+  const conversationTokenRef = useRef(0);
 
   useEffect(() => () => clearTimeout(retryTimerRef.current), []);
 
@@ -92,7 +112,9 @@ export function useDecryptedMessages(
   // switches between conversations. Nothing is lost: a cache hit against plaintextStore
   // repopulates any of these instantly the next time that conversation is reopened.
   useEffect(() => {
+    conversationTokenRef.current += 1;
     retryAttemptsRef.current = 0;
+    recoveryRetriesRef.current = 0;
     clearTimeout(retryTimerRef.current);
     setDecrypted({});
   }, [conversationId]);
@@ -109,6 +131,7 @@ export function useDecryptedMessages(
     if (typeof window === 'undefined') return undefined;
     const handleOnline = () => {
       retryAttemptsRef.current = 0;
+      recoveryRetriesRef.current = 0;
       clearTimeout(retryTimerRef.current);
       setRetryTick((tick) => tick + 1);
     };
@@ -121,6 +144,9 @@ export function useDecryptedMessages(
       return;
     }
     let cancelled = false;
+    const conversationToken = conversationTokenRef.current;
+    // Messages this run has claimed, so a failure anywhere below can settle them instead of leaving a blank gap.
+    let claimed: ChatMessageRow[] = [];
 
     void (async () => {
       // Cache hits - including a message this device just sent and cached
@@ -168,6 +194,7 @@ export function useDecryptedMessages(
         return;
       }
 
+      claimed = pendingIncoming;
       for (const message of pendingIncoming) {
         inFlightRef.current.add(message.id);
       }
@@ -199,7 +226,14 @@ export function useDecryptedMessages(
           console.warn('Could not sync MLS commits before decrypting messages', error);
         }
       }
-      const retryable = shouldRetryDecrypt(syncError, retryAttemptsRef.current);
+      // A group that could not be recovered yet is tried once more when its cooldown ends.
+      const recoveryDelayMs = recoveryRetryDelayMs(
+        syncError,
+        syncEngine.recoveryWaitMs(conversationId),
+        recoveryRetriesRef.current,
+      );
+      const retryable =
+        shouldRetryDecrypt(syncError, retryAttemptsRef.current) || recoveryDelayMs !== undefined;
 
       // Every setDecrypted below runs unconditionally, cancelled or not: once a message reaches
       // this point it's already claimed in inFlightRef (nothing else will ever attempt it again),
@@ -244,17 +278,35 @@ export function useDecryptedMessages(
         }),
       );
 
+      // A run for a conversation that has since changed leaves the new one's counters and timer alone.
+      if (conversationToken !== conversationTokenRef.current) return;
       if (!needsRetry) {
         retryAttemptsRef.current = 0;
+        recoveryRetriesRef.current = 0;
       } else {
         clearTimeout(retryTimerRef.current);
         retryTimerRef.current = setTimeout(
           () => setRetryTick((tick) => tick + 1),
-          nextRetryDelayMs(retryAttemptsRef.current),
+          recoveryDelayMs ?? nextRetryDelayMs(retryAttemptsRef.current),
         );
-        retryAttemptsRef.current += 1;
+        if (recoveryDelayMs !== undefined) recoveryRetriesRef.current += 1;
+        else retryAttemptsRef.current += 1;
       }
-    })();
+    })().catch((error: unknown) => {
+      // e.g. local storage failing: settle as unavailable rather than leaving the messages absent forever.
+      console.warn('Could not decrypt messages', error);
+      const stuck = claimed.length > 0 ? claimed : messages;
+      for (const message of claimed) inFlightRef.current.delete(message.id);
+      setDecrypted((prev) => {
+        const next = { ...prev };
+        for (const message of stuck) {
+          if (!next[message.id] || next[message.id]!.status === 'pending') {
+            next[message.id] = { status: 'unavailable' };
+          }
+        }
+        return next;
+      });
+    });
 
     return () => {
       cancelled = true;

@@ -55,15 +55,12 @@ async function addDevice(
   newDevice: SimulatedDevice,
   conversationId: string,
 ): Promise<GroupSession> {
-  const { wireBytes, welcomes } = await group.stageCommit({
+  const { wireBytes, welcome } = await group.stageCommit({
     added: [await offerKeyPackage(newDevice)],
     removed: [],
   });
   await group.commitAccepted();
 
-  const welcome = welcomes.find(
-    (item) => item.deviceId === newDevice.credential.deviceId,
-  );
   if (!welcome) {
     throw new Error('stageCommit did not return a Welcome for the added device');
   }
@@ -101,15 +98,13 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
       // Bob must process the Commit that added Carol before decrypting
       // anything sent after that epoch - he's an existing member now, not
       // just a bystander.
-      const { wireBytes: addCarolWire, welcomes } = await aliceGroup.stageCommit({
+      const { wireBytes: addCarolWire, welcome } = await aliceGroup.stageCommit({
         added: [await offerKeyPackage(carol)],
         removed: [],
       });
       await aliceGroup.commitAccepted();
       await bobGroup.process(addCarolWire);
-      const carolWelcome = welcomes.find(
-        (item) => item.deviceId === carol.credential.deviceId,
-      );
+      const carolWelcome = welcome;
       if (!carolWelcome) {
         throw new Error('missing Carol Welcome');
       }
@@ -195,13 +190,13 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
 
         const aliceGroup = await alice.factory.create(conversationId);
         const bobGroup = await addDevice(aliceGroup, bob, conversationId);
-        const { wireBytes: addCarolWire, welcomes } = await aliceGroup.stageCommit({
+        const { wireBytes: addCarolWire, welcome } = await aliceGroup.stageCommit({
           added: [await offerKeyPackage(carol)],
           removed: [],
         });
         await aliceGroup.commitAccepted();
         await bobGroup.process(addCarolWire);
-        await carol.factory.joinFromWelcome(conversationId, welcomes[0]!.welcomeBytes);
+        await carol.factory.joinFromWelcome(conversationId, welcome!.welcomeBytes);
 
         const { wireBytes } = await aliceGroup.stageCommit({
           added: [],
@@ -226,13 +221,13 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
 
         const aliceGroup = await alice.factory.create(conversationId);
         const bobGroup = await addDevice(aliceGroup, bob, conversationId);
-        const { wireBytes: addCarolWire, welcomes } = await aliceGroup.stageCommit({
+        const { wireBytes: addCarolWire, welcome } = await aliceGroup.stageCommit({
           added: [await offerKeyPackage(carol)],
           removed: [],
         });
         await aliceGroup.commitAccepted();
         await bobGroup.process(addCarolWire);
-        await carol.factory.joinFromWelcome(conversationId, welcomes[0]!.welcomeBytes);
+        await carol.factory.joinFromWelcome(conversationId, welcome!.welcomeBytes);
 
         const { wireBytes } = await aliceGroup.stageCommit({
           added: [await offerKeyPackage(dave)],
@@ -257,13 +252,13 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
 
         const aliceGroup = await alice.factory.create(conversationId);
         const bobGroup = await addDevice(aliceGroup, bob, conversationId);
-        const { wireBytes: addWire, welcomes } = await aliceGroup.stageCommit({
+        const { wireBytes: addWire, welcome } = await aliceGroup.stageCommit({
           added: [await offerKeyPackage(carol), await offerKeyPackage(dave)],
           removed: [],
         });
         await aliceGroup.commitAccepted();
         await bobGroup.process(addWire);
-        expect(welcomes).toHaveLength(2);
+        expect(welcome?.deviceIds).toHaveLength(2);
 
         const { wireBytes } = await aliceGroup.stageCommit({
           added: [],
@@ -441,15 +436,13 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
       const mallory = await setUpDevice(candidate, 'user-mallory');
 
       const aliceGroup = await alice.factory.create(conversationId);
-      const { welcomes } = await aliceGroup.stageCommit({
+      const { welcome } = await aliceGroup.stageCommit({
         added: [await offerKeyPackage(bob)],
         removed: [],
       });
       await aliceGroup.commitAccepted();
 
-      const bobWelcome = welcomes.find(
-        (item) => item.deviceId === bob.credential.deviceId,
-      );
+      const bobWelcome = welcome;
       if (!bobWelcome) {
         throw new Error('missing Bob Welcome');
       }
@@ -464,15 +457,13 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
       const bob = await setUpDevice(candidate, 'user-bob');
 
       const aliceGroup = await alice.factory.create(conversationId);
-      const { welcomes } = await aliceGroup.stageCommit({
+      const { welcome } = await aliceGroup.stageCommit({
         added: [await offerKeyPackage(bob)],
         removed: [],
       });
       await aliceGroup.commitAccepted();
 
-      const bobWelcome = welcomes.find(
-        (item) => item.deviceId === bob.credential.deviceId,
-      );
+      const bobWelcome = welcome;
       if (!bobWelcome) {
         throw new Error('missing Bob Welcome');
       }

@@ -263,6 +263,26 @@ describe('MembershipReconciler', () => {
       expect(change.added).toHaveLength(30);
     });
 
+    it('takes the first 50 devices of a single user who has more than a Commit can hold', async () => {
+      const devices = Array.from({ length: 60 }, (_, i) => ({ userId: 'big', deviceId: `big-d${i}` }));
+      await serveWork({ items: [item({ add: devices })] });
+      const api = await load();
+      vi.mocked(api.claimChatDeviceKeyPackages).mockImplementation(async () =>
+        Array.from({ length: 50 }, (_, i) => claimed(`big-d${i}`)),
+      );
+      const engine = fakeEngine();
+
+      const summary = await new MembershipReconciler(engine, 'dev-1').reconcile();
+
+      const [, options] = vi.mocked(api.claimChatDeviceKeyPackages).mock.calls[0]!;
+      expect((options as { deviceIds: string[] }).deviceIds).toEqual(
+        devices.slice(0, 50).map((device) => device.deviceId),
+      );
+      const [, change] = engine.submitMembershipChange.mock.calls[0]!;
+      expect(change.added).toHaveLength(50);
+      expect(summary.outcomes[0]?.outcome).toBe('committed');
+    });
+
     it('fits a smaller user in after one that does not fit', async () => {
       const devicesOf = (userId: string, n: number) =>
         Array.from({ length: n }, (_, i) => ({ userId, deviceId: `${userId}-d${i}` }));

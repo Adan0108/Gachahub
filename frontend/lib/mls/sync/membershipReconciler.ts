@@ -158,7 +158,7 @@ export class MembershipReconciler {
     }
   }
 
-  /** Claims key packages user by user, counting devices first so nothing claimed is left unused. */
+  /** Claims key packages user by user, at most one Commit's worth, counting devices first so nothing claimed is left unused. */
   private async claimOffers(item: MembershipWorkItem): Promise<KeyPackageOffer[]> {
     const devicesByUser = new Map<UserId, DeviceId[]>();
     for (const device of item.add) {
@@ -170,8 +170,10 @@ export class MembershipReconciler {
 
     const offers: KeyPackageOffer[] = [];
 
-    for (const [userId, deviceIds] of devicesByUser) {
-      if (offers.length + deviceIds.length > MAX_DEVICES_PER_COMMIT) continue;
+    for (const [userId, allDeviceIds] of devicesByUser) {
+      // A user who does not fit beside others waits for a later Commit; one too big for any Commit is cut to the cap.
+      if (offers.length > 0 && offers.length + allDeviceIds.length > MAX_DEVICES_PER_COMMIT) continue;
+      const deviceIds = allDeviceIds.slice(0, MAX_DEVICES_PER_COMMIT - offers.length);
 
       let claimed: ClaimedKeyPackage[];
       try {

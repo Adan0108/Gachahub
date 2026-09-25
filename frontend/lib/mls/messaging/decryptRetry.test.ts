@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { GroupStateUnavailableError, MembershipMismatchError } from '../contract/errors';
-import { MAX_RETRY_ATTEMPTS, nextRetryDelayMs, shouldRetryDecrypt } from './decryptRetry';
+import {
+  GroupStateCorruptedError,
+  GroupStateUnavailableError,
+  MembershipMismatchError,
+} from '../contract/errors';
+import {
+  MAX_RETRY_ATTEMPTS,
+  nextRetryDelayMs,
+  recoveryRetryDelayMs,
+  shouldRetryDecrypt,
+} from './decryptRetry';
 
 describe('nextRetryDelayMs', () => {
   it('doubles each attempt, starting at 5 seconds', () => {
@@ -30,5 +39,22 @@ describe('shouldRetryDecrypt', () => {
   it('gives up after the cap', () => {
     expect(shouldRetryDecrypt(new Error('offline'), MAX_RETRY_ATTEMPTS - 1)).toBe(true);
     expect(shouldRetryDecrypt(new Error('offline'), MAX_RETRY_ATTEMPTS)).toBe(false);
+  });
+});
+
+describe('recoveryRetryDelayMs', () => {
+  it('waits out the cooldown, plus a moment, for a group that could not be recovered yet', () => {
+    expect(recoveryRetryDelayMs(new GroupStateCorruptedError('c'), 30_000, 0)).toBe(31_000);
+    expect(recoveryRetryDelayMs(new GroupStateUnavailableError('c'), 30_000, 0)).toBe(31_000);
+  });
+
+  it('retries once only', () => {
+    expect(recoveryRetryDelayMs(new GroupStateCorruptedError('c'), 30_000, 1)).toBeUndefined();
+  });
+
+  it('does not wait when no cooldown is running, or for any other failure', () => {
+    expect(recoveryRetryDelayMs(new GroupStateCorruptedError('c'), 0, 0)).toBeUndefined();
+    expect(recoveryRetryDelayMs(new MembershipMismatchError('c', 'bad'), 30_000, 0)).toBeUndefined();
+    expect(recoveryRetryDelayMs(undefined, 30_000, 0)).toBeUndefined();
   });
 });

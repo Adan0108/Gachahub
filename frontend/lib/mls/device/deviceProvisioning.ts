@@ -1,18 +1,9 @@
 import { api } from '../../api';
 import { CIPHERSUITE_NAME, TsMlsDeviceIdentityStore } from '../adapter/tsMlsAdapter';
 import { bytesToBase64 } from '../storage/base64';
+import { generateKeyPackageUploads, SINGLE_USE_BATCH_SIZE } from './keyPackageBatch';
 import { wipeAllLocalMlsSecrets, wipeGroupSessionState } from '../storage/mlsEncryptedStore';
 import type { DeviceCredential, UserId } from '../contract/types';
-
-/**
- * Uploaded alongside the one LAST_RESORT package on first provision, so the
- * device has real single-use packages to offer immediately instead of every
- * early Add falling back to the one package that's never supposed to be
- * consumed. Not a full replenishment scheduler (that's a later concern,
- * mirroring the backend's MlsKeyPackageCleanupService) - just enough supply
- * for a freshly provisioned device to be usable right away.
- */
-const INITIAL_SINGLE_USE_KEY_PACKAGE_COUNT = 10;
 
 /** lib/api.js (plain JS, untyped) attaches the HTTP status to every thrown request error. */
 interface ApiError extends Error {
@@ -135,26 +126,17 @@ async function provisionAndRegister(
   userId: UserId,
 ): Promise<DeviceCredential> {
   const credential = await store.provision(userId);
-  const [lastResortKeyPackage] = await store.generateKeyPackages(1, 'LAST_RESORT');
-  const singleUseKeyPackages = await store.generateKeyPackages(
-    INITIAL_SINGLE_USE_KEY_PACKAGE_COUNT,
-    'SINGLE_USE',
-  );
-  if (!lastResortKeyPackage) {
-    throw new Error('generateKeyPackages returned no key packages');
-  }
+  // Real single-use packages up front, so early Adds don't all fall back to the one reusable package.
+  const keyPackages = await generateKeyPackageUploads(store, {
+    singleUse: SINGLE_USE_BATCH_SIZE,
+    lastResort: true,
+  });
 
   await api.registerChatDevice({
     deviceId: credential.deviceId,
     signaturePublicKey: bytesToBase64(credential.signatureKey),
     ciphersuite: CIPHERSUITE_NAME,
-    keyPackages: [
-      { kind: 'LAST_RESORT', payload: bytesToBase64(lastResortKeyPackage) },
-      ...singleUseKeyPackages.map((keyPackage) => ({
-        kind: 'SINGLE_USE',
-        payload: bytesToBase64(keyPackage),
-      })),
-    ],
+    keyPackages,
   });
 
   return credential;

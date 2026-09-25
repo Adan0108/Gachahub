@@ -25,7 +25,7 @@ async function groupOfTwo() {
   await aliceSession.commitAccepted();
   const bobSession = await bob.factory.joinFromWelcome(
     CONVERSATION,
-    staged.welcomes[0]!.welcomeBytes,
+    staged.welcome!.welcomeBytes,
   );
   return { alice, bob, aliceSession, bobSession, groupInfo: staged.groupInfo };
 }

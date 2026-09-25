@@ -1,6 +1,6 @@
 import type { KeyPackage, PrivateKeyPackage } from 'ts-mls';
 import type { DeviceCredential, DeviceId } from '../contract/types';
-import { openMlsDatabase, encryptAndStore, loadAndDecrypt, wipeAllLocalMlsSecrets } from './mlsEncryptedStore';
+import { openMlsDatabase, encryptAndStore, loadAndDecryptOrMissing, wipeAllLocalMlsSecrets } from './mlsEncryptedStore';
 
 /**
  * One device's key package, kept locally so joinFromWelcome can match an
@@ -70,7 +70,7 @@ const IDENTITY_RECORD = 'device-identity';
 export class EncryptedIndexedDbDeviceIdentityStorage implements DeviceIdentityStorage {
   async load(): Promise<PersistedDeviceIdentity | undefined> {
     const db = await openMlsDatabase();
-    return loadAndDecrypt<PersistedDeviceIdentity>(db, DEVICE_IDENTITY_STORE, IDENTITY_RECORD);
+    return loadAndDecryptOrMissing<PersistedDeviceIdentity>(db, DEVICE_IDENTITY_STORE, IDENTITY_RECORD);
   }
 
   async save(identity: PersistedDeviceIdentity): Promise<void> {

@@ -136,7 +136,7 @@ export interface GroupSession {
    * Stages an Add/Remove commit locally WITHOUT merging it - the fix for
    * MlsUser's premature `merge_pending_commit` (critique A4). The caller
    * must POST `wireBytes` (for every existing member, via process()) and
-   * each entry of `welcomes` (one per newly-added device, delivered via the
+   * the single `welcome` (for every newly-added device, delivered via the
    * backend's separate per-device Welcome channel - critique B's
    * `MlsWelcome` table) to the backend, then call exactly one of
    * commitAccepted / commitRejected with the result before calling
@@ -151,8 +151,8 @@ export interface GroupSession {
      * newest one so a device can join by itself (joinExternally) with no member online.
      */
     groupInfo: Uint8Array;
-    /** One Welcome per newly-added device. Empty when the commit only removed members. */
-    welcomes: Array<{ deviceId: DeviceId; welcomeBytes: Uint8Array }>;
+    /** The one Welcome for all newly-added devices. Absent when the commit only removed members. */
+    welcome?: { deviceIds: DeviceId[]; welcomeBytes: Uint8Array };
   }>;
 
   /** The backend accepted the staged commit (2xx) - merge it into local state now. */
@@ -217,6 +217,8 @@ export interface GroupSessionFactory {
        * package. Any other error keeps it, so the same Welcome can be retried.
        */
       verify?: (session: GroupSession) => Promise<void>;
+      /** Runs once the join is verified and BEFORE the key package is spent: save the session here so a crash cannot lose the join. Throwing keeps the package for a retry. */
+      onAccepted?: (session: GroupSession) => Promise<void>;
     },
   ): Promise<GroupSession>;
 }

@@ -95,3 +95,14 @@ export class NoEncryptableMembersError extends Error {
     this.name = 'NoEncryptableMembersError';
   }
 }
+
+/** The saved group state exists but cannot be decrypted (corrupted, or its key is gone): never treated as "no group", so nothing silently rejoins over it. */
+export class GroupStateCorruptedError extends Error {
+  constructor(
+    public readonly conversationId: ConversationId,
+    cause?: unknown,
+  ) {
+    super(`Saved group state for conversation ${conversationId} cannot be read`, { cause });
+    this.name = 'GroupStateCorruptedError';
+  }
+}
