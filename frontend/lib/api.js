@@ -247,6 +247,10 @@ async function request(path, options = {}) {
     error.status = response.status;
     // Machine-readable reason from the backend (e.g. MEMBERSHIP_CHANGE_PENDING), when it sent one.
     error.code = code;
+    if (response.status === 429) {
+      const retryAfterSeconds = Number(response.headers.get('Retry-After'));
+      error.retryAfterSeconds = Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : undefined;
+    }
     throw error;
   }
 

@@ -5856,6 +5856,14 @@ body {
   letter-spacing: 0.04em;
 }
 
+.chat-history-ceiling {
+  align-self: center;
+  padding: 4px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
 .chat-empty-thread {
   display: grid;
   place-items: center;
