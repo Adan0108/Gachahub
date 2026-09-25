@@ -281,9 +281,7 @@ export default function AdminCommunitiesPage() {
                   <th>Developer</th>
                   <th>Members</th>
                   <th>Status</th>
-                  <th>
-                    <span className="sr-only">Actions</span>
-                  </th>
+                  <th className="admin-actions-heading">Actions</th>
                 </tr>
               </thead>
               <tbody>

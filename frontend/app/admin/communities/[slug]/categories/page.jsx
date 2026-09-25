@@ -274,9 +274,7 @@ export default function AdminCategoriesPage() {
                   <th>Slug</th>
                   <th>Description</th>
                   <th>Status</th>
-                  <th>
-                    <span className="sr-only">Actions</span>
-                  </th>
+                  <th className="admin-actions-heading">Actions</th>
                 </tr>
               </thead>
               <tbody>

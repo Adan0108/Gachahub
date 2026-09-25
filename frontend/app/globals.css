@@ -915,10 +915,14 @@ button {
   --admin-text: #f5f6fa;
   --admin-muted: #929aaa;
   display: grid;
-  grid-template-columns: 244px minmax(0, 1fr);
+  grid-template-columns: 260px minmax(0, 1fr);
   min-height: 100vh;
-  background: var(--admin-bg);
+  background:
+    radial-gradient(circle at 82% -12%, rgba(91, 214, 255, 0.08), transparent 30%),
+    radial-gradient(circle at 42% 0%, rgba(124, 92, 255, 0.11), transparent 34%), var(--admin-bg);
   color: var(--admin-text);
+  font-size: 15px;
+  font-family: "Source Sans 3", "Segoe UI", sans-serif;
 }
 
 .admin-sidebar {
@@ -946,6 +950,13 @@ button {
   padding: 0 10px 24px;
 }
 
+.admin-brand b {
+  font-size: 18px;
+  font-family: "Barlow", "Source Sans 3", sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
 .admin-brand > span,
 .admin-identity > span {
   display: grid;
@@ -970,7 +981,7 @@ button {
 .admin-identity small,
 .admin-topbar small {
   color: var(--admin-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .admin-nav {
@@ -983,12 +994,12 @@ button {
   display: flex;
   align-items: center;
   gap: 11px;
-  min-height: 42px;
+  min-height: 46px;
   padding: 0 12px;
   border: 1px solid transparent;
   border-radius: 9px;
   color: var(--admin-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   text-decoration: none;
 }
@@ -1004,6 +1015,18 @@ button {
   color: #9a84ff;
 }
 
+.admin-nav a {
+  transition:
+    border-color 150ms ease,
+    background 150ms ease,
+    color 150ms ease,
+    transform 150ms ease;
+}
+
+.admin-nav a:hover {
+  transform: translateX(2px);
+}
+
 .admin-return-link {
   margin-top: auto;
 }
@@ -1014,14 +1037,15 @@ button {
 
 .admin-topbar {
   justify-content: space-between;
-  min-height: 72px;
+  min-height: 78px;
   padding: 0 32px;
   border-bottom: 1px solid var(--admin-line);
   background: rgba(18, 21, 28, 0.92);
+  backdrop-filter: blur(14px);
 }
 
 .admin-topbar > div:first-child > span {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
 }
 
@@ -1038,13 +1062,13 @@ button {
 }
 
 .admin-identity b {
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .admin-content {
   width: min(1400px, 100%);
   margin: 0 auto;
-  padding: 34px 32px 64px;
+  padding: 42px 40px 72px;
 }
 
 .admin-page-heading {
@@ -1057,7 +1081,7 @@ button {
 
 .admin-eyebrow {
   color: #ff7abf;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -1065,9 +1089,11 @@ button {
 
 .admin-page-heading h1 {
   margin: 7px 0 4px;
-  font-size: clamp(28px, 4vw, 42px);
+  font-size: clamp(34px, 4vw, 48px);
   line-height: 1;
   letter-spacing: -0.035em;
+  font-family: "Barlow", "Source Sans 3", sans-serif;
+  font-weight: 800;
 }
 
 .admin-page-heading p,
@@ -1076,7 +1102,7 @@ button {
 .admin-activity-list p {
   margin: 0;
   color: var(--admin-muted);
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .admin-page-heading time {
@@ -1094,32 +1120,45 @@ button {
 .admin-panel,
 .admin-state {
   border: 1px solid var(--admin-line);
-  border-radius: 12px;
-  background: var(--admin-panel);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(27, 32, 42, 0.96), rgba(19, 23, 31, 0.98));
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.14);
 }
 
 .admin-metric-card {
   display: grid;
   gap: 10px;
-  padding: 20px;
+  position: relative;
+  overflow: hidden;
+  padding: 24px;
+}
+
+.admin-metric-card::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(#7c5cff, #5bd6ff);
+  content: "";
 }
 
 .admin-metric-card > span {
   color: var(--admin-muted);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .admin-metric-card strong {
-  font-size: 29px;
+  font-size: 34px;
   letter-spacing: -0.04em;
+  font-family: "Barlow", "Source Sans 3", sans-serif;
+  font-weight: 800;
 }
 
 .admin-metric-card small {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 800;
 }
 
@@ -1151,27 +1190,31 @@ button {
 
 .admin-panel-heading h2 {
   margin: 4px 0 0;
-  font-size: 17px;
+  font-size: 20px;
+  font-family: "Barlow", "Source Sans 3", sans-serif;
+  font-weight: 700;
 }
 
 .admin-panel-heading > span {
   color: var(--admin-muted);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .admin-table-wrap {
   overflow-x: auto;
+  scrollbar-color: #4a416f transparent;
+  scrollbar-width: thin;
 }
 
 .admin-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .admin-table th,
 .admin-table td {
-  padding: 14px 18px;
+  padding: 17px 18px;
   border-bottom: 1px solid var(--admin-line);
   text-align: left;
   white-space: nowrap;
@@ -1179,10 +1222,24 @@ button {
 
 .admin-table th {
   background: var(--admin-panel-raised);
-  color: var(--admin-muted);
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  color: #b4bdd0;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.055em;
   text-transform: uppercase;
+}
+
+.admin-table tbody tr {
+  transition: background 140ms ease;
+}
+
+.admin-table tbody tr:hover {
+  background: rgba(124, 92, 255, 0.045);
+}
+
+.admin-table tbody td {
+  color: #e9ecf3;
+  font-weight: 500;
 }
 
 .admin-table tbody tr:last-child td {
@@ -1191,12 +1248,12 @@ button {
 
 .admin-status {
   display: inline-flex;
-  padding: 4px 7px;
+  padding: 5px 9px;
   border: 1px solid #275a4b;
   border-radius: 999px;
   background: #152b27;
   color: #76d9b5;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
 }
 
@@ -1232,12 +1289,12 @@ button {
 }
 
 .admin-activity-list b {
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .admin-activity-list time {
   color: var(--admin-muted);
-  font-size: 10px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -1253,7 +1310,7 @@ button {
 
 .admin-state h2 {
   margin: 0 0 5px;
-  font-size: 17px;
+  font-size: 21px;
 }
 
 .admin-spinner {
@@ -1266,13 +1323,24 @@ button {
 }
 
 .admin-button {
-  min-height: 36px;
-  padding: 0 13px;
+  min-height: 42px;
+  padding: 0 16px;
   border: 1px solid #4a5364;
   border-radius: 8px;
   background: #222936;
   color: var(--admin-text);
   font-weight: 800;
+  font-size: 14px;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.admin-button:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
 }
 
 .admin-button-primary {
@@ -1296,16 +1364,22 @@ button {
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
-  padding: 14px;
+  padding: 16px;
   border: 1px solid var(--admin-line);
   border-radius: 12px;
   background: var(--admin-panel);
 }
 
 .admin-toolbar > span {
-  color: var(--admin-muted);
-  font-size: 11px;
-  text-align: right;
+  justify-self: end;
+  padding: 7px 11px;
+  border: 1px solid #433969;
+  border-radius: 999px;
+  background: rgba(124, 92, 255, 0.1);
+  color: #c8bdff;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
 }
 
 .admin-search {
@@ -1329,13 +1403,14 @@ button {
   outline: 0;
   background: #11151c;
   color: var(--admin-text);
+  font-size: 14px;
 }
 
 .admin-search input,
 .admin-toolbar select,
 .admin-form input,
 .admin-form select {
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 11px;
 }
 
@@ -1345,7 +1420,7 @@ button {
 }
 
 .admin-search {
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 11px;
   border: 1px solid #343c4a;
   border-radius: 8px;
@@ -1393,17 +1468,26 @@ button {
   gap: 3px;
 }
 
+.admin-community-cell b,
+.admin-user-cell b,
+.admin-content-cell b {
+  font-size: 15px;
+  font-weight: 700;
+}
+
 .admin-community-cell small {
   max-width: 320px;
   overflow: hidden;
   color: var(--admin-muted);
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
 }
 
 .admin-table code {
-  color: #aeb7c6;
-  font-size: 11px;
+  color: #c5cce0;
+  font-size: 13px;
+  font-family: "Source Sans 3", "Segoe UI", sans-serif;
+  font-weight: 600;
 }
 
 .admin-status-hidden {
@@ -1422,18 +1506,24 @@ button {
 .admin-dialog-heading button {
   display: inline-grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   border: 1px solid #3a4352;
   border-radius: 8px;
   background: #202631;
   color: #cdd2dc;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease,
+    color 140ms ease;
 }
 
 .admin-icon-button:hover,
 .admin-dialog-heading button:hover {
   border-color: #7c5cff;
   color: white;
+  transform: translateY(-1px);
 }
 
 .admin-dialog-backdrop {
@@ -1473,6 +1563,7 @@ button {
 .admin-dialog-heading h2 {
   margin: 4px 0 0;
   font-size: 20px;
+  font-family: "Barlow", "Source Sans 3", sans-serif;
 }
 
 .admin-form {
@@ -1489,7 +1580,7 @@ button {
 
 .admin-form label > span {
   color: #c7ccd6;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 800;
 }
 
@@ -1543,7 +1634,7 @@ button {
   border-radius: 7px;
   background: #222733;
   color: #b7a9ff;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 900;
 }
 
@@ -1555,9 +1646,15 @@ button {
 }
 
 .admin-table td:last-child {
-  display: flex;
-  justify-content: flex-end;
-  gap: 7px;
+  text-align: right;
+}
+
+.admin-actions-heading {
+  text-align: right !important;
+}
+
+.admin-table td:last-child .admin-icon-button + .admin-icon-button {
+  margin-left: 7px;
 }
 
 .admin-form textarea {
@@ -1588,7 +1685,7 @@ button {
   border-left: 2px solid #5bd6ff;
   background: rgba(91, 214, 255, 0.06);
   color: var(--admin-muted);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -1604,7 +1701,7 @@ button {
 .admin-segmented legend {
   margin-bottom: 8px;
   color: #c7ccd6;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 800;
 }
 
@@ -1652,7 +1749,7 @@ button {
 
 .admin-scope-picker label > span {
   color: var(--admin-muted);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1673,7 +1770,7 @@ button {
   gap: 7px;
   margin: 0 0 10px;
   color: var(--admin-muted);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .admin-user-cell {
@@ -1738,23 +1835,25 @@ button {
 }
 
 .admin-page-count {
-  padding: 7px 10px;
-  border: 1px solid var(--admin-line);
+  padding: 9px 13px;
+  border: 1px solid #433969;
   border-radius: 999px;
-  color: var(--admin-muted);
-  font-size: 11px;
+  background: rgba(124, 92, 255, 0.1);
+  color: #c8bdff;
+  font-size: 13px;
   font-weight: 800;
+  letter-spacing: 0.01em;
 }
 
 .admin-type-badge,
 .admin-priority {
   display: inline-flex;
-  padding: 4px 7px;
+  padding: 5px 8px;
   border: 1px solid #444b59;
   border-radius: 6px;
   background: #232833;
   color: #bbc2cf;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.04em;
 }
@@ -1803,7 +1902,7 @@ button {
 .admin-content-cell small,
 .admin-user-cell small {
   color: var(--admin-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .admin-action-dialog {
@@ -1847,12 +1946,14 @@ button {
 
 .admin-action-dialog h2 {
   margin: 17px 0 6px;
+  font-family: "Barlow", "Source Sans 3", sans-serif;
+  font-size: 24px;
 }
 
 .admin-action-dialog > p:not(.admin-form-error) {
   margin: 0 0 18px;
   color: var(--admin-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -1869,7 +1970,7 @@ button {
 
 .admin-dialog-fields label > span {
   color: #c7ccd6;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 800;
 }
 
@@ -1926,11 +2027,12 @@ button {
 
 .admin-moderation-summary small {
   color: var(--admin-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .admin-moderation-summary strong {
   font-size: 19px;
+  font-family: "Barlow", "Source Sans 3", sans-serif;
 }
 
 .admin-moderation-summary a,
@@ -1939,7 +2041,7 @@ button {
   align-items: center;
   gap: 5px;
   color: #a995ff;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   text-decoration: none;
 }
@@ -1971,12 +2073,77 @@ button {
 
 .admin-review-list small {
   color: var(--admin-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .admin-review-list strong {
   color: var(--admin-muted);
-  font-size: 10px;
+  font-size: 12px;
+}
+
+.admin-report-table {
+  min-width: 1040px;
+  table-layout: fixed;
+}
+
+.admin-report-table th:nth-child(1) {
+  width: 14%;
+}
+
+.admin-report-table th:nth-child(2) {
+  width: 22%;
+}
+
+.admin-report-table th:nth-child(3) {
+  width: 14%;
+}
+
+.admin-report-table th:nth-child(4) {
+  width: 11%;
+}
+
+.admin-report-table th:nth-child(5) {
+  width: 13%;
+}
+
+.admin-report-table th:nth-child(6) {
+  width: 16%;
+}
+
+.admin-report-table th:nth-child(7) {
+  width: 10%;
+}
+
+.admin-report-id,
+.admin-target-cell {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.admin-report-id > span {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: 1px solid #4a416f;
+  border-radius: 8px;
+  background: linear-gradient(145deg, #2a2346, #1f1b33);
+  color: #c7bbff;
+  font-family: "Barlow", "Source Sans 3", sans-serif;
+  font-weight: 800;
+}
+
+.admin-reason-text {
+  color: #f1f3f8;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.admin-shell :is(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid #9d89ff;
+  outline-offset: 2px;
 }
 
 .admin-form-actions {

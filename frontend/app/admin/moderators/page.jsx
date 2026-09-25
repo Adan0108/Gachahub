@@ -291,9 +291,7 @@ export default function AdminModeratorsPage() {
                       <th>User status</th>
                       <th>Assigned by</th>
                       <th>Assigned</th>
-                      <th>
-                        <span className="sr-only">Actions</span>
-                      </th>
+                      <th className="admin-actions-heading">Actions</th>
                     </tr>
                   </thead>
                   <tbody>

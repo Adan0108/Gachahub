@@ -112,9 +112,7 @@ export default function AdminUsersPage() {
                   <th>Role</th>
                   <th>Status</th>
                   <th>Joined</th>
-                  <th>
-                    <span className="sr-only">Actions</span>
-                  </th>
+                  <th className="admin-actions-heading">Actions</th>
                 </tr>
               </thead>
               <tbody>

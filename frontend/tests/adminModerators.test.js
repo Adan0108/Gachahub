@@ -4,6 +4,7 @@ describe("admin moderator API", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("uses game-scoped list, assignment, and removal endpoints", async () => {
@@ -41,5 +42,21 @@ describe("admin moderator API", () => {
       "http://localhost:3000/games/genshin-impact/moderators/user-1",
       expect.objectContaining({ method: "DELETE", credentials: "include" }),
     );
+  });
+
+  it("uses local moderator responses in admin preview mode", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("NEXT_PUBLIC_ADMIN_PREVIEW", "true");
+    const { api } = await import("../lib/api");
+
+    const moderators = await api.getGameModerators("genshin-impact");
+    const assigned = await api.assignGameModerator("genshin-impact", {
+      email: "mod@example.com",
+    });
+
+    expect(moderators).toEqual([]);
+    expect(assigned.user).toMatchObject({ email: "mod@example.com", status: "ACTIVE" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

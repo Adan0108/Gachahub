@@ -112,9 +112,7 @@ export default function AdminContentPage() {
                   <th>Author</th>
                   <th>Reports</th>
                   <th>Status</th>
-                  <th>
-                    <span className="sr-only">Actions</span>
-                  </th>
+                  <th className="admin-actions-heading">Actions</th>
                 </tr>
               </thead>
               <tbody>

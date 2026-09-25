@@ -85,31 +85,36 @@ export default function AdminReportsPage() {
       ) : (
         <section className="admin-panel">
           <div className="admin-table-wrap">
-            <table className="admin-table">
+            <table className="admin-table admin-report-table">
               <thead>
                 <tr>
-                  <th>Report</th>
+                  <th>Report ID</th>
                   <th>Target</th>
                   <th>Reason</th>
                   <th>Priority</th>
                   <th>Status</th>
                   <th>Submitted</th>
-                  <th>
-                    <span className="sr-only">Actions</span>
-                  </th>
+                  <th className="admin-actions-heading">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {items.map((report) => (
                   <tr key={report.id}>
                     <td>
-                      <code>{report.id}</code>
+                      <div className="admin-report-id">
+                        <span aria-hidden="true">R</span>
+                        <code>{report.id}</code>
+                      </div>
                     </td>
                     <td>
-                      <span className="admin-type-badge">{report.targetType}</span>{" "}
-                      {report.targetId}
+                      <div className="admin-target-cell">
+                        <span className="admin-type-badge">{report.targetType}</span>
+                        <code>{report.targetId}</code>
+                      </div>
                     </td>
-                    <td>{report.reason}</td>
+                    <td>
+                      <strong className="admin-reason-text">{report.reason}</strong>
+                    </td>
                     <td>
                       <span
                         className={`admin-priority admin-priority-${report.priority.toLowerCase()}`}

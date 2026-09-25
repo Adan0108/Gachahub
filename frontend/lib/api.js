@@ -9,7 +9,8 @@ import {
 export const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000"
 ).replace(/\/$/, "");
-export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
+export const ADMIN_PREVIEW = process.env.NEXT_PUBLIC_ADMIN_PREVIEW === "true";
+export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true" || ADMIN_PREVIEW;
 
 export const backendRoutes = {
   health: "/health",
@@ -242,7 +243,16 @@ async function mockResponse(path, options = {}) {
   const params = new URLSearchParams(queryString || "");
 
   if (pathname === backendRoutes.health) return { status: "ok" };
-  if (pathname === backendRoutes.currentUser) return null;
+  if (pathname === backendRoutes.currentUser)
+    return ADMIN_PREVIEW
+      ? {
+          id: "admin-preview",
+          name: "Admin Preview",
+          email: "preview@localhost",
+          role: "ADMIN",
+          status: "ACTIVE",
+        }
+      : null;
   if (pathname === backendRoutes.signInEmail || pathname === backendRoutes.signUpEmail)
     return { ok: true };
   if (pathname === backendRoutes.myPosts) {
@@ -274,6 +284,23 @@ async function mockResponse(path, options = {}) {
   }
   if (/^\/users\/[^/]+\/follow-status$/.test(pathname)) return { following: false };
   if (pathname === backendRoutes.games) return fallbackGames(params.get("search") || "");
+  if (/^\/games\/[^/]+\/moderators\/[^/]+$/.test(pathname) && options.method === "DELETE")
+    return { message: "Moderator removed successfully" };
+  if (/^\/games\/[^/]+\/moderators$/.test(pathname)) {
+    if (options.method === "POST") {
+      const target = JSON.parse(options.body || "{}");
+      return {
+        id: `mock-moderator-${Date.now()}`,
+        user: {
+          id: target.userId || "mock-user",
+          name: "Preview Moderator",
+          email: target.email || "moderator@example.com",
+          status: "ACTIVE",
+        },
+      };
+    }
+    return [];
+  }
   if (pathname.startsWith("/games/") && pathname.endsWith("/categories"))
     return fallbackCategories();
   if (pathname.startsWith("/games/") && pathname.endsWith("/feed")) {
