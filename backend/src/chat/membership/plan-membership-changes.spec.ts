@@ -25,12 +25,14 @@ describe('planMembershipChanges', () => {
     participants?: ReturnType<typeof participant>[];
     mlsActive?: boolean;
     withLeaves?: string[];
+    onIllegal?: 'throw' | 'skip';
   }) =>
     planMembershipChanges({
       requests: params.requests,
       participants: params.participants ?? [],
       mlsActive: params.mlsActive ?? true,
       userIdsWithLeaves: new Set(params.withLeaves ?? []),
+      onIllegal: params.onIllegal,
     });
 
   describe('adding', () => {
@@ -124,6 +126,16 @@ describe('planMembershipChanges', () => {
       },
     );
 
+    it('moves a pending invitee already holding a device to LEAVING instead of declining outright', () => {
+      expect(
+        plan({
+          requests: [{ userId: 'u2', event: 'REMOVE' }],
+          participants: [participant('u2', 'PENDING')],
+          withLeaves: ['u2'],
+        }),
+      ).toEqual([{ userId: 'u2', from: 'PENDING', to: 'LEAVING' }]);
+    });
+
     it('declines someone who never had a device in the group', () => {
       expect(
         plan({
@@ -207,6 +219,80 @@ describe('planMembershipChanges', () => {
           participants: [participant('u2', 'PENDING')],
         }),
       ).toEqual([{ userId: 'u2', from: 'PENDING', to: 'DECLINED' }]);
+    });
+
+    it('sends a decline to LEAVING when the invitee already has a device in the group', () => {
+      expect(
+        plan({
+          requests: [{ userId: 'u2', event: 'DECLINE_INVITE' }],
+          participants: [participant('u2', 'PENDING')],
+          withLeaves: ['u2'],
+        }),
+      ).toEqual([{ userId: 'u2', from: 'PENDING', to: 'LEAVING' }]);
+    });
+
+    it('accepts straight into ACTIVE when the invitee already has a device in the group', () => {
+      expect(
+        plan({
+          requests: [{ userId: 'u2', event: 'ACCEPT_INVITE' }],
+          participants: [participant('u2', 'PENDING')],
+          withLeaves: ['u2'],
+        }),
+      ).toEqual([{ userId: 'u2', from: 'PENDING', to: 'ACTIVE' }]);
+    });
+
+    it('expires a pending invitee that nobody ever answered', () => {
+      expect(
+        plan({
+          requests: [{ userId: 'u2', event: 'EXPIRE_INVITE' }],
+          participants: [participant('u2', 'PENDING')],
+        }),
+      ).toEqual([{ userId: 'u2', from: 'PENDING', to: 'DECLINED' }]);
+    });
+
+    it('sends an expiry to LEAVING when the invitee already has a device in the group', () => {
+      expect(
+        plan({
+          requests: [{ userId: 'u2', event: 'EXPIRE_INVITE' }],
+          participants: [participant('u2', 'PENDING')],
+          withLeaves: ['u2'],
+        }),
+      ).toEqual([{ userId: 'u2', from: 'PENDING', to: 'LEAVING' }]);
+    });
+
+    it('refuses to expire someone who is no longer pending, instead of removing them outright', () => {
+      expect(() =>
+        plan({
+          requests: [{ userId: 'u2', event: 'EXPIRE_INVITE' }],
+          participants: [participant('u2', 'ACTIVE')],
+        }),
+      ).toThrow('Conversation is not pending');
+    });
+
+    it('with onIllegal skip, leaves the person who answered alone and still expires the rest', () => {
+      expect(
+        plan({
+          requests: [
+            { userId: 'u2', event: 'EXPIRE_INVITE' },
+            { userId: 'u3', event: 'EXPIRE_INVITE' },
+          ],
+          participants: [
+            participant('u2', 'ACTIVE'),
+            participant('u3', 'PENDING'),
+          ],
+          onIllegal: 'skip',
+        }),
+      ).toEqual([{ userId: 'u3', from: 'PENDING', to: 'DECLINED' }]);
+    });
+
+    it('lets a pending invitee who already has a device be upgraded straight to ACTIVE by a direct add', () => {
+      expect(
+        plan({
+          requests: [{ userId: 'u2', event: 'ADD_DIRECT' }],
+          participants: [participant('u2', 'PENDING')],
+          withLeaves: ['u2'],
+        }),
+      ).toEqual([{ userId: 'u2', from: 'PENDING', to: 'ACTIVE' }]);
     });
 
     it.each<State>(['ACTIVE', 'DECLINED', 'JOINING', 'LEAVING'])(

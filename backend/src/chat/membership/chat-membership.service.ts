@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ChatMembershipRepository } from './chat-membership.repository';
-import type { MembershipRequest } from './plan-membership-changes';
+import type {
+  MembershipRequest,
+  OnIllegalMembershipChange,
+} from './plan-membership-changes';
 
 /** How someone being added gets in: straight away, or only once they accept. */
 export type GroupMemberEntitlement = 'DIRECT' | 'INVITE';
@@ -54,9 +57,29 @@ export class ChatMembershipService {
     await this.change(conversationId, [{ userId, event: 'DECLINE_INVITE' }]);
   }
 
+  /**
+   * Expires invites nobody answered (see ChatInviteExpiryService). Only applies to
+   * whoever is still PENDING when this actually runs: EXPIRE_INVITE is illegal from
+   * every other state, and the change is planned with onIllegal 'skip', so anyone who
+   * accepted or was removed since the sweep read them is left alone - person by
+   * person, without holding up the rest of the conversation's batch - rather than
+   * offboarded as if REMOVE had been used.
+   */
+  async expireInvites(
+    conversationId: string,
+    userIds: string[],
+  ): Promise<{ count: number }> {
+    return this.change(
+      conversationId,
+      userIds.map((userId) => ({ userId, event: 'EXPIRE_INVITE' })),
+      'skip',
+    );
+  }
+
   private async change(
     conversationId: string,
     requests: MembershipRequest[],
+    onIllegal?: OnIllegalMembershipChange,
   ): Promise<{ count: number }> {
     // One change per person: two against the same starting state would make
     // the second one's conditional write fail.
@@ -64,10 +87,16 @@ export class ChatMembershipService {
       ...new Map(requests.map((request) => [request.userId, request])).values(),
     ];
 
-    const count = await this.chatMembershipRepository.changeMembership(
-      conversationId,
-      onePerUser,
-    );
+    const count = onIllegal
+      ? await this.chatMembershipRepository.changeMembership(
+          conversationId,
+          onePerUser,
+          onIllegal,
+        )
+      : await this.chatMembershipRepository.changeMembership(
+          conversationId,
+          onePerUser,
+        );
 
     return { count };
   }

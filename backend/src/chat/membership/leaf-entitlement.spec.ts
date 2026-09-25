@@ -2,21 +2,22 @@ import type { ChatParticipantState } from '../../generated/prisma/client';
 import { isEntitledToLeaf, isLeafRemovable } from './leaf-entitlement';
 
 describe('isEntitledToLeaf', () => {
-  it.each<ChatParticipantState>(['JOINING', 'ACTIVE', 'ARCHIVED', 'BLOCKED'])(
-    'is true for %s',
+  it.each<ChatParticipantState>([
+    'PENDING',
+    'JOINING',
+    'ACTIVE',
+    'ARCHIVED',
+    'BLOCKED',
+  ])('is true for %s', (state) => {
+    expect(isEntitledToLeaf(state)).toBe(true);
+  });
+
+  it.each<ChatParticipantState | undefined>(['DECLINED', 'LEAVING', undefined])(
+    'is false for %s',
     (state) => {
-      expect(isEntitledToLeaf(state)).toBe(true);
+      expect(isEntitledToLeaf(state)).toBe(false);
     },
   );
-
-  it.each<ChatParticipantState | undefined>([
-    'PENDING',
-    'DECLINED',
-    'LEAVING',
-    undefined,
-  ])('is false for %s', (state) => {
-    expect(isEntitledToLeaf(state)).toBe(false);
-  });
 });
 
 describe('isLeafRemovable', () => {
@@ -32,12 +33,16 @@ describe('isLeafRemovable', () => {
     );
   });
 
-  it.each<ChatParticipantState | undefined>([
-    'LEAVING',
-    'DECLINED',
-    'PENDING',
-    undefined,
-  ])('removes a device whose owner is %s', (ownerState) => {
-    expect(isLeafRemovable({ ownerState, deviceIsGone: false })).toBe(true);
+  it.each<ChatParticipantState | undefined>(['LEAVING', 'DECLINED', undefined])(
+    'removes a device whose owner is %s',
+    (ownerState) => {
+      expect(isLeafRemovable({ ownerState, deviceIsGone: false })).toBe(true);
+    },
+  );
+
+  it('keeps a device of a PENDING owner - they are entitled to a leaf too', () => {
+    expect(
+      isLeafRemovable({ ownerState: 'PENDING', deviceIsGone: false }),
+    ).toBe(false);
   });
 });

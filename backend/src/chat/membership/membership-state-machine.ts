@@ -13,6 +13,8 @@ export type MembershipEvent =
   | 'ADD_INVITE'
   | 'ACCEPT_INVITE'
   | 'DECLINE_INVITE'
+  /** Nobody ever answered the invite - see chat-invite-expiry.service.ts. */
+  | 'EXPIRE_INVITE'
   /** An admin removes them, or they leave. */
   | 'REMOVE'
   /** An accepted Commit added one of their devices to the MLS group. */
@@ -74,15 +76,27 @@ const MLS_TRANSITIONS: Record<
     ARCHIVED: 'noop',
     BLOCKED: 'noop',
   },
+  // Ends in JOINING when nobody has added their device yet, or straight in
+  // ACTIVE when a device was already added while they were PENDING - see
+  // planMembershipChanges, which picks the outcome by checking for a leaf.
   ACCEPT_INVITE: {
     PENDING: 'JOINING',
   },
+  // PENDING is entitled to a leaf now, so declining waits for the Remove
+  // Commit the same way REMOVE does - see planMembershipChanges.
   DECLINE_INVITE: {
-    PENDING: 'DECLINED',
+    PENDING: 'LEAVING',
+  },
+  // Only defined from PENDING, deliberately: if the invitee accepted or was
+  // removed between the expiry job reading them and applying this, they are
+  // no longer PENDING and this must fail closed rather than remove an
+  // active member outright the way a REMOVE from any state can.
+  EXPIRE_INVITE: {
+    PENDING: 'LEAVING',
   },
   REMOVE: {
     NONE: 'noop',
-    PENDING: 'DECLINED',
+    PENDING: 'LEAVING',
     JOINING: 'DECLINED',
     ACTIVE: 'LEAVING',
     ARCHIVED: 'LEAVING',
@@ -91,6 +105,9 @@ const MLS_TRANSITIONS: Record<
     DECLINED: 'noop',
   },
   COMMIT_ADDED: {
+    // Their device landed while still PENDING - state doesn't change, they
+    // just aren't waiting on anything cryptographic anymore.
+    PENDING: 'noop',
     JOINING: 'ACTIVE',
     ACTIVE: 'noop',
     ARCHIVED: 'noop',
@@ -130,6 +147,16 @@ const MLS_ONLY_EVENTS = new Set<MembershipEvent>([
   'COMMIT_REMOVED',
   'GROUP_ACTIVATED',
 ]);
+
+/**
+ * Whether an event is only ever legal from PENDING - someone answering (or
+ * timing out on) an invite. Derived from the table, so a new invite-answering
+ * event needs nothing beyond its own row.
+ */
+export function isAnswerToInvite(event: MembershipEvent): boolean {
+  const legalFrom = Object.keys(MLS_TRANSITIONS[event]);
+  return legalFrom.length === 1 && legalFrom[0] === 'PENDING';
+}
 
 export function resolveMembershipTransition(params: {
   from: MembershipFrom;

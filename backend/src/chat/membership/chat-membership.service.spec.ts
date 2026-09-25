@@ -58,6 +58,19 @@ describe('ChatMembershipService', () => {
     ]);
   });
 
+  it('turns an expiry into an EXPIRE_INVITE event per person', async () => {
+    await service.expireInvites('conv-1', ['u2', 'u3']);
+
+    expect(repository.changeMembership).toHaveBeenCalledWith(
+      'conv-1',
+      [
+        { userId: 'u2', event: 'EXPIRE_INVITE' },
+        { userId: 'u3', event: 'EXPIRE_INVITE' },
+      ],
+      'skip',
+    );
+  });
+
   it('applies one change per person when the same user is listed twice', async () => {
     await service.addMembers('conv-1', [
       { userId: 'u2', entitlement: 'DIRECT' },

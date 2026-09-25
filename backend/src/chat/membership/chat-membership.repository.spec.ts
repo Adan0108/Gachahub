@@ -18,7 +18,10 @@ describe('ChatMembershipRepository', () => {
       createMany: jest.fn(),
     },
   };
-  const prisma = { $transaction: jest.fn() };
+  const prisma = {
+    $transaction: jest.fn(),
+    chatParticipant: { findMany: jest.fn() },
+  };
   const roster = { hasRoster: jest.fn(), findActiveLeaves: jest.fn() };
 
   let repository: ChatMembershipRepository;
@@ -143,6 +146,69 @@ describe('ChatMembershipRepository', () => {
     expect(tx.chatParticipant.findMany).toHaveBeenCalledWith({
       where: { conversationId: 'conv-1', userId: { in: ['u2', 'u3'] } },
       select: { userId: true, state: true, role: true },
+    });
+  });
+
+  it('passes onIllegal through, so a sweep can skip someone who answered instead of failing the batch', async () => {
+    tx.chatParticipant.findMany.mockResolvedValue([
+      { userId: 'u2', state: 'ACTIVE', role: 'MEMBER' },
+      { userId: 'u3', state: 'PENDING', role: 'MEMBER' },
+    ]);
+
+    await expect(
+      repository.changeMembership(
+        'conv-1',
+        [
+          { userId: 'u2', event: 'EXPIRE_INVITE' },
+          { userId: 'u3', event: 'EXPIRE_INVITE' },
+        ],
+        'skip',
+      ),
+    ).resolves.toBe(1);
+
+    expect(tx.chatParticipant.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.chatParticipant.updateMany).toHaveBeenCalledWith({
+      where: { conversationId: 'conv-1', userId: 'u3', state: 'PENDING' },
+      data: { state: 'DECLINED' },
+    });
+  });
+
+  describe('findExpiredPendingInvites', () => {
+    it('queries PENDING participants updated before the cutoff', async () => {
+      prisma.chatParticipant.findMany.mockResolvedValue([]);
+      const cutoff = new Date('2026-09-01T00:00:00.000Z');
+
+      await repository.findExpiredPendingInvites(cutoff);
+
+      expect(prisma.chatParticipant.findMany).toHaveBeenCalledWith({
+        where: { state: 'PENDING', updatedAt: { lt: cutoff } },
+        select: { conversationId: true, userId: true },
+      });
+    });
+
+    it('groups the matching userIds by conversation', async () => {
+      prisma.chatParticipant.findMany.mockResolvedValue([
+        { conversationId: 'conv-1', userId: 'u2' },
+        { conversationId: 'conv-1', userId: 'u3' },
+        { conversationId: 'conv-2', userId: 'u4' },
+      ]);
+
+      const result = await repository.findExpiredPendingInvites(new Date());
+
+      expect(result).toEqual(
+        new Map([
+          ['conv-1', ['u2', 'u3']],
+          ['conv-2', ['u4']],
+        ]),
+      );
+    });
+
+    it('returns an empty map when nothing has expired', async () => {
+      prisma.chatParticipant.findMany.mockResolvedValue([]);
+
+      const result = await repository.findExpiredPendingInvites(new Date());
+
+      expect(result).toEqual(new Map());
     });
   });
 });

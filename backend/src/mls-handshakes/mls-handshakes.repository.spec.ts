@@ -298,7 +298,7 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('refuses to welcome someone who is only PENDING - a Commit cannot grant membership', async () => {
+    it('welcomes a pending invitee into the group it creates - PENDING is entitled to a leaf', async () => {
       devices(['device-2', 'user-2']);
       participants(['user-1', 'ACTIVE'], ['user-2', 'PENDING']);
 
@@ -308,10 +308,10 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
           addedDeviceIds: ['device-2'],
           welcomes: [welcomeFor('device-2')],
         }),
-      ).rejects.toThrow(ForbiddenException);
+      ).resolves.toMatchObject({ outcome: 'accepted' });
 
-      expect(tx.mlsHandshake.create).not.toHaveBeenCalled();
-      expect(tx.mlsWelcome.createMany).not.toHaveBeenCalled();
+      expect(tx.mlsHandshake.create).toHaveBeenCalled();
+      expect(tx.mlsWelcome.createMany).toHaveBeenCalled();
     });
   });
 
@@ -368,7 +368,27 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
       });
     });
 
-    it.each(['PENDING', 'DECLINED', 'LEAVING', 'MISSING'])(
+    it('adds a device for a pending invitee without changing their participant state', async () => {
+      devices(['device-2', 'user-2']);
+      participants(['user-1', 'ACTIVE'], ['user-2', 'PENDING']);
+
+      await repository.acceptHandshake({
+        ...baseParams,
+        expectedEpoch: 3,
+        addedDeviceIds: ['device-2'],
+        welcomes: [welcomeFor('device-2')],
+      });
+
+      expect(roster.addLeaves).toHaveBeenCalledWith(
+        'conv-1',
+        [{ deviceId: 'device-2', userId: 'user-2' }],
+        4,
+        tx,
+      );
+      expect(tx.chatParticipant.updateMany).not.toHaveBeenCalled();
+    });
+
+    it.each(['DECLINED', 'LEAVING', 'MISSING'])(
       'refuses to add a device for someone who is %s',
       async (state) => {
         devices(['device-2', 'user-2']);
@@ -601,7 +621,17 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
       });
     });
 
-    it.each(['PENDING', 'DECLINED', 'LEAVING', 'MISSING'])(
+    it('lets a still-pending invitee self-join, without changing their participant state', async () => {
+      devices(['device-2', 'user-2']);
+      participants(['user-1', 'ACTIVE'], ['user-2', 'PENDING']);
+
+      await expect(repository.acceptExternalJoin(join)).resolves.toMatchObject({
+        outcome: 'accepted',
+      });
+      expect(tx.chatParticipant.updateMany).not.toHaveBeenCalled();
+    });
+
+    it.each(['DECLINED', 'LEAVING', 'MISSING'])(
       'refuses a joiner whose user is %s',
       async (state) => {
         devices(['device-2', 'user-2']);

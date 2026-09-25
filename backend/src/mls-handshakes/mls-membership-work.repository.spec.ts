@@ -23,7 +23,7 @@ describe('MlsMembershipWorkRepository', () => {
   });
 
   describe('findConversationsNeedingWork', () => {
-    it('only looks at conversations this device is in, this user is an ACTIVE participant of, and someone is joining or leaving', async () => {
+    it('only looks at conversations this device is in, this user is an ACTIVE participant of, and someone is pending, joining or leaving', async () => {
       prisma.chatConversation.findMany.mockResolvedValue([]);
 
       await repository.findConversationsNeedingWork({
@@ -41,7 +41,7 @@ describe('MlsMembershipWorkRepository', () => {
               { participants: { some: { userId: 'user-1', state: 'ACTIVE' } } },
               {
                 participants: {
-                  some: { state: { in: ['JOINING', 'LEAVING'] } },
+                  some: { state: { in: ['PENDING', 'JOINING', 'LEAVING'] } },
                 },
               },
             ],

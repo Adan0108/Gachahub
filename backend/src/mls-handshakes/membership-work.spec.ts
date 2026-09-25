@@ -81,7 +81,7 @@ describe('buildMembershipWork', () => {
       expect(result[0]?.add).toEqual([{ userId: 'u2', deviceId: 'd2-new' }]);
     });
 
-    it.each(['ARCHIVED', 'BLOCKED'] as const)(
+    it.each(['PENDING', 'ARCHIVED', 'BLOCKED'] as const)(
       'gives a %s member who never got a device one - they are entitled, and would otherwise never read',
       (state) => {
         const result = work(
@@ -117,7 +117,7 @@ describe('buildMembershipWork', () => {
       expect(result[0]?.add).toEqual([{ userId: 'u2', deviceId: 'd2b' }]);
     });
 
-    it.each(['PENDING', 'DECLINED', 'LEAVING'] as const)(
+    it.each(['DECLINED', 'LEAVING'] as const)(
       'never adds a device for someone who is %s',
       (state) => {
         const result = work(

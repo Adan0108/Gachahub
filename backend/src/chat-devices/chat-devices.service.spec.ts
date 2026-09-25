@@ -533,7 +533,56 @@ describe('ChatDevicesService', () => {
       expect(repository.claimSingleUseKeyPackage).not.toHaveBeenCalled();
     });
 
-    it.each(['PENDING', 'DECLINED', 'LEAVING', 'MISSING'])(
+    it('lets a member claim for a pending invitee whose current settings still allow it', async () => {
+      repository.findParticipantStates.mockResolvedValue(
+        new Map([
+          ['user-1', 'ACTIVE'],
+          ['user-2', 'PENDING'],
+        ]),
+      );
+      repository.findUserMessagingProfile.mockResolvedValue({
+        id: 'user-2',
+        messageRequestSetting: 'EVERYONE',
+      });
+      blocksService.isBlocked.mockResolvedValue(false);
+
+      await expect(claimForGroup()).resolves.toEqual([
+        expect.objectContaining({ deviceId: 'd2' }),
+      ]);
+    });
+
+    it('refuses to claim for a pending invitee who currently refuses new messages - an invite is not a standing consent to be added later', async () => {
+      repository.findParticipantStates.mockResolvedValue(
+        new Map([
+          ['user-1', 'ACTIVE'],
+          ['user-2', 'PENDING'],
+        ]),
+      );
+      repository.findUserMessagingProfile.mockResolvedValue({
+        id: 'user-2',
+        messageRequestSetting: 'NO_ONE',
+      });
+
+      await expect(claimForGroup()).rejects.toThrow(ForbiddenException);
+
+      expect(repository.claimSingleUseKeyPackage).not.toHaveBeenCalled();
+    });
+
+    it('refuses to claim for a pending invitee who has since blocked the requester', async () => {
+      repository.findParticipantStates.mockResolvedValue(
+        new Map([
+          ['user-1', 'ACTIVE'],
+          ['user-2', 'PENDING'],
+        ]),
+      );
+      blocksService.isBlocked.mockResolvedValue(true);
+
+      await expect(claimForGroup()).rejects.toThrow(ForbiddenException);
+
+      expect(repository.claimSingleUseKeyPackage).not.toHaveBeenCalled();
+    });
+
+    it.each(['DECLINED', 'LEAVING', 'MISSING'])(
       'refuses to claim for someone who is %s in the group',
       async (state) => {
         repository.findParticipantStates.mockResolvedValue(

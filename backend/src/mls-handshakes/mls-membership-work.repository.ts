@@ -3,12 +3,17 @@ import type { ChatParticipantState } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ConversationFacts, DeviceRecord } from './membership-work';
 
-const PENDING_STATES: ChatParticipantState[] = ['JOINING', 'LEAVING'];
+const STATES_NEEDING_WORK: ChatParticipantState[] = [
+  'PENDING',
+  'JOINING',
+  'LEAVING',
+];
 
 /**
  * How widely to look for membership work.
- * - `pending`: only conversations where someone is JOINING or LEAVING - cheap
- *   and indexed, meant to run often.
+ * - `pending`: only conversations where someone is PENDING, JOINING or
+ *   LEAVING - cheap and indexed, meant to run often. PENDING is here so an
+ *   invitee's device gets added promptly, not just on the rare full scan.
  * - `full`: every conversation this device is in, which also finds a new
  *   device, a revoked one, or a leftover one - meant to run rarely.
  */
@@ -52,7 +57,7 @@ export class MlsMembershipWorkRepository {
             ? [
                 {
                   participants: {
-                    some: { state: { in: PENDING_STATES } },
+                    some: { state: { in: STATES_NEEDING_WORK } },
                   },
                 },
               ]
@@ -87,7 +92,7 @@ export class MlsMembershipWorkRepository {
         mlsMembers: { some: { deviceId, removedEpoch: null } },
         AND: [
           { participants: { some: { userId, state: 'ACTIVE' } } },
-          { participants: { some: { state: { in: PENDING_STATES } } } },
+          { participants: { some: { state: { in: STATES_NEEDING_WORK } } } },
         ],
       },
       select: { id: true },

@@ -12,6 +12,7 @@ import { ChatMediaReleaseRetryService } from './chat-media-release-retry.service
 import { ChatTypingGateway } from './realtime/chat-typing.gateway';
 import { ChatTypingService } from './realtime/chat-typing.service';
 import { ChatMessageRateLimiterService } from './chat-message-rate-limiter.service';
+import { ChatHistoryFetchRateLimiterService } from './chat-history-fetch-rate-limiter.service';
 import { SocketChatDeliveryService } from './realtime/socket-chat-delivery.service';
 import { OpaqueMessageEncryptionService } from './opaque-message-encryption.service';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
@@ -26,6 +27,7 @@ import { MlsGroupRosterModule } from '../mls-group-roster/mls-group-roster.modul
 import { ChatDevicesModule } from '../chat-devices/chat-devices.module';
 import { ChatMembershipRepository } from './membership/chat-membership.repository';
 import { ChatMembershipService } from './membership/chat-membership.service';
+import { ChatInviteExpiryService } from './membership/chat-invite-expiry.service';
 
 /**
  * Chat feature module.
@@ -55,6 +57,7 @@ import { ChatMembershipService } from './membership/chat-membership.service';
     ChatMessagingService,
     ChatMembershipRepository,
     ChatMembershipService,
+    ChatInviteExpiryService,
     ChatGroupService,
     ChatInboxService,
     ChatMessageActionsService,
@@ -62,6 +65,7 @@ import { ChatMembershipService } from './membership/chat-membership.service';
     ChatTypingGateway,
     ChatTypingService,
     ChatMessageRateLimiterService,
+    ChatHistoryFetchRateLimiterService,
     {
       provide: CHAT_DELIVERY_PORT,
       useClass: SocketChatDeliveryService,

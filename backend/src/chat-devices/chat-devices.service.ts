@@ -275,8 +275,10 @@ export class ChatDevicesService {
    * - Messaging someone (no conversationId): a requester block and the target's
    *   messageRequestSetting apply, unless claiming your own devices.
    * - Finishing a change to a group (conversationId): the group must be MLS, the
-   *   caller ACTIVE, the target entitled to a leaf; DM settings don't apply and
-   *   devices already in the group are skipped.
+   *   caller ACTIVE, the target entitled to a leaf; devices already in the group
+   *   are skipped. A PENDING target additionally gets the same block/messageRequestSetting
+   *   check a DM would - they haven't accepted, so nothing yet confirms their current
+   *   consent (see assertMayClaimForGroup).
    *
    * excludeDeviceId leaves out the device creating the group; deviceIds limits
    * the claim to those devices, so none registered meanwhile is claimed and wasted.
@@ -360,10 +362,21 @@ export class ChatDevicesService {
       );
     }
 
-    if (!isEntitledToLeaf(states.get(targetUserId))) {
+    const targetState = states.get(targetUserId);
+
+    if (!isEntitledToLeaf(targetState)) {
       throw new ForbiddenException(
         'This user is not entitled to join this group',
       );
+    }
+
+    // An ACTIVE member's entitlement already came from a completed relationship (mutual
+    // follow) or their own accept - nothing further to check. PENDING is different: nobody
+    // has confirmed consent yet, the invite may be long-lived (see the invite-expiry job),
+    // and messageRequestSetting can change after the invite was created - so this re-checks
+    // it fresh, the same gate a DM would apply, instead of trusting a stale invite-time read.
+    if (targetState === 'PENDING') {
+      await this.assertMayFetchKeyPackage(requesterId, targetUserId);
     }
 
     // A group with no MLS roster has nothing to finish, and no key package of

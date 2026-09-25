@@ -123,6 +123,53 @@ that snapshot and joins by itself (`mls-self-join.*`, `syncEngine.ts`'s
 against the same snapshot before accepting it. No existing member needs to
 be online at accept time. The "syncing…" UI state is still not built.
 
+**Superseded (2026-09-23):** reversed. `PENDING` is now an entitled state
+(`leaf-entitlement.ts`) — a group invitee's device is added, and they can
+call `findMessages`, from the moment they're invited, not from accept.
+Accept/decline still exist, but as a request-inbox affordance layered on top
+of already-real access, not a gate on it (matching Kawaii Moe's team's
+discussion linked from this branch's history).
+
+This does **not** mean an invitee reads the group's actual full history.
+MLS forward secrecy means a device only derives the group's *current* epoch
+secret from the Commit that adds it — it cannot derive any earlier epoch's
+secret, so anything sent before that Commit stays permanently
+undecryptable to them, at any access speed. What this decision actually
+buys an invitee is: readable from *invite time* forward instead of from
+*accept time* forward (the gap between the two, previously wasted). "Read
+the whole chat" was the original ask; it is not what MLS can deliver here
+without changing how far back a Welcome's secrets reach, which this change
+does not attempt.
+
+New gaps this decision opens, not yet fully closed:
+- **Invite expiry** — `isLeafRemovable` treats PENDING as entitled with no
+  time limit, and nothing ever declines a stale invite on its own. An
+  ignored invite is permanent cryptographic membership: their device keeps
+  receiving every future epoch secret indefinitely.
+  `chat-invite-expiry.service.ts` (added 2026-09-23) expires one after 14
+  days of no response, routing it through the same REMOVE→LEAVING pipeline
+  as an admin removal.
+- **Stale consent at claim time** — the mutual-follow/messageRequestSetting
+  check that decides ACTIVE vs PENDING only runs once, at invite time.
+  Because PENDING is now entitled, a later key-package claim for a
+  still-pending invitee re-checks the DM consent gate fresh
+  (`assertMayClaimForGroup`), since an old invite is not standing consent to
+  actually receive key material later, particularly if the target changed
+  their settings or blocked the inviter in between.
+- **Decline briefly holds up the next send** — `DECLINE_INVITE` now routes
+  through `LEAVING` when the invitee already holds a leaf (same as any REMOVE),
+  and `assertNoMembershipChangePending` refuses sends in the conversation while
+  anyone is LEAVING, because a leaf still in the tree could decrypt them. This is
+  not a standing outage: only someone online and sending is affected, and their
+  own client resolves it - `sendEncryptedChatMessage` catches the refusal, runs
+  `reconcileMembership` (an ordinary Remove Commit by that member), and retries
+  under the new epoch. With nobody online nobody is sending, so there is nothing
+  to hold up. The cost is a short extra delay on the first send after a decline.
+  A member cannot Commit their own removal (RFC 9420), so the decliner's device
+  can't do it faster; the IETF SelfRemove draft (`draft-mahy-mls-selfremove`)
+  would let any member or external joiner commit a signed leave proposal, and is
+  the thing to look at if that delay ever matters.
+
 ## 4. Direct messages need devices to exist first
 
 **Decided:** `createDirectMessage` currently creates the conversation and
@@ -198,7 +245,9 @@ traces already are, not trusted to "just not come up."
    `BACKLOG.md`, not part of this branch.
 3. Pending group invites — added to the MLS group only on accept. Still
    needs a queued/retry design for "no existing member is online at
-   accept-time" (see §3).
+   accept-time" (see §3). **Superseded (2026-09-23):** reversed - a group
+   invitee is added on invite, not accept. See §3's 2026-09-23 note for what
+   this does and doesn't get them, and the gaps it opened.
 4. Media encryption — required for v1. Files encrypted client-side before
    upload, key travels inside the MLS message. **Superseded (2026-09-23):**
    deferred, not built - see §6.

@@ -7,10 +7,13 @@ import type { ChatParticipantState } from '../../generated/prisma/client';
  * are how the two drift apart - and whatever falls in the gap never gets done.
  *
  * ACTIVE, ARCHIVED and BLOCKED are per-user views of a member; JOINING is
- * someone the server has authorized to join. Everyone else (PENDING, DECLINED,
- * LEAVING, or no participant row at all) is not entitled.
+ * someone the server has authorized to join. PENDING is entitled too - an
+ * invitee reads and decrypts real history from the moment they're invited,
+ * before they ever accept (see membership-state-machine.ts). Everyone else
+ * (DECLINED, LEAVING, or no participant row at all) is not entitled.
  */
 export const ENTITLED_TO_LEAF_STATES: readonly ChatParticipantState[] = [
+  'PENDING',
   'JOINING',
   'ACTIVE',
   'ARCHIVED',

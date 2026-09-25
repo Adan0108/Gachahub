@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import type { ChatParticipantState } from '../../generated/prisma/client';
 import type { ParticipantTransition } from './apply-participant-transitions';
 import {
+  isAnswerToInvite,
   resolveMembershipTransition,
   type MembershipEvent,
 } from './membership-state-machine';
@@ -10,6 +11,14 @@ export interface MembershipRequest {
   userId: string;
   event: MembershipEvent;
 }
+
+/**
+ * What to do with a request that makes no sense from someone's current state.
+ * 'throw' suits an interactive caller (a 400 back to the user); 'skip' leaves
+ * that person alone and carries on with everyone else, for a sweep that read
+ * their state a moment ago and can't tell someone changed it in between.
+ */
+export type OnIllegalMembershipChange = 'throw' | 'skip';
 
 interface ParticipantRow {
   userId: string;
@@ -22,11 +31,14 @@ interface ParticipantRow {
  * conversation as it stands. Pure: the repository reads the facts inside a
  * transaction and applies what this returns.
  *
- * A removal only waits for a Remove Commit when there is a device in the MLS
- * group for that Commit to remove. Someone with none (never got a device in,
- * or the group predates them) has nothing to wait for, so the removal is final
- * at once - otherwise they would sit in LEAVING forever, and LEAVING blocks
- * every send in the group until it is cleared.
+ * A change only waits for a Commit when there is one to wait for. Leaving
+ * (a transition to LEAVING) needs a Remove Commit only if the person has a device
+ * in the MLS group; with none there is nothing to wait for, so it is final at
+ * once - otherwise they would sit in LEAVING forever, and LEAVING blocks every
+ * send in the group until it is cleared. Joining (a transition to JOINING) needs
+ * an Add Commit only if none of their devices is in yet - one may already be
+ * there, added while they were still PENDING. Both are read off the transition
+ * table's own result, so a new event needs only its row in the table.
  */
 export function planMembershipChanges(params: {
   requests: readonly MembershipRequest[];
@@ -35,8 +47,15 @@ export function planMembershipChanges(params: {
   mlsActive: boolean;
   /** Users who currently have at least one device in the MLS group. */
   userIdsWithLeaves: ReadonlySet<string>;
+  onIllegal?: OnIllegalMembershipChange;
 }): ParticipantTransition[] {
-  const { requests, participants, mlsActive, userIdsWithLeaves } = params;
+  const {
+    requests,
+    participants,
+    mlsActive,
+    userIdsWithLeaves,
+    onIllegal = 'throw',
+  } = params;
   const participantByUserId = new Map(
     participants.map((participant) => [participant.userId, participant]),
   );
@@ -49,16 +68,27 @@ export function planMembershipChanges(params: {
       continue;
     }
 
-    const removalHasNothingToWaitFor =
-      event === 'REMOVE' && !userIdsWithLeaves.has(userId);
+    const from = participant?.state ?? 'NONE';
+    const hasLeaf = userIdsWithLeaves.has(userId);
 
-    const transition = resolveMembershipTransition({
-      from: participant?.state ?? 'NONE',
-      event,
-      mlsActive: mlsActive && !removalHasNothingToWaitFor,
-    });
+    let transition = resolveMembershipTransition({ from, event, mlsActive });
+
+    const noCommitNeeded =
+      transition.kind === 'change' &&
+      ((transition.to === 'LEAVING' && !hasLeaf) ||
+        (transition.to === 'JOINING' && hasLeaf));
+
+    if (noCommitNeeded) {
+      transition = resolveMembershipTransition({
+        from,
+        event,
+        mlsActive: false,
+      });
+    }
 
     if (transition.kind === 'illegal') {
+      if (onIllegal === 'skip') continue;
+
       throw new BadRequestException(illegalMessage(event, participant?.state));
     }
 
@@ -78,7 +108,7 @@ function illegalMessage(
   event: MembershipEvent,
   state: ChatParticipantState | undefined,
 ): string {
-  if (event === 'ACCEPT_INVITE' || event === 'DECLINE_INVITE') {
+  if (isAnswerToInvite(event)) {
     return 'Conversation is not pending';
   }
 

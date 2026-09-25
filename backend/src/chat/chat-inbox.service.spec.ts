@@ -104,6 +104,10 @@ describe('ChatInboxService', () => {
     declineInvite: jest.fn(),
   };
 
+  const historyFetchRateLimiter = {
+    assertNotRateLimited: jest.fn(),
+  };
+
   let chatAccessService: ChatAccessService;
   let service: ChatInboxService;
 
@@ -120,6 +124,7 @@ describe('ChatInboxService', () => {
       chatAccessService,
       blocksService as any,
       membershipService as any,
+      historyFetchRateLimiter as any,
     );
     blocksService.getBlockedIdsAmong.mockResolvedValue(new Set());
     blocksService.isBlocked.mockResolvedValue(false);
@@ -772,16 +777,16 @@ describe('ChatInboxService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('rejects a pending group invitee before they accept', async () => {
+    it('allows a pending group invitee to read message history before they accept', async () => {
       repository.findParticipant.mockResolvedValue({
         userId: 'user-1',
         state: 'PENDING',
       });
-      repository.findConversationType.mockResolvedValue({ type: 'GROUP' });
+      repository.findMessages.mockResolvedValue([]);
 
       await expect(
         service.findMessages('user-1', 'conversation-1', {} as any),
-      ).rejects.toThrow(ForbiddenException);
+      ).resolves.toBeDefined();
     });
 
     it('allows a pending direct message request to preview history', async () => {
@@ -789,7 +794,6 @@ describe('ChatInboxService', () => {
         userId: 'user-1',
         state: 'PENDING',
       });
-      repository.findConversationType.mockResolvedValue({ type: 'DIRECT' });
       repository.findMessages.mockResolvedValue([]);
 
       await expect(
@@ -817,6 +821,46 @@ describe('ChatInboxService', () => {
         beforeMessageId: 'message-5',
         limit: 30,
       });
+    });
+
+    it('does not rate limit the initial page, only paginated fetches', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findMessages.mockResolvedValue([]);
+
+      await service.findMessages('user-1', 'conversation-1', {} as any);
+
+      expect(
+        historyFetchRateLimiter.assertNotRateLimited,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('rate limits a paginated fetch before touching the cursor or the database', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      historyFetchRateLimiter.assertNotRateLimited.mockImplementationOnce(
+        () => {
+          throw new Error('rate limited');
+        },
+      );
+
+      await expect(
+        service.findMessages('user-1', 'conversation-1', {
+          beforeMessageId: 'message-5',
+          limit: 30,
+        }),
+      ).rejects.toThrow('rate limited');
+
+      expect(historyFetchRateLimiter.assertNotRateLimited).toHaveBeenCalledWith(
+        'user-1',
+        'conversation-1',
+      );
+      expect(repository.findSentMessageInConversation).not.toHaveBeenCalled();
+      expect(repository.findMessages).not.toHaveBeenCalled();
     });
 
     it('rejects a beforeMessageId that does not belong to this conversation', async () => {

@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,6 +7,7 @@ import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
 import { BlocksService } from '../blocks/blocks.service';
 import { ChatMembershipService } from './membership/chat-membership.service';
+import { ChatHistoryFetchRateLimiterService } from './chat-history-fetch-rate-limiter.service';
 import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
 import { MarkMessagesDeliveredDto } from './dto/mark-messages-delivered.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
@@ -26,6 +26,7 @@ export class ChatInboxService {
     private readonly chatAccessService: ChatAccessService,
     private readonly blocksService: BlocksService,
     private readonly chatMembershipService: ChatMembershipService,
+    private readonly historyFetchRateLimiter: ChatHistoryFetchRateLimiterService,
   ) {}
 
   /**
@@ -110,25 +111,16 @@ export class ChatInboxService {
     conversationId: string,
     query: QueryChatMessagesDto,
   ) {
-    const participant = await this.chatAccessService.assertReadableParticipant(
+    await this.chatAccessService.assertReadableParticipant(
       conversationId,
       userId,
     );
 
-    if (participant.state === 'PENDING') {
-      const conversation =
-        await this.chatRepository.findConversationType(conversationId);
-
-      if (conversation?.type === 'GROUP') {
-        throw new ForbiddenException(
-          'Accept the group invite before viewing message history',
-        );
-      }
-    }
-
     const limit = query.limit;
 
     if (query.beforeMessageId) {
+      this.historyFetchRateLimiter.assertNotRateLimited(userId, conversationId);
+
       const cursorMessage =
         await this.chatRepository.findSentMessageInConversation(
           query.beforeMessageId,

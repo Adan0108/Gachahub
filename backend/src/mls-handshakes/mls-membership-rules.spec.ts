@@ -197,19 +197,22 @@ describe('assertAddedDevicesAuthorized', () => {
     activeLeafDeviceIds: new Set<string>(),
   };
 
-  it.each<ChatParticipantState>(['JOINING', 'ACTIVE', 'ARCHIVED', 'BLOCKED'])(
-    'allows a device for someone who is %s',
-    (state) => {
-      expect(() =>
-        assertAddedDevicesAuthorized({
-          ...base,
-          participantStateByUserId: states([['u2', state]]),
-        }),
-      ).not.toThrow();
-    },
-  );
+  it.each<ChatParticipantState>([
+    'PENDING',
+    'JOINING',
+    'ACTIVE',
+    'ARCHIVED',
+    'BLOCKED',
+  ])('allows a device for someone who is %s', (state) => {
+    expect(() =>
+      assertAddedDevicesAuthorized({
+        ...base,
+        participantStateByUserId: states([['u2', state]]),
+      }),
+    ).not.toThrow();
+  });
 
-  it.each<ChatParticipantState>(['PENDING', 'DECLINED', 'LEAVING'])(
+  it.each<ChatParticipantState>(['DECLINED', 'LEAVING'])(
     'refuses a device for someone who is %s',
     (state) => {
       expect(() =>
@@ -263,7 +266,7 @@ describe('assertRemovedDevicesRemovable', () => {
     participantStateByUserId: states([['u2', 'LEAVING']]),
   };
 
-  it.each<ChatParticipantState>(['LEAVING', 'DECLINED', 'PENDING'])(
+  it.each<ChatParticipantState>(['LEAVING', 'DECLINED'])(
     'allows removing a device whose owner is %s',
     (state) => {
       expect(() =>
@@ -274,6 +277,15 @@ describe('assertRemovedDevicesRemovable', () => {
       ).not.toThrow();
     },
   );
+
+  it('refuses removing a device whose owner is PENDING - they are entitled to a leaf too', () => {
+    expect(() =>
+      assertRemovedDevicesRemovable({
+        ...base,
+        participantStateByUserId: states([['u2', 'PENDING']]),
+      }),
+    ).toThrow(ForbiddenException);
+  });
 
   it('allows removing a device whose owner is no longer a participant', () => {
     expect(() =>

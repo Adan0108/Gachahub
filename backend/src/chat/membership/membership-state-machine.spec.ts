@@ -1,4 +1,5 @@
 import {
+  isAnswerToInvite,
   resolveMembershipTransition,
   type MembershipEvent,
   type MembershipFrom,
@@ -38,11 +39,19 @@ describe('resolveMembershipTransition', () => {
       ['ACTIVE', 'ACCEPT_INVITE', illegal],
       ['DECLINED', 'ACCEPT_INVITE', illegal],
       ['NONE', 'ACCEPT_INVITE', illegal],
-      ['PENDING', 'DECLINE_INVITE', change('DECLINED')],
+      ['PENDING', 'DECLINE_INVITE', change('LEAVING')],
       ['ACTIVE', 'DECLINE_INVITE', illegal],
       ['JOINING', 'DECLINE_INVITE', illegal],
-      // removal: only someone holding a leaf goes through LEAVING
-      ['PENDING', 'REMOVE', change('DECLINED')],
+      // invite expiry: only ever legal from PENDING, so a race with an accept or a
+      // removal fails closed instead of silently doing a REMOVE from any state
+      ['PENDING', 'EXPIRE_INVITE', change('LEAVING')],
+      ['ACTIVE', 'EXPIRE_INVITE', illegal],
+      ['JOINING', 'EXPIRE_INVITE', illegal],
+      ['DECLINED', 'EXPIRE_INVITE', illegal],
+      ['NONE', 'EXPIRE_INVITE', illegal],
+      // removal: PENDING is entitled to a leaf too, so it now waits in LEAVING
+      // like ACTIVE/ARCHIVED/BLOCKED; JOINING is assumed to have none yet
+      ['PENDING', 'REMOVE', change('LEAVING')],
       ['JOINING', 'REMOVE', change('DECLINED')],
       ['ACTIVE', 'REMOVE', change('LEAVING')],
       ['ARCHIVED', 'REMOVE', change('LEAVING')],
@@ -55,7 +64,8 @@ describe('resolveMembershipTransition', () => {
       ['ACTIVE', 'COMMIT_ADDED', noop],
       ['ARCHIVED', 'COMMIT_ADDED', noop],
       ['BLOCKED', 'COMMIT_ADDED', noop],
-      ['PENDING', 'COMMIT_ADDED', illegal],
+      // their device landed while still PENDING - no state change yet
+      ['PENDING', 'COMMIT_ADDED', noop],
       ['DECLINED', 'COMMIT_ADDED', illegal],
       ['LEAVING', 'COMMIT_ADDED', illegal],
       ['NONE', 'COMMIT_ADDED', illegal],
@@ -93,6 +103,7 @@ describe('resolveMembershipTransition', () => {
       ['PENDING', 'REMOVE', change('DECLINED')],
       ['DECLINED', 'REMOVE', noop],
       ['PENDING', 'DECLINE_INVITE', change('DECLINED')],
+      ['PENDING', 'EXPIRE_INVITE', change('DECLINED')],
     ])('%s + %s', (from, event, expected) => {
       expect(resolve(from, event, false)).toEqual(expected);
     });
@@ -111,6 +122,21 @@ describe('resolveMembershipTransition', () => {
         expect(resolve(from, 'GROUP_ACTIVATED', false)).toEqual(illegal);
       },
     );
+  });
+
+  it('knows which events only answer an invite', () => {
+    expect(
+      (
+        [
+          'ACCEPT_INVITE',
+          'DECLINE_INVITE',
+          'EXPIRE_INVITE',
+          'REMOVE',
+          'ADD_DIRECT',
+          'ADD_INVITE',
+        ] as const
+      ).map(isAnswerToInvite),
+    ).toEqual([true, true, true, false, false, false]);
   });
 
   it('never leaves someone in a state that holds no leaf while the group thinks they are a member', () => {
