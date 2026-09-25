@@ -19,6 +19,7 @@ export class UsersService {
   async searchForPicker(callerId: string, { q, limit }: SearchUsersQueryDto) {
     this.searchRateLimiter.assertNotRateLimited(callerId);
 
+    const byId = await this.usersRepository.findPickableById(callerId, q);
     const prefixed = await this.usersRepository.searchByName(
       callerId,
       q,
@@ -36,7 +37,10 @@ export class UsersService {
           )
         : [];
 
-    return { items: [...prefixed, ...contained] };
+    const items = [...prefixed, ...contained];
+    return {
+      items: byId ? [byId, ...items.filter((u) => u.id !== byId.id)] : items,
+    };
   }
 
   updateProfile(userId: string, dto: UpdateProfileDto) {

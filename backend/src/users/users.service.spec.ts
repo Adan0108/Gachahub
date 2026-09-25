@@ -13,7 +13,10 @@ describe('UsersService', () => {
     isBlocked: jest.fn(),
   };
 
-  const repository = { searchByName: jest.fn() };
+  const repository = {
+    searchByName: jest.fn(),
+    findPickableById: jest.fn(),
+  };
   const limiter = { assertNotRateLimited: jest.fn() };
 
   let service: UsersService;
@@ -134,6 +137,19 @@ describe('UsersService', () => {
         'contains',
         2,
       );
+    });
+
+    it('puts an exact id match first and does not repeat it', async () => {
+      limiter.assertNotRateLimited.mockReset();
+      repository.findPickableById.mockResolvedValueOnce(b);
+      repository.searchByName
+        .mockResolvedValueOnce([a, b])
+        .mockResolvedValueOnce([]);
+
+      const result = await service.searchForPicker('me', { q: b.id, limit: 3 });
+
+      expect(repository.findPickableById).toHaveBeenCalledWith('me', b.id);
+      expect(result).toEqual({ items: [b, a] });
     });
 
     it('skips the contains query when prefix matches fill the limit', async () => {

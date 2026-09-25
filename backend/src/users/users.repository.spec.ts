@@ -5,7 +5,7 @@ jest.mock('../prisma/prisma.service', () => ({ PrismaService: class {} }));
 import { escapeLikePattern, UsersRepository } from './users.repository';
 
 describe('UsersRepository.searchByName', () => {
-  const prisma = { user: { findMany: jest.fn() } };
+  const prisma = { user: { findMany: jest.fn(), findFirst: jest.fn() } };
   const repository = new UsersRepository(prisma as unknown as PrismaService);
 
   beforeEach(() => jest.clearAllMocks());
@@ -16,6 +16,21 @@ describe('UsersRepository.searchByName', () => {
         { where: { name: unknown; NOT: unknown }; take: number },
       ]
     )[0];
+
+  it('finds an exact id only when active, not the caller and not blocked either way', async () => {
+    await repository.findPickableById('me', 'abc');
+
+    expect(prisma.user.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'abc',
+        NOT: { id: 'me' },
+        status: 'ACTIVE',
+        blockedUsers: { none: { blockedId: 'me' } },
+        blockedBy: { none: { blockerId: 'me' } },
+      },
+      select: { id: true, name: true, image: true },
+    });
+  });
 
   it('prefix query is case-insensitive, active-only and excludes caller and blocks both ways', async () => {
     await repository.searchByName('me', 'ma', 'prefix', 5);
