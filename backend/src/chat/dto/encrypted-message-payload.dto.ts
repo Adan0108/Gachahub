@@ -105,13 +105,13 @@ export class EncryptedMessagePayloadDto {
 
   @ApiPropertyOptional({
     type: [ChatMediaReferenceDto],
-    maxItems: 4,
+    maxItems: 20,
     description:
-      'Already-uploaded media to attach. Up to four images, or one video.',
+      'Already-uploaded media to attach: up to four images or one video, or up to 10 encrypted blobs plus their thumbnails.',
   })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(4)
+  @ArrayMaxSize(20)
   @ValidateNested({ each: true })
   @Type(() => ChatMediaReferenceDto)
   media?: ChatMediaReferenceDto[];

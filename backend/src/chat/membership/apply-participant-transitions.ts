@@ -11,6 +11,16 @@ export interface ParticipantTransition {
   to: ChatParticipantState;
 }
 
+/** pendingSince to write for a state change: stamped on entering PENDING, cleared on leaving it. */
+export function pendingSinceChange(
+  from: ChatParticipantState | null,
+  to: ChatParticipantState,
+  now: Date,
+): { pendingSince?: Date | null } {
+  if (to === 'PENDING') return from === 'PENDING' ? {} : { pendingSince: now };
+  return from === 'PENDING' ? { pendingSince: null } : {};
+}
+
 /**
  * Applies membership state changes decided by the membership state machine,
  * inside the caller's transaction, all or nothing.
@@ -29,7 +39,10 @@ export async function applyParticipantTransitions(
   conversationId: string,
   changes: ParticipantTransition[],
 ): Promise<number> {
+  const now = new Date();
+
   for (const change of changes) {
+    const pendingSince = pendingSinceChange(change.from, change.to, now);
     const applied =
       change.from === null
         ? (
@@ -40,6 +53,7 @@ export async function applyParticipantTransitions(
                   userId: change.userId,
                   role: 'MEMBER',
                   state: change.to,
+                  ...pendingSince,
                 },
               ],
               skipDuplicates: true,
@@ -54,6 +68,7 @@ export async function applyParticipantTransitions(
               },
               data: {
                 state: change.to,
+                ...pendingSince,
                 ...(change.from === 'DECLINED'
                   ? { role: 'MEMBER', deletedAt: null, archivedAt: null }
                   : {}),

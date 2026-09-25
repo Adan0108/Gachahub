@@ -4,6 +4,7 @@ import {
   buildMembershipWork,
   type MembershipWorkItem,
 } from './membership-work';
+import { MlsRequestRateLimiterService } from './mls-request-rate-limiter.service';
 import {
   MlsMembershipWorkRepository,
   type MembershipWorkScope,
@@ -29,6 +30,7 @@ export class MlsMembershipWorkService {
   constructor(
     private readonly mlsMembershipWorkRepository: MlsMembershipWorkRepository,
     private readonly chatDevicesService: ChatDevicesService,
+    private readonly requestRateLimiter: MlsRequestRateLimiterService,
   ) {}
 
   async getMembershipWork(
@@ -40,6 +42,7 @@ export class MlsMembershipWorkService {
       conversationId?: string;
     } = {},
   ) {
+    this.requestRateLimiter.assertMayTakeMembershipWork(userId);
     await this.chatDevicesService.assertOwnActiveDevice(userId, deviceId);
 
     const conversations =
@@ -70,10 +73,27 @@ export class MlsMembershipWorkService {
           })
         : [];
 
+    const refusingInviteeIds =
+      await this.chatDevicesService.findInviteesRefusingRequester(
+        userId,
+        unique(
+          conversations.flatMap((conversation) =>
+            conversation.participants
+              .filter(
+                (participant) =>
+                  participant.state === 'PENDING' &&
+                  participant.userId !== userId,
+              )
+              .map((participant) => participant.userId),
+          ),
+        ),
+      );
+
     const items = buildMembershipWork({
       conversations,
       devices,
       requestingDeviceId: deviceId,
+      refusingInviteeIds,
     });
 
     return {

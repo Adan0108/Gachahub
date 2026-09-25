@@ -50,7 +50,8 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
   let tx: ReturnType<typeof buildTx>;
   let prisma: {
     $transaction: jest.Mock;
-    mlsHandshake: { findUnique: jest.Mock };
+    mlsHandshake: { findUnique: jest.Mock; findMany: jest.Mock };
+    mlsWelcome: { findMany: jest.Mock; findFirst: jest.Mock };
     chatDevice: { findMany: jest.Mock };
     chatParticipant: { findUnique: jest.Mock };
     mlsCommitFault: { createMany: jest.Mock };
@@ -81,7 +82,8 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
       $transaction: jest.fn((callback: (t: typeof tx) => unknown) =>
         callback(tx),
       ),
-      mlsHandshake: { findUnique: jest.fn() },
+      mlsHandshake: { findUnique: jest.fn(), findMany: jest.fn() },
+      mlsWelcome: { findMany: jest.fn(), findFirst: jest.fn() },
       mlsCommitFault: { createMany: jest.fn() },
       chatDevice: { findMany: jest.fn() },
       chatParticipant: { findUnique: jest.fn() },
@@ -718,23 +720,58 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
     });
   });
 
-  describe('isEntitledParticipant', () => {
-    it.each([
-      ['ACTIVE', true],
-      ['ARCHIVED', true],
-      ['BLOCKED', true],
-      ['JOINING', true],
-      ['LEAVING', false],
-      ['DECLINED', false],
-      [undefined, false],
-    ])('for a %s participant is %s', async (state, expected) => {
-      prisma.chatParticipant.findUnique.mockResolvedValue(
-        state ? { state } : null,
-      );
+  describe('paging', () => {
+    it('reads Commits in epoch order, capped at the limit', async () => {
+      await repository.findHandshakesSince('conv-1', 3, 100);
+
+      expect(prisma.mlsHandshake.findMany).toHaveBeenCalledWith({
+        where: { conversationId: 'conv-1', epoch: { gte: 3 } },
+        orderBy: { epoch: 'asc' },
+        take: 100,
+      });
+    });
+
+    it('reads Welcomes oldest first with id as tiebreak, capped at the limit', async () => {
+      await repository.findPendingWelcomes('device-1', 50);
+
+      expect(prisma.mlsWelcome.findMany).toHaveBeenCalledWith({
+        where: { recipientDeviceId: 'device-1', consumedAt: null },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: 50,
+      });
+    });
+
+    it('resumes Welcomes strictly after the cursor welcome by (createdAt, id)', async () => {
+      const createdAt = new Date('2026-01-01');
+      prisma.mlsWelcome.findFirst.mockResolvedValue({ createdAt, id: 'w-9' });
+
+      await repository.findPendingWelcomes('device-1', 50, 'w-9');
+
+      expect(prisma.mlsWelcome.findFirst).toHaveBeenCalledWith({
+        where: { id: 'w-9', recipientDeviceId: 'device-1' },
+        select: { createdAt: true, id: true },
+      });
+      expect(prisma.mlsWelcome.findMany).toHaveBeenCalledWith({
+        where: {
+          recipientDeviceId: 'device-1',
+          consumedAt: null,
+          OR: [
+            { createdAt: { gt: createdAt } },
+            { createdAt, id: { gt: 'w-9' } },
+          ],
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: 50,
+      });
+    });
+
+    it('returns null, reading nothing, when the cursor is unknown to this device', async () => {
+      prisma.mlsWelcome.findFirst.mockResolvedValue(null);
 
       await expect(
-        repository.isEntitledParticipant('conv-1', 'user-1'),
-      ).resolves.toBe(expected);
+        repository.findPendingWelcomes('device-1', 50, 'w-x'),
+      ).resolves.toBeNull();
+      expect(prisma.mlsWelcome.findMany).not.toHaveBeenCalled();
     });
   });
 });

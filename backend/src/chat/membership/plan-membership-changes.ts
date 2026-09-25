@@ -7,9 +7,15 @@ import {
   type MembershipEvent,
 } from './membership-state-machine';
 
+/** Events an app-level caller may request; the MLS-only ones come from planCommitTransitions, never from here. */
+export type AppMembershipEvent = Exclude<
+  MembershipEvent,
+  'COMMIT_ADDED' | 'COMMIT_REMOVED' | 'GROUP_ACTIVATED'
+>;
+
 export interface MembershipRequest {
   userId: string;
-  event: MembershipEvent;
+  event: AppMembershipEvent;
 }
 
 /**

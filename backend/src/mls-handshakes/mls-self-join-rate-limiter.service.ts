@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { SlidingWindowRateLimiter } from '../common/utils/sliding-window-rate-limiter';
+import { perMinutePerUserLimiter } from '../common/utils/sliding-window-rate-limiter';
 
 /**
  * Per-user limits on joining groups by yourself. Fetching a snapshot is cheap
@@ -7,19 +7,15 @@ import { SlidingWindowRateLimiter } from '../common/utils/sliding-window-rate-li
  */
 @Injectable()
 export class MlsSelfJoinRateLimiterService {
-  private readonly fetchLimiter = new SlidingWindowRateLimiter({
-    windowMs: 60_000,
-    maxPerWindow: 30,
-    maxTrackedKeys: 10000,
-    message: 'You are fetching group snapshots too fast, please slow down',
-  });
+  private readonly fetchLimiter = perMinutePerUserLimiter(
+    30,
+    'You are fetching group snapshots too fast, please slow down',
+  );
 
-  private readonly joinLimiter = new SlidingWindowRateLimiter({
-    windowMs: 60_000,
-    maxPerWindow: 10,
-    maxTrackedKeys: 10000,
-    message: 'You are joining groups too fast, please slow down',
-  });
+  private readonly joinLimiter = perMinutePerUserLimiter(
+    10,
+    'You are joining groups too fast, please slow down',
+  );
 
   assertMayFetchGroupInfo(userId: string): void {
     this.fetchLimiter.assertNotRateLimited(userId);

@@ -2,6 +2,7 @@ jest.mock('../auth/session-terminator.service', () => ({
   SessionTerminator: class {},
 }));
 
+import { RateLimitedException } from '../common/exceptions/rate-limited.exception';
 import {
   BadRequestException,
   ConflictException,
@@ -9,15 +10,19 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { MlsHandshakesService } from './mls-handshakes.service';
+import {
+  HANDSHAKES_PER_PAGE,
+  MlsHandshakesService,
+  WELCOMES_PER_PAGE,
+} from './mls-handshakes.service';
 import { decodeMlsMessage, encodeMlsMessage } from 'ts-mls';
+import * as groupInfoUtil from './mls-group-info.util';
 import { buildTestCommitWithWelcome } from './test-support/build-test-commit';
 import { buildTestExternalJoin } from './test-support/build-test-external-join';
 
 describe('MlsHandshakesService', () => {
+  const participantStates = { findState: jest.fn() };
   const repository = {
-    isActiveParticipant: jest.fn(),
-    isEntitledParticipant: jest.fn(),
     acceptHandshake: jest.fn(),
     acceptExternalJoin: jest.fn(),
     getCurrentEpoch: jest.fn(),
@@ -31,6 +36,16 @@ describe('MlsHandshakesService', () => {
     assertOwnActiveDevice: jest.fn(),
   };
 
+  const requestRateLimiter = {
+    assertMaySubmitHandshake: jest.fn(),
+    assertMayTakeMembershipWork: jest.fn(),
+    assertMayPollPending: jest.fn(),
+    assertMayFetchRoster: jest.fn(),
+  };
+  const throwRateLimited = () => {
+    throw new RateLimitedException('slow down', 30);
+  };
+
   const selfJoinRateLimiter = { assertMayJoin: jest.fn() };
 
   const groupInfos = { findCurrent: jest.fn() };
@@ -39,9 +54,9 @@ describe('MlsHandshakesService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    Object.values(requestRateLimiter).forEach((fn) => fn.mockReset());
     groupInfos.findCurrent.mockResolvedValue(null);
-    repository.isActiveParticipant.mockResolvedValue(true);
-    repository.isEntitledParticipant.mockResolvedValue(true);
+    participantStates.findState.mockResolvedValue('ACTIVE');
     chatDevicesService.assertOwnActiveDevice.mockResolvedValue({
       id: 'device-1',
       userId: 'user-1',
@@ -52,6 +67,8 @@ describe('MlsHandshakesService', () => {
       chatDevicesService as any,
       selfJoinRateLimiter as any,
       groupInfos as any,
+      requestRateLimiter as any,
+      participantStates as any,
     );
   });
 
@@ -75,12 +92,12 @@ describe('MlsHandshakesService', () => {
         deviceId: 'device-1',
         epoch,
         payload: Buffer.from(commitPayload).toString('base64'),
-        welcomes: [],
         addedDeviceIds: [],
         removedDeviceIds: [],
       });
 
       expect(result.outcome).toBe('accepted');
+
       expect(repository.acceptHandshake).toHaveBeenCalledWith(
         expect.objectContaining({
           conversationId: 'conv-1',
@@ -111,7 +128,6 @@ describe('MlsHandshakesService', () => {
         deviceId: 'device-1',
         epoch,
         payload: Buffer.from(commitPayload).toString('base64'),
-        welcomes: [],
         addedDeviceIds: [],
         removedDeviceIds: [],
       };
@@ -145,7 +161,7 @@ describe('MlsHandshakesService', () => {
       });
     });
 
-    it('forwards real Welcome bytes for newly added devices', async () => {
+    it('fans the one Welcome out to a row per added device', async () => {
       const { epoch, commitPayload, welcomePayload } =
         await buildTestCommitWithWelcome('conv-1');
       repository.acceptHandshake.mockResolvedValue({
@@ -164,20 +180,19 @@ describe('MlsHandshakesService', () => {
         deviceId: 'device-1',
         epoch,
         payload: Buffer.from(commitPayload).toString('base64'),
-        welcomes: [
-          {
-            recipientDeviceId: 'device-2',
-            payload: Buffer.from(welcomePayload).toString('base64'),
-          },
-        ],
-        addedDeviceIds: ['device-2'],
+        welcome: {
+          recipientDeviceIds: ['device-2', 'device-3'],
+          payload: Buffer.from(welcomePayload).toString('base64'),
+        },
+        addedDeviceIds: ['device-2', 'device-3'],
         removedDeviceIds: [],
       });
 
       expect(repository.acceptHandshake).toHaveBeenCalledWith(
         expect.objectContaining({
           welcomes: [
-            expect.objectContaining({ recipientDeviceId: 'device-2' }),
+            { recipientDeviceId: 'device-2', payload: welcomePayload },
+            { recipientDeviceId: 'device-3', payload: welcomePayload },
           ],
         }),
       );
@@ -202,12 +217,10 @@ describe('MlsHandshakesService', () => {
         deviceId: 'device-1',
         epoch,
         payload: Buffer.from(commitPayload).toString('base64'),
-        welcomes: [
-          {
-            recipientDeviceId: 'device-2',
-            payload: Buffer.from(welcomePayload).toString('base64'),
-          },
-        ],
+        welcome: {
+          recipientDeviceIds: ['device-2'],
+          payload: Buffer.from(welcomePayload).toString('base64'),
+        },
         addedDeviceIds: ['device-2'],
         removedDeviceIds: ['device-3'],
       });
@@ -231,12 +244,10 @@ describe('MlsHandshakesService', () => {
           epoch,
           payload: Buffer.from(commitPayload).toString('base64'),
           // a Welcome for a device the Commit does not declare as added
-          welcomes: [
-            {
-              recipientDeviceId: 'device-2',
-              payload: Buffer.from(welcomePayload).toString('base64'),
-            },
-          ],
+          welcome: {
+            recipientDeviceIds: ['device-2'],
+            payload: Buffer.from(welcomePayload).toString('base64'),
+          },
           addedDeviceIds: [],
           removedDeviceIds: [],
         }),
@@ -254,7 +265,6 @@ describe('MlsHandshakesService', () => {
           deviceId: 'device-1',
           epoch,
           payload: Buffer.from(commitPayload).toString('base64'),
-          welcomes: [],
           addedDeviceIds: [],
           removedDeviceIds: [],
         }),
@@ -284,7 +294,6 @@ describe('MlsHandshakesService', () => {
           deviceId: 'device-1',
           epoch,
           payload: Buffer.from(commitPayload).toString('base64'),
-          welcomes: [],
           addedDeviceIds: [],
           removedDeviceIds: [],
         }),
@@ -303,7 +312,6 @@ describe('MlsHandshakesService', () => {
           deviceId: 'device-1',
           epoch,
           payload: Buffer.from(commitPayload).toString('base64'),
-          welcomes: [],
           addedDeviceIds: [],
           removedDeviceIds: [],
         }),
@@ -311,7 +319,7 @@ describe('MlsHandshakesService', () => {
     });
 
     it('rejects when the caller is not an active participant in the conversation', async () => {
-      repository.isActiveParticipant.mockResolvedValue(false);
+      participantStates.findState.mockResolvedValue('PENDING');
       const { epoch, commitPayload } =
         await buildTestCommitWithWelcome('conv-1');
 
@@ -320,7 +328,6 @@ describe('MlsHandshakesService', () => {
           deviceId: 'device-1',
           epoch,
           payload: Buffer.from(commitPayload).toString('base64'),
-          welcomes: [],
           addedDeviceIds: [],
           removedDeviceIds: [],
         }),
@@ -375,6 +382,7 @@ describe('MlsHandshakesService', () => {
       });
 
       expect(result.outcome).toBe('accepted');
+
       expect(repository.acceptExternalJoin).toHaveBeenCalledWith(
         expect.objectContaining({
           conversationId: 'conv-1',
@@ -382,6 +390,50 @@ describe('MlsHandshakesService', () => {
           deviceId: 'device-1',
           userId: 'user-1',
         }),
+      );
+    });
+
+    it('still accepts the commit but stores no snapshot when it is not signed by the callers device', async () => {
+      const join = await buildTestExternalJoin('conv-1', {
+        userId: 'user-1',
+        deviceId: 'device-1',
+      });
+      const stranger = await buildTestExternalJoin('conv-1', {
+        userId: 'user-9',
+        deviceId: 'device-9',
+      });
+      chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+        registeredKey(join.joinerSignatureKey),
+      );
+      repository.getCurrentEpoch.mockResolvedValue(join.epoch);
+      groupInfos.findCurrent.mockResolvedValue({
+        epoch: join.epoch,
+        payload: join.groupInfoPayload,
+      });
+      repository.acceptExternalJoin.mockResolvedValue({
+        outcome: 'accepted',
+        handshake: {
+          id: 'hs-1',
+          conversationId: 'conv-1',
+          epoch: join.epoch,
+          senderDeviceId: 'device-1',
+          payload: join.commitPayload,
+          membershipDeclared: true,
+          addedDevices: [],
+          removedDevices: [],
+          createdAt: new Date(),
+        },
+      });
+
+      await service.submitExternalJoin('user-1', 'conv-1', {
+        deviceId: 'device-1',
+        epoch: join.epoch,
+        payload: b64(join.commitPayload),
+        groupInfo: b64(stranger.nextGroupInfoPayload),
+      });
+
+      expect(repository.acceptExternalJoin).toHaveBeenCalledWith(
+        expect.objectContaining({ groupInfo: undefined }),
       );
     });
 
@@ -543,6 +595,62 @@ describe('MlsHandshakesService', () => {
       ).rejects.toThrow(ConflictException);
     });
 
+    it.each([
+      ['a non-participant', undefined],
+      ['a removed member', 'LEAVING' as const],
+      ['someone who declined', 'DECLINED' as const],
+    ])(
+      'refuses %s with 403 before revealing anything about the epoch',
+      async (_label, state) => {
+        const join = await buildTestExternalJoin('conv-1', {
+          userId: 'user-1',
+          deviceId: 'device-1',
+        });
+        participantStates.findState.mockResolvedValue(state);
+        repository.getCurrentEpoch.mockResolvedValue(join.epoch + 5);
+
+        const attempt = service.submitExternalJoin('user-1', 'conv-1', {
+          deviceId: 'device-1',
+          epoch: join.epoch,
+          payload: b64(join.commitPayload),
+        });
+
+        await expect(attempt).rejects.toThrow(ForbiddenException);
+        const error = (await attempt.catch(
+          (e: unknown) => e,
+        )) as ForbiddenException;
+        expect(JSON.stringify(error.getResponse())).not.toContain('handshake');
+        expect(chatDevicesService.assertOwnActiveDevice).not.toHaveBeenCalled();
+        expect(repository.getCurrentEpoch).not.toHaveBeenCalled();
+        expect(repository.acceptExternalJoin).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rethrows an unexpected error while checking the snapshot instead of swallowing it', async () => {
+      const join = await buildTestExternalJoin('conv-1', {
+        userId: 'user-1',
+        deviceId: 'device-1',
+      });
+      chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+        registeredKey(join.joinerSignatureKey),
+      );
+      repository.getCurrentEpoch.mockResolvedValue(join.epoch + 1);
+      const spy = jest
+        .spyOn(groupInfoUtil, 'assertGroupInfoSignedBy')
+        .mockRejectedValueOnce(new Error('boom'));
+
+      await expect(
+        service.submitExternalJoin('user-1', 'conv-1', {
+          deviceId: 'device-1',
+          epoch: join.epoch,
+          payload: b64(join.commitPayload),
+          groupInfo: b64(join.nextGroupInfoPayload),
+        }),
+      ).rejects.toThrow('boom');
+      expect(repository.acceptExternalJoin).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
     it('refuses a join for a conversation that does not exist', async () => {
       const join = await buildTestExternalJoin('conv-1', {
         userId: 'user-1',
@@ -685,11 +793,107 @@ describe('MlsHandshakesService', () => {
     });
 
     it('rejects when the caller is not an active participant', async () => {
-      repository.isEntitledParticipant.mockResolvedValue(false);
+      participantStates.findState.mockResolvedValue(undefined);
 
       await expect(
         service.getHandshakesSince('user-1', 'conv-1', 0),
       ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('paging', () => {
+    it('asks for at most one page of Commits, in epoch order', async () => {
+      repository.findHandshakesSince.mockResolvedValue([]);
+
+      await service.getHandshakesSince('user-1', 'conv-1', 5);
+
+      expect(repository.findHandshakesSince).toHaveBeenCalledWith(
+        'conv-1',
+        5,
+        HANDSHAKES_PER_PAGE,
+      );
+      expect(HANDSHAKES_PER_PAGE).toBe(100);
+    });
+
+    it('asks for at most one page of Welcomes', async () => {
+      repository.findPendingWelcomes.mockResolvedValue([]);
+
+      await service.getPendingWelcomes('user-1', 'device-1');
+
+      expect(repository.findPendingWelcomes).toHaveBeenCalledWith(
+        'device-1',
+        WELCOMES_PER_PAGE,
+        undefined,
+      );
+      expect(WELCOMES_PER_PAGE).toBe(50);
+    });
+
+    it('passes the after cursor through so a page of unconsumable Welcomes cannot starve newer ones', async () => {
+      repository.findPendingWelcomes.mockResolvedValue([]);
+
+      await service.getPendingWelcomes('user-1', 'device-1', 'w-50');
+
+      expect(repository.findPendingWelcomes).toHaveBeenCalledWith(
+        'device-1',
+        WELCOMES_PER_PAGE,
+        'w-50',
+      );
+    });
+  });
+
+  describe('getPendingWelcomes with an unknown cursor', () => {
+    it('is a 400 so the client restarts deliberately instead of silently re-paging from the top', async () => {
+      repository.findPendingWelcomes.mockResolvedValue(null);
+
+      await expect(
+        service.getPendingWelcomes('user-1', 'device-1', 'gone'),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('rate limits', () => {
+    it('limits submitting a Commit before touching anything', async () => {
+      requestRateLimiter.assertMaySubmitHandshake.mockImplementation(
+        throwRateLimited,
+      );
+
+      await expect(
+        service.submitHandshake('user-1', 'conv-1', {} as never),
+      ).rejects.toThrow(RateLimitedException);
+      expect(repository.acceptExternalJoin).not.toHaveBeenCalled();
+    });
+
+    it('limits consuming a Welcome', async () => {
+      requestRateLimiter.assertMayPollPending.mockImplementation(
+        throwRateLimited,
+      );
+
+      await expect(
+        service.consumeWelcome('user-1', 'device-1', 'w1'),
+      ).rejects.toThrow(RateLimitedException);
+      expect(repository.markWelcomeConsumed).not.toHaveBeenCalled();
+    });
+
+    it('limits roster fetches', async () => {
+      requestRateLimiter.assertMayFetchRoster.mockImplementation(
+        throwRateLimited,
+      );
+
+      await expect(
+        service.getRosterAtEpoch('user-1', 'conv-1', 1),
+      ).rejects.toThrow(RateLimitedException);
+      expect(repository.findRosterAtEpoch).not.toHaveBeenCalled();
+    });
+
+    it('limits pending Welcome polls', async () => {
+      requestRateLimiter.assertMayPollPending.mockImplementation(
+        throwRateLimited,
+      );
+
+      await expect(
+        service.getPendingWelcomes('user-1', 'device-1'),
+      ).rejects.toThrow(RateLimitedException);
+      expect(repository.findPendingWelcomes).not.toHaveBeenCalled();
     });
   });
 
@@ -721,7 +925,7 @@ describe('MlsHandshakesService', () => {
     });
 
     it('lets an archived or blocked member read it - their new device still has to join', async () => {
-      repository.isActiveParticipant.mockResolvedValue(false);
+      participantStates.findState.mockResolvedValue('PENDING');
       repository.findRosterAtEpoch.mockResolvedValue([]);
 
       await expect(
@@ -730,7 +934,7 @@ describe('MlsHandshakesService', () => {
     });
 
     it('rejects when the caller is not a member', async () => {
-      repository.isEntitledParticipant.mockResolvedValue(false);
+      participantStates.findState.mockResolvedValue(undefined);
 
       await expect(
         service.getRosterAtEpoch('user-1', 'conv-1', 3),

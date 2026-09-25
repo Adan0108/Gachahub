@@ -1,5 +1,8 @@
 import { RateLimitedException } from '../exceptions/rate-limited.exception';
-import { SlidingWindowRateLimiter } from './sliding-window-rate-limiter';
+import {
+  perMinutePerUserLimiter,
+  SlidingWindowRateLimiter,
+} from './sliding-window-rate-limiter';
 
 describe('SlidingWindowRateLimiter', () => {
   const capture = (fn: () => void): RateLimitedException => {
@@ -29,17 +32,26 @@ describe('SlidingWindowRateLimiter', () => {
         message: 'slow down',
       });
 
-    it('rejects past the cap with the window as retry-after, until the window slides', () => {
+    it('rejects past the cap with the time until the oldest hit expires, until the window slides', () => {
       const limiter = make();
       limiter.assertNotRateLimited('a');
+      jest.setSystemTime(20_000);
       limiter.assertNotRateLimited('a');
 
       const error = capture(() => limiter.assertNotRateLimited('a'));
-      expect(error.retryAfterSeconds).toBe(60);
+      expect(error.retryAfterSeconds).toBe(40);
       expect(error.message).toBe('slow down');
 
       jest.setSystemTime(60_001);
       expect(() => limiter.assertNotRateLimited('a')).not.toThrow();
+    });
+
+    it('falls back to the full window when a single cost exceeds the cap on its own', () => {
+      const limiter = make();
+
+      expect(
+        capture(() => limiter.assertNotRateLimited('a', 3)).retryAfterSeconds,
+      ).toBe(60);
     });
 
     it('does not count a rejected attempt', () => {
@@ -61,6 +73,37 @@ describe('SlidingWindowRateLimiter', () => {
       expect(() => limiter.assertNotRateLimited('a', 3)).toThrow(
         RateLimitedException,
       );
+    });
+
+    it('waits until enough hits age out to fit a cost above one', () => {
+      const limiter = new SlidingWindowRateLimiter({
+        windowMs: 60_000,
+        maxPerWindow: 4,
+        maxTrackedKeys: 3,
+        message: 'slow down',
+      });
+      limiter.assertNotRateLimited('a');
+      jest.setSystemTime(10_000);
+      limiter.assertNotRateLimited('a');
+      jest.setSystemTime(20_000);
+      limiter.assertNotRateLimited('a', 2);
+
+      // Cost 2 needs two of the four hits gone: the ones at 0 and 10s.
+      expect(
+        capture(() => limiter.assertNotRateLimited('a', 2)).retryAfterSeconds,
+      ).toBe(50);
+    });
+
+    it('tryConsume returns false instead of throwing, and records only successes', () => {
+      const limiter = make();
+
+      expect(limiter.tryConsume('a')).toBe(true);
+      expect(limiter.tryConsume('a')).toBe(true);
+      expect(limiter.tryConsume('a')).toBe(false);
+      expect(limiter.tryConsume('a', 3)).toBe(false);
+
+      jest.setSystemTime(60_001);
+      expect(limiter.tryConsume('a')).toBe(true);
     });
 
     it('evicts the least recently used key at capacity', () => {
@@ -128,5 +171,17 @@ describe('SlidingWindowRateLimiter', () => {
 
       expect(() => limiter.assertNotRateLimited('b')).not.toThrow();
     });
+  });
+});
+
+describe('perMinutePerUserLimiter', () => {
+  it('caps per key per minute', () => {
+    const limiter = perMinutePerUserLimiter(1, 'slow down');
+    limiter.assertNotRateLimited('a');
+
+    expect(() => limiter.assertNotRateLimited('a')).toThrow(
+      RateLimitedException,
+    );
+    expect(() => limiter.assertNotRateLimited('b')).not.toThrow();
   });
 });

@@ -27,6 +27,18 @@ export class MlsGroupInfoRepository {
     }
   }
 
+  /** Whether the stored snapshot describes `epoch`. */
+  async describesEpoch(
+    conversationId: string,
+    epoch: number,
+  ): Promise<boolean> {
+    const count = await this.prisma.mlsGroupInfo.count({
+      where: { conversationId, epoch },
+    });
+
+    return count > 0;
+  }
+
   /** Removes the snapshot if it describes `epoch`: nobody should join from a state its members refused. */
   async deleteIfDescribesEpoch(
     conversationId: string,

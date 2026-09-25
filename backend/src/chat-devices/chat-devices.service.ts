@@ -7,9 +7,11 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Prisma } from '../generated/prisma/client';
 import { BlocksService } from '../blocks/blocks.service';
 import { isEntitledToLeaf } from '../chat/membership/leaf-entitlement';
 import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
+import { ParticipantStateRepository } from '../mls-group-roster/participant-state.repository';
 import { FollowsService } from '../follows/follows.service';
 import {
   ChatDevicesRepository,
@@ -44,6 +46,9 @@ const CAP_EVICTION_MIN_IDLE_MS = 14 * 24 * 60 * 60 * 1000;
 /** lastSeenAt is worth at most one write per device per hour. */
 const LAST_SEEN_WRITE_THROTTLE_MS = 60 * 60 * 1000;
 
+/** Revoked devices stay listed this long so the UI can show them as removed. */
+const REVOKED_LISTING_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
 @Injectable()
 export class ChatDevicesService {
   constructor(
@@ -54,7 +59,25 @@ export class ChatDevicesService {
     private readonly uploadRateLimiter: KeyPackageUploadRateLimiterService,
     private readonly mlsGroupRosterRepository: MlsGroupRosterRepository,
     private readonly sessionTerminator: SessionTerminator,
+    private readonly participantStates: ParticipantStateRepository,
   ) {}
+
+  async listOwnDevices(userId: string) {
+    const devices = await this.chatDevicesRepository.listOwnDevices(
+      userId,
+      new Date(Date.now() - REVOKED_LISTING_WINDOW_MS),
+    );
+
+    return {
+      items: devices.map((device) => ({
+        id: device.id,
+        ciphersuite: device.ciphersuite,
+        createdAt: device.createdAt.toISOString(),
+        lastSeenAt: device.lastSeenAt.toISOString(),
+        revokedAt: device.revokedAt?.toISOString() ?? null,
+      })),
+    };
+  }
 
   /**
    * Registers a new device for the current user. Not idempotent by design
@@ -75,18 +98,6 @@ export class ChatDevicesService {
       );
     }
 
-    const existing = await this.chatDevicesRepository.findById(dto.deviceId);
-    if (existing) {
-      throw new ConflictException('This device id is already registered');
-    }
-
-    // Bounds how much one member multiplies every group they are in (~10 mirrors Signal/WhatsApp); a group's snapshot still grows with its TOTAL leaves (see the submit-handshake DTO caps).
-    const activeDevices =
-      await this.chatDevicesRepository.countActiveDevices(userId);
-    if (activeDevices >= MAX_ACTIVE_DEVICES_PER_USER) {
-      await this.retireStalestDeviceOrRefuse(userId);
-    }
-
     const signaturePublicKey = Uint8Array.from(
       Buffer.from(dto.signaturePublicKey, 'base64'),
     );
@@ -98,13 +109,41 @@ export class ChatDevicesService {
       dto.keyPackages,
     );
 
-    return this.chatDevicesRepository.createDeviceWithKeyPackages({
-      deviceId: dto.deviceId,
-      userId,
-      signaturePublicKey,
-      ciphersuite: dto.ciphersuite,
-      keyPackages,
-    });
+    // Bounds how much one member multiplies every group they are in (~10 mirrors Signal/WhatsApp); a group's snapshot still grows with its TOTAL leaves (see the submit-handshake DTO caps).
+    let result: Awaited<
+      ReturnType<ChatDevicesRepository['createDeviceWithinCap']>
+    >;
+    try {
+      result = await this.chatDevicesRepository.createDeviceWithinCap(
+        {
+          deviceId: dto.deviceId,
+          userId,
+          signaturePublicKey,
+          ciphersuite: dto.ciphersuite,
+          keyPackages,
+        },
+        {
+          maxActive: MAX_ACTIVE_DEVICES_PER_USER,
+          evictIdleBefore: new Date(Date.now() - CAP_EVICTION_MIN_IDLE_MS),
+        },
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ConflictException('This device id is already registered');
+      }
+      throw error;
+    }
+
+    if (result.outcome === 'exists') {
+      throw new ConflictException('This device id is already registered');
+    }
+    if (result.outcome === 'cap-reached') {
+      throw new ConflictException(
+        `Device limit reached (${MAX_ACTIVE_DEVICES_PER_USER}) and every device was used recently - retire one first`,
+      );
+    }
+
+    return result.device;
   }
 
   /**
@@ -194,10 +233,12 @@ export class ChatDevicesService {
         sessionId,
         userId,
       );
+      if (current === null) {
+        throw new NotFoundException('Session not found');
+      }
       if (current !== deviceId) {
-        const currentDevice = current
-          ? await this.chatDevicesRepository.findById(current)
-          : null;
+        const currentDevice =
+          await this.chatDevicesRepository.findById(current);
 
         // The link is write-once so revoking a device ends the login it's tied to - but that
         // only works while the linked device is still the one actually being used. Once it's
@@ -210,11 +251,17 @@ export class ChatDevicesService {
           );
         }
 
-        await this.chatDevicesRepository.relinkSession(
+        const relinked = await this.chatDevicesRepository.relinkSession(
           sessionId,
           userId,
           deviceId,
+          current,
         );
+        if (relinked.count === 0) {
+          throw new ConflictException(
+            'This login is already linked to another device',
+          );
+        }
       }
     }
 
@@ -228,17 +275,44 @@ export class ChatDevicesService {
     return env.betterAuthSecret;
   }
 
-  async revokeDevice(userId: string, deviceId: string) {
-    const result = await this.chatDevicesRepository.revokeDevice(
-      deviceId,
-      userId,
-    );
-
-    if (result.count === 0) {
+  /** Idempotent: revoking an already revoked device of the caller succeeds, and its logins are ended either way. */
+  async revokeDevice(
+    userId: string,
+    deviceId: string,
+    callerSessionId: string,
+  ) {
+    const device = await this.chatDevicesRepository.findById(deviceId);
+    if (!device || device.userId !== userId) {
       throw new NotFoundException('Device not found');
     }
 
+    if (!device.revokedAt) {
+      await this.chatDevicesRepository.revokeDevice(deviceId, userId);
+    }
+
+    const logins = await this.chatDevicesRepository.findLoginsOfDevice(
+      deviceId,
+      userId,
+      callerSessionId,
+    );
+    await this.sessionTerminator.end(logins);
+
     return { message: 'Device revoked successfully' };
+  }
+
+  /** How many key packages other members can still claim for the caller's device, and when its reusable fallback lapses. */
+  async getKeyPackageStatus(userId: string, deviceId: string) {
+    await this.assertOwnActiveDevice(userId, deviceId);
+
+    const [singleUseRemaining, lastResort] = await Promise.all([
+      this.chatDevicesRepository.countClaimableSingleUseKeyPackages(deviceId),
+      this.chatDevicesRepository.findLastResortKeyPackage(deviceId),
+    ]);
+
+    return {
+      singleUseRemaining,
+      lastResortExpiresAt: lastResort?.expiresAt.toISOString() ?? null,
+    };
   }
 
   /**
@@ -276,9 +350,8 @@ export class ChatDevicesService {
    *   messageRequestSetting apply, unless claiming your own devices.
    * - Finishing a change to a group (conversationId): the group must be MLS, the
    *   caller ACTIVE, the target entitled to a leaf; devices already in the group
-   *   are skipped. A PENDING target additionally gets the same block/messageRequestSetting
-   *   check a DM would - they haven't accepted, so nothing yet confirms their current
-   *   consent (see assertMayClaimForGroup).
+   *   are skipped. A PENDING target additionally must not have blocked the requester (or
+   *   vice versa) nor set messageRequestSetting to NO_ONE (see assertMayClaimForGroup).
    *
    * excludeDeviceId leaves out the device creating the group; deviceIds limits
    * the claim to those devices, so none registered meanwhile is claimed and wasted.
@@ -351,10 +424,10 @@ export class ChatDevicesService {
     targetUserId: string,
     conversationId: string,
   ): Promise<Set<string>> {
-    const states = await this.chatDevicesRepository.findParticipantStates(
-      conversationId,
-      [requesterId, targetUserId],
-    );
+    const states = await this.participantStates.findStates(conversationId, [
+      requesterId,
+      targetUserId,
+    ]);
 
     if (states.get(requesterId) !== 'ACTIVE') {
       throw new ForbiddenException(
@@ -370,13 +443,9 @@ export class ChatDevicesService {
       );
     }
 
-    // An ACTIVE member's entitlement already came from a completed relationship (mutual
-    // follow) or their own accept - nothing further to check. PENDING is different: nobody
-    // has confirmed consent yet, the invite may be long-lived (see the invite-expiry job),
-    // and messageRequestSetting can change after the invite was created - so this re-checks
-    // it fresh, the same gate a DM would apply, instead of trusting a stale invite-time read.
+    // PENDING consent may be stale (long-lived invite); recheck only member-independent gates - FOLLOWERS was checked against the real inviter at invite time.
     if (targetState === 'PENDING') {
-      await this.assertMayFetchKeyPackage(requesterId, targetUserId);
+      await this.assertPendingInviteeStillConsents(requesterId, targetUserId);
     }
 
     // A group with no MLS roster has nothing to finish, and no key package of
@@ -420,6 +489,62 @@ export class ChatDevicesService {
     };
   }
 
+  /** The member-independent part of the consent gate: a claimant's follow relation says nothing about the invitee's consent. */
+  private async assertPendingInviteeStillConsents(
+    requesterId: string,
+    targetUserId: string,
+  ) {
+    if (!(await this.pendingInviteeConsents(requesterId, targetUserId))) {
+      throw new ForbiddenException('This user cannot be added to the group');
+    }
+  }
+
+  private async pendingInviteeConsents(
+    requesterId: string,
+    targetUserId: string,
+  ): Promise<boolean> {
+    const [requesterBlockedTarget, targetBlockedRequester] = await Promise.all([
+      this.blocksService.isBlocked(requesterId, targetUserId),
+      this.blocksService.isBlocked(targetUserId, requesterId),
+    ]);
+    if (requesterBlockedTarget || targetBlockedRequester) {
+      return false;
+    }
+
+    const target =
+      await this.chatDevicesRepository.findUserMessagingProfile(targetUserId);
+
+    return target !== null && target.messageRequestSetting !== 'NO_ONE';
+  }
+
+  /** Of these PENDING invitees, the ones the requester may not claim key packages for (see assertMayClaimForGroup). */
+  async findInviteesRefusingRequester(
+    requesterId: string,
+    userIds: string[],
+  ): Promise<Set<string>> {
+    const consents = await Promise.all(
+      userIds.map((userId) => this.pendingInviteeConsents(requesterId, userId)),
+    );
+
+    return new Set(userIds.filter((_, index) => !consents[index]));
+  }
+
+  private async assertTargetAcceptsMessages(targetUserId: string) {
+    const target =
+      await this.chatDevicesRepository.findUserMessagingProfile(targetUserId);
+    if (!target) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (target.messageRequestSetting === 'NO_ONE') {
+      throw new ForbiddenException(
+        `User ${targetUserId} is not accepting new messages`,
+      );
+    }
+
+    return target;
+  }
+
   private async assertMayFetchKeyPackage(
     requesterId: string,
     targetUserId: string,
@@ -436,17 +561,7 @@ export class ChatDevicesService {
       throw new ForbiddenException('You have blocked this user');
     }
 
-    const target =
-      await this.chatDevicesRepository.findUserMessagingProfile(targetUserId);
-    if (!target) {
-      throw new NotFoundException('User not found');
-    }
-
-    if (target.messageRequestSetting === 'NO_ONE') {
-      throw new ForbiddenException(
-        `User ${targetUserId} is not accepting new messages`,
-      );
-    }
+    const target = await this.assertTargetAcceptsMessages(targetUserId);
 
     if (target.messageRequestSetting === 'FOLLOWERS') {
       const targetFollowsRequester = await this.followsService.isFollowing(
@@ -513,25 +628,6 @@ export class ChatDevicesService {
     return deviceId;
   }
 
-  /** At the cap the stalest device gives way, like re-linking on WhatsApp; refused only when all are in recent use. */
-  private async retireStalestDeviceOrRefuse(userId: string): Promise<void> {
-    const stalest =
-      await this.chatDevicesRepository.findLeastRecentlySeenActiveDevice(
-        userId,
-      );
-    const idleLongEnough =
-      stalest !== null &&
-      stalest.lastSeenAt.getTime() < Date.now() - CAP_EVICTION_MIN_IDLE_MS;
-
-    if (!idleLongEnough) {
-      throw new ConflictException(
-        `Device limit reached (${MAX_ACTIVE_DEVICES_PER_USER}) and every device was used recently - retire one first`,
-      );
-    }
-
-    await this.chatDevicesRepository.revokeDevice(stalest.id, userId);
-  }
-
   private async verifyKeyPackages(
     userId: string,
     deviceId: string,
@@ -559,4 +655,11 @@ export class ChatDevicesService {
       }),
     );
   }
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
+  );
 }

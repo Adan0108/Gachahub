@@ -8,6 +8,7 @@ import {
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
+import { pendingSinceChange } from './membership/apply-participant-transitions';
 import { lockConversation } from './membership/lock-conversation';
 import {
   claimUploadsForAttachment,
@@ -200,6 +201,7 @@ export class ChatRepository {
               {
                 userId: params.recipientUserId,
                 state: params.recipientState,
+                ...pendingSinceChange(null, params.recipientState, new Date()),
               },
             ],
           },
@@ -251,6 +253,8 @@ export class ChatRepository {
     photoUrl?: string;
     members: Array<{ userId: string; state: 'ACTIVE' | 'PENDING' }>;
   }) {
+    const now = new Date();
+
     return this.prisma.chatConversation.create({
       data: {
         type: 'GROUP',
@@ -268,6 +272,7 @@ export class ChatRepository {
               userId: member.userId,
               role: 'MEMBER' as const,
               state: member.state,
+              ...pendingSinceChange(null, member.state, now),
             })),
           ],
         },
@@ -722,6 +727,7 @@ export class ChatRepository {
       },
       data: {
         state,
+        pendingSince: state === 'PENDING' ? now : null,
         blockedAt: state === 'BLOCKED' ? now : undefined,
         archivedAt: state === 'ARCHIVED' ? now : undefined,
       },

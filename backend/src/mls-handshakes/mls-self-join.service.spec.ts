@@ -17,6 +17,7 @@ jest.mock('./mls-self-join-rate-limiter.service', () => ({
   MlsSelfJoinRateLimiterService: class {},
 }));
 
+import { RateLimitedException } from '../common/exceptions/rate-limited.exception';
 import {
   ConflictException,
   ForbiddenException,
@@ -27,8 +28,18 @@ import { MlsSelfJoinService } from './mls-self-join.service';
 describe('MlsSelfJoinService', () => {
   const selfJoinRepository = { findJoinableConversationIds: jest.fn() };
   const groupInfoRepository = { findCurrent: jest.fn() };
-  const handshakesRepository = { isEntitledParticipant: jest.fn() };
+  const participantStates = { findState: jest.fn() };
   const rosterRepository = { findActiveLeaves: jest.fn() };
+  const requestRateLimiter = {
+    assertMaySubmitHandshake: jest.fn(),
+    assertMayTakeMembershipWork: jest.fn(),
+    assertMayPollPending: jest.fn(),
+    assertMayFetchRoster: jest.fn(),
+  };
+  const throwRateLimited = () => {
+    throw new RateLimitedException('slow down', 30);
+  };
+
   const chatDevicesService = { assertOwnActiveDevice: jest.fn() };
   const rateLimiter = {
     assertMayFetchGroupInfo: jest.fn(),
@@ -39,8 +50,9 @@ describe('MlsSelfJoinService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    requestRateLimiter.assertMayPollPending.mockReset();
     chatDevicesService.assertOwnActiveDevice.mockResolvedValue({});
-    handshakesRepository.isEntitledParticipant.mockResolvedValue(true);
+    participantStates.findState.mockResolvedValue('ACTIVE');
     rosterRepository.findActiveLeaves.mockResolvedValue([
       { userId: 'user-2', deviceId: 'other-device' },
     ]);
@@ -51,14 +63,27 @@ describe('MlsSelfJoinService', () => {
     service = new MlsSelfJoinService(
       selfJoinRepository as never,
       groupInfoRepository as never,
-      handshakesRepository as never,
+      participantStates as never,
       rosterRepository as never,
       chatDevicesService as never,
       rateLimiter as never,
+      requestRateLimiter as never,
     );
   });
 
   describe('listJoinable', () => {
+    it('rate limits listing joinable conversations before any lookup', async () => {
+      requestRateLimiter.assertMayPollPending.mockImplementation(
+        throwRateLimited,
+      );
+
+      await expect(
+        service.listJoinable('user-1', 'device-1', 'pending'),
+      ).rejects.toThrow(RateLimitedException);
+
+      expect(chatDevicesService.assertOwnActiveDevice).not.toHaveBeenCalled();
+    });
+
     it('lists what a device of the caller could join, after checking the device is theirs', async () => {
       selfJoinRepository.findJoinableConversationIds.mockResolvedValue([
         'conv-1',
@@ -94,7 +119,7 @@ describe('MlsSelfJoinService', () => {
     });
 
     it('refuses someone who is not entitled to be in the group', async () => {
-      handshakesRepository.isEntitledParticipant.mockResolvedValue(false);
+      participantStates.findState.mockResolvedValue('LEAVING');
 
       await expect(
         service.getGroupInfo('user-1', 'conv-1', 'device-1'),

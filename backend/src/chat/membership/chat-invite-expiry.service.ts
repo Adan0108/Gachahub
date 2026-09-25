@@ -7,6 +7,9 @@ import { ChatMembershipService } from './chat-membership.service';
 /** An invite (group or DM) unanswered this long expires on its own. */
 const EXPIRE_PENDING_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
 
+const EXPIRE_BATCH_SIZE = 500;
+const MAX_EXPIRE_BATCHES = 100;
+
 /**
  * Expires invites nobody ever answered. PENDING became entitled to an MLS leaf
  * (leaf-entitlement.ts) so a group invitee's device is added and starts receiving
@@ -30,35 +33,50 @@ export class ChatInviteExpiryService {
   @Cron(CronExpression.EVERY_DAY_AT_4AM)
   async expireStaleInvites(): Promise<void> {
     try {
-      const cutoff = new Date(Date.now() - EXPIRE_PENDING_AFTER_MS);
-      const userIdsByConversationId =
-        await this.chatMembershipRepository.findExpiredPendingInvites(cutoff);
-
+      const now = Date.now();
+      await this.chatMembershipRepository.stampMissingPendingSince(
+        new Date(now),
+      );
+      const cutoff = new Date(now - EXPIRE_PENDING_AFTER_MS);
       let expiredCount = 0;
       let failedConversationCount = 0;
 
-      for (const [
-        conversationId,
-        userIds,
-      ] of userIdsByConversationId.entries()) {
-        try {
-          const { count } = await this.chatMembershipService.expireInvites(
-            conversationId,
-            userIds,
+      for (let batch = 0; batch < MAX_EXPIRE_BATCHES; batch += 1) {
+        const userIdsByConversationId =
+          await this.chatMembershipRepository.findExpiredPendingInvites(
+            cutoff,
+            EXPIRE_BATCH_SIZE,
           );
-          expiredCount += count;
-        } catch (error) {
-          // Someone answering between the read above and this running is not an
-          // error - expireInvites skips them person by person. This is a real
-          // failure (a database error, or a concurrent change that made the
-          // conversation's write conflict), isolated per conversation so it doesn't
-          // stop the rest of the sweep, and retried on tomorrow's run.
-          failedConversationCount += 1;
-          this.logger.warn(
-            `Failed to expire invites for conversation ${conversationId}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
+        const batchSize = [...userIdsByConversationId.values()].reduce(
+          (sum, userIds) => sum + userIds.length,
+          0,
+        );
+        const expiredBefore = expiredCount;
+
+        for (const [
+          conversationId,
+          userIds,
+        ] of userIdsByConversationId.entries()) {
+          try {
+            const { count } = await this.chatMembershipService.expireInvites(
+              conversationId,
+              userIds,
+            );
+            expiredCount += count;
+          } catch (error) {
+            // A real failure (db error or write conflict); isolated per conversation, retried tomorrow.
+            failedConversationCount += 1;
+            this.logger.warn(
+              `Failed to expire invites for conversation ${conversationId}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+        }
+
+        // Short batch = drained; zero progress = stuck rows that would refetch forever.
+        if (batchSize < EXPIRE_BATCH_SIZE || expiredCount === expiredBefore) {
+          break;
         }
       }
 

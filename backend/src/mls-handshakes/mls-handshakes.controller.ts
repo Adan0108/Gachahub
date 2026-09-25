@@ -1,13 +1,4 @@
-import {
-  Body,
-  Controller,
-  DefaultValuePipe,
-  Get,
-  Param,
-  ParseIntPipe,
-  Post,
-  Query,
-} from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
@@ -18,7 +9,13 @@ import { ExternalJoinDto } from './dto/external-join.dto';
 import { MlsPendingService } from './mls-pending.service';
 import { MlsSelfJoinService } from './mls-self-join.service';
 import { ReportCommitFaultDto } from './dto/report-commit-fault.dto';
+import { HandshakesSinceQueryDto } from './dto/handshakes-since-query.dto';
 import { SubmitHandshakeDto } from './dto/submit-handshake.dto';
+import { RosterQueryDto } from './dto/roster-query.dto';
+import { DeviceQueryDto } from './dto/device-query.dto';
+import { MembershipWorkQueryDto } from './dto/membership-work-query.dto';
+import { ScopeQueryDto } from './dto/scope-query.dto';
+import { PendingWelcomesQueryDto } from './dto/pending-welcomes-query.dto';
 
 @ApiTags('MLS Handshakes')
 @ApiCookieAuth('better-auth.session_token')
@@ -73,7 +70,7 @@ export class MlsHandshakesController {
   getGroupInfo(
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
-    @Query('deviceId') deviceId: string,
+    @Query() { deviceId }: DeviceQueryDto,
   ) {
     return this.mlsSelfJoinService.getGroupInfo(
       session.user.id,
@@ -90,12 +87,12 @@ export class MlsHandshakesController {
   listJoinable(
     @Session() session: UserSession,
     @Param('deviceId') deviceId: string,
-    @Query('scope') scope?: string,
+    @Query() { scope }: ScopeQueryDto,
   ) {
     return this.mlsSelfJoinService.listJoinable(
       session.user.id,
       deviceId,
-      scope === 'full' ? 'full' : 'pending',
+      scope ?? 'pending',
     );
   }
 
@@ -118,18 +115,18 @@ export class MlsHandshakesController {
 
   @Get('conversations/:conversationId')
   @ApiOperation({
-    summary: 'Fetch Commits for a conversation since a given epoch',
+    summary:
+      'Fetch Commits for a conversation since a given epoch, at most one page (100); a full page means ask again from the new epoch',
   })
   getHandshakesSince(
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
-    @Query('sinceEpoch', new DefaultValuePipe(0), ParseIntPipe)
-    sinceEpoch: number,
+    @Query() query: HandshakesSinceQueryDto,
   ) {
     return this.mlsHandshakesService.getHandshakesSince(
       session.user.id,
       conversationId,
-      sinceEpoch,
+      query.sinceEpoch,
     );
   }
 
@@ -141,12 +138,12 @@ export class MlsHandshakesController {
   getRosterAtEpoch(
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
-    @Query('epoch', ParseIntPipe) epoch: number,
+    @Query() query: RosterQueryDto,
   ) {
     return this.mlsHandshakesService.getRosterAtEpoch(
       session.user.id,
       conversationId,
-      epoch,
+      query.epoch,
     );
   }
 
@@ -163,14 +160,19 @@ export class MlsHandshakesController {
   }
 
   @Get('devices/:deviceId/welcomes')
-  @ApiOperation({ summary: 'Fetch pending Welcomes for an owned device' })
+  @ApiOperation({
+    summary:
+      'Fetch pending Welcomes for an owned device, oldest first, at most one page (50); pass `after` (the last id seen) to walk past ones that cannot be consumed',
+  })
   getPendingWelcomes(
     @Session() session: UserSession,
     @Param('deviceId') deviceId: string,
+    @Query() query: PendingWelcomesQueryDto,
   ) {
     return this.mlsHandshakesService.getPendingWelcomes(
       session.user.id,
       deviceId,
+      query.after,
     );
   }
 
@@ -183,16 +185,13 @@ export class MlsHandshakesController {
   getMembershipWork(
     @Session() session: UserSession,
     @Param('deviceId') deviceId: string,
-    @Query('scope') scope?: string,
-    @Query('after') after?: string,
-    @Query('conversationId') conversationId?: string,
+    @Query() { scope, after, conversationId }: MembershipWorkQueryDto,
   ) {
     return this.mlsMembershipWorkService.getMembershipWork(
       session.user.id,
       deviceId,
-      // `full` also finds new, revoked and leftover devices but costs more, so
-      // clients ask for it rarely; anything else means the cheap default.
-      { scope: scope === 'full' ? 'full' : 'pending', after, conversationId },
+      // `full` costs more, so clients ask for it rarely; the default is the cheap scope.
+      { scope: scope ?? 'pending', after, conversationId },
     );
   }
 

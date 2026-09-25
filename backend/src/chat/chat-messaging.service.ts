@@ -17,6 +17,7 @@ import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { ChatMediaReferenceDto } from './dto/chat-media-reference.dto';
 import { MediaService } from '../media/media.service';
+import { MAX_OPAQUE_BLOBS_PER_MESSAGE } from '../media/opaque-blob';
 import type { ChatMessageMediaInput } from './chat.repository';
 import type { MessageEncryptionPort } from './ports/message-encryption.port';
 import type { ChatDeliveryPort } from './ports/chat-delivery.port';
@@ -544,6 +545,7 @@ export class ChatMessagingService {
       purpose: 'CHAT',
       maxImages: 4,
       maxVideos: 1,
+      maxOpaqueBlobs: MAX_OPAQUE_BLOBS_PER_MESSAGE,
       entityLabel: 'chat message',
     });
 

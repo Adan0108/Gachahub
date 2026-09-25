@@ -2,18 +2,41 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   ArrayUnique,
   IsArray,
   IsBase64,
-  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
-  Min,
   ValidateNested,
 } from 'class-validator';
-import { WelcomeItemDto } from './welcome-item.dto';
+import { BoundedEpoch } from './bounded-epoch.decorator';
+
+/** Most devices one Commit may add or remove; the work handed to a device is chunked to it. */
+export const MAX_DEVICES_PER_COMMIT = 50;
+
+export class WelcomeDto {
+  @ApiProperty({ description: 'Base64-encoded MLS Welcome wire bytes' })
+  @IsNotEmpty()
+  @IsBase64()
+  @MaxLength(20000)
+  payload!: string;
+
+  @ApiProperty({
+    type: [String],
+    description: 'Device ids that receive this one Welcome',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_DEVICES_PER_COMMIT)
+  @ArrayUnique()
+  @IsString({ each: true })
+  @IsNotEmpty({ each: true })
+  @MaxLength(64, { each: true })
+  recipientDeviceIds!: string[];
+}
 
 export class SubmitHandshakeDto {
   @ApiProperty({ description: 'Device id submitting this Commit' })
@@ -23,8 +46,7 @@ export class SubmitHandshakeDto {
   deviceId!: string;
 
   @ApiProperty({ description: 'Epoch this Commit was built from' })
-  @IsInt()
-  @Min(0)
+  @BoundedEpoch()
   epoch!: number;
 
   @ApiProperty({
@@ -46,20 +68,15 @@ export class SubmitHandshakeDto {
   groupInfo?: string;
 
   @ApiProperty({
-    type: [WelcomeItemDto],
+    type: WelcomeDto,
     required: false,
-    description: 'Welcomes for any devices newly added by this Commit',
+    description:
+      'The one Welcome for every device this Commit adds; omitted when it adds none',
   })
-  @IsArray()
-  @ArrayMaxSize(50)
-  // Nothing else rejects the same recipientDeviceId appearing more than
-  // once - without this, a client (buggy or malicious) submitting 50
-  // duplicate entries would have all 50 accepted and stored as separate
-  // mls_welcomes rows for the same device.
-  @ArrayUnique((welcome: WelcomeItemDto) => welcome.recipientDeviceId)
-  @ValidateNested({ each: true })
-  @Type(() => WelcomeItemDto)
-  welcomes: WelcomeItemDto[] = [];
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => WelcomeDto)
+  welcome?: WelcomeDto;
 
   // Required, with no default: a client that leaves these out must be
   // refused, not treated as "this Commit changes no one" - the server checks
@@ -70,7 +87,7 @@ export class SubmitHandshakeDto {
     description: 'Device ids this Commit adds - exactly the Welcome recipients',
   })
   @IsArray()
-  @ArrayMaxSize(50)
+  @ArrayMaxSize(MAX_DEVICES_PER_COMMIT)
   @ArrayUnique()
   @IsString({ each: true })
   @IsNotEmpty({ each: true })
@@ -82,7 +99,7 @@ export class SubmitHandshakeDto {
     description: 'Device ids this Commit removes from the group',
   })
   @IsArray()
-  @ArrayMaxSize(50)
+  @ArrayMaxSize(MAX_DEVICES_PER_COMMIT)
   @ArrayUnique()
   @IsString({ each: true })
   @IsNotEmpty({ each: true })

@@ -1,3 +1,4 @@
+import { MAX_DEVICES_PER_COMMIT } from './dto/submit-handshake.dto';
 import type { ChatParticipantState } from '../generated/prisma/client';
 import {
   isEntitledToLeaf,
@@ -48,10 +49,15 @@ export interface DeviceRecord extends WorkDevice {
  *
  * - Add: every unrevoked device of an entitled user that is not in the group.
  *   This covers someone joining, a member's new device, and a device that had
- *   no key package when its owner joined.
+ *   no key package when its owner joined. A PENDING invitee the requester may
+ *   not claim key packages for (see refusingInviteeIds) is left out.
  * - Remove: every device in the group whose owner is not entitled, or whose
  *   device is revoked or gone. This covers someone leaving, a lost or stolen
  *   device, and a leftover device of a user who is no longer a member.
+ *
+ * A Commit changes at most MAX_DEVICES_PER_COMMIT devices each way, so a
+ * larger backlog is handed out in chunks (lowest device ids first): once one
+ * Commit lands, the next poll yields the rest.
  *
  * Needs the conversation's COMPLETE participant list: a member left out would
  * look like someone with no right to be there.
@@ -62,8 +68,15 @@ export function buildMembershipWork(params: {
   devices: readonly DeviceRecord[];
   /** The device asking; it can never remove itself. */
   requestingDeviceId: string;
+  /** PENDING invitees the requester's claim would be refused for (they block, are blocked, or take no messages). */
+  refusingInviteeIds?: ReadonlySet<string>;
 }): MembershipWorkItem[] {
-  const { conversations, devices, requestingDeviceId } = params;
+  const {
+    conversations,
+    devices,
+    requestingDeviceId,
+    refusingInviteeIds = new Set<string>(),
+  } = params;
 
   const unrevokedDeviceIds = new Set(
     devices
@@ -97,6 +110,12 @@ export function buildMembershipWork(params: {
 
     for (const participant of conversation.participants) {
       if (!isEntitledToLeaf(participant.state)) continue;
+      if (
+        participant.state === 'PENDING' &&
+        refusingInviteeIds.has(participant.userId)
+      ) {
+        continue;
+      }
 
       const userDeviceIds =
         unrevokedDeviceIdsByUser.get(participant.userId) ?? [];
@@ -125,14 +144,23 @@ export function buildMembershipWork(params: {
       continue;
     }
 
+    const firstChunk = (devices: WorkDevice[]) =>
+      [...devices]
+        .sort((a, b) => compareIds(a.deviceId, b.deviceId))
+        .slice(0, MAX_DEVICES_PER_COMMIT);
+
     items.push({
       conversationId: conversation.id,
       epoch: conversation.mlsEpoch,
-      add,
-      remove,
+      add: firstChunk(add),
+      remove: firstChunk(remove),
       unreachableUserIds,
     });
   }
 
   return items;
+}
+
+function compareIds(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }

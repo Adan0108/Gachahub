@@ -20,7 +20,7 @@ describe('ChatMembershipRepository', () => {
   };
   const prisma = {
     $transaction: jest.fn(),
-    chatParticipant: { findMany: jest.fn() },
+    chatParticipant: { findMany: jest.fn(), updateMany: jest.fn() },
   };
   const roster = { hasRoster: jest.fn(), findActiveLeaves: jest.fn() };
 
@@ -169,20 +169,36 @@ describe('ChatMembershipRepository', () => {
     expect(tx.chatParticipant.updateMany).toHaveBeenCalledTimes(1);
     expect(tx.chatParticipant.updateMany).toHaveBeenCalledWith({
       where: { conversationId: 'conv-1', userId: 'u3', state: 'PENDING' },
-      data: { state: 'DECLINED' },
+      data: { state: 'DECLINED', pendingSince: null },
+    });
+  });
+
+  describe('stampMissingPendingSince', () => {
+    it('stamps only PENDING rows that have no pendingSince and returns how many', async () => {
+      prisma.chatParticipant.updateMany.mockResolvedValue({ count: 3 });
+      const now = new Date('2026-09-25T00:00:00.000Z');
+
+      await expect(repository.stampMissingPendingSince(now)).resolves.toBe(3);
+
+      expect(prisma.chatParticipant.updateMany).toHaveBeenCalledWith({
+        where: { state: 'PENDING', pendingSince: null },
+        data: { pendingSince: now },
+      });
     });
   });
 
   describe('findExpiredPendingInvites', () => {
-    it('queries PENDING participants updated before the cutoff', async () => {
+    it('queries PENDING participants by pendingSince, oldest first, in a bounded batch', async () => {
       prisma.chatParticipant.findMany.mockResolvedValue([]);
       const cutoff = new Date('2026-09-01T00:00:00.000Z');
 
-      await repository.findExpiredPendingInvites(cutoff);
+      await repository.findExpiredPendingInvites(cutoff, 500);
 
       expect(prisma.chatParticipant.findMany).toHaveBeenCalledWith({
-        where: { state: 'PENDING', updatedAt: { lt: cutoff } },
+        where: { state: 'PENDING', pendingSince: { lt: cutoff } },
         select: { conversationId: true, userId: true },
+        orderBy: [{ pendingSince: 'asc' }, { id: 'asc' }],
+        take: 500,
       });
     });
 
@@ -193,7 +209,10 @@ describe('ChatMembershipRepository', () => {
         { conversationId: 'conv-2', userId: 'u4' },
       ]);
 
-      const result = await repository.findExpiredPendingInvites(new Date());
+      const result = await repository.findExpiredPendingInvites(
+        new Date(),
+        500,
+      );
 
       expect(result).toEqual(
         new Map([
@@ -206,7 +225,10 @@ describe('ChatMembershipRepository', () => {
     it('returns an empty map when nothing has expired', async () => {
       prisma.chatParticipant.findMany.mockResolvedValue([]);
 
-      const result = await repository.findExpiredPendingInvites(new Date());
+      const result = await repository.findExpiredPendingInvites(
+        new Date(),
+        500,
+      );
 
       expect(result).toEqual(new Map());
     });

@@ -40,4 +40,19 @@ describe('ExternalJoinDto', () => {
 
     expect(errors.some((error) => error.property === 'groupInfo')).toBe(true);
   });
+
+  it.each([-1, 2_147_483_648])(
+    'rejects the out-of-range epoch %s',
+    async (epoch) => {
+      const dto = plainToInstance(ExternalJoinDto, {
+        deviceId: 'device-1',
+        epoch,
+        payload: validPayload,
+      });
+
+      expect((await validate(dto)).map((error) => error.property)).toContain(
+        'epoch',
+      );
+    },
+  );
 });

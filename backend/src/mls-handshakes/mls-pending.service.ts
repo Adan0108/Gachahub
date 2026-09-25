@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ChatDevicesService } from '../chat-devices/chat-devices.service';
+import { MlsRequestRateLimiterService } from './mls-request-rate-limiter.service';
 import { MlsHandshakesRepository } from './mls-handshakes.repository';
 import { MlsMembershipWorkRepository } from './mls-membership-work.repository';
 import { MlsSelfJoinRepository } from './mls-self-join.repository';
@@ -16,9 +17,11 @@ export class MlsPendingService {
     private readonly selfJoinRepository: MlsSelfJoinRepository,
     private readonly workRepository: MlsMembershipWorkRepository,
     private readonly chatDevicesService: ChatDevicesService,
+    private readonly requestRateLimiter: MlsRequestRateLimiterService,
   ) {}
 
   async getPendingSummary(userId: string, deviceId: string) {
+    this.requestRateLimiter.assertMayPollPending(userId);
     await this.chatDevicesService.assertOwnActiveDevice(userId, deviceId);
 
     const [welcomes, joinable, membershipWork] = await Promise.all([

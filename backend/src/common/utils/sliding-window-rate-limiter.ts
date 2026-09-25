@@ -34,6 +34,19 @@ export class SlidingWindowRateLimiter {
 
   /** `cost` counts as that many attempts - a request that hands out N things counts N times. */
   assertNotRateLimited(key: string, cost = 1): void {
+    const retryAfterMs = this.attempt(key, cost);
+    if (retryAfterMs !== null) {
+      this.reject(retryAfterMs);
+    }
+  }
+
+  /** Like assertNotRateLimited, but returns false instead of throwing when over the limit. */
+  tryConsume(key: string, cost = 1): boolean {
+    return this.attempt(key, cost) === null;
+  }
+
+  /** Records the attempt and returns null, or returns how long to wait without recording it. */
+  private attempt(key: string, cost: number): number | null {
     const { windowMs, maxPerWindow, lockoutMs, maxTrackedKeys } = this.config;
     const now = Date.now();
     const lockExpiresAt = this.lockedUntil.get(key);
@@ -41,7 +54,7 @@ export class SlidingWindowRateLimiter {
     if (lockExpiresAt !== undefined) {
       if (now < lockExpiresAt) {
         touch(this.lockedUntil, key, lockExpiresAt);
-        this.reject(lockExpiresAt - now);
+        return lockExpiresAt - now;
       }
 
       this.lockedUntil.delete(key);
@@ -52,23 +65,28 @@ export class SlidingWindowRateLimiter {
       now,
       windowMs,
     );
-    for (let i = 0; i < cost; i += 1) {
-      recent.push(now);
-    }
 
-    if (recent.length > maxPerWindow) {
+    if (recent.length + cost > maxPerWindow) {
       if (lockoutMs === undefined) {
-        this.reject(windowMs);
+        // Wait until enough hits age out to fit the cost; a cost over the cap never fits.
+        const mustAgeOut = recent.length + cost - maxPerWindow;
+        return cost > maxPerWindow
+          ? windowMs
+          : recent[mustAgeOut - 1] + windowMs - now;
       }
 
       this.recent.delete(key);
       evictOldestIfAtCapacity(this.lockedUntil, maxTrackedKeys, key);
       touch(this.lockedUntil, key, now + lockoutMs);
-      this.reject(lockoutMs);
+      return lockoutMs;
     }
 
+    for (let i = 0; i < cost; i += 1) {
+      recent.push(now);
+    }
     evictOldestIfAtCapacity(this.recent, maxTrackedKeys, key);
     touch(this.recent, key, recent);
+    return null;
   }
 
   private reject(retryAfterMs: number): never {
@@ -77,4 +95,17 @@ export class SlidingWindowRateLimiter {
       Math.ceil(retryAfterMs / 1000),
     );
   }
+}
+
+/** The common shape: a plain per-minute cap per user id, no lockout. */
+export function perMinutePerUserLimiter(
+  maxPerMinute: number,
+  message: string,
+): SlidingWindowRateLimiter {
+  return new SlidingWindowRateLimiter({
+    windowMs: 60_000,
+    maxPerWindow: maxPerMinute,
+    maxTrackedKeys: 10000,
+    message,
+  });
 }

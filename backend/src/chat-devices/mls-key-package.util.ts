@@ -1,36 +1,21 @@
 import { BadRequestException } from '@nestjs/common';
-import {
-  decodeMlsMessage,
-  getCiphersuiteImpl,
-  getCiphersuiteFromName,
-  type CiphersuiteImpl,
-  type KeyPackage,
-} from 'ts-mls';
+import { decodeMlsMessage, type KeyPackage } from 'ts-mls';
 // Not re-exported from the package root - reachable via ts-mls's own
 // "./*.js" subpath export map (same as the frontend adapter).
 import { verifyKeyPackage } from 'ts-mls/keyPackage.js';
 import { bytesEqual } from '../common/utils/bytes';
+import {
+  getPinnedCiphersuiteImpl,
+  PINNED_CIPHERSUITE,
+} from '../common/utils/mls-pinned-ciphersuite';
 
-/**
- * Ciphersuite this backend accepts for MLS key packages - matches the
- * frontend's ts-mls adapter (frontend/lib/mls/tsMlsAdapter.ts). Pinned to
- * exactly one (critique C1) rather than accepting whatever a client sends,
- * so uploads can never mix ciphersuites.
- */
-export const PINNED_CIPHERSUITE =
-  'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519';
+export { PINNED_CIPHERSUITE };
 
 const MAX_KEY_PACKAGE_LIFETIME_SECONDS = 90 * 24 * 60 * 60;
 // A key package that isn't valid yet is still useless to us today - allow
 // only a small clock-skew tolerance, not a package scheduled to activate
 // far in the future.
 const CLOCK_SKEW_TOLERANCE_SECONDS = 5 * 60;
-
-let cachedImpl: Promise<CiphersuiteImpl> | undefined;
-function getImpl(): Promise<CiphersuiteImpl> {
-  cachedImpl ??= getCiphersuiteImpl(getCiphersuiteFromName(PINNED_CIPHERSUITE));
-  return cachedImpl;
-}
 
 export interface ExpectedKeyPackageIdentity {
   userId: string;
@@ -90,7 +75,7 @@ async function decodeAndVerifyKeyPackageUnsafe(
     );
   }
 
-  const impl = await getImpl();
+  const impl = await getPinnedCiphersuiteImpl();
   const isSignatureValid = await verifyKeyPackage(keyPackage, impl.signature);
   if (!isSignatureValid) {
     throw new BadRequestException('Key package signature is invalid');

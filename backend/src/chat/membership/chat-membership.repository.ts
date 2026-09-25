@@ -63,6 +63,16 @@ export class ChatMembershipRepository {
     });
   }
 
+  /** Stamps PENDING rows written without pendingSince (e.g. by older code mid-deploy) so they start their expiry clock. */
+  async stampMissingPendingSince(now: Date): Promise<number> {
+    const { count } = await this.prisma.chatParticipant.updateMany({
+      where: { state: 'PENDING', pendingSince: null },
+      data: { pendingSince: now },
+    });
+
+    return count;
+  }
+
   /**
    * PENDING participants (group invite or DM message request) whose invite has sat
    * unanswered since before `cutoff`, grouped by conversation. PENDING is entitled to
@@ -70,16 +80,18 @@ export class ChatMembershipRepository {
    * declines would otherwise be permanent cryptographic membership - see
    * ChatInviteExpiryService, which turns this into an EXPIRE_INVITE per conversation.
    *
-   * updatedAt, not createdAt: a participant re-invited after DECLINED updates the
-   * same row rather than creating a new one, and Prisma's @updatedAt already tracks
-   * exactly "when they most recently entered PENDING" for that case.
+   * Keyed on pendingSince, not updatedAt (which any mute/read/pin would bump), oldest
+   * first and capped at `limit` per call so the sweep can page through a backlog.
    */
   async findExpiredPendingInvites(
     cutoff: Date,
+    limit: number,
   ): Promise<Map<string, string[]>> {
     const rows = await this.prisma.chatParticipant.findMany({
-      where: { state: 'PENDING', updatedAt: { lt: cutoff } },
+      where: { state: 'PENDING', pendingSince: { lt: cutoff } },
       select: { conversationId: true, userId: true },
+      orderBy: [{ pendingSince: 'asc' }, { id: 'asc' }],
+      take: limit,
     });
 
     const userIdsByConversationId = new Map<string, string[]>();

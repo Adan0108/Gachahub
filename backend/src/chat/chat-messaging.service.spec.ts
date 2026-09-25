@@ -441,6 +441,7 @@ describe('ChatMessagingService', () => {
           purpose: 'CHAT',
           maxImages: 4,
           maxVideos: 1,
+          maxOpaqueBlobs: 10,
           entityLabel: 'chat message',
         });
         expect(
@@ -757,10 +758,14 @@ describe('ChatMessagingService', () => {
           conversationId: 'conversation-1',
         });
 
-        const result = await service.createDirectMessage('user-1', 'session-1', {
-          recipientUserId: 'user-2',
-          message: { clientMessageId: 'client-1' },
-        } as any);
+        const result = await service.createDirectMessage(
+          'user-1',
+          'session-1',
+          {
+            recipientUserId: 'user-2',
+            message: { clientMessageId: 'client-1' },
+          } as any,
+        );
 
         expect(result).toEqual({
           conversationId: 'conversation-1',
@@ -795,10 +800,14 @@ describe('ChatMessagingService', () => {
         );
         repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-        const result = await service.createDirectMessage('user-1', 'session-1', {
-          recipientUserId: 'user-2',
-          message: { clientMessageId: 'client-1' },
-        } as any);
+        const result = await service.createDirectMessage(
+          'user-1',
+          'session-1',
+          {
+            recipientUserId: 'user-2',
+            message: { clientMessageId: 'client-1' },
+          } as any,
+        );
 
         expect(repository.createMessage).toHaveBeenCalled();
         expect(result).toEqual({
@@ -868,7 +877,9 @@ describe('ChatMessagingService', () => {
       expect(
         chatDevicesService.assertSessionLinkedToActiveDevice,
       ).toHaveBeenCalledWith('user-1', 'session-1');
-      expect(repository.findMessageBySenderClientMessageId).not.toHaveBeenCalled();
+      expect(
+        repository.findMessageBySenderClientMessageId,
+      ).not.toHaveBeenCalled();
       expect(messageEncryption.preparePayload).not.toHaveBeenCalled();
     });
 
@@ -884,7 +895,9 @@ describe('ChatMessagingService', () => {
         } as any),
       ).rejects.toBe(revoked);
 
-      expect(repository.findMessageBySenderClientMessageId).not.toHaveBeenCalled();
+      expect(
+        repository.findMessageBySenderClientMessageId,
+      ).not.toHaveBeenCalled();
     });
 
     it('returns duplicate immediately without checking the sender', async () => {
@@ -893,9 +906,14 @@ describe('ChatMessagingService', () => {
         conversationId: 'conversation-1',
       });
 
-      const result = await service.sendMessage('user-1', 'session-1', 'conversation-1', {
-        message: { clientMessageId: 'client-1' },
-      } as any);
+      const result = await service.sendMessage(
+        'user-1',
+        'session-1',
+        'conversation-1',
+        {
+          message: { clientMessageId: 'client-1' },
+        } as any,
+      );
 
       expect(result.duplicate).toBe(true);
       expect(repository.findParticipant).not.toHaveBeenCalled();
@@ -933,9 +951,14 @@ describe('ChatMessagingService', () => {
         ]),
       );
 
-      const rejection = service.sendMessage('user-1', 'session-1', 'conversation-1', {
-        message: { clientMessageId: 'client-1' },
-      } as any);
+      const rejection = service.sendMessage(
+        'user-1',
+        'session-1',
+        'conversation-1',
+        {
+          message: { clientMessageId: 'client-1' },
+        } as any,
+      );
 
       await expect(rejection).rejects.toThrow(MembershipChangePendingException);
       expect(repository.createMessage).not.toHaveBeenCalled();
@@ -1395,6 +1418,7 @@ describe('ChatMessagingService', () => {
         purpose: 'CHAT',
         maxImages: 4,
         maxVideos: 1,
+        maxOpaqueBlobs: 10,
         entityLabel: 'chat message',
       });
       expect(repository.createMessage).toHaveBeenCalledWith(
@@ -1477,9 +1501,14 @@ describe('ChatMessagingService', () => {
           conversationId: 'conversation-1',
         });
 
-        const result = await service.sendMessage('user-1', 'session-1', 'conversation-1', {
-          message: { clientMessageId: 'client-1' },
-        } as any);
+        const result = await service.sendMessage(
+          'user-1',
+          'session-1',
+          'conversation-1',
+          {
+            message: { clientMessageId: 'client-1' },
+          } as any,
+        );
 
         expect(result).toEqual({
           conversationId: 'conversation-1',
@@ -1504,9 +1533,14 @@ describe('ChatMessagingService', () => {
           conversationId: 'conversation-1',
         });
 
-        const result = await service.sendMessage('user-1', 'session-1', 'conversation-1', {
-          message: { clientMessageId: 'client-1' },
-        } as any);
+        const result = await service.sendMessage(
+          'user-1',
+          'session-1',
+          'conversation-1',
+          {
+            message: { clientMessageId: 'client-1' },
+          } as any,
+        );
 
         expect(result.duplicate).toBe(true);
       });

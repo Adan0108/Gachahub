@@ -1,20 +1,9 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import {
-  getCiphersuiteFromName,
-  getCiphersuiteImpl,
-  type CiphersuiteImpl,
-} from 'ts-mls';
+import { decodeMlsMessage } from 'ts-mls';
 // Not re-exported from the package root - reachable via ts-mls's own "./*.js" subpath export map.
 import { verifyFramedContentSignature } from 'ts-mls/framedContent.js';
-import { PINNED_CIPHERSUITE } from '../chat-devices/mls-key-package.util';
-
-let cachedImpl: Promise<CiphersuiteImpl> | undefined;
-function getImpl(): Promise<CiphersuiteImpl> {
-  cachedImpl ??= getCiphersuiteImpl(getCiphersuiteFromName(PINNED_CIPHERSUITE));
-  return cachedImpl;
-}
-import { decodeMlsMessage } from 'ts-mls';
 import { bytesEqual } from '../common/utils/bytes';
+import { getPinnedCiphersuiteImpl } from '../common/utils/mls-pinned-ciphersuite';
 
 /** Who an external commit adds: read from the joiner's own leaf, so it is the joiner's claim until it is checked against the registry. */
 export interface ExternalJoiner {
@@ -168,7 +157,7 @@ export async function assertExternalJoinSigned(
     commit.publicMessage.content,
     commit.publicMessage.auth,
     snapshot.groupInfo.groupContext,
-    (await getImpl()).signature,
+    (await getPinnedCiphersuiteImpl()).signature,
   );
 
   if (!valid) {

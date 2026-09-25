@@ -3,11 +3,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { isMemberState } from '../chat/membership/leaf-entitlement';
 import { ChatDevicesService } from '../chat-devices/chat-devices.service';
 import { DiscordLoggerService } from '../common/discord/discord-logger.service';
+import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
 import { ReportCommitFaultDto } from './dto/report-commit-fault.dto';
 import { MlsGroupInfoRepository } from './mls-group-info.repository';
+import { MlsFaultReportRateLimiterService } from './mls-fault-report-rate-limiter.service';
 import { MlsHandshakesRepository } from './mls-handshakes.repository';
+import { ParticipantStateRepository } from '../mls-group-roster/participant-state.repository';
 
 /**
  * Where a member's client tells the server it refused a Commit. Without this a
@@ -23,6 +27,9 @@ export class MlsCommitFaultsService {
     private readonly chatDevicesService: ChatDevicesService,
     private readonly discordLogger: DiscordLoggerService,
     private readonly groupInfoRepository: MlsGroupInfoRepository,
+    private readonly rosterRepository: MlsGroupRosterRepository,
+    private readonly rateLimiter: MlsFaultReportRateLimiterService,
+    private readonly participantStates: ParticipantStateRepository,
   ) {}
 
   async reportFault(
@@ -30,8 +37,10 @@ export class MlsCommitFaultsService {
     conversationId: string,
     dto: ReportCommitFaultDto,
   ) {
-    await this.assertEntitledParticipant(conversationId, userId);
+    this.rateLimiter.assertMayReport(userId);
+    await this.assertMember(conversationId, userId);
     await this.chatDevicesService.assertOwnActiveDevice(userId, dto.deviceId);
+    await this.assertDeviceIsInGroup(conversationId, userId, dto.deviceId);
 
     // Only a Commit that exists can be reported, which also bounds how many
     // distinct faults one member can file.
@@ -51,14 +60,9 @@ export class MlsCommitFaultsService {
       reason: dto.reason,
     });
 
-    // Filing the same fault again (every poll re-detects it) must not re-alert, and must not let one
-    // member keep self-join off for a group by re-reporting the same epoch after every new Commit.
+    // A repeat report (every poll re-detects it) must not re-alert.
     if (isNew) {
-      // The faulted commit produced epoch+1; its snapshot must not seed anyone's self-join.
-      await this.groupInfoRepository.deleteIfDescribesEpoch(
-        conversationId,
-        dto.epoch + 1,
-      );
+      await this.discardFaultedSnapshot(conversationId, dto.epoch + 1);
 
       void this.discordLogger.sendError({
         source: 'mls',
@@ -81,18 +85,47 @@ export class MlsCommitFaultsService {
     return { recorded: isNew };
   }
 
-  private async assertEntitledParticipant(
+  /** Deleting is budgeted per conversation so reports cannot keep the snapshot off; only a real deletion spends budget. */
+  private async discardFaultedSnapshot(conversationId: string, epoch: number) {
+    if (
+      !(await this.groupInfoRepository.describesEpoch(conversationId, epoch))
+    ) {
+      return;
+    }
+
+    if (this.rateLimiter.tryConsumeSnapshotDeletion(conversationId)) {
+      await this.groupInfoRepository.deleteIfDescribesEpoch(
+        conversationId,
+        epoch,
+      );
+    }
+  }
+
+  /** An invitee may read the group but has no leaf, so their word about a Commit means nothing. */
+  private async assertMember(conversationId: string, userId: string) {
+    const state = await this.participantStates.findState(
+      conversationId,
+      userId,
+    );
+
+    if (!isMemberState(state)) {
+      throw new ForbiddenException('Not a member of this conversation');
+    }
+  }
+
+  private async assertDeviceIsInGroup(
     conversationId: string,
     userId: string,
+    deviceId: string,
   ) {
-    const isParticipant =
-      await this.mlsHandshakesRepository.isEntitledParticipant(
-        conversationId,
-        userId,
-      );
+    const leaves = await this.rosterRepository.findActiveLeaves(conversationId);
 
-    if (!isParticipant) {
-      throw new ForbiddenException('Not a member of this conversation');
+    if (
+      !leaves.some(
+        (leaf) => leaf.deviceId === deviceId && leaf.userId === userId,
+      )
+    ) {
+      throw new ForbiddenException('This device is not in the group');
     }
   }
 }

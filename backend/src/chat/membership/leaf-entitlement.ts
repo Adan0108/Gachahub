@@ -41,3 +41,16 @@ export function isLeafRemovable(params: {
 }): boolean {
   return params.deviceIsGone || !isEntitledToLeaf(params.ownerState);
 }
+
+/** The per-user views of a real member: not an invitee, not someone still joining. */
+export const MEMBER_STATES: readonly ChatParticipantState[] = [
+  'ACTIVE',
+  'ARCHIVED',
+  'BLOCKED',
+];
+
+export function isMemberState(
+  state: ChatParticipantState | undefined,
+): boolean {
+  return state !== undefined && MEMBER_STATES.includes(state);
+}

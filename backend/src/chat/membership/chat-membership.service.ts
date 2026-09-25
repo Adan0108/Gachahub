@@ -87,16 +87,11 @@ export class ChatMembershipService {
       ...new Map(requests.map((request) => [request.userId, request])).values(),
     ];
 
-    const count = onIllegal
-      ? await this.chatMembershipRepository.changeMembership(
-          conversationId,
-          onePerUser,
-          onIllegal,
-        )
-      : await this.chatMembershipRepository.changeMembership(
-          conversationId,
-          onePerUser,
-        );
+    const count = await this.chatMembershipRepository.changeMembership(
+      conversationId,
+      onePerUser,
+      onIllegal,
+    );
 
     return { count };
   }

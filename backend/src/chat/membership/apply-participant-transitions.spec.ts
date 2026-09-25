@@ -71,6 +71,35 @@ describe('applyParticipantTransitions', () => {
     });
   });
 
+  it('stamps pendingSince when a new row starts PENDING', async () => {
+    await apply([{ userId: 'u2', from: null, to: 'PENDING' }]);
+
+    expect(tx.chatParticipant.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({ pendingSince: expect.any(Date) as Date }),
+      ],
+      skipDuplicates: true,
+    });
+  });
+
+  it('stamps pendingSince when an existing row re-enters PENDING', async () => {
+    await apply([{ userId: 'u2', from: 'DECLINED', to: 'PENDING' }]);
+
+    const [args] = tx.chatParticipant.updateMany.mock.calls[0] as [
+      { data: { pendingSince: unknown } },
+    ];
+    expect(args.data.pendingSince).toBeInstanceOf(Date);
+  });
+
+  it('clears pendingSince when leaving PENDING', async () => {
+    await apply([{ userId: 'u2', from: 'PENDING', to: 'LEAVING' }]);
+
+    expect(tx.chatParticipant.updateMany).toHaveBeenCalledWith({
+      where: { conversationId: 'conv-1', userId: 'u2', state: 'PENDING' },
+      data: { state: 'LEAVING', pendingSince: null },
+    });
+  });
+
   it('returns how many changes it applied', async () => {
     await expect(
       apply([

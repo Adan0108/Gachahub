@@ -5,7 +5,6 @@ import {
 } from '@nestjs/common';
 import type { MlsHandshake, Prisma } from '../generated/prisma/client';
 import { applyParticipantTransitions } from '../chat/membership/apply-participant-transitions';
-import { isEntitledToLeaf } from '../chat/membership/leaf-entitlement';
 import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
 import { PrismaService } from '../prisma/prisma.service';
 import { MlsGroupInfoRepository } from './mls-group-info.repository';
@@ -57,44 +56,6 @@ export class MlsHandshakesRepository {
     private readonly mlsGroupInfoRepository: MlsGroupInfoRepository,
   ) {}
 
-  /** Only an ACTIVE member may submit a Commit. */
-  async isActiveParticipant(
-    conversationId: string,
-    userId: string,
-  ): Promise<boolean> {
-    const participant = await this.prisma.chatParticipant.findUnique({
-      where: { conversationId_userId: { conversationId, userId } },
-    });
-
-    return participant?.state === 'ACTIVE';
-  }
-
-  /** Anyone entitled to a leaf may read the group's Commits and roster, so a new device of an archived or blocked member can still join. */
-  async isEntitledParticipant(
-    conversationId: string,
-    userId: string,
-  ): Promise<boolean> {
-    const participant = await this.prisma.chatParticipant.findUnique({
-      where: { conversationId_userId: { conversationId, userId } },
-    });
-
-    return isEntitledToLeaf(participant?.state);
-  }
-
-  /**
-   * Atomic compare-and-set: mlsEpoch only advances when expectedEpoch still
-   * matches, so exactly one Commit ever wins a given epoch. A loser gets
-   * back whatever handshake DID win, so it can tell a harmless retry (same
-   * payload) from a real conflict (someone else's Commit) it must catch up
-   * on - the server never resolves crypto conflicts itself, only ordering.
-   *
-   * The epoch bump, the roster and participant changes the Commit makes (see
-   * applyMembershipChange), and the handshake/welcome rows all happen in one
-   * transaction (threat-model §3: "the two must be kept in sync in the same
-   * transaction"). If any rule is broken the whole Commit is rejected and
-   * rolled back, including the epoch bump, rather than leaving an epoch
-   * advanced with no matching handshake row or the two rosters out of step.
-   */
   /** A Commit from a member of the group. */
   acceptHandshake(
     params: Omit<CommitToAccept, 'sender'>,
@@ -125,6 +86,20 @@ export class MlsHandshakesRepository {
     });
   }
 
+  /**
+   * Atomic compare-and-set: mlsEpoch only advances when expectedEpoch still
+   * matches, so exactly one Commit ever wins a given epoch. A loser gets
+   * back whatever handshake DID win, so it can tell a harmless retry (same
+   * payload) from a real conflict (someone else's Commit) it must catch up
+   * on - the server never resolves crypto conflicts itself, only ordering.
+   *
+   * The epoch bump, the roster and participant changes the Commit makes (see
+   * applyMembershipChange), and the handshake/welcome rows all happen in one
+   * transaction (threat-model §3: "the two must be kept in sync in the same
+   * transaction"). If any rule is broken the whole Commit is rejected and
+   * rolled back, including the epoch bump, rather than leaving an epoch
+   * advanced with no matching handshake row or the two rosters out of step.
+   */
   private async acceptCommit(
     params: CommitToAccept,
   ): Promise<HandshakeAcceptResult> {
@@ -448,10 +423,15 @@ export class MlsHandshakesRepository {
     }));
   }
 
-  findHandshakesSince(conversationId: string, fromEpoch: number) {
+  findHandshakesSince(
+    conversationId: string,
+    fromEpoch: number,
+    limit: number,
+  ) {
     return this.prisma.mlsHandshake.findMany({
       where: { conversationId, epoch: { gte: fromEpoch } },
       orderBy: { epoch: 'asc' },
+      take: limit,
     });
   }
 
@@ -461,10 +441,35 @@ export class MlsHandshakesRepository {
     });
   }
 
-  findPendingWelcomes(recipientDeviceId: string) {
+  /** Oldest first; `afterWelcomeId` resumes past that welcome. Null when that id is not one of this device's welcomes. */
+  async findPendingWelcomes(
+    recipientDeviceId: string,
+    limit: number,
+    afterWelcomeId?: string,
+  ) {
+    const cursor = afterWelcomeId
+      ? await this.prisma.mlsWelcome.findFirst({
+          where: { id: afterWelcomeId, recipientDeviceId },
+          select: { createdAt: true, id: true },
+        })
+      : null;
+    if (afterWelcomeId && !cursor) {
+      return null;
+    }
+
     return this.prisma.mlsWelcome.findMany({
-      where: { recipientDeviceId, consumedAt: null },
-      orderBy: { createdAt: 'asc' },
+      where: {
+        recipientDeviceId,
+        consumedAt: null,
+        ...(cursor && {
+          OR: [
+            { createdAt: { gt: cursor.createdAt } },
+            { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+          ],
+        }),
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: limit,
     });
   }
 

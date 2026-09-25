@@ -4,11 +4,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { isEntitledToLeaf } from '../chat/membership/leaf-entitlement';
 import { ChatDevicesService } from '../chat-devices/chat-devices.service';
 import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
+import { MlsRequestRateLimiterService } from './mls-request-rate-limiter.service';
 import { MlsSelfJoinRateLimiterService } from './mls-self-join-rate-limiter.service';
 import { MlsGroupInfoRepository } from './mls-group-info.repository';
-import { MlsHandshakesRepository } from './mls-handshakes.repository';
+import { ParticipantStateRepository } from '../mls-group-roster/participant-state.repository';
 import {
   MlsSelfJoinRepository,
   type SelfJoinScope,
@@ -27,13 +29,15 @@ export class MlsSelfJoinService {
   constructor(
     private readonly selfJoinRepository: MlsSelfJoinRepository,
     private readonly groupInfoRepository: MlsGroupInfoRepository,
-    private readonly handshakesRepository: MlsHandshakesRepository,
+    private readonly participantStates: ParticipantStateRepository,
     private readonly rosterRepository: MlsGroupRosterRepository,
     private readonly chatDevicesService: ChatDevicesService,
     private readonly rateLimiter: MlsSelfJoinRateLimiterService,
+    private readonly requestRateLimiter: MlsRequestRateLimiterService,
   ) {}
 
   async listJoinable(userId: string, deviceId: string, scope: SelfJoinScope) {
+    this.requestRateLimiter.assertMayPollPending(userId);
     await this.chatDevicesService.assertOwnActiveDevice(userId, deviceId);
 
     return {
@@ -52,11 +56,11 @@ export class MlsSelfJoinService {
     this.rateLimiter.assertMayFetchGroupInfo(userId);
     await this.chatDevicesService.assertOwnActiveDevice(userId, deviceId);
 
-    const entitled = await this.handshakesRepository.isEntitledParticipant(
+    const state = await this.participantStates.findState(
       conversationId,
       userId,
     );
-    if (!entitled) {
+    if (!isEntitledToLeaf(state)) {
       throw new ForbiddenException('Not entitled to join this conversation');
     }
 

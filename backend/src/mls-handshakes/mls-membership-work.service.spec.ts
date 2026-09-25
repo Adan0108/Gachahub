@@ -1,3 +1,4 @@
+import { RateLimitedException } from '../common/exceptions/rate-limited.exception';
 import { ForbiddenException } from '@nestjs/common';
 import type { ChatDevicesService } from '../chat-devices/chat-devices.service';
 import type { MlsMembershipWorkRepository } from './mls-membership-work.repository';
@@ -18,7 +19,20 @@ describe('MlsMembershipWorkService', () => {
     leaseConversations: jest.fn(),
     releaseLease: jest.fn(),
   };
-  const chatDevicesService = { assertOwnActiveDevice: jest.fn() };
+  const requestRateLimiter = {
+    assertMaySubmitHandshake: jest.fn(),
+    assertMayTakeMembershipWork: jest.fn(),
+    assertMayPollPending: jest.fn(),
+    assertMayFetchRoster: jest.fn(),
+  };
+  const throwRateLimited = () => {
+    throw new RateLimitedException('slow down', 30);
+  };
+
+  const chatDevicesService = {
+    assertOwnActiveDevice: jest.fn(),
+    findInviteesRefusingRequester: jest.fn(),
+  };
 
   let service: MlsMembershipWorkService;
 
@@ -41,7 +55,11 @@ describe('MlsMembershipWorkService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    requestRateLimiter.assertMayTakeMembershipWork.mockReset();
     chatDevicesService.assertOwnActiveDevice.mockResolvedValue({});
+    chatDevicesService.findInviteesRefusingRequester.mockResolvedValue(
+      new Set(),
+    );
     repository.findConversationsNeedingWork.mockResolvedValue([]);
     repository.findDevices.mockResolvedValue([]);
     repository.leaseConversations.mockImplementation(
@@ -52,7 +70,23 @@ describe('MlsMembershipWorkService', () => {
     service = new MlsMembershipWorkService(
       repository as unknown as MlsMembershipWorkRepository,
       chatDevicesService as unknown as ChatDevicesService,
+      requestRateLimiter as never,
     );
+  });
+
+  it('is rate limited per user, before any lookup', async () => {
+    requestRateLimiter.assertMayTakeMembershipWork.mockImplementation(
+      throwRateLimited,
+    );
+
+    await expect(
+      service.getMembershipWork('user-1', 'device-1'),
+    ).rejects.toThrow(RateLimitedException);
+
+    expect(requestRateLimiter.assertMayTakeMembershipWork).toHaveBeenCalledWith(
+      'user-1',
+    );
+    expect(chatDevicesService.assertOwnActiveDevice).not.toHaveBeenCalled();
   });
 
   it('only answers for a device the caller owns and that is still active', async () => {
@@ -232,6 +266,54 @@ describe('MlsMembershipWorkService', () => {
 
       expect(result.items).toEqual([]);
       expect(result.nextCursor).toBe('conv-49');
+    });
+  });
+
+  describe('PENDING invitees who refuse the requester', () => {
+    const pendingConversation = () => ({
+      id: 'conv-1',
+      mlsEpoch: 2,
+      participants: [
+        { userId: 'user-1', state: 'ACTIVE' },
+        { userId: 'invitee', state: 'PENDING' },
+      ],
+      activeLeaves: [{ userId: 'user-1', deviceId: 'device-1' }],
+    });
+
+    beforeEach(() => {
+      repository.findConversationsNeedingWork.mockResolvedValue([
+        pendingConversation(),
+      ]);
+      repository.findDevices.mockResolvedValue([
+        { userId: 'user-1', deviceId: 'device-1', revoked: false },
+        { userId: 'invitee', deviceId: 'invitee-device', revoked: false },
+      ]);
+    });
+
+    it('are asked about once per user, never including the requester', async () => {
+      await service.getMembershipWork('user-1', 'device-1');
+
+      expect(
+        chatDevicesService.findInviteesRefusingRequester,
+      ).toHaveBeenCalledWith('user-1', ['invitee']);
+    });
+
+    it('are left out of the work, so no one polls for an add that would be refused', async () => {
+      chatDevicesService.findInviteesRefusingRequester.mockResolvedValue(
+        new Set(['invitee']),
+      );
+
+      const result = await service.getMembershipWork('user-1', 'device-1');
+
+      expect(result.items).toEqual([]);
+    });
+
+    it('still get their devices added when they consent', async () => {
+      const result = await service.getMembershipWork('user-1', 'device-1');
+
+      expect(result.items[0]?.add).toEqual([
+        { userId: 'invitee', deviceId: 'invitee-device' },
+      ]);
     });
   });
 

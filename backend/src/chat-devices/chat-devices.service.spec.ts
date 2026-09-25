@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { env } from '../config/env';
+import { Prisma } from '../generated/prisma/client';
 import { ChatDevicesService } from './chat-devices.service';
 import { issueLinkChallenge, SESSION_LINK_LABEL } from './session-link-proof';
 import { buildTestKeyPackage } from './test-support/build-key-package';
@@ -19,22 +20,21 @@ describe('ChatDevicesService', () => {
   const repository = {
     findById: jest.fn(),
     findUserMessagingProfile: jest.fn(),
-    createDeviceWithKeyPackages: jest.fn(),
+    createDeviceWithinCap: jest.fn(),
     addKeyPackages: jest.fn(),
     findActiveDevicesForUser: jest.fn(),
     claimSingleUseKeyPackage: jest.fn(),
     findLastResortKeyPackage: jest.fn(),
     revokeDevice: jest.fn(),
-    countActiveDevices: jest.fn(),
+    countClaimableSingleUseKeyPackages: jest.fn(),
     touchLastSeen: jest.fn(),
-    findLeastRecentlySeenActiveDevice: jest.fn(),
     findLoginsOfDevice: jest.fn(),
     linkSession: jest.fn(),
     relinkSession: jest.fn(),
     findSessionDeviceId: jest.fn(),
-    findParticipantStates: jest.fn(),
   };
 
+  const participantStates = { findStates: jest.fn() };
   const roster = { findActiveLeaves: jest.fn(), hasRoster: jest.fn() };
 
   const sessionTerminator = { end: jest.fn() };
@@ -60,8 +60,6 @@ describe('ChatDevicesService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     blocksService.isBlocked.mockResolvedValue(false);
-    repository.countActiveDevices.mockResolvedValue(0);
-    repository.findLeastRecentlySeenActiveDevice.mockResolvedValue(null);
     service = new ChatDevicesService(
       repository as any,
       followsService as any,
@@ -70,6 +68,7 @@ describe('ChatDevicesService', () => {
       uploadRateLimiter as any,
       roster as any,
       sessionTerminator as any,
+      participantStates as any,
     );
   });
 
@@ -86,8 +85,9 @@ describe('ChatDevicesService', () => {
   describe('registerDevice', () => {
     it('creates a device with its verified key packages', async () => {
       repository.findById.mockResolvedValue(null);
-      repository.createDeviceWithKeyPackages.mockResolvedValue({
-        id: 'device-1',
+      repository.createDeviceWithinCap.mockResolvedValue({
+        outcome: 'created',
+        device: { id: 'device-1' },
       });
       const { payload, signaturePublicKey } = await base64KeyPackage(
         'user-1',
@@ -101,17 +101,18 @@ describe('ChatDevicesService', () => {
         keyPackages: [{ kind: 'SINGLE_USE', payload }],
       } as any);
 
-      expect(repository.createDeviceWithKeyPackages).toHaveBeenCalledWith(
+      expect(repository.createDeviceWithinCap).toHaveBeenCalledWith(
         expect.objectContaining({
           deviceId: 'device-1',
           userId: 'user-1',
           keyPackages: [expect.objectContaining({ kind: 'SINGLE_USE' })],
         }),
+        expect.anything(),
       );
     });
 
-    it('rejects when the device id is already registered', async () => {
-      repository.findById.mockResolvedValue({ id: 'device-1' });
+    it('rejects when the device id is already registered, without probing it beforehand', async () => {
+      repository.createDeviceWithinCap.mockResolvedValue({ outcome: 'exists' });
       const { payload, signaturePublicKey } = await base64KeyPackage(
         'user-1',
         'device-1',
@@ -126,7 +127,7 @@ describe('ChatDevicesService', () => {
         } as any),
       ).rejects.toThrow(ConflictException);
 
-      expect(repository.createDeviceWithKeyPackages).not.toHaveBeenCalled();
+      expect(repository.findById).not.toHaveBeenCalled();
     });
 
     it('rejects a key package whose credential belongs to a different device', async () => {
@@ -147,7 +148,7 @@ describe('ChatDevicesService', () => {
         'Key package credential does not match the authenticated user/device',
       );
 
-      expect(repository.createDeviceWithKeyPackages).not.toHaveBeenCalled();
+      expect(repository.createDeviceWithinCap).not.toHaveBeenCalled();
     });
 
     it('rejects a declared ciphersuite that is not the pinned one', async () => {
@@ -166,7 +167,7 @@ describe('ChatDevicesService', () => {
         } as any),
       ).rejects.toThrow(/Unsupported ciphersuite/);
 
-      expect(repository.createDeviceWithKeyPackages).not.toHaveBeenCalled();
+      expect(repository.createDeviceWithinCap).not.toHaveBeenCalled();
     });
 
     it('enforces the upload rate limit', async () => {
@@ -481,7 +482,7 @@ describe('ChatDevicesService', () => {
       });
 
     beforeEach(() => {
-      repository.findParticipantStates.mockResolvedValue(
+      participantStates.findStates.mockResolvedValue(
         new Map([
           ['user-1', 'ACTIVE'],
           ['user-2', 'JOINING'],
@@ -521,7 +522,7 @@ describe('ChatDevicesService', () => {
     });
 
     it('refuses a caller who is not an ACTIVE member of the group', async () => {
-      repository.findParticipantStates.mockResolvedValue(
+      participantStates.findStates.mockResolvedValue(
         new Map([
           ['user-1', 'PENDING'],
           ['user-2', 'JOINING'],
@@ -534,7 +535,7 @@ describe('ChatDevicesService', () => {
     });
 
     it('lets a member claim for a pending invitee whose current settings still allow it', async () => {
-      repository.findParticipantStates.mockResolvedValue(
+      participantStates.findStates.mockResolvedValue(
         new Map([
           ['user-1', 'ACTIVE'],
           ['user-2', 'PENDING'],
@@ -551,8 +552,28 @@ describe('ChatDevicesService', () => {
       ]);
     });
 
+    it('lets a member claim for a pending FOLLOWERS-only invitee without evaluating any follow relation', async () => {
+      participantStates.findStates.mockResolvedValue(
+        new Map([
+          ['user-1', 'ACTIVE'],
+          ['user-2', 'PENDING'],
+        ]),
+      );
+      repository.findUserMessagingProfile.mockResolvedValue({
+        id: 'user-2',
+        messageRequestSetting: 'FOLLOWERS',
+      });
+      followsService.isFollowing.mockResolvedValue({ following: false });
+
+      await expect(claimForGroup()).resolves.toEqual([
+        expect.objectContaining({ deviceId: 'd2' }),
+      ]);
+
+      expect(followsService.isFollowing).not.toHaveBeenCalled();
+    });
+
     it('refuses to claim for a pending invitee who currently refuses new messages - an invite is not a standing consent to be added later', async () => {
-      repository.findParticipantStates.mockResolvedValue(
+      participantStates.findStates.mockResolvedValue(
         new Map([
           ['user-1', 'ACTIVE'],
           ['user-2', 'PENDING'],
@@ -569,7 +590,7 @@ describe('ChatDevicesService', () => {
     });
 
     it('refuses to claim for a pending invitee who has since blocked the requester', async () => {
-      repository.findParticipantStates.mockResolvedValue(
+      participantStates.findStates.mockResolvedValue(
         new Map([
           ['user-1', 'ACTIVE'],
           ['user-2', 'PENDING'],
@@ -582,10 +603,45 @@ describe('ChatDevicesService', () => {
       expect(repository.claimSingleUseKeyPackage).not.toHaveBeenCalled();
     });
 
+    it('refuses to claim for a pending invitee when only the requester blocked them', async () => {
+      participantStates.findStates.mockResolvedValue(
+        new Map([
+          ['user-1', 'ACTIVE'],
+          ['user-2', 'PENDING'],
+        ]),
+      );
+      blocksService.isBlocked.mockImplementation((blockerId: string) =>
+        Promise.resolve(blockerId === 'user-1'),
+      );
+
+      await expect(claimForGroup()).rejects.toThrow(ForbiddenException);
+    });
+
+    it('reports which invitees refuse the requester: blocked either way, or taking no messages', async () => {
+      blocksService.isBlocked.mockImplementation(
+        (blockerId: string, blockedId: string) =>
+          Promise.resolve(blockerId === 'user-1' && blockedId === 'blocked'),
+      );
+      repository.findUserMessagingProfile.mockImplementation((userId: string) =>
+        Promise.resolve({
+          id: userId,
+          messageRequestSetting: userId === 'closed' ? 'NO_ONE' : 'EVERYONE',
+        }),
+      );
+
+      await expect(
+        service.findInviteesRefusingRequester('user-1', [
+          'open',
+          'blocked',
+          'closed',
+        ]),
+      ).resolves.toEqual(new Set(['blocked', 'closed']));
+    });
+
     it.each(['DECLINED', 'LEAVING', 'MISSING'])(
       'refuses to claim for someone who is %s in the group',
       async (state) => {
-        repository.findParticipantStates.mockResolvedValue(
+        participantStates.findStates.mockResolvedValue(
           new Map(
             state === 'MISSING'
               ? [['user-1', 'ACTIVE']]
@@ -711,72 +767,79 @@ describe('ChatDevicesService', () => {
   });
 
   describe('the device cap', () => {
-    const daysAgo = (days: number) =>
-      new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-
-    it('quietly retires the stalest device when the cap is hit and that device has been idle for weeks', async () => {
-      repository.findById.mockResolvedValue(null);
-      repository.countActiveDevices.mockResolvedValue(10);
-      repository.findLeastRecentlySeenActiveDevice.mockResolvedValue({
-        id: 'zombie-device',
-        lastSeenAt: daysAgo(30),
-      });
-      repository.createDeviceWithKeyPackages.mockResolvedValue({
-        id: 'device-11',
-      });
+    const registerDto = async (deviceId: string) => {
       const { payload, signaturePublicKey } = await base64KeyPackage(
         'user-1',
-        'device-11',
+        deviceId,
       );
-
-      await service.registerDevice('user-1', {
-        deviceId: 'device-11',
+      return {
+        deviceId,
         signaturePublicKey,
         ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
         keyPackages: [{ kind: 'SINGLE_USE', payload }],
-      } as never);
+      } as never;
+    };
 
-      expect(repository.revokeDevice).toHaveBeenCalledWith(
-        'zombie-device',
-        'user-1',
-      );
-      expect(repository.createDeviceWithKeyPackages).toHaveBeenCalled();
+    it('asks the repository to enforce ten devices and to retire one idle for two weeks', async () => {
+      repository.findById.mockResolvedValue(null);
+      repository.createDeviceWithinCap.mockResolvedValue({
+        outcome: 'created',
+        device: { id: 'device-11' },
+      });
+
+      await service.registerDevice('user-1', await registerDto('device-11'));
+
+      const [, cap] = repository.createDeviceWithinCap.mock.calls[0] as [
+        unknown,
+        { maxActive: number; evictIdleBefore: Date },
+      ];
+      expect(cap.maxActive).toBe(10);
+      const idleDays =
+        (Date.now() - cap.evictIdleBefore.getTime()) / (24 * 60 * 60 * 1000);
+      expect(idleDays).toBeCloseTo(14, 1);
     });
 
-    it('refuses the 11th device while all ten were used recently, retiring nothing', async () => {
+    it('refuses with a conflict while all ten devices were used recently', async () => {
       repository.findById.mockResolvedValue(null);
-      repository.countActiveDevices.mockResolvedValue(10);
-      repository.findLeastRecentlySeenActiveDevice.mockResolvedValue({
-        id: 'busy-device',
-        lastSeenAt: daysAgo(1),
+      repository.createDeviceWithinCap.mockResolvedValue({
+        outcome: 'cap-reached',
       });
 
       await expect(
-        service.registerDevice('user-1', {
-          deviceId: 'device-11',
-          signaturePublicKey: 'aaaa',
-          ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
-          keyPackages: [],
-        }),
-      ).rejects.toThrow(ConflictException);
-
-      expect(repository.revokeDevice).not.toHaveBeenCalled();
+        service.registerDevice('user-1', await registerDto('device-11')),
+      ).rejects.toThrow(/Device limit reached/);
     });
 
-    it('refuses an 11th active device, so group snapshots stay small enough to publish', async () => {
+    it('turns a race lost on the existence check into the same conflict', async () => {
       repository.findById.mockResolvedValue(null);
-      repository.countActiveDevices.mockResolvedValue(10);
+      repository.createDeviceWithinCap.mockResolvedValue({ outcome: 'exists' });
 
       await expect(
-        service.registerDevice('user-1', {
-          deviceId: 'device-11',
-          signaturePublicKey: 'aaaa',
-          ciphersuite: 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
-          keyPackages: [],
-        }),
-      ).rejects.toThrow(ConflictException);
+        service.registerDevice('user-1', await registerDto('device-1')),
+      ).rejects.toThrow('This device id is already registered');
+    });
 
-      expect(repository.createDeviceWithKeyPackages).not.toHaveBeenCalled();
+    it('turns a unique-constraint violation into the already-registered conflict, not a 500', async () => {
+      repository.findById.mockResolvedValue(null);
+      repository.createDeviceWithinCap.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('dup', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
+      );
+
+      await expect(
+        service.registerDevice('user-1', await registerDto('device-1')),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('lets any other failure through untouched', async () => {
+      repository.findById.mockResolvedValue(null);
+      repository.createDeviceWithinCap.mockRejectedValue(new Error('db down'));
+
+      await expect(
+        service.registerDevice('user-1', await registerDto('device-1')),
+      ).rejects.toThrow('db down');
     });
   });
 
@@ -902,6 +965,21 @@ describe('ChatDevicesService', () => {
     // regression: a login's device link is write-once, so once its device is retired (dormancy,
     // cap eviction) every future device this same browser provisions hit the same conflict
     // forever - the login could never send again short of signing out.
+    it('says the session is missing, not that it is linked elsewhere, when the login row does not exist', async () => {
+      repository.linkSession.mockResolvedValue({ count: 0 });
+      repository.findSessionDeviceId.mockResolvedValue(null);
+
+      await expect(
+        service.linkSessionToDevice(
+          'user-1',
+          'device-1',
+          'session-1',
+          proof(challengeFor()),
+        ),
+      ).rejects.toThrow(NotFoundException);
+      expect(repository.relinkSession).not.toHaveBeenCalled();
+    });
+
     it('relinks a login whose device was retired, instead of leaving it stuck', async () => {
       repository.linkSession.mockResolvedValue({ count: 0 });
       repository.findSessionDeviceId.mockResolvedValue('device-old');
@@ -927,7 +1005,30 @@ describe('ChatDevicesService', () => {
         'session-1',
         'user-1',
         'device-1',
+        'device-old',
       );
+    });
+
+    it('conflicts when the login was relinked concurrently, instead of overwriting it', async () => {
+      repository.linkSession.mockResolvedValue({ count: 0 });
+      repository.findSessionDeviceId.mockResolvedValue('device-old');
+      repository.findById.mockImplementation((deviceId: string) =>
+        Promise.resolve(
+          deviceId === 'device-old'
+            ? { ...ownDevice, id: 'device-old', revokedAt: new Date() }
+            : ownDevice,
+        ),
+      );
+      repository.relinkSession.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.linkSessionToDevice(
+          'user-1',
+          'device-1',
+          'session-1',
+          proof(challengeFor()),
+        ),
+      ).rejects.toThrow(ConflictException);
     });
 
     it('relinks a login whose device row is gone entirely', async () => {
@@ -951,26 +1052,109 @@ describe('ChatDevicesService', () => {
         'session-1',
         'user-1',
         'device-1',
+        'device-old',
       );
     });
   });
 
   describe('revokeDevice', () => {
-    it('retires an owned device without touching any login', async () => {
-      repository.revokeDevice.mockResolvedValue({ count: 1 });
-
-      await expect(service.revokeDevice('user-1', 'device-1')).resolves.toEqual(
-        { message: 'Device revoked successfully' },
-      );
-      expect(sessionTerminator.end).not.toHaveBeenCalled();
+    beforeEach(() => {
+      repository.findLoginsOfDevice.mockResolvedValue([
+        { id: 's2', token: 't2' },
+      ]);
     });
 
-    it('throws when nothing matched', async () => {
-      repository.revokeDevice.mockResolvedValue({ count: 0 });
+    it('retires an owned device and ends the logins linked to it', async () => {
+      repository.findById.mockResolvedValue({
+        id: 'device-1',
+        userId: 'user-1',
+        revokedAt: null,
+      });
 
-      await expect(service.revokeDevice('user-1', 'device-1')).rejects.toThrow(
-        NotFoundException,
+      await expect(
+        service.revokeDevice('user-1', 'device-1', 'session-1'),
+      ).resolves.toEqual({ message: 'Device revoked successfully' });
+
+      expect(repository.revokeDevice).toHaveBeenCalledWith(
+        'device-1',
+        'user-1',
       );
+      expect(repository.findLoginsOfDevice).toHaveBeenCalledWith(
+        'device-1',
+        'user-1',
+        'session-1',
+      );
+      expect(sessionTerminator.end).toHaveBeenCalledWith([
+        { id: 's2', token: 't2' },
+      ]);
+    });
+
+    it('succeeds again on an already revoked device without rewriting it, still ending logins', async () => {
+      repository.findById.mockResolvedValue({
+        id: 'device-1',
+        userId: 'user-1',
+        revokedAt: new Date(),
+      });
+
+      await expect(
+        service.revokeDevice('user-1', 'device-1', 'session-1'),
+      ).resolves.toEqual({ message: 'Device revoked successfully' });
+
+      expect(repository.revokeDevice).not.toHaveBeenCalled();
+      expect(sessionTerminator.end).toHaveBeenCalled();
+    });
+
+    it.each([
+      ['unknown', null],
+      ['someone else', { id: 'device-1', userId: 'user-2', revokedAt: null }],
+    ])('throws for a device that is %s', async (_label, device) => {
+      repository.findById.mockResolvedValue(device);
+
+      await expect(
+        service.revokeDevice('user-1', 'device-1', 'session-1'),
+      ).rejects.toThrow(NotFoundException);
+      expect(repository.revokeDevice).not.toHaveBeenCalled();
+      expect(sessionTerminator.end).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getKeyPackageStatus', () => {
+    const ownDevice = { id: 'device-1', userId: 'user-1', revokedAt: null };
+
+    it('reports the unclaimed single-use count and the last-resort expiry of an owned device', async () => {
+      repository.findById.mockResolvedValue(ownDevice);
+      repository.countClaimableSingleUseKeyPackages.mockResolvedValue(7);
+      repository.findLastResortKeyPackage.mockResolvedValue({
+        expiresAt: new Date('2027-01-01T00:00:00.000Z'),
+      });
+
+      await expect(
+        service.getKeyPackageStatus('user-1', 'device-1'),
+      ).resolves.toEqual({
+        singleUseRemaining: 7,
+        lastResortExpiresAt: '2027-01-01T00:00:00.000Z',
+      });
+    });
+
+    it('returns null when there is no last-resort package', async () => {
+      repository.findById.mockResolvedValue(ownDevice);
+      repository.countClaimableSingleUseKeyPackages.mockResolvedValue(0);
+      repository.findLastResortKeyPackage.mockResolvedValue(null);
+
+      await expect(
+        service.getKeyPackageStatus('user-1', 'device-1'),
+      ).resolves.toEqual({ singleUseRemaining: 0, lastResortExpiresAt: null });
+    });
+
+    it("refuses someone else's device", async () => {
+      repository.findById.mockResolvedValue({ ...ownDevice, userId: 'user-2' });
+
+      await expect(
+        service.getKeyPackageStatus('user-1', 'device-1'),
+      ).rejects.toThrow();
+      expect(
+        repository.countClaimableSingleUseKeyPackages,
+      ).not.toHaveBeenCalled();
     });
   });
 

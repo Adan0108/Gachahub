@@ -1,10 +1,13 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
+import { isEntitledToLeaf } from '../chat/membership/leaf-entitlement';
 import { ChatDevicesService } from '../chat-devices/chat-devices.service';
 import {
   assertIsCommitForConversation,
@@ -16,7 +19,11 @@ import {
 } from './mls-handshakes.repository';
 import { SubmitHandshakeDto } from './dto/submit-handshake.dto';
 import { ExternalJoinDto } from './dto/external-join.dto';
-import { assertIsGroupInfoFor } from './mls-group-info.util';
+import {
+  assertGroupInfoSignedBy,
+  assertIsGroupInfoFor,
+} from './mls-group-info.util';
+import { MlsRequestRateLimiterService } from './mls-request-rate-limiter.service';
 import { MlsSelfJoinRateLimiterService } from './mls-self-join-rate-limiter.service';
 import {
   assertExternalJoinSigned,
@@ -24,7 +31,12 @@ import {
   readExternalJoin,
 } from './mls-external-commit.util';
 import { MlsGroupInfoRepository } from './mls-group-info.repository';
+import { ParticipantStateRepository } from '../mls-group-roster/participant-state.repository';
 import { assertDeclarationIsConsistent } from './mls-membership-rules';
+
+/** A full page means there may be more; the client asks again. */
+export const HANDSHAKES_PER_PAGE = 100;
+export const WELCOMES_PER_PAGE = 50;
 
 interface SerializableHandshake {
   id: string;
@@ -43,11 +55,15 @@ interface SerializableHandshake {
 
 @Injectable()
 export class MlsHandshakesService {
+  private readonly logger = new Logger(MlsHandshakesService.name);
+
   constructor(
     private readonly mlsHandshakesRepository: MlsHandshakesRepository,
     private readonly chatDevicesService: ChatDevicesService,
     private readonly selfJoinRateLimiter: MlsSelfJoinRateLimiterService,
     private readonly groupInfoRepository: MlsGroupInfoRepository,
+    private readonly requestRateLimiter: MlsRequestRateLimiterService,
+    private readonly participantStates: ParticipantStateRepository,
   ) {}
 
   async submitHandshake(
@@ -55,22 +71,17 @@ export class MlsHandshakesService {
     conversationId: string,
     dto: SubmitHandshakeDto,
   ) {
+    this.requestRateLimiter.assertMaySubmitHandshake(userId);
     await this.assertActiveParticipant(conversationId, userId);
-    await this.chatDevicesService.assertOwnActiveDevice(userId, dto.deviceId);
+    const device = await this.chatDevicesService.assertOwnActiveDevice(
+      userId,
+      dto.deviceId,
+    );
 
     const payload = new Uint8Array(Buffer.from(dto.payload, 'base64'));
     assertIsCommitForConversation(payload, conversationId, dto.epoch);
 
-    const welcomes = dto.welcomes.map((item) => {
-      const welcomePayload = new Uint8Array(
-        Buffer.from(item.payload, 'base64'),
-      );
-      assertIsWelcomeMessage(welcomePayload);
-      return {
-        recipientDeviceId: item.recipientDeviceId,
-        payload: welcomePayload,
-      };
-    });
+    const welcomes = this.fanOutWelcome(dto.welcome);
 
     assertDeclarationIsConsistent({
       senderDeviceId: dto.deviceId,
@@ -80,6 +91,13 @@ export class MlsHandshakesService {
     });
 
     const payloadSha256 = createHash('sha256').update(payload).digest('hex');
+
+    const groupInfo = await this.decodeGroupInfo(
+      dto.groupInfo,
+      conversationId,
+      dto.epoch,
+      device.signaturePublicKey,
+    );
 
     const result = await this.mlsHandshakesRepository.acceptHandshake({
       conversationId,
@@ -91,12 +109,23 @@ export class MlsHandshakesService {
       addedDeviceIds: dto.addedDeviceIds,
       removedDeviceIds: dto.removedDeviceIds,
       welcomes,
-      groupInfo: dto.groupInfo
-        ? this.decodeGroupInfo(dto.groupInfo, conversationId, dto.epoch)
-        : undefined,
+      groupInfo,
     });
 
     return this.toSubmitResponse(result);
+  }
+
+  /** One Welcome for all new members becomes one row per recipient device. */
+  private fanOutWelcome(welcome: SubmitHandshakeDto['welcome']) {
+    if (!welcome) {
+      return [];
+    }
+    const payload = new Uint8Array(Buffer.from(welcome.payload, 'base64'));
+    assertIsWelcomeMessage(payload);
+    return welcome.recipientDeviceIds.map((recipientDeviceId) => ({
+      recipientDeviceId,
+      payload,
+    }));
   }
 
   /**
@@ -110,6 +139,8 @@ export class MlsHandshakesService {
     dto: ExternalJoinDto,
   ) {
     this.selfJoinRateLimiter.assertMayJoin(userId);
+    // First, so a stranger or removed member learns nothing about epochs, snapshots or winning Commits.
+    await this.assertEntitledParticipant(conversationId, userId);
     const device = await this.chatDevicesService.assertOwnActiveDevice(
       userId,
       dto.deviceId,
@@ -151,6 +182,13 @@ export class MlsHandshakesService {
       );
     }
 
+    const groupInfo = await this.decodeGroupInfo(
+      dto.groupInfo,
+      conversationId,
+      dto.epoch,
+      device.signaturePublicKey,
+    );
+
     const result = await this.mlsHandshakesRepository.acceptExternalJoin({
       conversationId,
       expectedEpoch: dto.epoch,
@@ -158,22 +196,36 @@ export class MlsHandshakesService {
       userId,
       payload,
       payloadSha256: createHash('sha256').update(payload).digest('hex'),
-      groupInfo: dto.groupInfo
-        ? this.decodeGroupInfo(dto.groupInfo, conversationId, dto.epoch)
-        : undefined,
+      groupInfo,
     });
 
     return this.toSubmitResponse(result);
   }
 
-  /** The snapshot a Commit publishes for the epoch it creates, checked to be exactly that. */
-  private decodeGroupInfo(
-    encoded: string,
+  /** The snapshot a Commit publishes for the epoch it creates, checked to be exactly that; undefined when none was sent or it is not attributable. */
+  private async decodeGroupInfo(
+    encoded: string | undefined,
     conversationId: string,
     commitEpoch: number,
-  ): Uint8Array {
+    publisherSignatureKey: Uint8Array,
+  ): Promise<Uint8Array | undefined> {
+    if (!encoded) {
+      return undefined;
+    }
     const groupInfo = new Uint8Array(Buffer.from(encoded, 'base64'));
     assertIsGroupInfoFor(groupInfo, conversationId, commitEpoch + 1);
+    try {
+      await assertGroupInfoSignedBy(groupInfo, publisherSignatureKey);
+    } catch (error) {
+      if (!(error instanceof BadRequestException)) {
+        throw error;
+      }
+      // Not stored (the response says so), but the Commit itself still flows.
+      this.logger.warn(
+        `Dropped unattributable GroupInfo for ${conversationId}: ${error.message}`,
+      );
+      return undefined;
+    }
     return groupInfo;
   }
 
@@ -187,6 +239,7 @@ export class MlsHandshakesService {
     const handshakes = await this.mlsHandshakesRepository.findHandshakesSince(
       conversationId,
       sinceEpoch,
+      HANDSHAKES_PER_PAGE,
     );
 
     return handshakes.map((handshake) => this.serializeHandshake(handshake));
@@ -203,6 +256,7 @@ export class MlsHandshakesService {
     conversationId: string,
     epoch: number,
   ) {
+    this.requestRateLimiter.assertMayFetchRoster(userId);
     await this.assertEntitledParticipant(conversationId, userId);
 
     const leaves = await this.mlsHandshakesRepository.findRosterAtEpoch(
@@ -222,11 +276,21 @@ export class MlsHandshakesService {
     };
   }
 
-  async getPendingWelcomes(userId: string, deviceId: string) {
+  /** Oldest first; `after` (the last welcome id seen) skips ones a client cannot consume so they never starve newer ones. */
+  async getPendingWelcomes(userId: string, deviceId: string, after?: string) {
+    this.requestRateLimiter.assertMayPollPending(userId);
     await this.chatDevicesService.assertOwnActiveDevice(userId, deviceId);
 
-    const welcomes =
-      await this.mlsHandshakesRepository.findPendingWelcomes(deviceId);
+    const welcomes = await this.mlsHandshakesRepository.findPendingWelcomes(
+      deviceId,
+      WELCOMES_PER_PAGE,
+      after,
+    );
+    if (!welcomes) {
+      throw new BadRequestException(
+        'Unknown welcome cursor; start again without it',
+      );
+    }
 
     return welcomes.map((welcome) => ({
       id: welcome.id,
@@ -237,6 +301,7 @@ export class MlsHandshakesService {
   }
 
   async consumeWelcome(userId: string, deviceId: string, welcomeId: string) {
+    this.requestRateLimiter.assertMayPollPending(userId);
     await this.chatDevicesService.assertOwnActiveDevice(userId, deviceId);
 
     const consumed = await this.mlsHandshakesRepository.markWelcomeConsumed(
@@ -255,12 +320,12 @@ export class MlsHandshakesService {
     conversationId: string,
     userId: string,
   ) {
-    const isEntitled = await this.mlsHandshakesRepository.isEntitledParticipant(
+    const state = await this.participantStates.findState(
       conversationId,
       userId,
     );
 
-    if (!isEntitled) {
+    if (!isEntitledToLeaf(state)) {
       throw new ForbiddenException('Not a member of this conversation');
     }
   }
@@ -269,13 +334,12 @@ export class MlsHandshakesService {
     conversationId: string,
     userId: string,
   ) {
-    const isParticipant =
-      await this.mlsHandshakesRepository.isActiveParticipant(
-        conversationId,
-        userId,
-      );
+    const state = await this.participantStates.findState(
+      conversationId,
+      userId,
+    );
 
-    if (!isParticipant) {
+    if (state !== 'ACTIVE') {
       throw new ForbiddenException(
         'Not an active participant in this conversation',
       );

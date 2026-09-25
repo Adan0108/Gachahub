@@ -31,31 +31,45 @@ describe('ChatMembershipService', () => {
       ]),
     ).resolves.toEqual({ count: 2 });
 
-    expect(repository.changeMembership).toHaveBeenCalledWith('conv-1', [
-      { userId: 'u2', event: 'ADD_DIRECT' },
-      { userId: 'u3', event: 'ADD_INVITE' },
-    ]);
+    expect(repository.changeMembership).toHaveBeenCalledWith(
+      'conv-1',
+      [
+        { userId: 'u2', event: 'ADD_DIRECT' },
+        { userId: 'u3', event: 'ADD_INVITE' },
+      ],
+      undefined,
+    );
   });
 
   it('turns a removal into a REMOVE event per person', async () => {
     await service.removeMembers('conv-1', ['u2', 'u3']);
 
-    expect(repository.changeMembership).toHaveBeenCalledWith('conv-1', [
-      { userId: 'u2', event: 'REMOVE' },
-      { userId: 'u3', event: 'REMOVE' },
-    ]);
+    expect(repository.changeMembership).toHaveBeenCalledWith(
+      'conv-1',
+      [
+        { userId: 'u2', event: 'REMOVE' },
+        { userId: 'u3', event: 'REMOVE' },
+      ],
+      undefined,
+    );
   });
 
   it('accepts and declines an invite', async () => {
     await service.acceptInvite('conv-1', 'u2');
     await service.declineInvite('conv-1', 'u2');
 
-    expect(repository.changeMembership).toHaveBeenNthCalledWith(1, 'conv-1', [
-      { userId: 'u2', event: 'ACCEPT_INVITE' },
-    ]);
-    expect(repository.changeMembership).toHaveBeenNthCalledWith(2, 'conv-1', [
-      { userId: 'u2', event: 'DECLINE_INVITE' },
-    ]);
+    expect(repository.changeMembership).toHaveBeenNthCalledWith(
+      1,
+      'conv-1',
+      [{ userId: 'u2', event: 'ACCEPT_INVITE' }],
+      undefined,
+    );
+    expect(repository.changeMembership).toHaveBeenNthCalledWith(
+      2,
+      'conv-1',
+      [{ userId: 'u2', event: 'DECLINE_INVITE' }],
+      undefined,
+    );
   });
 
   it('turns an expiry into an EXPIRE_INVITE event per person', async () => {
@@ -77,9 +91,11 @@ describe('ChatMembershipService', () => {
       { userId: 'u2', entitlement: 'DIRECT' },
     ]);
 
-    expect(repository.changeMembership).toHaveBeenCalledWith('conv-1', [
-      { userId: 'u2', event: 'ADD_DIRECT' },
-    ]);
+    expect(repository.changeMembership).toHaveBeenCalledWith(
+      'conv-1',
+      [{ userId: 'u2', event: 'ADD_DIRECT' }],
+      undefined,
+    );
   });
 
   it('reports how many people actually changed', async () => {

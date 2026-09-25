@@ -1,8 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import {
-  MlsKeyPackageKind,
-  type ChatParticipantState,
-} from '../generated/prisma/client';
+import { MlsKeyPackageKind, type ChatDevice } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface NewKeyPackage {
@@ -19,6 +16,24 @@ export class ChatDevicesRepository {
     return this.prisma.chatDevice.findUnique({ where: { id: deviceId } });
   }
 
+  /** Own devices, newest first; revoked ones only if revoked since `revokedSince`. */
+  listOwnDevices(userId: string, revokedSince: Date) {
+    return this.prisma.chatDevice.findMany({
+      where: {
+        userId,
+        OR: [{ revokedAt: null }, { revokedAt: { gte: revokedSince } }],
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        ciphersuite: true,
+        createdAt: true,
+        lastSeenAt: true,
+        revokedAt: true,
+      },
+    });
+  }
+
   findUserMessagingProfile(userId: string) {
     return this.prisma.user.findUnique({
       where: { id: userId },
@@ -26,32 +41,51 @@ export class ChatDevicesRepository {
     });
   }
 
-  /** The participant state of each of these users in the conversation; users with no row are absent. */
-  async findParticipantStates(
-    conversationId: string,
-    userIds: string[],
-  ): Promise<Map<string, ChatParticipantState>> {
-    const participants = await this.prisma.chatParticipant.findMany({
-      where: { conversationId, userId: { in: userIds } },
-      select: { userId: true, state: true },
-    });
-
-    return new Map(
-      participants.map((participant) => [
-        participant.userId,
-        participant.state,
-      ]),
-    );
-  }
-
-  async createDeviceWithKeyPackages(params: {
-    deviceId: string;
-    userId: string;
-    signaturePublicKey: Uint8Array;
-    ciphersuite: string;
-    keyPackages: NewKeyPackage[];
-  }) {
+  /** Registers under the user's row lock (NO KEY UPDATE, so FK inserts are not blocked), so concurrent registrations cannot overshoot the cap. */
+  async createDeviceWithinCap(
+    params: {
+      deviceId: string;
+      userId: string;
+      signaturePublicKey: Uint8Array;
+      ciphersuite: string;
+      keyPackages: NewKeyPackage[];
+    },
+    cap: { maxActive: number; evictIdleBefore: Date },
+  ): Promise<
+    | { outcome: 'created'; device: ChatDevice }
+    | { outcome: 'exists' }
+    | { outcome: 'cap-reached' }
+  > {
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "user" WHERE "id" = ${params.userId} FOR NO KEY UPDATE`;
+
+      const existing = await tx.chatDevice.findUnique({
+        where: { id: params.deviceId },
+        select: { id: true },
+      });
+      if (existing) {
+        return { outcome: 'exists' as const };
+      }
+
+      const active = await tx.chatDevice.count({
+        where: { userId: params.userId, revokedAt: null },
+      });
+      if (active >= cap.maxActive) {
+        const stalest = await tx.chatDevice.findFirst({
+          where: { userId: params.userId, revokedAt: null },
+          orderBy: { lastSeenAt: 'asc' },
+          select: { id: true, lastSeenAt: true },
+        });
+        if (!stalest || stalest.lastSeenAt >= cap.evictIdleBefore) {
+          return { outcome: 'cap-reached' as const };
+        }
+
+        await tx.chatDevice.updateMany({
+          where: { id: stalest.id, userId: params.userId },
+          data: { revokedAt: new Date() },
+        });
+      }
+
       const device = await tx.chatDevice.create({
         data: {
           id: params.deviceId,
@@ -73,7 +107,7 @@ export class ChatDevicesRepository {
         })),
       });
 
-      return device;
+      return { outcome: 'created' as const, device };
     });
   }
 
@@ -95,14 +129,6 @@ export class ChatDevicesRepository {
     });
   }
 
-  findLeastRecentlySeenActiveDevice(userId: string) {
-    return this.prisma.chatDevice.findFirst({
-      where: { userId, revokedAt: null },
-      orderBy: { lastSeenAt: 'asc' },
-      select: { id: true, lastSeenAt: true },
-    });
-  }
-
   /** Retires every device unseen since `cutoff`; returns how many. */
   async retireDevicesUnseenSince(cutoff: Date): Promise<number> {
     const result = await this.prisma.chatDevice.updateMany({
@@ -110,10 +136,6 @@ export class ChatDevicesRepository {
       data: { revokedAt: new Date() },
     });
     return result.count;
-  }
-
-  countActiveDevices(userId: string): Promise<number> {
-    return this.prisma.chatDevice.count({ where: { userId, revokedAt: null } });
   }
 
   findActiveDevicesForUser(userId: string) {
@@ -183,6 +205,17 @@ export class ChatDevicesRepository {
     return null;
   }
 
+  countClaimableSingleUseKeyPackages(deviceId: string): Promise<number> {
+    return this.prisma.mlsKeyPackage.count({
+      where: {
+        deviceId,
+        kind: 'SINGLE_USE',
+        claimedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+    });
+  }
+
   findLastResortKeyPackage(deviceId: string) {
     return this.prisma.mlsKeyPackage.findFirst({
       where: {
@@ -213,9 +246,15 @@ export class ChatDevicesRepository {
    * device this browser provisions would hit the same write-once conflict forever, with no way
    * back short of signing out.
    */
-  relinkSession(sessionId: string, userId: string, deviceId: string) {
+  relinkSession(
+    sessionId: string,
+    userId: string,
+    deviceId: string,
+    currentDeviceId: string | null,
+  ) {
     return this.prisma.session.updateMany({
-      where: { id: sessionId, userId },
+      // Conditional on the device seen when deciding, so a concurrent relink is not overwritten.
+      where: { id: sessionId, userId, chatDeviceId: currentDeviceId },
       data: { chatDeviceId: deviceId },
     });
   }
