@@ -1,13 +1,38 @@
 .chat-attachments {
   display: grid;
   gap: 6px;
+  width: min(320px, 100%);
   min-width: 0;
+}
+
+.chat-message:has(.chat-attachments) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px 6px 8px;
+}
+
+.chat-message:has(.chat-attachments) > small {
+  padding: 0 4px;
 }
 
 .chat-attachment-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 4px;
+}
+
+.chat-attachment-grid > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-attachment-grid .chat-attachment-action {
+  justify-self: start;
+  border: 0;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
 }
 
 .chat-attachment-tile {
@@ -16,11 +41,11 @@
   place-items: center;
   width: 100%;
   min-height: 80px;
-  max-height: 260px;
+  max-height: 320px;
   overflow: hidden;
   padding: 0;
-  border: 1px solid var(--line);
-  background: rgba(0, 0, 0, 0.25);
+  border: 0;
+  background: rgba(0, 0, 0, 0.3);
   color: var(--muted-strong);
   font-size: 11px;
   cursor: pointer;
@@ -30,8 +55,13 @@
 .chat-attachment-tile video {
   display: block;
   width: 100%;
-  max-height: 260px;
+  max-height: 320px;
+  object-fit: cover;
+}
+
+.chat-attachment-tile video {
   object-fit: contain;
+  background: #000;
 }
 
 .chat-attachment-tile.busy {
