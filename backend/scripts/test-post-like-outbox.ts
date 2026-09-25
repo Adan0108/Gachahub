@@ -11,7 +11,8 @@ async function main() {
   await prisma.$connect();
 
   const postsRepository = new PostsRepository(prisma);
-  const outboxRepository = new OutboxRepository();
+
+  const outboxRepository = new OutboxRepository(prisma);
   const eventPublisher = new OutboxEventPublisher(outboxRepository);
 
   let testPostId: string | null = null;
