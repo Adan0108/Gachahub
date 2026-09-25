@@ -10,6 +10,7 @@ const TRUSTED_HOST = 'res.cloudinary.com';
 const cache = new BlobCache(64 * 1024 * 1024);
 
 interface InFlight {
+  cacheKey: string;
   promise: Promise<Blob>;
   controller: AbortController;
   waiters: number;
@@ -96,6 +97,7 @@ async function download(source: AttachmentSource, signal: AbortSignal): Promise<
 function startDownload(source: AttachmentSource): InFlight {
   const controller = new AbortController();
   const entry: InFlight = {
+    cacheKey: source.cacheKey,
     controller,
     waiters: 0,
     promise: download(source, controller.signal)
@@ -121,7 +123,11 @@ function waitFor(entry: InFlight, signal?: AbortSignal): Promise<Blob> {
   return new Promise<Blob>((resolve, reject) => {
     const onAbort = () => {
       entry.waiters -= 1;
-      if (entry.waiters === 0) entry.controller.abort();
+      if (entry.waiters === 0) {
+        // an aborted download must not be handed to the next caller
+        if (inFlight.get(entry.cacheKey) === entry) inFlight.delete(entry.cacheKey);
+        entry.controller.abort();
+      }
       reject(abortError());
     };
     if (signal?.aborted) {

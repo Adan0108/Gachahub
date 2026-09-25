@@ -157,6 +157,28 @@ describe('abort and clear', () => {
     expect(fetchMock.mock.calls[0]![1].signal.aborted).toBe(true);
   });
 
+  it('starts a fresh download for a caller that arrives right after the last one left', async () => {
+    const { source, ciphertext } = await makeSource();
+    fetchMock.mockImplementationOnce(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal!.addEventListener('abort', () =>
+            reject(new DOMException('aborted', 'AbortError')),
+          );
+        }),
+    );
+    fetchMock.mockImplementationOnce(() => Promise.resolve(respond(ciphertext)));
+    const first = new AbortController();
+
+    const leaving = loadAttachmentBlob(source, first.signal);
+    first.abort();
+    const arriving = loadAttachmentBlob(source);
+
+    await expect(leaving).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(arriving).resolves.toBeInstanceOf(Blob);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps the download alive while another caller still waits', async () => {
     const { source, ciphertext } = await makeSource();
     let release!: () => void;
