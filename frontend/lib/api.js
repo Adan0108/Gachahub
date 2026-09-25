@@ -11,6 +11,7 @@ export const backendRoutes = {
   game: (slug) => `/games/${encodePathParam(slug)}`,
   gameCategories: (gameSlug) => `/games/${encodePathParam(gameSlug)}/categories`,
   currentUser: '/users/me',
+  userSearch: '/users/search',
   signInEmail: '/api/auth/sign-in/email',
   signUpEmail: '/api/auth/sign-up/email',
   signOut: '/api/auth/sign-out',
@@ -49,8 +50,14 @@ export const backendRoutes = {
     `/chat/groups/${encodePathParam(conversationId)}/leave`,
   chatDelivered: '/chat/messages/delivered',
   chatRead: (conversationId) => `/chat/conversations/${encodePathParam(conversationId)}/read`,
+  chatBackup: '/chat-backup',
+  chatBackupBlobs: '/chat-backup/blobs',
+  chatBackupChallenge: '/chat-backup/challenge',
+  chatBackupSchedule: '/chat-backup/schedule',
   chatDevices: '/chat-devices',
   chatDeviceKeyPackages: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}/key-packages`,
+  chatDeviceKeyPackageStatus: (deviceId) =>
+    `/chat-devices/${encodePathParam(deviceId)}/key-packages/status`,
   chatDevice: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}`,
   chatDeviceSignOut: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}/sign-out`,
   chatDeviceSession: (deviceId) => `/chat-devices/${encodePathParam(deviceId)}/session`,
@@ -248,8 +255,8 @@ async function request(path, options = {}) {
     // Machine-readable reason from the backend (e.g. MEMBERSHIP_CHANGE_PENDING), when it sent one.
     error.code = code;
     if (response.status === 429) {
-      const retryAfterSeconds = Number(response.headers.get('Retry-After'));
-      error.retryAfterSeconds = Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : undefined;
+      const retryAfterSeconds = Number.parseInt(response.headers.get('Retry-After') ?? '', 10);
+      error.retryAfterSeconds = retryAfterSeconds > 0 ? retryAfterSeconds : undefined;
     }
     throw error;
   }
@@ -280,7 +287,9 @@ async function submitMlsCommit(path, payload) {
     return body;
   }
   if (!response.ok) {
-    throw new Error(body?.message || `API request failed: ${response.status}`);
+    const error = new Error(body?.message || `API request failed: ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
   return body;
 }
@@ -310,6 +319,7 @@ async function mockResponse(path, options = {}) {
 
   if (pathname === backendRoutes.health) return { status: 'ok' };
   if (pathname === backendRoutes.currentUser) return null;
+  if (pathname === backendRoutes.userSearch) return { items: [] };
   if (pathname === backendRoutes.signInEmail || pathname === backendRoutes.signUpEmail)
     return { ok: true };
   if (pathname === backendRoutes.myPosts) {
@@ -353,6 +363,23 @@ async function mockResponse(path, options = {}) {
     if (!game) throw new Error('Game not found');
     return game;
   }
+  if (/^\/chat-devices\/[^/]+\/key-packages\/status$/.test(pathname)) {
+    return { singleUseRemaining: 10, lastResortExpiresAt: null };
+  }
+  if (pathname === backendRoutes.chatBackup) {
+    if (options.method === 'PUT') return { enabled: true };
+    if (options.method === 'DELETE') return { enabled: false };
+    return { enabled: false, keyCheck: null, blobCount: 0, bytesUsed: 0 };
+  }
+  if (pathname === backendRoutes.chatBackupChallenge) return { nonce: '' };
+  if (pathname === backendRoutes.chatBackupSchedule) {
+    return { enabled: true, deletionScheduledFor: null };
+  }
+  if (pathname === backendRoutes.chatBackupBlobs) {
+    if (options.method === 'POST') return { stored: 0, skipped: 0 };
+    return { items: [], nextCursor: null };
+  }
+  if (pathname === backendRoutes.chatDevices && !options.method) return { items: [] };
   if (pathname.startsWith('/chat')) return [];
   return null;
 }
@@ -393,6 +420,7 @@ function encryptedMessagePayload({
   contentType = 'TEXT',
   clientMessageId,
   replyToId,
+  media,
 }) {
   return {
     ciphertext,
@@ -400,7 +428,18 @@ function encryptedMessagePayload({
     ...(contentType ? { contentType } : {}),
     ...(clientMessageId ? { clientMessageId } : {}),
     ...(replyToId ? { replyToId } : {}),
+    ...(media?.length ? { media } : {}),
   };
+}
+
+const MEDIA_BATCH_SIZE = 10;
+
+function chunked(items) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += MEDIA_BATCH_SIZE) {
+    chunks.push(items.slice(i, i + MEDIA_BATCH_SIZE));
+  }
+  return chunks;
 }
 
 export const api = {
@@ -420,6 +459,11 @@ export const api = {
   getCurrentUser: (options = {}) =>
     request(backendRoutes.currentUser, { ...options, allowUnauthorized: true }),
   getProfile: (options = {}) => api.getCurrentUser(options),
+  /** @param {{ limit?: number, signal?: AbortSignal }} [options] */
+  searchUsers: (q, /** @type {{ limit?: number, signal?: AbortSignal }} */ options = {}) =>
+    request(withQuery(backendRoutes.userSearch, { q, limit: options.limit ?? 8 }), {
+      signal: options.signal,
+    }),
   signIn: ({ email, password }) =>
     mutation(backendRoutes.signInEmail, {
       email,
@@ -482,6 +526,31 @@ export const api = {
     }
     return confirmed.successful.map(({ result }) => result);
   },
+  /**
+   * Uploads already-encrypted bytes as opaque raw blobs, returning upload ids in input order.
+   * @param {{ bytes: Uint8Array, kind: "BLOB" | "THUMB" }[]} blobs
+   */
+  uploadChatBlobs: async (blobs) => {
+    const uploaded = [];
+    for (const batch of chunked(blobs)) {
+      const authorizations = await mutation(backendRoutes.mediaSignatures, {
+        purpose: 'CHAT',
+        items: batch.map(({ kind }) => ({ opaqueKind: kind })),
+      });
+      const results = [];
+      for (const [index, { bytes }] of batch.entries()) {
+        const file = new Blob([bytes], { type: 'application/octet-stream' });
+        results.push(await uploadToCloudinary(file, authorizations.items[index]));
+      }
+      const confirmed = await api.confirmMediaUploads(results);
+      if (confirmed.failedCount) {
+        throw new Error(confirmed.failed?.[0]?.error || 'Media confirmation failed');
+      }
+      const byId = new Map(confirmed.successful.map(({ uploadId, result }) => [uploadId, result]));
+      uploaded.push(...results.map(({ uploadId }) => byId.get(uploadId).mediaUploadId));
+    }
+    return uploaded;
+  },
   getPostCollection: async (path, query = {}, options = {}) => {
     const response = await request(withQuery(path, query), options);
     const items = Array.isArray(response) ? response : response.items || [];
@@ -541,9 +610,31 @@ export const api = {
       backendRoutes.chatRead(conversationId),
       lastReadMessageId ? { lastReadMessageId } : {},
     ),
+  // History backup: { enabled, keyCheck, deletionScheduledFor: ISO | null, blobCount, bytesUsed }. Blobs are opaque base64 ciphertext.
+  getChatBackupStatus: () => request(backendRoutes.chatBackup),
+  // Turns backup on: { keyCheck, replaceSecret }. Replacing an existing key also needs { replace: true, nonce, proof } and deletes every blob.
+  putChatBackupKey: (payload) => mutation(backendRoutes.chatBackup, payload, { method: 'PUT' }),
+  // Single-use nonce for the replace proof: { nonce }.
+  getChatBackupChallenge: () => request(backendRoutes.chatBackupChallenge),
+  // With { nonce, proof }, turns backup off and deletes every blob now; without, only schedules deletion -> { enabled, deletionScheduledFor }.
+  deleteChatBackup: (proof = {}) =>
+    mutation(backendRoutes.chatBackup, { confirm: true, ...proof }, { method: 'DELETE' }),
+  // Cancels a scheduled deletion: { nonce, proof } required.
+  cancelChatBackupDeletion: (proof) =>
+    mutation(backendRoutes.chatBackupSchedule, proof, { method: 'DELETE' }),
+  // items: [{ conversationId, messageId, ciphertext }], up to 100 -> { stored, skipped }.
+  uploadChatBackupBlobs: (items) => mutation(backendRoutes.chatBackupBlobs, { items }),
+  // One page: { items: [{ conversationId, messageId, ciphertext }], nextCursor: string | null }.
+  getChatBackupBlobs: ({ after, limit } = {}) =>
+    request(withQuery(backendRoutes.chatBackupBlobs, { after, limit })),
   registerChatDevice: (payload) => mutation(backendRoutes.chatDevices, payload),
+  // Your own devices, recently removed ones included: { items: [{ id, ciphersuite, createdAt, lastSeenAt, revokedAt }] }.
+  getChatDevices: () => request(backendRoutes.chatDevices),
   uploadChatDeviceKeyPackages: (deviceId, payload) =>
     mutation(backendRoutes.chatDeviceKeyPackages(deviceId), payload),
+  // How many single-use key packages this device has left and when its last-resort one expires.
+  getChatDeviceKeyPackageStatus: (deviceId) =>
+    request(backendRoutes.chatDeviceKeyPackageStatus(deviceId)),
   // Two steps that tell the server this login is in this device's browser, so revoking the device ends
   // the login: get a challenge, then send it back signed with the device key.
   chatDeviceSessionChallenge: (deviceId) =>
@@ -580,7 +671,8 @@ export const api = {
     request(withQuery(backendRoutes.mlsJoinable(deviceId), { scope })),
   getMlsHandshakesSince: (conversationId, sinceEpoch = 0) =>
     request(withQuery(backendRoutes.mlsHandshakes(conversationId), { sinceEpoch })),
-  getMlsPendingWelcomes: (deviceId) => request(backendRoutes.mlsPendingWelcomes(deviceId)),
+  getMlsPendingWelcomes: (deviceId, { after } = {}) =>
+    request(withQuery(backendRoutes.mlsPendingWelcomes(deviceId), { after })),
   // Membership changes (devices to add or remove) this device can finish, and takes a lease on them.
   // scope "full" also finds new, revoked and leftover devices but costs more; conversationId looks at one conversation only.
   getMlsMembershipWork: (deviceId, { scope, after, conversationId } = {}) =>

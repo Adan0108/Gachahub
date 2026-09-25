@@ -7,6 +7,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FiBell, FiLogOut, FiMenu, FiMoon, FiPlus, FiSun, FiUser } from "react-icons/fi";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { api } from "../lib/api";
+import { CHAT_BACKUP_QUERY_ROOT } from "../lib/backup/backupQueryKeys";
+import "../lib/backup/backupSessionCleanup";
+import { runSessionCleanups } from "../lib/sessionCleanup";
 import { queries, queryKeys } from "../lib/queries";
 import { glyph } from "./constants";
 import { GlobalSearch } from "./GlobalSearch";
@@ -58,8 +61,10 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
     .toUpperCase();
   const logout = useMutation({
     mutationFn: api.signOut,
-    onSuccess: () => {
+    onSuccess: async () => {
+      await runSessionCleanups();
       queryClient.setQueryData(queryKeys.currentUser, null);
+      queryClient.removeQueries({ queryKey: CHAT_BACKUP_QUERY_ROOT });
       setAccountOpen(false);
       router.push("/");
     },

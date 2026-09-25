@@ -25,9 +25,23 @@ export interface ConversationHistory<Message> {
   /** Set while the server is making us wait between batches. */
   isWaitingOnRateLimit: boolean;
   rateLimitSecondsLeft: number;
+  /** Set when loading older history failed for a reason other than the rate limit. */
+  historyError: Error | undefined;
+  /** Clears historyError and tries the same batch again. */
+  retryHistory: () => void;
   /** Attach to the scrollable message list. */
   containerRef: RefObject<HTMLDivElement | null>;
   handleScroll: (event: UIEvent<HTMLDivElement>) => void;
+}
+
+/** Browsers with CSS scroll anchoring (overflow-anchor) keep the view steady on their own. */
+const supportsScrollAnchoring = () =>
+  typeof CSS !== "undefined" && CSS.supports?.("overflow-anchor", "auto");
+
+/** Older messages not already shown, so a page fetched twice never repeats a message. */
+function unseen<Message extends HistoryMessage>(incoming: Message[], ...shown: Message[][]) {
+  const known = new Set(shown.flatMap((messages) => messages.map((message) => message.id)));
+  return incoming.filter((message) => !known.has(message.id));
 }
 
 /**
@@ -53,9 +67,19 @@ export function useConversationHistory<Message extends HistoryMessage>(
   );
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [rateLimit, setRateLimit] = useState<HistoryRateLimit | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [historyError, setHistoryError] = useState<Error | undefined>();
   const [ownerId, setOwnerId] = useState(conversationId);
   const [previousLatest, setPreviousLatest] = useState<Message[]>([]);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // A response only counts if the conversation is still the one it was requested for.
+  const generation = useRef(0);
+  const isFetching = useRef(false);
+
+  useEffect(() => {
+    generation.current += 1;
+    isFetching.current = false;
+  }, [conversationId]);
 
   const latest = useMemo(() => newestPage?.items ?? [], [newestPage?.items]);
   const hasMoreHistory = typeof nextBeforeMessageId === "string";
@@ -66,6 +90,7 @@ export function useConversationHistory<Message extends HistoryMessage>(
     setNextBeforeMessageId(undefined);
     setIsLoadingOlder(false);
     setRateLimit(null);
+    setHistoryError(undefined);
     setPreviousLatest([]);
   } else if (latest !== previousLatest) {
     setPreviousLatest(latest);
@@ -80,9 +105,12 @@ export function useConversationHistory<Message extends HistoryMessage>(
     }
   }
 
-  const loadOlderMessages = async () => {
-    if (isLoadingOlder || !hasMoreHistory || rateLimit) return;
+  const fetchOlderMessages = async () => {
+    if (isFetching.current || !hasMoreHistory || rateLimit) return;
 
+    const requestGeneration = generation.current;
+    const isCurrent = () => generation.current === requestGeneration;
+    isFetching.current = true;
     setIsLoadingOlder(true);
     const container = containerRef.current;
     const previousScrollHeight = container?.scrollHeight ?? 0;
@@ -91,30 +119,48 @@ export function useConversationHistory<Message extends HistoryMessage>(
         beforeMessageId: nextBeforeMessageId,
         limit: PAGE_SIZE,
       })) as MessagesPage<Message>;
-      setOlderMessages((previous) => [...page.items, ...previous]);
+      if (!isCurrent()) return;
+      setOlderMessages((previous) => [...unseen(page.items, previous, latest), ...previous]);
       setNextBeforeMessageId(page.meta.nextBeforeMessageId);
-      // Keep the same content under the viewport instead of jumping when older
-      // messages are prepended above what the user was already looking at.
+      // Fallback for browsers without scroll anchoring: hold the content under the viewport.
       requestAnimationFrame(() => {
-        if (container) container.scrollTop += container.scrollHeight - previousScrollHeight;
+        if (container && !supportsScrollAnchoring()) container.scrollTop += container.scrollHeight - previousScrollHeight;
       });
     } catch (error) {
+      if (!isCurrent()) return;
       const { status, retryAfterSeconds } = error as {
         status?: number;
         retryAfterSeconds?: number;
       };
       if (status === 429) {
+        const startedAt = Date.now();
+        setNow(startedAt);
         setRateLimit({
-          resumesAt: Date.now() + (retryAfterSeconds ?? DEFAULT_RETRY_AFTER_SECONDS) * 1000,
+          resumesAt: startedAt + (retryAfterSeconds ?? DEFAULT_RETRY_AFTER_SECONDS) * 1000,
         });
+      } else {
+        setHistoryError(error instanceof Error ? error : new Error('Could not load older messages'));
       }
     } finally {
-      setIsLoadingOlder(false);
+      if (isCurrent()) {
+        isFetching.current = false;
+        setIsLoadingOlder(false);
+      }
     }
   };
 
+  // Scrolling never re-hits a failed request on its own; only retryHistory does.
+  const loadOlderMessages = () => {
+    if (!historyError) void fetchOlderMessages();
+  };
+
+  const retryHistory = () => {
+    setHistoryError(undefined);
+    void fetchOlderMessages();
+  };
+
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {
-    if (event.currentTarget.scrollTop < NEAR_TOP_PX) void loadOlderMessages();
+    if (event.currentTarget.scrollTop < NEAR_TOP_PX) loadOlderMessages();
   };
 
   useEffect(() => {
@@ -130,11 +176,10 @@ export function useConversationHistory<Message extends HistoryMessage>(
   // waiting, instead of making them scroll again to resume.
   useEffect(() => {
     if (rateLimit || !hasMoreHistory || isLoadingOlder) return;
-    if ((containerRef.current?.scrollTop ?? Infinity) < NEAR_TOP_PX) void loadOlderMessages();
+    if ((containerRef.current?.scrollTop ?? Infinity) < NEAR_TOP_PX) loadOlderMessages();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-checks only when the ceiling clears or the conversation changes, not on every render
   }, [rateLimit, conversationId]);
 
-  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!rateLimit) return;
     const interval = setInterval(() => setNow(Date.now()), 500);
@@ -150,6 +195,8 @@ export function useConversationHistory<Message extends HistoryMessage>(
     rateLimitSecondsLeft: rateLimit
       ? Math.max(0, Math.ceil((rateLimit.resumesAt - now) / 1000))
       : 0,
+    historyError,
+    retryHistory,
     containerRef,
     handleScroll,
   };

@@ -35,11 +35,6 @@ export function conversationDisplayName(conversation, userId) {
   return conversationPeer(conversation, userId)?.name || "GachaHub member";
 }
 
-/** Splits a textarea of pasted user IDs (one per line, or comma-separated) into a deduped list. */
-export function parseUserIds(text) {
-  return Array.from(new Set(text.split(/[\n,]+/).map((id) => id.trim()).filter(Boolean)));
-}
-
 export function initialOf(name) {
   return name?.trim()?.charAt(0).toUpperCase() || "?";
 }

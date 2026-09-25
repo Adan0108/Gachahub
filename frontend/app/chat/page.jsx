@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -9,6 +9,9 @@ import {
   FiInbox,
   FiLock,
   FiMessageCircle,
+  FiDatabase,
+  FiMonitor,
+  FiPaperclip,
   FiPlus,
   FiSearch,
   FiSend,
@@ -18,12 +21,23 @@ import {
 } from "react-icons/fi";
 import { QueryNotice } from "../../components/QueryNotice";
 import { GroupSettingsModal } from "../../components/GroupSettingsModal";
+import { SafetyNumberModal } from "../../components/SafetyNumberModal";
+import { SafetyBadge, SafetyChangedBanner } from "../../components/SafetyStatus";
+import { UserPicker } from "../../components/UserPicker";
+import { DevicesModal } from "../../components/DevicesModal";
+import { ChatBackupModal } from "../../components/ChatBackupModal";
+import { ThreadRow } from "../../components/ThreadRow";
+import { AttachmentComposerTray } from "../../components/AttachmentComposerTray";
+import { PendingContent } from "../../components/EnvelopeContent";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
+import { useAttachmentPicker } from "../../hooks/useAttachmentPicker";
 import { useDeviceIdentity } from "../../hooks/useDeviceIdentity";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
-import { useDecryptedMessages } from "../../hooks/useDecryptedMessages";
-import { useConversationHistory } from "../../hooks/useConversationHistory";
+import { useChatBackup } from "../../hooks/useChatBackup";
+import { useThreadData } from "../../hooks/useThreadData";
 import { sendEncryptedChatMessage } from "../../lib/mls/messaging/sendEncryptedMessage";
+import { sendAttachmentsWithCache } from "../../lib/mls/messaging/sendEncryptedAttachment";
+import { pendingStatusLabel } from "../../lib/mls/media/attachmentView";
 import { api } from "../../lib/api";
 import { queries, queryKeys } from "../../lib/queries";
 import {
@@ -33,22 +47,10 @@ import {
   initialOf,
   myParticipant,
   otherActiveMemberIds,
-  parseUserIds,
   participantUser,
   relativeTime,
 } from "../../lib/chatDisplay";
-
-/**
- * A message this device can't decrypt, but with both an earlier and a later message it DID
- * decrypt, was very likely sent during a gap in membership (left, or was removed, then came
- * back) rather than a real problem - a genuine decrypt failure has no reason to be bounded on
- * both sides like that. Approximate, since the app doesn't track join/leave history, but a much
- * better message than a generic "can't decrypt" for what's actually expected behavior.
- */
-function wasLikelySentDuringAbsence(messages, decryptedMessages, index) {
-  const isOk = (message) => decryptedMessages[message?.id]?.status === "ok";
-  return messages.slice(0, index).some(isOk) && messages.slice(index + 1).some(isOk);
-}
+import { threadItemKey } from "../../lib/chatThread";
 
 const VIEWS = [
   { key: "inbox", label: "All Chats", icon: FiInbox },
@@ -137,23 +139,23 @@ export default function ChatPage() {
     ...queries.chatMessages(activeId),
     enabled: isAuthenticated && Boolean(activeId),
   });
-  const messageIds = useMemo(
-    () =>
-      (messages.data?.items || [])
-        .filter((message) => message.senderId !== user?.id)
-        .map((message) => message.id),
-    [messages.data?.items, user?.id],
-  );
-  const messageIdsKey = messageIds.join(",");
-
   const {
     displayMessages,
     isLoadingOlder,
     isWaitingOnRateLimit,
     rateLimitSecondsLeft,
+    historyError,
+    retryHistory,
     containerRef: messagesContainerRef,
     handleScroll: handleMessagesScroll,
-  } = useConversationHistory(activeId, messages.data);
+    decrypted: decryptedMessages,
+    groupProblem,
+    safety,
+    safetyPeerIds,
+    threadItems,
+    readableMessageIds,
+    announcement,
+  } = useThreadData(activeId, messages.data, activeConversation, user?.id);
 
   const {
     credential: deviceCredential,
@@ -163,11 +165,8 @@ export default function ChatPage() {
     reprovision: reprovisionDevice,
   } = useDeviceIdentity();
   const syncEngine = useSyncEngine();
-  const decryptableMessages = useMemo(
-    () => displayMessages.filter((message) => message.contentType !== "SYSTEM"),
-    [displayMessages],
-  );
-  const decryptedMessages = useDecryptedMessages(activeId, decryptableMessages, user?.id);
+  const [verifyPeerId, setVerifyPeerId] = useState("");
+  const readableMessageIdsKey = readableMessageIds.join(",");
   const messagesEndRef = useRef(null);
   const [draft, setDraft] = useState("");
   // Sent messages waiting on the network - shown immediately as their own
@@ -175,13 +174,33 @@ export default function ChatPage() {
   // actually takes (MLS encrypt + a real round trip). Keyed by a client-side
   // id since the server hasn't assigned one yet.
   const [pendingMessages, setPendingMessages] = useState([]);
+  const attachmentPicker = useAttachmentPicker();
+  const fileInputRef = useRef(null);
+  // Uploaded attachment entries by clientId, so a retry re-sends without re-uploading.
+  const uploadedAttachmentsRef = useRef(new Map());
   const sendMessage = useMutation({
-    mutationFn: async ({ text, clientId }) => {
+    mutationFn: async ({ text, clientId, files }) => {
       const recipientIds =
         activeConversation?.type === "GROUP"
           ? otherActiveMemberIds(activeConversation, user?.id)
           : peer?.id;
       try {
+        if (files?.length) {
+          return await sendAttachmentsWithCache({
+            syncEngine,
+            deviceId: deviceCredential.deviceId,
+            conversationId: activeId,
+            recipientUserId: recipientIds,
+            files,
+            caption: text,
+            clientMessageId: clientId,
+            uploaded: uploadedAttachmentsRef.current,
+            onStage: (stage) =>
+              setPendingMessages((prev) =>
+                prev.map((item) => (item.clientId === clientId ? { ...item, stage } : item)),
+              ),
+          });
+        }
         return await sendEncryptedChatMessage(
           syncEngine,
           deviceCredential.deviceId,
@@ -197,7 +216,11 @@ export default function ChatPage() {
         // doesn't retry THIS send: a freshly provisioned device starts with no local state
         // for any group (self-join runs on its own independent poll, see useSyncEngine), so
         // an immediate retry here would just fail the same way for a different reason.
-        await reprovisionDevice();
+        if (!(await reprovisionDevice())) {
+          throw new Error("Couldn't reconnect this device. Try again in a moment.", {
+            cause: error,
+          });
+        }
         throw new Error(
           "Your device needed to be reconnected. Give it a few seconds to rejoin your conversations, then try sending again.",
           { cause: error },
@@ -205,6 +228,7 @@ export default function ChatPage() {
       }
     },
     onSuccess: (response, variables) => {
+      uploadedAttachmentsRef.current.delete(variables.clientId);
       setPendingMessages((prev) =>
         prev.filter((pending) => pending.clientId !== variables.clientId),
       );
@@ -232,15 +256,15 @@ export default function ChatPage() {
     setPendingMessages((prev) =>
       prev.map((item) => (item.clientId === pending.clientId ? { ...item, failed: false } : item)),
     );
-    sendMessage.mutate({ text: pending.text, clientId: pending.clientId });
+    sendMessage.mutate({ text: pending.text, clientId: pending.clientId, files: pending.files });
   };
 
   const [isComposingNewChat, setIsComposingNewChat] = useState(false);
-  const [newChatRecipientId, setNewChatRecipientId] = useState("");
+  const [newChatRecipients, setNewChatRecipients] = useState([]);
   const startNewChat = useMutation({
     mutationFn: () =>
       api.createDirectMessage({
-        recipientUserId: newChatRecipientId.trim(),
+        recipientUserId: newChatRecipients[0]?.id,
         // Placeholder only - a real conversationId doesn't exist until this
         // call creates one, so the actual encrypted MLS group can't be set
         // up until afterward (see sendEncryptedChatMessage's
@@ -254,7 +278,7 @@ export default function ChatPage() {
     onSuccess: async (result) => {
       await refreshChat();
       setIsComposingNewChat(false);
-      setNewChatRecipientId("");
+      setNewChatRecipients([]);
       setView("inbox");
       setSelectedId(result.conversationId);
     },
@@ -265,10 +289,10 @@ export default function ChatPage() {
   }, [isAuthenticated, isSessionLoading, router]);
 
   useEffect(() => {
-    if (!activeId || !messageIdsKey) return;
-    api.markChatDelivered(messageIds).catch(() => {});
-    api.markChatRead(activeId, messageIds.at(-1)).catch(() => {});
-  }, [activeId, messageIds, messageIdsKey]);
+    if (!activeId || !readableMessageIdsKey) return;
+    api.markChatDelivered(readableMessageIds).catch(() => {});
+    api.markChatRead(activeId, readableMessageIds.at(-1)).catch(() => {});
+  }, [activeId, readableMessageIds, readableMessageIdsKey]);
 
   const decryptedCount = Object.keys(decryptedMessages).length;
   const activePendingCount = pendingMessages.filter(
@@ -315,18 +339,18 @@ export default function ChatPage() {
 
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [groupTitle, setGroupTitle] = useState("");
-  const [groupMemberIdsText, setGroupMemberIdsText] = useState("");
+  const [groupMembers, setGroupMembers] = useState([]);
   const createGroup = useMutation({
     mutationFn: () =>
       api.createGroupChat({
         title: groupTitle.trim(),
-        memberUserIds: parseUserIds(groupMemberIdsText),
+        memberUserIds: groupMembers.map((member) => member.id),
       }),
     onSuccess: async (result) => {
       await refreshChat();
       setIsCreatingGroup(false);
       setGroupTitle("");
-      setGroupMemberIdsText("");
+      setGroupMembers([]);
       setView("inbox");
       setSelectedId(result.id);
     },
@@ -334,12 +358,26 @@ export default function ChatPage() {
 
   const [isGroupSettingsOpen, setIsGroupSettingsOpen] = useState(false);
   const groupSettingsButtonRef = useRef(null);
+  const [isDevicesOpen, setIsDevicesOpen] = useState(false);
+  const devicesButtonRef = useRef(null);
+  const [isBackupOpen, setIsBackupOpen] = useState(false);
+  const backupButtonRef = useRef(null);
+  // Mounted here (not in the modal) so uploads resume after every reload.
+  const backup = useChatBackup(user?.id);
 
   if (isSessionLoading || !isAuthenticated) {
     return <ChatSkeleton />;
   }
 
   const actionError = acceptRequest.error || declineRequest.error || blockConversation.error;
+  // Only claim end-to-end encryption when this device can actually use the group.
+  const encryptionStatus = groupProblem
+    ? "Encryption problem on this device"
+    : isDeviceReady && syncEngine
+      ? "End-to-end encrypted"
+      : "Setting up encryption...";
+  const shownError =
+    actionError || sendMessage.error || (isDeviceReady ? deviceError : undefined);
   const activeConversationName = conversationDisplayName(activeConversation, user?.id);
   const activeGroupMembers = activeMembers(activeConversation);
   const myGroupParticipant = myParticipant(activeConversation, user?.id);
@@ -361,6 +399,22 @@ export default function ChatPage() {
           <div className="chat-sidebar-head">
             <span>Conversations</span>
             <div className="chat-sidebar-actions">
+              <button
+                aria-label="Your devices"
+                onClick={() => setIsDevicesOpen(true)}
+                ref={devicesButtonRef}
+                type="button"
+              >
+                <FiMonitor /> Devices
+              </button>
+              <button
+                aria-label="Message backup"
+                onClick={() => setIsBackupOpen(true)}
+                ref={backupButtonRef}
+                type="button"
+              >
+                <FiDatabase /> Backup
+              </button>
               <button
                 aria-label="New chat"
                 onClick={() => {
@@ -388,21 +442,18 @@ export default function ChatPage() {
               className="chat-new-form"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (!newChatRecipientId.trim() || startNewChat.isPending) return;
+                if (!newChatRecipients.length || startNewChat.isPending) return;
                 startNewChat.mutate();
               }}
             >
-              <label htmlFor="new-chat-recipient">Recipient user ID</label>
-              <input
-                autoFocus
+              <label htmlFor="new-chat-recipient">Recipient</label>
+              <UserPicker
                 disabled={startNewChat.isPending}
                 id="new-chat-recipient"
-                onChange={(event) => setNewChatRecipientId(event.target.value)}
-                placeholder="Paste their GachaHub user ID..."
-                type="text"
-                value={newChatRecipientId}
+                onChange={setNewChatRecipients}
+                value={newChatRecipients}
               />
-              <button disabled={!newChatRecipientId.trim() || startNewChat.isPending} type="submit">
+              <button disabled={!newChatRecipients.length || startNewChat.isPending} type="submit">
                 {startNewChat.isPending ? "Starting..." : "Start Chat"}
               </button>
               {startNewChat.error && <small>{startNewChat.error.message}</small>}
@@ -413,7 +464,7 @@ export default function ChatPage() {
               className="chat-new-form"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (!groupTitle.trim() || !groupMemberIdsText.trim() || createGroup.isPending) {
+                if (!groupTitle.trim() || !groupMembers.length || createGroup.isPending) {
                   return;
                 }
                 createGroup.mutate();
@@ -429,16 +480,16 @@ export default function ChatPage() {
                 type="text"
                 value={groupTitle}
               />
-              <label htmlFor="new-group-members">Member user IDs</label>
-              <textarea
+              <label htmlFor="new-group-members">Members</label>
+              <UserPicker
                 disabled={createGroup.isPending}
                 id="new-group-members"
-                onChange={(event) => setGroupMemberIdsText(event.target.value)}
-                placeholder="Paste GachaHub user IDs, one per line..."
-                value={groupMemberIdsText}
+                multiple
+                onChange={setGroupMembers}
+                value={groupMembers}
               />
               <button
-                disabled={!groupTitle.trim() || !groupMemberIdsText.trim() || createGroup.isPending}
+                disabled={!groupTitle.trim() || !groupMembers.length || createGroup.isPending}
                 type="submit"
               >
                 {createGroup.isPending ? "Creating..." : "Create Group"}
@@ -539,17 +590,23 @@ export default function ChatPage() {
                     <small>
                       {activeConversation.type === "GROUP" ? (
                         <>
-                          <FiLock /> {activeGroupMembers.length} members · End-to-end encrypted
+                          <FiLock /> {activeGroupMembers.length} members · {encryptionStatus}
                         </>
                       ) : (
                         <>
-                          <FiLock /> End-to-end encrypted
+                          <FiLock /> {encryptionStatus}
                         </>
                       )}
                     </small>
                   </span>
                 </div>
                 <div className="chat-thread-actions">
+                  {activeConversation.type !== "GROUP" && safetyPeerIds[0] && (
+                    <SafetyBadge
+                      onVerify={() => setVerifyPeerId(safetyPeerIds[0])}
+                      safety={safety.byUser[safetyPeerIds[0]]}
+                    />
+                  )}
                   {activeConversation.type === "GROUP" && (
                     <button
                       aria-label="Group settings"
@@ -590,13 +647,28 @@ export default function ChatPage() {
                 </div>
               </header>
 
+              <div className="sr-only" aria-live="polite" aria-atomic="true">
+                <p key={announcement.seq}>{announcement.text}</p>
+              </div>
               <div
                 className="chat-messages"
-                aria-live="polite"
                 ref={messagesContainerRef}
                 onScroll={handleMessagesScroll}
               >
                 <QueryNotice isLoading={messages.isLoading} isError={messages.isError} />
+                {groupProblem && (
+                  <div className="chat-history-ceiling" role="alert">
+                    This group had a problem on this device - messages may not decrypt.
+                  </div>
+                )}
+                <SafetyChangedBanner
+                  onVerify={setVerifyPeerId}
+                  peers={safetyPeerIds.map((id) => ({
+                    id,
+                    name: participantUser(activeConversation, id)?.name || "GachaHub member",
+                    safety: safety.byUser[id],
+                  }))}
+                />
                 {isWaitingOnRateLimit ? (
                   <div className="chat-history-ceiling">
                     Loading more slowed down - resuming in {rateLimitSecondsLeft}s
@@ -604,60 +676,24 @@ export default function ChatPage() {
                 ) : (
                   isLoadingOlder && <div className="chat-history-ceiling">Loading more...</div>
                 )}
-                {displayMessages.map((message, index, allMessages) => {
-                  if (message.contentType === "SYSTEM") {
-                    return (
-                      <div className="chat-system-message" key={message.id}>
-                        <span>Conversation started</span>
-                      </div>
-                    );
-                  }
-                  const mine = message.senderId === user?.id;
-                  const sender = participantUser(activeConversation, message.senderId);
-                  const decrypted = decryptedMessages[message.id];
-                  // Not decrypted yet - render nothing rather than a
-                  // "Decrypting..." placeholder bubble, so the message pops
-                  // in fully formed once it's actually ready instead of
-                  // changing content right after appearing.
-                  if (!decrypted) {
-                    return null;
-                  }
-                  return (
-                    <div className={`chat-message-row ${mine ? "mine" : ""}`} key={message.id}>
-                      {!mine && (
-                        <span className="chat-avatar small">{initialOf(sender?.name)}</span>
-                      )}
-                      <article className={`chat-message ${mine ? "mine" : ""}`}>
-                        {decrypted.status === "ok" ? (
-                          <div>
-                            {!mine && activeConversation.type === "GROUP" && (
-                              <small>{sender?.name || "GachaHub member"}</small>
-                            )}
-                            <p>
-                              {typeof decrypted.envelope.body === "string"
-                                ? decrypted.envelope.body
-                                : JSON.stringify(decrypted.envelope.body)}
-                            </p>
-                            <small>{relativeTime(message.createdAt)}</small>
-                          </div>
-                        ) : (
-                          <>
-                            <FiLock aria-hidden="true" />
-                            <div>
-                              <b>Message unavailable</b>
-                              <p>
-                                {wasLikelySentDuringAbsence(allMessages, decryptedMessages, index)
-                                  ? "Sent while you weren't in the group."
-                                  : "This device can't decrypt this message."}
-                              </p>
-                              <small>{relativeTime(message.createdAt)}</small>
-                            </div>
-                          </>
-                        )}
-                      </article>
-                    </div>
-                  );
-                })}
+                {historyError && (
+                  <div className="chat-history-ceiling" role="alert">
+                    Couldn&apos;t load older messages.
+                    <button className="chat-history-retry" onClick={retryHistory} type="button">
+                      Retry
+                    </button>
+                  </div>
+                )}
+                {threadItems.map((item) => (
+                  <ThreadRow
+                    allMessages={displayMessages}
+                    conversation={activeConversation}
+                    decryptedById={decryptedMessages}
+                    item={item}
+                    key={threadItemKey(item)}
+                    userId={user?.id}
+                  />
+                ))}
                 {pendingMessages
                   .filter((pending) => pending.conversationId === activeId)
                   .map((pending) => (
@@ -666,7 +702,7 @@ export default function ChatPage() {
                         className={`chat-message mine pending ${pending.failed ? "failed" : ""}`}
                       >
                         <div>
-                          <p>{pending.text}</p>
+                          <PendingContent files={pending.files} text={pending.text} />
                           <small>
                             {pending.failed ? (
                               <button
@@ -677,7 +713,7 @@ export default function ChatPage() {
                                 Failed to send - tap to retry
                               </button>
                             ) : (
-                              "Sending..."
+                              pendingStatusLabel(pending.stage)
                             )}
                           </small>
                         </div>
@@ -693,7 +729,7 @@ export default function ChatPage() {
                       <b>No messages in this conversation</b>
                     </div>
                   )}
-                <div ref={messagesEndRef} />
+                <div className="chat-messages-end" ref={messagesEndRef} />
               </div>
 
               {!canSendMessages ? (
@@ -725,25 +761,54 @@ export default function ChatPage() {
                   onSubmit={(event) => {
                     event.preventDefault();
                     const text = draft.trim();
-                    if (!text) return;
+                    const files = attachmentPicker.files;
+                    if (!text && files.length === 0) return;
                     const clientId = crypto.randomUUID();
                     // Show the bubble and free up the input immediately -
                     // the actual send (MLS encrypt + network) keeps running
                     // in the background and reconciles onSuccess/onError.
                     setPendingMessages((prev) => [
                       ...prev,
-                      { clientId, text, conversationId: activeId },
+                      { clientId, text, files, conversationId: activeId },
                     ]);
                     setDraft("");
-                    sendMessage.mutate({ text, clientId });
+                    attachmentPicker.clear();
+                    sendMessage.mutate({ text, clientId, files });
                   }}
                 >
+                  <AttachmentComposerTray
+                    error={attachmentPicker.error}
+                    files={attachmentPicker.files}
+                    onRemove={attachmentPicker.remove}
+                  />
+                  <input
+                    hidden
+                    multiple
+                    onChange={(event) => {
+                      attachmentPicker.add([...event.target.files]);
+                      event.target.value = "";
+                    }}
+                    ref={fileInputRef}
+                    type="file"
+                  />
+                  <button
+                    aria-label="Attach files"
+                    className="chat-attach-button"
+                    onClick={() => fileInputRef.current?.click()}
+                    type="button"
+                  >
+                    <FiPaperclip />
+                  </button>
                   <input
                     onChange={(event) => setDraft(event.target.value)}
                     placeholder="Send an encrypted message..."
                     value={draft}
                   />
-                  <button aria-label="Send" disabled={!draft.trim()} type="submit">
+                  <button
+                    aria-label="Send"
+                    disabled={!draft.trim() && attachmentPicker.files.length === 0}
+                    type="submit"
+                  >
                     <FiSend />
                   </button>
                 </form>
@@ -767,11 +832,7 @@ export default function ChatPage() {
                   </div>
                 </div>
               )}
-              {(actionError || sendMessage.error) && (
-                <small className="post-action-error">
-                  {(actionError || sendMessage.error).message}
-                </small>
-              )}
+              {shownError && <small className="post-action-error">{shownError.message}</small>}
             </>
           ) : (
             <div className="chat-empty-thread">
@@ -783,16 +844,47 @@ export default function ChatPage() {
         </section>
       </div>
 
+      <DevicesModal
+        currentDeviceId={deviceCredential?.deviceId}
+        isOpen={isDevicesOpen}
+        key={isDevicesOpen ? "devices-open" : "devices-closed"}
+        onClose={() => setIsDevicesOpen(false)}
+        syncEngine={syncEngine}
+        triggerRef={devicesButtonRef}
+      />
+
+      <ChatBackupModal
+        backup={backup}
+        isOpen={isBackupOpen}
+        key={isBackupOpen ? "backup-open" : "backup-closed"}
+        onClose={() => setIsBackupOpen(false)}
+        triggerRef={backupButtonRef}
+      />
+
       <GroupSettingsModal
         conversation={activeConversation}
         currentUserId={user?.id}
         isOpen={isGroupSettingsOpen}
         // Forces a fresh mount every time it opens - see GroupSettingsModal's own doc comment.
-        key={isGroupSettingsOpen ? activeId : "closed"}
+        key={isGroupSettingsOpen ? activeId : "group-settings-closed"}
         onClose={() => setIsGroupSettingsOpen(false)}
         onLeft={() => setSelectedId("")}
+        onVerify={(userId) => {
+          setIsGroupSettingsOpen(false);
+          setVerifyPeerId(userId);
+        }}
         refreshChat={refreshChat}
+        safety={safety.byUser}
         triggerRef={groupSettingsButtonRef}
+      />
+      <SafetyNumberModal
+        hasError={safety.hasError}
+        isOpen={Boolean(verifyPeerId)}
+        onClose={() => setVerifyPeerId("")}
+        onRetry={safety.retry}
+        onVerify={() => safety.verify(verifyPeerId)}
+        peerName={participantUser(activeConversation, verifyPeerId)?.name || "this person"}
+        safety={safety.byUser[verifyPeerId]}
       />
     </div>
   );
