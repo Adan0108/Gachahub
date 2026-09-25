@@ -1,6 +1,5 @@
 import { computeBackupProof, proofMatches } from './replace-proof';
 
-// The same vector is asserted in the frontend's backupCrypto.test.ts, so the two sides cannot drift.
 const VECTOR = 'vFpeZotdsgzGcuhopWvFH9uMhoYEutxFH5/9p7XGJmY=';
 
 describe('replace proof', () => {

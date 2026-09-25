@@ -240,8 +240,6 @@ describe('SyncEngine', () => {
       const carol = await setUpDevice('user-carol');
       const dave = await setUpDevice('user-dave');
 
-      // Real group: alice creates it and adds bob for real, so bob has his
-      // own genuine member session (not a copy of alice's private state).
       const aliceSession = await alice.engine.createGroup('conv-1');
       const addBob = await aliceSession.stageCommit({
         added: [await offerFor(bob)],
@@ -251,19 +249,17 @@ describe('SyncEngine', () => {
       const bobWelcome = addBob.welcome;
       if (!bobWelcome) throw new Error('missing Bob Welcome');
       const bobSession = await bob.factory.joinFromWelcome('conv-1', bobWelcome.welcomeBytes);
-      await bob.engine.forgetConversation('conv-1'); // clear any stale cache before seeding storage directly
+      await bob.engine.forgetConversation('conv-1');
       const bobStorage = new InMemoryGroupSessionStorage();
       await bobStorage.save('conv-1', await bobSession.serialize());
       const bobEngine = new SyncEngine(bob.factory, bob.deviceId, bob.userId, bobStorage);
 
-      // Alice wins the race for epoch 1 by adding dave...
       const addDave = await aliceSession.stageCommit({
         added: [await offerFor(dave)],
         removed: [],
       });
       await aliceSession.commitAccepted();
 
-      // ...while bob, also at epoch 1, tries to add carol and loses.
       await mockClaims({ 'user-carol': [carol] });
       vi.mocked(api.submitMlsHandshake).mockResolvedValue({
         outcome: 'conflict',
@@ -278,7 +274,6 @@ describe('SyncEngine', () => {
         EpochConflictError,
       );
 
-      // Bob's session should now be caught up on alice's winning commit.
       await expect(bobEngine.getCurrentEpoch('conv-1')).resolves.toBe(2);
     });
   });
@@ -325,16 +320,11 @@ describe('SyncEngine', () => {
       );
     });
 
-    // regression: this used to return epoch 0 and quietly move on. Without a Commit, this
-    // device's leaf is never recorded server-side, so nothing can ever bootstrap the group
-    // afterward - not membership work (needs this device already in the roster) and not
-    // self-join (needs a published snapshot). Every message sent into that group was encrypted
-    // to an audience of one, forever, with no error shown.
     it('refuses to seed a group with nobody to add, instead of silently leaving it at epoch 0', async () => {
       const { api } = await import('../../api');
       const alice = await setUpDevice('user-alice');
       await alice.engine.createGroup('conv-1');
-      await mockClaims({}); // nobody is ACTIVE yet (all invitees still PENDING), and alice has no other devices
+      await mockClaims({});
 
       await expect(alice.engine.seedNewGroupWithMembers('conv-1', [])).rejects.toThrow(
         NoEncryptableMembersError,
@@ -500,7 +490,6 @@ describe('SyncEngine', () => {
 
       await expect(bobEngine.syncCommits('conv-1')).rejects.toThrow(MembershipMismatchError);
 
-      // in memory and on disk, bob is still at the epoch before the refused commit
       await expect(bobEngine.getCurrentEpoch('conv-1')).resolves.toBe(1);
       const saved = await bob.factory.restore('conv-1', (await bobStorage.load('conv-1'))!);
       await expect(saved.currentEpoch()).resolves.toBe(1);
@@ -551,7 +540,6 @@ describe('SyncEngine', () => {
           declared: { addedDevices: [attest(carol)], removedDevices: [] },
         }),
       );
-      // the founder's leaf was labelled as someone else all along
       await serveRosterOf(aliceSession, (leaves) => {
         leaves.find((leaf) => leaf.deviceId === alice.deviceId)!.userId = 'user-victim';
       });
@@ -648,7 +636,6 @@ describe('SyncEngine', () => {
           epoch: 1,
           senderDeviceId: alice.deviceId,
           payload: addCarol.wireBytes,
-          // the server's registry says carol's device has a different key than the leaf carries
           declared: {
             addedDevices: [attest(carol, { signatureKey: new Uint8Array([9, 9, 9]) })],
             removedDevices: [],
@@ -712,11 +699,9 @@ describe('SyncEngine', () => {
           epoch: 2,
           senderDeviceId: alice.deviceId,
           payload: addDave.wireBytes,
-          // a server (or anyone) quietly reporting the commit as undeclared to skip the check
         }),
       );
 
-      // a fresh engine over the same storage, as after a reload: the rule must still hold
       const reloaded = new SyncEngine(bob.factory, bob.deviceId, bob.userId, bobStorage);
       await expect(reloaded.syncCommits('conv-1')).rejects.toThrow(/undeclared/);
       await expect(reloaded.getCurrentEpoch('conv-1')).resolves.toBe(2);
@@ -1015,7 +1000,6 @@ describe('SyncEngine', () => {
       await bobStorage.save('conv-1', await bobSession.serialize());
       const bobEngine = new SyncEngine(bob.factory, bob.deviceId, bob.userId, bobStorage);
 
-      // Bob goes offline from here - alice adds carol, then dave, without bob ever processing either.
       const addCarol = await aliceSession.stageCommit({
         added: [await offerFor(carol)],
         removed: [],
@@ -1098,7 +1082,6 @@ describe('SyncEngine', () => {
         removed: [],
       });
       await aliceSession.commitAccepted();
-      // the server has the founder's device under a different owner than the tree's leaf says
       await serveRosterOf(aliceSession, (leaves) => {
         const founder = leaves.find((leaf) => leaf.deviceId === alice.deviceId)!;
         founder.userId = 'user-someone-else';
@@ -1119,7 +1102,6 @@ describe('SyncEngine', () => {
 
       expect(result.joined).toEqual([]);
       expect(result.failures[0]?.error).toBeInstanceOf(MembershipMismatchError);
-      // a definite refusal: the Welcome is dropped so it is not retried every poll
       expect(api.consumeMlsWelcome).toHaveBeenCalledWith(bob.deviceId, 'welcome-1');
       await expect(bob.engine.getCurrentEpoch('conv-1')).rejects.toThrow();
       expect(api.reportMlsFault).toHaveBeenCalledWith(
@@ -1162,10 +1144,6 @@ describe('SyncEngine', () => {
       await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(1);
     });
 
-    // regression: a Welcome can be re-delivered for a conversation this
-    // device already joined and advanced past epoch 0 (e.g. the earlier
-    // join succeeded but consumeMlsWelcome then failed, leaving the
-    // Welcome pending) - rejoining it used to silently rewind the session.
     it('does not rejoin (rewind) an already-advanced session when a stale Welcome for the same conversation is re-delivered', async () => {
       const { api } = await import('../../api');
       const alice = await setUpDevice('user-alice');
@@ -1184,7 +1162,6 @@ describe('SyncEngine', () => {
         {
           id: 'welcome-stale',
           conversationId: 'conv-1',
-          // Not a decodable Welcome, so it can only be stale.
           payload: bytesToBase64(new TextEncoder().encode('stale-welcome')),
           createdAt: new Date().toISOString(),
         },
@@ -1192,8 +1169,6 @@ describe('SyncEngine', () => {
 
       const result = await bob.engine.processPendingWelcomes();
 
-      // Not a new join - the session already existed before this call, so
-      // this stale Welcome is only ever consumed, never counted as joined.
       expect(result.joined).toEqual([]);
       expect(result.failures).toEqual([]);
       expect(api.consumeMlsWelcome).toHaveBeenCalledWith(bob.deviceId, 'welcome-stale');
@@ -1218,7 +1193,6 @@ describe('SyncEngine', () => {
       await bob.engine.processPendingWelcomes();
       await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(1);
 
-      // bob is removed and re-added while his device never saw it: he still holds the epoch-1 session
       await aliceSession.stageCommit({ added: [], removed: [bob.credential] });
       await aliceSession.commitAccepted();
       const readd = await aliceSession.stageCommit({ added: [await offerFor(bob)], removed: [] });
@@ -1407,7 +1381,6 @@ describe('SyncEngine', () => {
         epoch: 1,
         groupInfo: bytesToBase64(staged.groupInfo),
       });
-      // the server accepting the join: hand the members the commit, exactly as it would be stored
       let submitted: Uint8Array | undefined;
       vi.mocked(api.submitMlsExternalJoin).mockImplementation(
         async (_c: string, body: { payload: string }) => {
@@ -1491,7 +1464,6 @@ describe('SyncEngine', () => {
       await expect(carol.engine.joinByExternalCommit('conv-1')).rejects.toThrow('tab died');
       save.mockRestore();
 
-      // the members moved on with the accepted join; the roster now has carol
       await aliceSession.process(submittedCommit()!);
 
       await expect(carol.engine.getCurrentEpoch('conv-1')).resolves.toBe(2);
@@ -1529,7 +1501,6 @@ describe('SyncEngine', () => {
         vi.mocked(api.submitMlsExternalJoin).mockRejectedValue(new Error('server error'));
         vi.mocked(api.getMlsHandshakesSince).mockResolvedValue([] as never);
 
-        // the missing group is reported as missing, not as the server error, so recovery can run
         await expect(carol.engine.getCurrentEpoch('conv-1')).rejects.toBeInstanceOf(
           GroupStateUnavailableError,
         );
@@ -1561,7 +1532,6 @@ describe('SyncEngine', () => {
           GroupStateUnavailableError,
         );
 
-        // the network is back and the server has the join
         vi.mocked(api.submitMlsExternalJoin).mockResolvedValue({ outcome: 'duplicate' } as never);
         await expect(carol.engine.getCurrentEpoch('conv-1')).resolves.toBe(2);
       });
@@ -1594,9 +1564,6 @@ describe('SyncEngine', () => {
     });
 
     it('recovering after a crash adopts its OWN join, not a different device merely sharing the same leaf epoch', async () => {
-      // this is the #3 race: another change (e.g. membership work adding the same device via an ordinary
-      // Add) could land at the epoch carol's join was also targeting - a leaf-presence check alone cannot
-      // tell "my commit won" from "a different commit that happens to add me too won" apart.
       const { aliceSession, carol, submittedCommit } = await groupWithPublishedSnapshot();
       const { api } = await import('../../api');
       const realSave = carol.storage.save.bind(carol.storage);
@@ -1609,16 +1576,14 @@ describe('SyncEngine', () => {
       await expect(carol.engine.joinByExternalCommit('conv-1')).rejects.toThrow('tab died');
       save.mockRestore();
 
-      // the server tells the truth on resubmit: a DIFFERENT commit won this epoch, not carol's
       vi.mocked(api.submitMlsExternalJoin).mockResolvedValue({ outcome: 'conflict' });
-      // the members moved on with whatever else won - carol's own attempted commit was never applied
       await aliceSession.stageCommit({ added: [], removed: [] });
       await aliceSession.commitAccepted();
 
       await expect(carol.engine.getCurrentEpoch('conv-1')).rejects.toThrow();
       await expect(carol.storage.load('conv-1#pending-join')).resolves.toBeUndefined();
       await expect(carol.storage.load('conv-1#pending-join-request')).resolves.toBeUndefined();
-      expect(submittedCommit()).toBeDefined(); // sanity: carol's commit really was built and sent once
+      expect(submittedCommit()).toBeDefined();
     });
 
     it('does nothing for a group this device already has', async () => {
@@ -1706,7 +1671,6 @@ describe('SyncEngine', () => {
       await expect(alice.engine.submitMembershipChange('conv-1', change)).rejects.toThrow(
         'response lost',
       );
-      // the answer to the resubmit is what the server says for bytes it already has
       vi.mocked(api.submitMlsHandshake).mockResolvedValue({ outcome: 'duplicate' } as never);
 
       const fresh = restart();
@@ -1726,7 +1690,6 @@ describe('SyncEngine', () => {
         kind: 'application',
         envelope: { body: 'after the lost answer' },
       });
-      // settled for good: another restart has nothing left to resubmit
       const settled = vi.mocked(api.submitMlsHandshake).mock.calls.length;
       await expect(restart().syncCommits('conv-1')).resolves.toBe(1);
       expect(api.submitMlsHandshake).toHaveBeenCalledTimes(settled);
@@ -1758,7 +1721,6 @@ describe('SyncEngine', () => {
       await expect(fresh.syncCommits('conv-1')).resolves.toBe(0);
 
       expect(fresh.groupProblems.get('conv-1')).toBeUndefined();
-      // nothing left to settle: the next restart neither resubmits nor moves the group
       const settled = vi.mocked(api.submitMlsHandshake).mock.calls.length;
       const next = restart();
       await expect(next.syncCommits('conv-1')).resolves.toBe(0);
@@ -1805,7 +1767,6 @@ describe('SyncEngine', () => {
       const back = restart();
       await expect(back.syncCommits('conv-1')).rejects.toThrow('offline');
 
-      // the network returns and the server has the Commit: the unsettled send is still settled
       vi.mocked(api.submitMlsHandshake).mockResolvedValue({ outcome: 'duplicate' } as never);
       vi.mocked(api.getMlsHandshakesSince).mockResolvedValue([] as never);
       await expect(back.syncCommits('conv-1')).resolves.toBe(1);
@@ -1814,7 +1775,6 @@ describe('SyncEngine', () => {
     it('is not kept when the answer is a lost race: the winner is applied and the record is gone', async () => {
       const { api, alice, change } = await aliceAddingBob();
       const carol = await setUpDevice('user-carol');
-      // the winner: another member's Commit adding carol at the same epoch
       const winnerSession = await alice.factory.restore('conv-1', (await alice.storage.load('conv-1'))!);
       const winner = await winnerSession.stageCommit({ added: [await offerFor(carol)], removed: [] });
       vi.mocked(api.submitMlsHandshake).mockResolvedValue({
@@ -1855,7 +1815,6 @@ describe('SyncEngine', () => {
         'restore failed',
       );
 
-      // the group is still at the epoch the server has, not at the rejected Commit's
       await expect(
         alice.engine.encryptMessage('conv-1', { v: 1, type: 'text', body: 'still epoch 0' }),
       ).resolves.toMatchObject({ epoch: 0 });
@@ -1906,7 +1865,6 @@ describe('SyncEngine', () => {
       await expect(fresh.syncCommits('conv-1')).rejects.toThrow('disk full');
       await expect(fresh.syncCommits('conv-1')).resolves.toBe(1);
 
-      // the marker was written on the retry, not skipped because the record looked finished
       expect(mark).toHaveBeenCalledTimes(2);
       mark.mockRestore();
     });
@@ -1930,14 +1888,12 @@ describe('SyncEngine', () => {
       const { api, alice, bob, restart } = await aliceAddingBob();
       const carol = await setUpDevice('user-carol');
       const change = { added: [await offerFor(carol)], removed: [] };
-      // bob is in at epoch 1 and sends a message at that epoch
       const aliceSession = await alice.engine.createGroup('conv-2');
       const added = await aliceSession.stageCommit({ added: [await offerFor(bob)], removed: [] });
       await aliceSession.commitAccepted();
       await alice.storage.save('conv-2', await aliceSession.serialize());
       const bobSession = await bob.factory.joinFromWelcome('conv-2', added.welcome!.welcomeBytes);
       const message = await bobSession.encrypt({ v: 1, type: 'text', body: 'hello alice' });
-      // alice sends a Commit whose answer is lost while the network is down
       vi.mocked(api.submitMlsHandshake).mockRejectedValue(new Error('offline'));
       vi.mocked(api.getMlsHandshakesSince).mockRejectedValue(new Error('offline'));
       await expect(alice.engine.submitMembershipChange('conv-2', change)).rejects.toThrow('offline');
@@ -1947,7 +1903,6 @@ describe('SyncEngine', () => {
         kind: 'application',
         envelope: { body: 'hello alice' },
       });
-      // a write still needs the earlier send settled
       await expect(
         offline.encryptMessage('conv-2', { v: 1, type: 'text', body: 'x' }),
       ).rejects.toThrow('offline');
@@ -2052,10 +2007,8 @@ describe('SyncEngine', () => {
         'conv-1',
         addBob.welcome!.welcomeBytes,
       );
-      // a second tab: its own engine and memory, the same saved state
       const otherTab = new SyncEngine(alice.factory, alice.deviceId, alice.userId, alice.storage);
 
-      // the other tab has already opened the conversation, so it holds an older copy in memory
       await otherTab.getCurrentEpoch('conv-1');
 
       const first = await alice.engine.encryptMessage('conv-1', { v: 1, type: 'text', body: 'a' });
@@ -2095,9 +2048,6 @@ describe('SyncEngine', () => {
         alice.engine.encryptMessage('conv-1', { v: 1, type: 'text', body: 'third' }),
       ]);
 
-      // If these ran concurrently against the same mutable ClientState,
-      // ts-mls would either throw or silently corrupt the ratchet - getting
-      // 3 distinct, valid ciphertexts back is the real assertion here.
       expect(new Set(results.map((r) => bytesToBase64(r.wireBytes))).size).toBe(3);
       await expect(alice.engine.getCurrentEpoch('conv-1')).resolves.toBe(0);
     });

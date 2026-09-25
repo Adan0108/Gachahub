@@ -10,16 +10,7 @@ const EXPIRE_PENDING_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
 const EXPIRE_BATCH_SIZE = 500;
 const MAX_EXPIRE_BATCHES = 100;
 
-/**
- * Expires invites nobody ever answered. PENDING became entitled to an MLS leaf
- * (leaf-entitlement.ts) so a group invitee's device is added and starts receiving
- * epoch secrets immediately, before they ever accept - without this, an ignored
- * invite would be permanent cryptographic membership: the invitee's device would
- * keep receiving every future epoch secret forever, having never agreed to
- * anything. Routes through the ordinary EXPIRE_INVITE -> LEAVING pipeline, the same
- * membership machinery a decline or an admin removal uses, not a bespoke path -
- * mirrors MlsKeyPackageCleanupService's cron + Discord-on-failure shape.
- */
+/** Expires group/DM invites nobody answered, via the ordinary EXPIRE_INVITE -> LEAVING pipeline. */
 @Injectable()
 export class ChatInviteExpiryService {
   private readonly logger = new Logger(ChatInviteExpiryService.name);

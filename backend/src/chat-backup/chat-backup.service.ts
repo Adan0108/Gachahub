@@ -190,7 +190,6 @@ export class ChatBackupService {
   async uploadBlobs(userId: string, items: BackupBlobItemDto[]) {
     this.rateLimiter.assertCanUpload(userId);
 
-    // Cheap early answer so a client with backup off gets 409, not a misleading 403 below.
     if (!(await this.repository.findKey(userId))) {
       throw new ConflictException('Backup is not turned on');
     }

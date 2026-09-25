@@ -18,7 +18,7 @@ export class MembershipEventLog {
       this.channel = new BroadcastChannel(channelName);
       this.channel.onmessage = () => this.notify();
     }
-    // A wipe empties the stored events, so listeners reload instead of showing the wiped ones.
+    // A wipe empties the stored events, so listeners reload instead of showing the wiped ones
     this.stopWipeListener = onMlsSecretsWiped(() => this.notify());
   }
 

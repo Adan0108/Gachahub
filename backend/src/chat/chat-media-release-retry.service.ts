@@ -4,15 +4,7 @@ import { MediaRepository } from '../media/media.repository';
 import { MediaService } from '../media/media.service';
 import { ChatRepository } from './chat.repository';
 
-/**
- * Retries releasing chat media uploads whose Cloudinary delete failed when
- * their message was deleted (see ChatService.releaseDeletedMessageMedia).
- *
- * Lives in the chat module rather than MediaCleanupService because only
- * chat attaches-then-releases media on delete today - posts don't have that
- * flow yet. RELEASE_FAILED uploads would otherwise sit ATTACHED forever,
- * since ATTACHED is permanently excluded from the general cleanup sweep.
- */
+/** Retries releasing chat media whose Cloudinary delete failed after its message was deleted. */
 @Injectable()
 export class ChatMediaReleaseRetryService {
   private readonly logger = new Logger(ChatMediaReleaseRetryService.name);
@@ -47,8 +39,7 @@ export class ChatMediaReleaseRetryService {
         );
 
         await this.mediaService.markReleaseFailed(upload.id).catch(() => {
-          // already RELEASE_FAILED, or the row is gone - either way, next
-          // sweep's query naturally handles it, nothing more to do here
+          // Already RELEASE_FAILED or gone; the next sweep handles it.
         });
       }
     }

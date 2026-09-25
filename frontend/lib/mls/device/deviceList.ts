@@ -34,10 +34,7 @@ export function sortDevices(
   );
 }
 
-/**
- * Revokes each device on the server one by one (a 404 means it is already gone), then asks the
- * sync engine once to finish the MLS Remove commits for them. A failure on one never stops the rest.
- */
+/** Revokes each device on the server one by one (a 404 means it is already gone), then asks the sync engine once to finish the MLS Remove commits for them */
 export async function removeDevices(
   deviceIds: DeviceId[],
   deps: {
@@ -64,7 +61,7 @@ export async function removeDevices(
     }
   }
 
-  // The poll would do this anyway; failing here only delays the Remove.
+  // The poll would do this anyway; failing here only delays the Remove
   if (outcome.removed.length > 0) await deps.reconcile().catch(() => undefined);
   return outcome;
 }

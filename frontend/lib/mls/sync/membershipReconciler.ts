@@ -20,7 +20,6 @@ export interface MembershipWorkItem {
   unreachableUserIds: UserId[];
 }
 
-/** The slice of SyncEngine the reconciler drives - kept narrow so it can be tested on its own. */
 export interface ReconcilerEngine {
   syncCommits(conversationId: ConversationId): Promise<Epoch>;
   submitMembershipChange(
@@ -32,11 +31,7 @@ export interface ReconcilerEngine {
 export interface ReconcileOptions {
   /** Look at one conversation only. */
   conversationId?: ConversationId;
-  /**
-   * `pending` (the default) checks only conversations where someone is joining
-   * or leaving - cheap enough to run often. `full` also finds a member's new
-   * device, a revoked one, or a leftover one, and should run rarely.
-   */
+  /** `pending` (the default) checks only conversations where someone is joining or leaving - cheap enough to run often. `full` also finds a member's new device, a revoked one, or a leftover one, and should run rarely */
   scope?: 'pending' | 'full';
 }
 
@@ -63,7 +58,7 @@ const MAX_PASSES = 3;
 /** Pages of work fetched per pass - a guard against a server that never stops paging. */
 const MAX_WORK_PAGES = 20;
 
-/** Carries out the membership changes the server authorized: one Commit per conversation. The server decides who may be in a group; accepting the Commit completes it. */
+/** Carries out the membership changes the server authorized: one Commit per conversation */
 export class MembershipReconciler {
   constructor(
     private readonly engine: ReconcilerEngine,
@@ -120,7 +115,7 @@ export class MembershipReconciler {
     conversationId: ConversationId,
     outcome: ReconcileOutcome,
   ): Promise<void> {
-    // A Commit clears the lease itself, and a conflict means someone else's Commit did.
+    // A Commit clears the lease itself, and a conflict means someone else's Commit did
     if (outcome === 'committed' || outcome === 'conflict') return;
 
     try {
@@ -140,8 +135,7 @@ export class MembershipReconciler {
         throw error;
       }
 
-      // Claiming burns single-use key packages, so only do it once this
-      // device is sure it is looking at the epoch the server computed the work for.
+      // Claiming burns single-use key packages, so only do it once this device is sure it is looking at the epoch the server computed the work for
       if (epoch !== item.epoch) return 'stale';
 
       const added = await this.claimOffers(item);
@@ -171,7 +165,7 @@ export class MembershipReconciler {
     const offers: KeyPackageOffer[] = [];
 
     for (const [userId, allDeviceIds] of devicesByUser) {
-      // A user who does not fit beside others waits for a later Commit; one too big for any Commit is cut to the cap.
+      // A user who does not fit beside others waits for a later Commit; one too big for any Commit is cut to the cap
       if (offers.length > 0 && offers.length + allDeviceIds.length > MAX_DEVICES_PER_COMMIT) continue;
       const deviceIds = allDeviceIds.slice(0, MAX_DEVICES_PER_COMMIT - offers.length);
 
@@ -180,7 +174,7 @@ export class MembershipReconciler {
         // eslint-disable-next-line no-await-in-loop -- claims are sequential so the limit is never overshot by parallel requests
         claimed = (await api.claimChatDeviceKeyPackages(userId, {
           conversationId: item.conversationId,
-          // Only the devices counted above: one registered since would be claimed and wasted.
+          // Only the devices counted above: one registered since would be claimed and wasted
           deviceIds,
         })) as ClaimedKeyPackage[];
       } catch (error) {

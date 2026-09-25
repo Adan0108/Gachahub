@@ -87,11 +87,7 @@ describe('useDecryptedMessages', () => {
     vi.useRealTimers();
   });
 
-  // regression: a second message arriving mid-decrypt cancels the effect that's still
-  // decrypting the first one. The old code let that cancellation suppress the first
-  // message's own setDecrypted call once it finished, even though its plaintext had
-  // already been saved - the message stayed stuck as if still decrypting until some
-  // unrelated later event happened to re-scan the cache.
+  // regression: a cancelled effect must still settle its in-flight message.
   it('does not lose a message an in-flight decrypt finishes for after a newer effect superseded it', async () => {
     const engine = fakeEngine();
     engine.isAtCurrentEpoch.mockResolvedValue(true);
@@ -113,16 +109,12 @@ describe('useDecryptedMessages', () => {
     const hook = renderHook();
 
     await hook.render({ conversationId: 'conv-1', messages: [msg1], currentUserId: 'me' });
-    // msg1's decrypt is still pending (the mock never resolved it yet).
     expect(hook.value.m1).toBeUndefined();
 
-    // msg2 arrives - this changes the id-list dependency, cancelling the still-running effect above.
     await hook.render({ conversationId: 'conv-1', messages: [msg1, msg2], currentUserId: 'me' });
     expect(hook.value).toMatchObject({ m2: { status: 'ok' } });
-    // msg1 is still legitimately in flight (owned by the cancelled effect), not lost yet.
     expect(hook.value.m1).toBeUndefined();
 
-    // The original, "cancelled" effect's in-flight decrypt of msg1 finally finishes.
     await act(async () => {
       resolveFirst({
         kind: 'application',
@@ -144,8 +136,7 @@ describe('useDecryptedMessages', () => {
     hook.unmount();
   });
 
-  // regression: this map was never pruned, so switching conversations only ever added to it -
-  // every message ever decrypted this session stayed in memory for the page's whole lifetime.
+  // regression: the decrypted map is pruned when switching conversations.
   it('clears previously decrypted entries when the conversation changes', async () => {
     const engine = fakeEngine();
     engine.isAtCurrentEpoch.mockResolvedValue(true);
@@ -172,9 +163,7 @@ describe('useDecryptedMessages', () => {
     hook.unmount();
   });
 
-  // regression: once the timed retry budget (MAX_RETRY_ATTEMPTS) runs out, the message is marked
-  // permanently unavailable even if the underlying cause (a network outage) was purely transient
-  // and has since cleared - nothing re-triggers a recheck unless an unrelated event happens to.
+  // regression: a message left unavailable after the retry budget is rechecked once connectivity returns.
   it('retries a message left unavailable by an exhausted timed budget once the browser regains connectivity', async () => {
     vi.useFakeTimers();
     const engine = fakeEngine();
@@ -197,7 +186,6 @@ describe('useDecryptedMessages', () => {
     await hook.render({ conversationId: 'conv-1', messages: [msg], currentUserId: 'me' });
     expect(hook.value.m1).toEqual({ status: 'pending' });
 
-    // Every scheduled retry keeps failing the same way, until the budget runs out.
     for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt += 1) {
       // eslint-disable-next-line no-await-in-loop -- each round must fully settle before the next timer is due
       await advanceAndFlush(nextRetryDelayMs(attempt));
@@ -206,7 +194,6 @@ describe('useDecryptedMessages', () => {
     expect(hook.value.m1).toEqual({ status: 'unavailable' });
     expect(engine.syncCommits).toHaveBeenCalledTimes(MAX_RETRY_ATTEMPTS + 1);
 
-    // Connectivity returns - and so does the group, this time.
     engine.syncCommits.mockResolvedValue(0 as never);
     engine.isAtCurrentEpoch.mockResolvedValue(true);
     engine.processIncoming.mockResolvedValue({

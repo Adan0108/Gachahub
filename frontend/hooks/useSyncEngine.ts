@@ -11,14 +11,7 @@ import { membershipEventLog } from '../lib/mls/sync/sharedMembershipEventLog';
 import { KeyPackageReplenisher } from '../lib/mls/device/keyPackageReplenisher';
 import type { DeviceId, UserId } from '../lib/mls/contract/types';
 
-// One engine per browser tab per device, reused across hook instances - a
-// second SyncEngine wrapping the same store would just duplicate the
-// in-memory session cache/locks for no benefit. Getting/creating it does
-// mutate this module-level state, but only that - no network, no timers,
-// no DOM - so it's safe to call directly from render the way a lazy
-// singleton normally is (same shape as getSharedDeviceIdentityStore),
-// unlike the polling setup below, which is a real side effect and belongs
-// in the effect further down.
+// One engine per tab per device, shared across hook instances.
 let sharedEngine: SyncEngine | undefined;
 let sharedEngineDeviceId: DeviceId | undefined;
 
@@ -41,12 +34,7 @@ function ensureSharedSyncEngine(deviceId: DeviceId, userId: UserId): SyncEngine 
   return sharedEngine;
 }
 
-// Being added to a conversation only creates a Welcome for this device once
-// - if this browser was already open at the time, a one-shot "check on
-// mount" never notices it, and this device can never join, decrypt, or
-// reply. Polling is a stopgap for not having a live push mechanism for it
-// yet (the socket infra used for typing indicators doesn't cover this) -
-// cheap enough for one lightweight GET per tab at this interval.
+// Polls for pending Welcomes so a device added while open can join.
 const WELCOME_POLL_INTERVAL_MS = 5000;
 
 // Everything one poll loop remembers; a new engine gets a new loop, so none of it carries over.
@@ -73,12 +61,7 @@ async function checkForPendingWork(loop: PollLoop): Promise<void> {
   }
 }
 
-// Reference-counted so several components can call useSyncEngine() for the
-// same engine (AppShell, chat/page.jsx, ...) and still share exactly one
-// poll loop - tied to how many mounted consumers currently want it, not to
-// any single one of their lifecycles. The count is per engine: a
-// device-identity change (a new engine) starts a fresh loop and count
-// instead of reusing a stale one.
+// Reference-counted so consumers share one poll loop per engine.
 const pollConsumers = new PollConsumers<SyncEngine>();
 let activeLoop: PollLoop | undefined;
 
@@ -110,8 +93,7 @@ function startWelcomePolling(engine: SyncEngine): void {
   schedulePoll(activeLoop, 0);
 }
 
-// Takes the engine it registered for, so a stale consumer cleaning up after a
-// newer engine has already taken over polling has nothing to do here.
+// Takes the engine it registered for; a stale consumer's cleanup is a no-op.
 function stopWelcomePollingConsumer(engine: SyncEngine): void {
   if (!pollConsumers.release(engine) || !activeLoop) return;
 
@@ -119,13 +101,7 @@ function stopWelcomePollingConsumer(engine: SyncEngine): void {
   activeLoop = undefined;
 }
 
-/**
- * Returns this device's SyncEngine once its MLS identity is provisioned -
- * undefined until then, since a SyncEngine is meaningless without a
- * deviceId. Also polls for pending Welcomes for as long as at least one
- * component is mounted with this device identity active (e.g. after being
- * added to a new conversation).
- */
+/** This device's SyncEngine once its identity is provisioned (undefined until then); polls for pending Welcomes while mounted. */
 export function useSyncEngine(): SyncEngine | undefined {
   const { credential, isReady } = useDeviceIdentity();
   const engine =

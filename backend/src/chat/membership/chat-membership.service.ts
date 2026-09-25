@@ -8,17 +8,7 @@ import type {
 /** How someone being added gets in: straight away, or only once they accept. */
 export type GroupMemberEntitlement = 'DIRECT' | 'INVITE';
 
-/**
- * The authorization side of group membership: turns "add / remove / accept /
- * decline" into participant state changes. What each one means for a given
- * conversation - immediate when there is no MLS group, or via JOINING /
- * LEAVING when there is one - is decided by the membership state machine (see
- * planMembershipChanges) and applied atomically by ChatMembershipRepository.
- *
- * It never touches MLS itself. Finishing the cryptographic half - a Commit
- * that adds or removes the devices - is what moves someone out of JOINING or
- * LEAVING, in MlsHandshakesRepository.acceptHandshake.
- */
+/** Turns add/remove/accept/decline into participant state changes; never touches MLS itself. */
 @Injectable()
 export class ChatMembershipService {
   constructor(
@@ -57,14 +47,7 @@ export class ChatMembershipService {
     await this.change(conversationId, [{ userId, event: 'DECLINE_INVITE' }]);
   }
 
-  /**
-   * Expires invites nobody answered (see ChatInviteExpiryService). Only applies to
-   * whoever is still PENDING when this actually runs: EXPIRE_INVITE is illegal from
-   * every other state, and the change is planned with onIllegal 'skip', so anyone who
-   * accepted or was removed since the sweep read them is left alone - person by
-   * person, without holding up the rest of the conversation's batch - rather than
-   * offboarded as if REMOVE had been used.
-   */
+  /** Expires invites nobody answered; anyone no longer PENDING is skipped, not offboarded. */
   async expireInvites(
     conversationId: string,
     userIds: string[],
@@ -81,8 +64,7 @@ export class ChatMembershipService {
     requests: MembershipRequest[],
     onIllegal?: OnIllegalMembershipChange,
   ): Promise<{ count: number }> {
-    // One change per person: two against the same starting state would make
-    // the second one's conditional write fail.
+    // One change per person: two against the same starting state would fail the second's conditional write.
     const onePerUser = [
       ...new Map(requests.map((request) => [request.userId, request])).values(),
     ];

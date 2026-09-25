@@ -47,17 +47,11 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
       throw new Error('Could not decode serialized group state');
     }
     if (!bytesEqual(groupState.groupContext.groupId, encodeConversationId(conversationId))) {
-      // Same check joinFromWelcome already makes on a Welcome - a storage
-      // bug or key collision handing this conversationId the wrong bytes
-      // should fail loudly here, not silently resume as the wrong group.
       throw new CredentialMismatchError(
         `Restored state is for a different conversation than "${conversationId}"`,
       );
     }
-    // encodeGroupState only serializes GroupState, not the clientConfig half
-    // of ClientState (it's static config, not group state) - reattach the
-    // defaults on restore, same as createGroup/joinGroup do when the caller
-    // doesn't override them.
+    // encodeGroupState only serializes GroupState, not the clientConfig half of ClientState (it's static config, not group state) - reattach the defaults on restore, same as createGroup/joinGroup do when the caller doesn't override them
     const state: ClientState = { ...groupState, clientConfig: defaultClientConfig };
     return new TsMlsGroupSession(conversationId, state, credential);
   }
@@ -111,10 +105,7 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
       throw new CredentialMismatchError('Bytes do not contain an MLS Welcome message');
     }
 
-    // getOwnCredential() is also what triggers the store's lazy hydration
-    // from persistent storage - must run before keyPackagesById is read
-    // below, or a freshly-constructed (not yet hydrated) store would always
-    // report "no matching key package" right after a reload.
+    // getOwnCredential() is also what triggers the store's lazy hydration from persistent storage - must run before keyPackagesById is read below, or a freshly-constructed (not yet hydrated) store would always report "no matching key package" right after a reload
     const credential = await this.store.getOwnCredential();
     const impl = await getImpl();
     const matching = await this.findMatchingKeyPackage(decoded.welcome, impl);
@@ -124,9 +115,7 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
       );
     }
 
-    // No explicit ratchetTree argument - stageCommit sets
-    // ratchetTreeExtension: true, so joinGroup recovers the tree from the
-    // Welcome's own GroupInfo extension.
+    // No explicit ratchetTree argument - stageCommit sets ratchetTreeExtension: true, so joinGroup recovers the tree from the Welcome's own GroupInfo extension
     const state = await joinGroup(
       decoded.welcome,
       matching.publicPackage,
@@ -146,14 +135,14 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
     try {
       await options.verify?.(session);
     } catch (error) {
-      // A definite refusal or a stale Welcome spends the package; a transport error keeps it for the retry.
+      // A definite refusal or a stale Welcome spends the package; a transport error keeps it for the retry
       if (error instanceof MembershipMismatchError || error instanceof StaleWelcomeError) {
         await this.store.consumeKeyPackage(matching.id);
       }
       throw error;
     }
 
-    // Spent only once the join is accepted and saved, so a failed or crashed attempt leaves it for a retry.
+    // Spent only once the join is accepted and saved, so a failed or crashed attempt leaves it for a retry
     await options.onAccepted?.(session);
     await this.store.consumeKeyPackage(matching.id);
 
@@ -173,15 +162,6 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
     return undefined;
   }
 
-  /**
-   * Looked up by its FOUNDER kind, not by map/insertion order - it used to
-   * just grab the first entry in keyPackagesById, relying on provision()
-   * always running (and storing its package) before generateKeyPackages()
-   * ever does. That worked only because the package it happened to grab
-   * was never actually uploaded or claimable; an explicit kind means this
-   * can't silently start returning a claimable SINGLE_USE/LAST_RESORT
-   * package instead if that insertion order ever changed.
-   */
   private pickOwnKeyPackage() {
     const founder = [...this.store.keyPackagesById.values()].find(
       (stored) => stored.kind === 'FOUNDER',

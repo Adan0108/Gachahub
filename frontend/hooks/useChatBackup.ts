@@ -29,12 +29,7 @@ interface PendingKey {
   text: string;
 }
 
-/**
- * Encrypted history backup: server status, whether this device holds the key (and so keeps
- * uploading), turning it on (key shown once), off (at once with the key, else scheduled), and
- * restoring on a new device. Mount it once
- * on the chat page so uploads resume after every reload, not only while the modal is open.
- */
+/** Encrypted history backup: status, key holding, turning on/off, and restore; mount once on the chat page so uploads resume. */
 export function useChatBackup(userId: string | undefined) {
   const queryClient = useQueryClient();
   const statusKey = backupStatusKey(userId);

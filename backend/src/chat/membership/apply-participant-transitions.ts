@@ -21,19 +21,7 @@ export function pendingSinceChange(
   return from === 'PENDING' ? { pendingSince: null } : {};
 }
 
-/**
- * Applies membership state changes decided by the membership state machine,
- * inside the caller's transaction, all or nothing.
- *
- * Each change is conditional on the state the caller read, so two requests
- * changing the same person at once can't both win with stale assumptions -
- * the loser gets a Conflict and re-reads. Coming back from DECLINED is a
- * fresh start: role resets to MEMBER and the per-user hidden/archived marks
- * clear, as when a member is added again.
- *
- * Shared by the app-side changes (ChatRepository) and the Commit-side ones
- * (MlsHandshakesRepository) so both write participant rows the same way.
- */
+/** Applies state-machine membership changes in the caller's transaction, each conditional on the state read (a stale read throws Conflict). */
 export async function applyParticipantTransitions(
   tx: Prisma.TransactionClient,
   conversationId: string,

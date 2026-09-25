@@ -19,12 +19,7 @@ const WORK_LEASE_MS = 60_000;
 /** A device whose lease ended without a Commit stays out for this long; keep it above the poll interval. */
 const WORK_COOLDOWN_MS = 2 * 60_000;
 
-/**
- * Tells a device which membership changes it can finish. The server can't
- * create the Commits that add or remove devices - only a member's client can -
- * so it works out what is waiting and hands it to whichever member is online.
- * The device stages one Commit per conversation from the result and submits it.
- */
+/** Tells a device which membership changes it can finish, for it to stage as one Commit per conversation. */
 @Injectable()
 export class MlsMembershipWorkService {
   constructor(
@@ -98,8 +93,7 @@ export class MlsMembershipWorkService {
 
     return {
       items: await this.keepOnlyLeased(items, deviceId),
-      // A full page means there may be more; a conversation with nothing the
-      // device can act on is left out of `items` but still counts toward the page.
+      // A conversation with nothing actionable is left out of `items` but counts toward the page.
       nextCursor:
         conversations.length === CONVERSATIONS_PER_PAGE
           ? conversations[conversations.length - 1].id

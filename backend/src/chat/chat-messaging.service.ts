@@ -22,13 +22,7 @@ import type { ChatMessageMediaInput } from './chat.repository';
 import type { MessageEncryptionPort } from './ports/message-encryption.port';
 import type { ChatDeliveryPort } from './ports/chat-delivery.port';
 
-/**
- * Sending encrypted messages - the first message in a brand-new direct
- * conversation, and every message after that (direct or group). Pulled out
- * of the former monolithic ChatService as its own concern: duplicate-send
- * idempotency, participant-state eligibility, and delivery fan-out all
- * belong together here, distinct from group management or inbox listing.
- */
+/** Sends encrypted messages: first direct message and follow-ups, with idempotency, eligibility and delivery fan-out. */
 @Injectable()
 export class ChatMessagingService {
   constructor(
@@ -43,21 +37,7 @@ export class ChatMessagingService {
     private readonly chatDevicesService: ChatDevicesService,
   ) {}
 
-  /**
-   * Creates or reuses a direct convo and sends a first encrypted message.
-   *
-   * Business behavior:
-   * - Users cannot message themselves.
-   * - Recipient must exist and be active.
-   * - clientMessageId prevents duplicate sends when clients retry.
-   * - A new direct convo starts with the recipient in PENDING state, unless
-   *   sender and recipient mutually follow each other, in which case it
-   *   starts ACTIVE for both — no stranger-request step needed.
-   * - Pending stranger messages are stored but should not notify the receiver.
-   *
-   * Requires this login to be linked to a device that is still active - same gate as
-   * sendMessage, since this is just as much an encrypted-message send as a follow-up one is.
-   */
+  /** Creates or reuses a direct convo and sends a first encrypted message; clientMessageId dedupes retries, needs an active linked device. New convos start PENDING unless the users mutually follow (then ACTIVE). */
   async createDirectMessage(
     senderId: string,
     sessionId: string,
@@ -78,15 +58,7 @@ export class ChatMessagingService {
       dto.recipientUserId,
     );
 
-    // Three independent reads - none needs any of the others' results, just
-    // senderId/recipientUserId/clientMessageId which are already known -
-    // so they run concurrently instead of stacking into three round trips
-    // before any actual validation can happen. The block check stays a
-    // separate, sequential step after the recipient-exists check: batching
-    // it in here too would let Promise.all surface a "you're blocked"
-    // rejection before a "recipient not found" one even gets checked,
-    // silently reordering which error a caller sees for a
-    // doesn't-exist-and-blocked-me combination.
+    // Independent reads run concurrently; the block check stays sequential so error precedence is unchanged.
     const [recipient, existingPair, existingMessage] = await Promise.all([
       this.chatRepository.findUserById(dto.recipientUserId),
       this.chatRepository.findDirectPair(userIdA, userIdB),
@@ -119,10 +91,7 @@ export class ChatMessagingService {
       };
     }
 
-    // conversationId is only known here when this direct pair already
-    // exists (existingPair) - a genuinely brand-new conversation doesn't
-    // have one yet for the ciphertext's group_id to be cross-checked
-    // against.
+    // Only known when the direct pair already exists; a new conversation has no id to check group_id against.
     const preparedPayload = await this.messageEncryption.preparePayload(
       dto.message,
       existingPair?.conversation.id,
@@ -243,17 +212,7 @@ export class ChatMessagingService {
     };
   }
 
-  /**
-   * Send an encrypted message to an existing convo
-   *
-   * The encryption port keeps message handling opaque to the backend
-   * Service logic only validates chat rules and passes ciphertext to the repository.
-   *
-   * Requires this login to be linked to a device that is still active: membership work only
-   * schedules the Remove Commit that evicts a revoked device's leaf, it doesn't block sends
-   * before that Commit lands, so a revoked device's still-valid session could otherwise keep
-   * submitting encrypted messages in the meantime.
-   */
+  /** Sends an encrypted message to an existing convo; requires an active linked device, since revoked-device eviction lags the Remove Commit. */
   async sendMessage(
     senderId: string,
     sessionId: string,
@@ -279,13 +238,7 @@ export class ChatMessagingService {
     );
   }
 
-  /**
-   * Shared implementation for sending into an existing convo.
-   *
-   * This keeps the duplicate-send, participant-state, blocked/declined, message
-   * creation, and delivery hook behavior in one place for both first-message and
-   * follow-up-message flows.
-   */
+  /** Shared send path for first and follow-up messages: dedupe, participant state, block/decline checks, creation, delivery hook. */
   private async sendMessageToExistingConversation(
     senderId: string,
     conversationId: string,
@@ -295,9 +248,7 @@ export class ChatMessagingService {
       encryptionMeta?: Record<string, unknown>;
     },
   ) {
-    // Independent reads (neither depends on the other's result) - run
-    // concurrently instead of back-to-back to save one full DB round trip
-    // per send, which is real added latency against a remote database.
+    // Independent reads run concurrently to save a DB round trip.
     const [existingMessage, conversation] = await Promise.all([
       this.chatRepository.findMessageBySenderClientMessageId(
         senderId,
@@ -398,9 +349,7 @@ export class ChatMessagingService {
       dto.message.media,
     );
 
-    // deferred until every step that can still throw (payload prep, media
-    // validation) has succeeded, so a rejected send never leaves a deleted
-    // participant's conversation resurrected for nothing
+    // Deferred until every step that can still throw has succeeded.
     if (deletedParticipantIds.length > 0) {
       await this.chatRepository.restoreDeletedParticipants(
         conversationId,
@@ -412,9 +361,7 @@ export class ChatMessagingService {
       (participant) => participant.userId !== senderId,
     );
 
-    // Doesn't depend on the message row at all (just sender + participant
-    // state) - fired here instead of after createMessage so its DB round
-    // trip overlaps with the insert instead of stacking after it.
+    // Independent of the message row; fired early so it overlaps the insert.
     const notifiableFlagsPromise = Promise.all(
       recipientParticipants.map((participant) =>
         this.chatAccessService.isRecipientNotifiable(senderId, participant),
@@ -443,9 +390,7 @@ export class ChatMessagingService {
         throw error;
       }
 
-      // Unneeded on this path - a duplicate was already delivered by its
-      // original send. Acknowledged explicitly so firing the promise above
-      // eagerly can't surface as an unhandled rejection here.
+      // Unneeded for a duplicate; acknowledged so the eager promise cannot become an unhandled rejection.
       notifiableFlagsPromise.catch(() => undefined);
 
       return this.recoverDuplicateMessage(
@@ -501,40 +446,22 @@ export class ChatMessagingService {
     };
   }
 
-  /**
-   * Sorts user ids before storing a direct chat pair.
-   *
-   * A->B and B->A resolve to the same unique database pair,
-   * ==> prevents duplicate direct conversations between the same users.
-   */
+  /** Sorts user ids so A->B and B->A resolve to the same direct pair. */
   private normalizeDirectPair(userIdOne: string, userIdTwo: string) {
     return [userIdOne, userIdTwo].sort() as [string, string];
   }
 
-  /**
-   * Resolves the stored content type for a message payload.
-   *
-   * Single source of truth for the TEXT default so createDirectMessage and
-   * sendMessageToExistingConversation can't drift from each other.
-   */
+  /** Resolves the stored content type for a payload, defaulting to TEXT. */
   private resolveContentType(contentType?: ChatMessageContentType) {
     return contentType ?? ChatMessageContentType.TEXT;
   }
 
-  /**
-   * Validates media references and resolves them into repository-ready
-   * input, shared by createDirectMessage and sendMessageToExistingConversation.
-   *
-   * Ownership/purpose/status/count/mix validation lives in
-   * MediaService.resolveAttachableMedia, shared with PostsService's attach
-   * flow. Only the final mapping to ChatMessageMedia's shape is chat-specific.
-   */
+  /** Validates media references and maps them to repository input; policy lives in MediaService.resolveAttachableMedia. */
   private async resolveChatMessageMedia(
     senderId: string,
     mediaReferences?: ChatMediaReferenceDto[] | null,
   ): Promise<ChatMessageMediaInput[]> {
-    // a default param only covers undefined, and an explicit `"media": null`
-    // in the request body passes @IsOptional() validation unchanged
+    // A default param misses an explicit `"media": null`, which passes @IsOptional().
     if (!mediaReferences || mediaReferences.length === 0) {
       return [];
     }
@@ -571,9 +498,7 @@ export class ChatMessagingService {
     }));
   }
 
-  /**
-   * True when the error is a Prisma unique-constraint violation (P2002).
-   */
+  /** True for a Prisma unique-constraint violation (P2002). */
   private isUniqueConstraintViolation(
     error: unknown,
   ): error is Prisma.PrismaClientKnownRequestError {
@@ -583,11 +508,7 @@ export class ChatMessagingService {
     );
   }
 
-  /**
-   * Checks a unique-constraint error's target field list for one field.
-   *
-   * Handles both array and string target shapes Prisma can return.
-   */
+  /** Checks a unique-constraint error's target (array or string) for one field. */
   private constraintTargetIncludes(
     error: Prisma.PrismaClientKnownRequestError,
     field: string,
@@ -607,10 +528,7 @@ export class ChatMessagingService {
     );
   }
 
-  /**
-   * Two first-ever messages between the same pair racing the ChatDirectPair
-   * unique constraint, different collision than the message id one above
-   */
+  /** Two first-ever messages between the same pair racing the ChatDirectPair unique constraint. */
   private isDuplicateDirectPairConflict(error: unknown): boolean {
     return (
       this.isUniqueConstraintViolation(error) &&
@@ -618,10 +536,7 @@ export class ChatMessagingService {
     );
   }
 
-  /**
-   * Fetches the message that already exists for this sender and clientMessageId,
-   * only if it belongs to the conversation this call actually expected.
-   */
+  /** The existing message for this sender and clientMessageId, only if it belongs to the expected conversation. */
   private async recoverDuplicateMessage(
     senderId: string,
     expectedConversationId: string | undefined,

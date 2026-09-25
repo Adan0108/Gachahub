@@ -16,7 +16,7 @@ export interface MembershipEventStorage {
 
 const byTime = (a: MembershipEvent, b: MembershipEvent) => a.at - b.at || a.epoch - b.epoch;
 
-// One record per event so two tabs writing the same event collapse instead of racing a list.
+// One record per event so two tabs writing the same event collapse instead of racing a list
 const SEPARATOR = '\u001f';
 const recordId = (event: MembershipEvent) => `${event.conversationId}${SEPARATOR}${event.id}`;
 const conversationPrefix = (conversationId: ConversationId) => `${conversationId}${SEPARATOR}`;
@@ -40,7 +40,6 @@ export class InMemoryMembershipEventStorage implements MembershipEventStorage {
 
 const MEMBERSHIP_EVENT_STORE = 'membershipEvents';
 
-/** Encrypted-at-rest, one record per event - see mlsEncryptedStore.ts for the shared plumbing. */
 export class EncryptedIndexedDbMembershipEventStorage implements MembershipEventStorage {
   async load(conversationId: ConversationId): Promise<MembershipEvent[]> {
     const db = await openMlsDatabase();

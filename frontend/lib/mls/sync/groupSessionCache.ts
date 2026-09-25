@@ -15,10 +15,9 @@ const versionKey = (conversationId: ConversationId) => `${conversationId}#versio
 /** The in-memory group sessions of one device, kept in step with saved state and other tabs. */
 export class GroupSessionCache {
   private readonly sessions = new Map<ConversationId, GroupSession>();
-  // The stamp each cached session was loaded or saved at, so another tab's write is noticed.
+  // The stamp each cached session was loaded or saved at, so another tab's write is noticed
   private readonly versions = new Map<ConversationId, string | undefined>();
   private readonly locks = new Map<ConversationId, Promise<unknown>>();
-  // The wipe generation each conversation's running task started under.
   private readonly taskGenerations = new Map<ConversationId, number>();
 
   constructor(
@@ -28,7 +27,6 @@ export class GroupSessionCache {
     private readonly problems: Pick<GroupProblemTracker, 'mark'>,
   ) {}
 
-  /** Runs `task` alone for this device and conversation, across tabs too, on a session as new as the saved one. */
   runExclusive<T>(conversationId: ConversationId, task: () => Promise<T>): Promise<T> {
     const locked = async () =>
       withCrossTabLock(`mls:${this.deviceId}:${conversationId}`, async () => {
@@ -67,7 +65,7 @@ export class GroupSessionCache {
     try {
       session = await this.factory.restore(conversationId, stateBytes);
     } catch (error) {
-      // Saved bytes that will not restore are still a group: never "no group", or a rejoin would overwrite them.
+      // Saved bytes that will not restore are still a group: never "no group", or a rejoin would overwrite them
       return this.refuseUnreadable(conversationId, error);
     }
     this.sessions.set(conversationId, session);
@@ -93,7 +91,7 @@ export class GroupSessionCache {
   async persist(conversationId: ConversationId, session: GroupSession): Promise<void> {
     const stateBytes = await session.serialize();
     this.assertNotWiped(conversationId);
-    // Stamp first: a crash between the two writes leaves the older, still consistent state for other tabs.
+    // Stamp first: a crash between the two writes leaves the older, still consistent state for other tabs
     const stamp = crypto.randomUUID();
     try {
       await this.storage.save(versionKey(conversationId), new TextEncoder().encode(stamp));
@@ -122,7 +120,6 @@ export class GroupSessionCache {
     await this.storage.delete(versionKey(conversationId));
   }
 
-  /** Throws when local MLS data was wiped since the running task for this conversation started. */
   assertNotWiped(conversationId: ConversationId): void {
     assertGenerationCurrent(this.taskGenerations.get(conversationId) ?? currentWipeGeneration());
   }

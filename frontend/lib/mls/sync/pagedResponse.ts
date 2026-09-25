@@ -7,9 +7,9 @@ export interface Page<T> {
 /** Reads a list response that is a bare array (no paging) or an object with `items` (or the legacy `key` field) plus optional hasMore/nextCursor. */
 export function readPage<T>(response: unknown, key: string, fullPageSize?: number): Page<T> {
   if (Array.isArray(response)) {
-    // The server caps a bare-array page, so a full one means there may be more.
+    // The server caps a bare-array page, so a full one means there may be more
     const hasMore = fullPageSize !== undefined && response.length >= fullPageSize;
-    // The server pages by the last item's id, so a full bare-array page carries its own cursor.
+    // The server pages by the last item's id, so a full bare-array page carries its own cursor
     const lastId = (response.at(-1) as { id?: unknown } | undefined)?.id;
     return {
       items: response as T[],

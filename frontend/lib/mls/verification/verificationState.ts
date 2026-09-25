@@ -21,10 +21,7 @@ export interface PeerVerification extends PeerKey {
 
 export type VerificationStatus = 'unverified' | 'verified' | 'new-device' | 'changed';
 
-/**
- * 'changed' when a verified device id now has another key; 'new-device' when some current device is
- * unverified but the peer was verified before; retired verified devices are ignored.
- */
+/** 'changed' when a verified device id now has another key; 'new-device' when some current device is unverified but the peer was verified before; retired verified devices are ignored */
 export function statusOf(record: PeerVerification | undefined, current: DeviceKey[]): VerificationStatus {
   if (!record?.devices.length || !current.length) return 'unverified';
   const verified = new Map(record.devices.map((d) => [d.deviceId, d.signatureKey]));

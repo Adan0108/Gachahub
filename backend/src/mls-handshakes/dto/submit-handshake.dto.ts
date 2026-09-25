@@ -78,10 +78,7 @@ export class SubmitHandshakeDto {
   @Type(() => WelcomeDto)
   welcome?: WelcomeDto;
 
-  // Required, with no default: a client that leaves these out must be
-  // refused, not treated as "this Commit changes no one" - the server checks
-  // membership against what is declared here, and every other member's client
-  // checks the declaration against the Commit itself.
+  // Required, no default: omission is refused rather than read as "changes no one".
   @ApiProperty({
     type: [String],
     description: 'Device ids this Commit adds - exactly the Welcome recipients',

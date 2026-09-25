@@ -90,9 +90,7 @@ export class ChatDevicesRepository {
         data: {
           id: params.deviceId,
           userId: params.userId,
-          // .slice() pins the exact ArrayBuffer-backed Uint8Array type
-          // Prisma's Bytes fields want, regardless of what backed the
-          // input (Buffer, a view over a larger buffer, etc.)
+          // .slice() gives Prisma's Bytes fields an exact ArrayBuffer-backed Uint8Array
           signaturePublicKey: params.signaturePublicKey.slice(),
           ciphersuite: params.ciphersuite,
         },
@@ -144,21 +142,7 @@ export class ChatDevicesRepository {
     });
   }
 
-  /**
-   * Atomically claims one SINGLE_USE, unexpired key package belonging to
-   * the given active device (claim-once, critique C1) - the same
-   * find-then-guarded-updateMany pattern already established for
-   * MediaUpload claims (see MediaRepository/claimUploadsForAttachment).
-   *
-   * Retries against the next-oldest untried candidate whenever a concurrent
-   * request wins the race for the row this call picked, until the pool is
-   * genuinely exhausted (each attempt permanently excludes one id via
-   * triedIds, so this always terminates) - a fixed retry cap would let
-   * ordinary contention on a popular device's pool silently fall back to the
-   * reused LAST_RESORT package while real unclaimed SINGLE_USE packages
-   * still existed. MAX_CLAIM_ATTEMPTS is a defensive ceiling against a
-   * runaway loop, not an expected limit.
-   */
+  /** Atomically claims one unexpired SINGLE_USE key package of the active device, retrying past concurrent claimers until the pool is exhausted. */
   async claimSingleUseKeyPackage(deviceId: string, claimedByUserId: string) {
     const triedIds: string[] = [];
     const MAX_CLAIM_ATTEMPTS = 1000;
@@ -181,10 +165,7 @@ export class ChatDevicesRepository {
       }
 
       const claimed = await this.prisma.mlsKeyPackage.updateMany({
-        // re-checking device.revokedAt here, not just on the earlier
-        // findFirst, closes the window where a revocation landing between
-        // the read and this write would otherwise still let the claim
-        // through
+        // re-checks device.revokedAt so a revocation between read and write blocks the claim
         where: {
           id: candidate.id,
           claimedAt: null,
@@ -228,10 +209,7 @@ export class ChatDevicesRepository {
     });
   }
 
-  /**
-   * Ties a login to the chat device of its browser, once. A link is only ever moved afterward via
-   * relinkSession below, and only when the device it currently points to is dead.
-   */
+  /** Ties a login to its browser's chat device, once; only relinkSession moves it, and only off a dead device. */
   linkSession(sessionId: string, userId: string, deviceId: string) {
     return this.prisma.session.updateMany({
       where: { id: sessionId, userId, chatDeviceId: null },
@@ -239,13 +217,7 @@ export class ChatDevicesRepository {
     });
   }
 
-  /**
-   * Repoints a login already linked to a device that's since been revoked or gone, to a live one -
-   * the one case the write-once link in linkSession is allowed to move. Without this, a login
-   * whose device got retired (dormancy, cap eviction) could never link a replacement: every future
-   * device this browser provisions would hit the same write-once conflict forever, with no way
-   * back short of signing out.
-   */
+  /** Repoints a login linked to a revoked or gone device to a live one. */
   relinkSession(
     sessionId: string,
     userId: string,
@@ -279,11 +251,7 @@ export class ChatDevicesRepository {
     });
   }
 
-  /**
-   * The logins to end when a device is signed out: those linked to it. The
-   * caller's own login is kept, unless it is linked to this device - signing
-   * out the device you are in signs you out too.
-   */
+  /** Logins to end when a device is signed out: those linked to it, plus the caller's own only if linked to it. */
   async findLoginsOfDevice(
     deviceId: string,
     userId: string,
@@ -305,11 +273,7 @@ export class ChatDevicesRepository {
     });
   }
 
-  /**
-   * Bulk-deletes expired key packages. No external resource to release
-   * first (unlike MediaUpload/Cloudinary) - a plain deleteMany is safe and
-   * needs no per-row claim/batch loop.
-   */
+  /** Bulk-deletes expired key packages. */
   async deleteExpiredKeyPackages(): Promise<number> {
     const result = await this.prisma.mlsKeyPackage.deleteMany({
       where: { expiresAt: { lt: new Date() } },

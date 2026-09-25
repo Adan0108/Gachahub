@@ -60,12 +60,7 @@ export class MediaService {
           'IMAGE') as MediaResourceType;
         const purpose = dto.purpose as MediaPurpose;
 
-        /*
-         * The backend owns the complete public ID.
-         *
-         * A browser cannot upload into another user's folder by replacing
-         * this value because folder/public_id are included in the signature.
-         */
+        // The backend owns the full public ID; folder/public_id are signed so a browser cannot change them.
         const folder = opaqueKind
           ? opaqueFolder(opaqueKind, userId)
           : this.createFolder(purpose, userId);
@@ -83,13 +78,7 @@ export class MediaService {
         // size caps: preset in the Cloudinary console + getAsset check at confirm
         const uploadPreset = this.uploadPresetFor(resourceType, opaqueKind);
 
-        /*
-         * We include folder and public_id consistently in the signature.
-         *
-         * Because publicId already contains the folder path, the frontend
-         * should send exactly the returned parameters and must not derive or
-         * replace them independently.
-         */
+        // Send exactly the returned parameters; folder and public_id are signed.
         const folderOnly = folder;
         const filenameOnly = generatedName;
 
@@ -147,13 +136,7 @@ export class MediaService {
       error: string;
     }> = [];
 
-    /*
-     * Process confirmations sequentially.
-     *
-     * This keeps database operations predictable and avoids issuing multiple
-     * Prisma operations against the same adapter at the same time.
-     * A maximum batch size of 10 keeps sequential processing reasonable.
-     */
+    // Sequential: avoids concurrent Prisma operations on one adapter; batch max 10.
     for (const item of dto.items) {
       try {
         const result = await this.confirmUpload(item, userId);
@@ -207,9 +190,6 @@ export class MediaService {
     }
 
     if (upload.status === 'UPLOADED') {
-      /*
-       * Confirm is idempotent for a successful upload.
-       */
       if (upload.assetId === dto.assetId && upload.publicId === dto.publicId) {
         return this.formatUpload(upload);
       }
@@ -265,10 +245,7 @@ export class MediaService {
 
       return this.formatUpload(confirmed);
     } catch (error) {
-      /*
-       * assetId is unique. This prevents confirming one Cloudinary asset
-       * into multiple MediaUpload records.
-       */
+      // assetId is unique: one Cloudinary asset cannot back several MediaUpload records.
       console.log(error);
       throw new ConflictException(
         'This Cloudinary asset has already been registered',
@@ -302,15 +279,7 @@ export class MediaService {
     };
   }
 
-  /**
-   * Deletes the Cloudinary asset and marks an already-attached upload as
-   * deleted, for callers whose parent record (e.g. a chat message) was just
-   * deleted. No ownership check: the caller already verified it can modify
-   * whatever this upload was attached to.
-   *
-   * No-op if the upload is missing or not ATTACHED, so a caller can safely
-   * retry without needing to track whether a prior attempt partially ran.
-   */
+  /** Deletes the Cloudinary asset and marks an attached upload deleted; no-op if missing or not ATTACHED, no ownership check. */
   async releaseAttachedUpload(mediaUploadId: string): Promise<void> {
     const released = await this.destroyAttachedCloudinaryAsset(mediaUploadId);
 
@@ -319,17 +288,7 @@ export class MediaService {
     }
   }
 
-  /**
-   * Destroys the Cloudinary asset for an upload that still needs releasing
-   * (ATTACHED, or RELEASE_FAILED from a previous failed attempt) without
-   * touching its row. Returns false (no-op) if the upload is missing or
-   * already released.
-   *
-   * For a caller that must also drop its own link row (e.g. ChatMessageMedia)
-   * atomically with marking the upload DELETED - so a crash between the two
-   * writes can never leave a link row pointing at a dead upload - call this
-   * first, then do both DB writes together in one transaction.
-   */
+  /** Destroys the Cloudinary asset for an ATTACHED or RELEASE_FAILED upload without touching its row; false if missing or already released. */
   async destroyAttachedCloudinaryAsset(
     mediaUploadId: string,
   ): Promise<boolean> {
@@ -347,22 +306,12 @@ export class MediaService {
     return true;
   }
 
-  /**
-   * Flags an upload whose release failed so a retry job can pick it back up
-   * on a backoff, instead of it sitting ATTACHED - permanently excluded from
-   * cleanup - forever. Callers call this from their own catch block and
-   * should treat it as best-effort too: a failure here shouldn't block
-   * whatever they were already handling.
-   */
+  /** Flags a failed release for the retry job; best-effort, called from the caller's own catch. */
   async markReleaseFailed(mediaUploadId: string): Promise<void> {
     await this.mediaRepository.markReleaseFailed(mediaUploadId);
   }
 
-  /**
-   * Shared tail for removePendingUpload/releaseAttachedUpload: only the
-   * Cloudinary call, callers decide when it's needed and always follow up
-   * with their own markDeleted.
-   */
+  /** Cloudinary call only; callers follow up with their own markDeleted. */
   private async destroyCloudinaryAsset(upload: {
     publicId: string;
     resourceType: MediaResourceType;
@@ -374,10 +323,7 @@ export class MediaService {
     );
   }
 
-  /**
-   * Used by PostsService, CommentsService and ChatService before attaching
-   * media.
-   */
+  /** Loads the uploads a caller may attach. */
   async getAttachableUploads(params: {
     ids: string[];
     userId: string;
@@ -429,16 +375,7 @@ export class MediaService {
     return uploads;
   }
 
-  /**
-   * getAttachableUploads plus the count/mix policy every attach flow needs:
-   * every id must resolve, and images/video can't exceed the caller's limits
-   * or mix. Shared by PostsService and ChatService so the two don't drift.
-   *
-   * Callers still do their own final mapping to whatever shape their
-   * PostMedia/ChatMessageMedia row needs - that part isn't shared since the
-   * two genuinely differ (e.g. posts distinguish GIF, chat doesn't have
-   * altText).
-   */
+  /** getAttachableUploads plus the count/mix policy: every id must resolve and images/video can't exceed the caller's limits or mix. */
   async resolveAttachableMedia(params: {
     ids: string[];
     userId: string;

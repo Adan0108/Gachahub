@@ -17,12 +17,7 @@ import {
 import { ChatMessageContentType } from '../../generated/prisma/client';
 import { ChatMediaReferenceDto } from './chat-media-reference.dto';
 
-// Matches ciphertext's own MaxLength(20000) below - encryptionMeta is an
-// arbitrary object with no per-field cap of its own, otherwise bounded
-// only by whatever the request body parser's overall size limit happens
-// to be (currently Express's 100kb default, re-added by
-// @thallesp/nestjs-better-auth after Nest's own parser is disabled in
-// main.ts) rather than anything specific to this field.
+// Matches ciphertext's MaxLength(20000); encryptionMeta has no per-field cap of its own.
 const ENCRYPTION_META_MAX_JSON_LENGTH = 20000;
 
 @ValidatorConstraint({ name: 'BoundedJsonSize', async: false })
@@ -34,8 +29,7 @@ class BoundedJsonSizeConstraint implements ValidatorConstraintInterface {
     try {
       return JSON.stringify(value).length <= ENCRYPTION_META_MAX_JSON_LENGTH;
     } catch {
-      // Circular or otherwise unserializable - @IsObject() lets it through,
-      // but it could never be stored as the JSON column it's headed for.
+      // Circular/unserializable objects pass @IsObject() but cannot be stored as JSON.
       return false;
     }
   }
@@ -45,12 +39,7 @@ class BoundedJsonSizeConstraint implements ValidatorConstraintInterface {
   }
 }
 
-/**
- * Opaque encrypted message payload.
- *
- * Backend never receive plaintext message content.
- * Clients encrypt before sending and decrypt after reading from the API.
- */
+/** Opaque encrypted message payload; the backend never sees plaintext. */
 export class EncryptedMessagePayloadDto {
   @ApiProperty({
     example: 'base64-or-armored-ciphertext',

@@ -12,14 +12,7 @@ export interface ExternalJoiner {
   signatureKey: Uint8Array;
 }
 
-/**
- * Reads a device's request to join a group by itself. An external commit is a
- * public message, so unlike other Commits the server can see what it does, and
- * insists on the one shape that is a plain join: a single ExternalInit
- * proposal and a path carrying the joiner's own leaf. Anything else, in
- * particular a Remove or Add riding along, is refused, so a joiner can only
- * ever add itself.
- */
+/** Reads a device's request to join by itself; accepts only a single ExternalInit proposal with a path carrying the joiner's own leaf. */
 export function readExternalJoin(
   payload: Uint8Array,
   conversationId: string,
@@ -105,7 +98,6 @@ function readIdentity(credential: {
       return { userId: parsed.userId, deviceId: parsed.deviceId };
     }
   } catch {
-    // falls through to the refusal below
   }
   throw new BadRequestException('The joiner leaf identity is not readable');
 }
@@ -130,13 +122,7 @@ export function assertJoinerMatchesDevice(
   }
 }
 
-/**
- * RFC 9420 §6.1: a join commit is signed over the group context, which the
- * server holds in its stored snapshot. Verifying it here means a stolen login
- * alone (the device's PUBLIC key is in every roster response, its private key
- * is not) cannot submit a garbage join that every member would refuse - the
- * one move that would freeze the group.
- */
+/** RFC 9420 §6.1: verifies the join commit's signature against the group context in the stored snapshot. */
 export async function assertExternalJoinSigned(
   commitPayload: Uint8Array,
   storedGroupInfoPayload: Uint8Array,

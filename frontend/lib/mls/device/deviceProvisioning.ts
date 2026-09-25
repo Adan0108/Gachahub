@@ -15,23 +15,13 @@ interface ApiError extends Error {
 const DEVICE_REVOKED = 'DEVICE_REVOKED';
 const DEVICE_NOT_FOUND = 'DEVICE_NOT_FOUND';
 
-// Keyed by store instance (not userId alone) so unrelated store instances -
-// e.g. in tests - never share an in-flight entry. Without this, several
-// hook instances (useDeviceIdentity is mounted independently from AppShell,
-// chat/page.jsx, and useSyncEngine) can all observe "not yet provisioned"
-// before the first call resolves and each provision + register a distinct
-// device with the backend, silently orphaning every loser.
+// Keyed by store instance (not userId alone) so unrelated store instances - e.g. in tests - never share an in-flight entry
 const inFlightProvisioning = new WeakMap<
   TsMlsDeviceIdentityStore,
   { userId: UserId; promise: Promise<DeviceCredential> }
 >();
 
-/**
- * Ensures this browser device has a provisioned, backend-registered MLS
- * identity for `userId` - provisioning a new one only when needed. Not
- * exported as a hook itself (that's useDeviceIdentity.ts) so this can be
- * unit-tested without React.
- */
+/** Ensures this browser device has a provisioned, backend-registered MLS identity for `userId` - provisioning a new one only when needed */
 export function ensureDeviceProvisioned(
   store: TsMlsDeviceIdentityStore,
   userId: UserId,
@@ -57,9 +47,7 @@ async function ensureDeviceProvisionedUnsafe(
   const credential = await provisionIfNeeded(store, userId);
   if ((await linkSession(store, credential)) !== 'device-gone') return credential;
 
-  // The server retired this identity (e.g. dormant for months): replace it in
-  // place. Group state goes with it; the decrypted history stays readable, and
-  // the fresh device rejoins every group by itself.
+  // The server retired this identity (e.g. dormant for months): replace it in place
   await store.revoke();
   await wipeGroupSessionState();
   const fresh = await provisionAndRegister(store, userId);
@@ -67,10 +55,7 @@ async function ensureDeviceProvisionedUnsafe(
   return fresh;
 }
 
-/**
- * Proves to the server that this login is in this device, so signing the device out ends the login.
- * Best effort: a failure only means that signing this device out would not end this login.
- */
+/** Proves to the server that this login is in this device, so signing the device out ends the login */
 async function linkSession(
   store: TsMlsDeviceIdentityStore,
   credential: DeviceCredential,
@@ -107,14 +92,8 @@ async function provisionIfNeeded(
     if (existing.userId === userId) {
       return existing;
     }
-    // A different user signed into this browser profile - device identity
-    // is per-user (client.ts: "one instance per logged-in user per browser
-    // profile"), so the old identity can't be reused for the new one. Must
-    // go through the backend-then-local revoke, not a local-only wipe -
-    // otherwise the old device stays ACTIVE and claimable on the backend
-    // forever, with nothing left in this browser profile able to revoke it.
+    // A different user signed into this browser profile - device identity is per-user (client.ts: "one instance per logged-in user per browser profile"), so the old identity can't be reused for the new one
     await revokeDeviceEverywhere(store);
-    // A different person: their predecessor's decrypted history must not carry over.
     await wipeAllLocalMlsSecrets();
   }
 
@@ -126,7 +105,7 @@ async function provisionAndRegister(
   userId: UserId,
 ): Promise<DeviceCredential> {
   const credential = await store.provision(userId);
-  // Real single-use packages up front, so early Adds don't all fall back to the one reusable package.
+  // Real single-use packages up front, so early Adds don't all fall back to the one reusable package
   const keyPackages = await generateKeyPackageUploads(store, {
     singleUse: SINGLE_USE_BATCH_SIZE,
     lastResort: true,
@@ -142,21 +121,7 @@ async function provisionAndRegister(
   return credential;
 }
 
-/**
- * Revokes this device everywhere. The backend call must succeed before
- * local keys are destroyed - the reverse order would strand the device as
- * "revoked" locally while the backend still treats it as active and
- * claimable, with no way to use this device's identity again to fix it.
- *
- * A 404 is the one exception: it means the backend already has no record of
- * this device (e.g. the account it belonged to was deleted outright, taking
- * the device with it via cascade - routine with the dev test-user tooling).
- * There is nothing left to notify the backend about, so this is a success
- * case for "everywhere," not a failure - treating it as an error would
- * permanently wedge ensureDeviceProvisioned's user-switch path, since the
- * stale local credential this browser still holds can never be revoked
- * again through a device row that no longer exists.
- */
+/** Revokes this device everywhere */
 export async function revokeDeviceEverywhere(store: TsMlsDeviceIdentityStore): Promise<void> {
   const credential = await store.getOwnCredential();
   try {

@@ -18,12 +18,7 @@ export interface MembershipRequest {
   event: AppMembershipEvent;
 }
 
-/**
- * What to do with a request that makes no sense from someone's current state.
- * 'throw' suits an interactive caller (a 400 back to the user); 'skip' leaves
- * that person alone and carries on with everyone else, for a sweep that read
- * their state a moment ago and can't tell someone changed it in between.
- */
+/** What to do with an event illegal from someone's current state: 'throw' fails the request, 'skip' leaves that person alone. */
 export type OnIllegalMembershipChange = 'throw' | 'skip';
 
 interface ParticipantRow {
@@ -32,20 +27,7 @@ interface ParticipantRow {
   role: string;
 }
 
-/**
- * Decides what each requested membership event does to each person, given the
- * conversation as it stands. Pure: the repository reads the facts inside a
- * transaction and applies what this returns.
- *
- * A change only waits for a Commit when there is one to wait for. Leaving
- * (a transition to LEAVING) needs a Remove Commit only if the person has a device
- * in the MLS group; with none there is nothing to wait for, so it is final at
- * once - otherwise they would sit in LEAVING forever, and LEAVING blocks every
- * send in the group until it is cleared. Joining (a transition to JOINING) needs
- * an Add Commit only if none of their devices is in yet - one may already be
- * there, added while they were still PENDING. Both are read off the transition
- * table's own result, so a new event needs only its row in the table.
- */
+/** Pure: decides what each requested membership event does to each person; a change waits for a Commit only when one is needed. */
 export function planMembershipChanges(params: {
   requests: readonly MembershipRequest[];
   participants: readonly ParticipantRow[];

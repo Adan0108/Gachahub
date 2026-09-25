@@ -19,11 +19,7 @@ import {
 /** Conversations returned per request; a device that has more just asks again once these are done. */
 const JOINABLE_PER_REQUEST = 50;
 
-/**
- * The reading side of a device joining a group by itself: which groups it could
- * join, and the public snapshot to join from. The joining itself is submitted
- * through MlsHandshakesService.submitExternalJoin, like any other Commit.
- */
+/** The reading side of a device joining by itself: joinable groups and the snapshot to join from. */
 @Injectable()
 export class MlsSelfJoinService {
   constructor(

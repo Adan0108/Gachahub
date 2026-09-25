@@ -962,9 +962,7 @@ describe('ChatDevicesService', () => {
       ).rejects.toThrow(ConflictException);
     });
 
-    // regression: a login's device link is write-once, so once its device is retired (dormancy,
-    // cap eviction) every future device this same browser provisions hit the same conflict
-    // forever - the login could never send again short of signing out.
+    // regression: a login whose linked device was retired must be able to link a replacement
     it('says the session is missing, not that it is linked elsewhere, when the login row does not exist', async () => {
       repository.linkSession.mockResolvedValue({ count: 0 });
       repository.findSessionDeviceId.mockResolvedValue(null);

@@ -72,7 +72,6 @@ function videoThumbnail(file: Blob): Promise<Thumbnail | null> {
   });
 }
 
-/** Best-effort preview: null for anything the browser can't decode - the attachment still sends without one. */
 export async function generateThumbnail(file: File): Promise<Thumbnail | null> {
   try {
     if (file.type.startsWith('image/') && file.type !== 'image/svg+xml') {

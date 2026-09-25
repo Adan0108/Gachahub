@@ -264,13 +264,7 @@ async function request(path, options = {}) {
   return response.status === 204 ? null : response.json();
 }
 
-/**
- * Submits an MLS handshake without going through request()'s generic error
- * handling: a 409 there is not a failure to surface as a thrown Error, it's
- * a structured { outcome: 'conflict', handshake } body the sync engine
- * needs in full (the winning commit to catch up on) - request() would
- * collapse that down to just its `message` string and discard the rest.
- */
+/** Submits an MLS handshake, returning a 409 as a structured { outcome: 'conflict', handshake } instead of throwing. */
 async function submitMlsCommit(path, payload) {
   if (USE_MOCKS) return mutation(path, payload);
 
@@ -690,9 +684,7 @@ export const api = {
     mutation(backendRoutes.mlsFaults(conversationId), payload),
   consumeMlsWelcome: (deviceId, welcomeId) =>
     mutation(backendRoutes.mlsConsumeWelcome(deviceId, welcomeId)),
-  // Dev tools only - the backend only registers these routes at all when
-  // NODE_ENV === 'development' (DevModule in app.module.ts), so these calls
-  // 404 in any other environment.
+  // Dev tools only; 404 outside development.
   listDevTestUsers: () => request(backendRoutes.devTestUsers),
   createDevTestUser: (label) => mutation(backendRoutes.devTestUsers, label ? { label } : {}),
   impersonateDevTestUser: (id) => mutation(backendRoutes.devTestUserImpersonate(id)),

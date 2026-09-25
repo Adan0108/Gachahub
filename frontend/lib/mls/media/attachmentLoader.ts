@@ -16,7 +16,7 @@ interface InFlight {
 }
 const inFlight = new Map<string, InFlight>();
 
-// The server picks this URL; a peer's client must never be steered to fetch from anywhere else.
+// The server picks this URL; a peer's client must never be steered to fetch from anywhere else
 export function isTrustedBlobUrl(value: string): boolean {
   try {
     const url = new URL(value);

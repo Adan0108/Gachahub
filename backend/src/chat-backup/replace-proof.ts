@@ -3,7 +3,7 @@ import { BACKUP_PROOF_DOMAINS } from './chat-backup.constants';
 
 export type ProofAction = keyof typeof BACKUP_PROOF_DOMAINS;
 
-/** Proof: HMAC-SHA256 keyed by the replaceSecret (derived from the backup key), over JSON [action domain, userId, nonce, keyCheck, replaceSecret], answering a single-use 5-minute nonce; keyCheck and replaceSecret are the new key's for a replace and empty otherwise. */
+/** HMAC-SHA256 proof keyed by replaceSecret over a single-use 5-minute nonce; keyCheck/replaceSecret are the new key's on replace, empty otherwise. */
 export function computeBackupProof(
   secret: Uint8Array,
   action: ProofAction,

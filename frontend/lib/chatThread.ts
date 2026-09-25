@@ -28,12 +28,7 @@ function leadingUnreadableIds(
   return hidden;
 }
 
-/**
- * The thread's rows in order: an optional history banner, then messages with membership events
- * between them. An event sorts by its commit time against message createdAt (both server clocks
- * when the handshake time is known), and goes before a message with the same timestamp.
- * `collapseLeading` off keeps every undecryptable message (a group with a real problem).
- */
+/** The thread's rows in order: history banner, then messages with membership events sorted by server time (events first on ties). */
 export function buildThreadItems<M extends ThreadMessage>(input: {
   messages: M[];
   decrypted: Record<string, DecryptState>;
@@ -74,10 +69,7 @@ export function threadItemKey(item: ThreadItem): string {
   return item.kind === 'event' ? item.event.id : item.message.id;
 }
 
-/**
- * An undecryptable message bounded on both sides by ones this device DID read was very likely
- * sent during a gap in membership; a genuine decrypt failure has no reason to be bounded like that.
- */
+/** An undecryptable message bounded on both sides by readable ones was likely sent during a membership gap. */
 export function wasLikelySentDuringAbsence(
   messages: ThreadMessage[],
   decrypted: Record<string, DecryptState>,

@@ -39,7 +39,7 @@ import { RegisterDeviceDto } from './dto/register-device.dto';
 import { UploadKeyPackagesDto } from './dto/upload-key-packages.dto';
 import { KeyPackageItemDto } from './dto/key-package-item.dto';
 
-/** Keeps groups small enough that their published snapshot always fits (see submit-handshake.dto groupInfo cap). */
+/** Keeps groups small enough that their published snapshot always fits. */
 const MAX_ACTIVE_DEVICES_PER_USER = 10;
 /** A device idle this long quietly gives up its slot when the cap is hit. */
 const CAP_EVICTION_MIN_IDLE_MS = 14 * 24 * 60 * 60 * 1000;
@@ -79,19 +79,11 @@ export class ChatDevicesService {
     };
   }
 
-  /**
-   * Registers a new device for the current user. Not idempotent by design
-   * (matches DeviceIdentityStore.provision() on the frontend) - calling
-   * this with a deviceId that already exists is always a conflict, never a
-   * silent no-op, since the caller only calls it once per fresh identity.
-   */
+  /** Registers a new device; not idempotent, an existing deviceId is always a conflict. */
   async registerDevice(userId: string, dto: RegisterDeviceDto) {
     this.uploadRateLimiter.assertNotRateLimited(userId);
 
-    // Every key package is already checked against PINNED_CIPHERSUITE
-    // individually (decodeAndVerifyKeyPackage) - this closes the gap where
-    // the device's own DECLARED ciphersuite could disagree with that, which
-    // would defeat the whole point of pinning one (critique C1).
+    // The declared ciphersuite must match the pinned one, like each key package.
     if (dto.ciphersuite !== PINNED_CIPHERSUITE) {
       throw new BadRequestException(
         `Unsupported ciphersuite: expected ${PINNED_CIPHERSUITE}`,
@@ -109,7 +101,7 @@ export class ChatDevicesService {
       dto.keyPackages,
     );
 
-    // Bounds how much one member multiplies every group they are in (~10 mirrors Signal/WhatsApp); a group's snapshot still grows with its TOTAL leaves (see the submit-handshake DTO caps).
+    // Bounds how many leaves one member adds to every group they are in.
     let result: Awaited<
       ReturnType<ChatDevicesRepository['createDeviceWithinCap']>
     >;
@@ -146,9 +138,7 @@ export class ChatDevicesService {
     return result.device;
   }
 
-  /**
-   * Tops up more key packages for a device the caller already owns.
-   */
+  /** Tops up key packages for a device the caller owns. */
   async uploadKeyPackages(
     userId: string,
     deviceId: string,
@@ -192,11 +182,7 @@ export class ChatDevicesService {
     };
   }
 
-  /**
-   * Step 2: records which device this login is in, so revoking the device also
-   * ends the login. Needs proof the browser holds the device key - a device id
-   * alone is not secret - and a login links once, to one device.
-   */
+  /** Step 2: records which device this login is in, so revoking the device ends the login; needs proof of the device key, links once. */
   async linkSessionToDevice(
     userId: string,
     deviceId: string,
@@ -240,11 +226,7 @@ export class ChatDevicesService {
         const currentDevice =
           await this.chatDevicesRepository.findById(current);
 
-        // The link is write-once so revoking a device ends the login it's tied to - but that
-        // only works while the linked device is still the one actually being used. Once it's
-        // retired (dormancy, cap eviction) or gone outright, refusing to move the link would
-        // leave this login permanently unable to send: every future device this browser
-        // provisions would hit this same conflict, with no way back short of signing out.
+        // A login whose linked device is retired or gone may relink to a live one.
         if (currentDevice && !currentDevice.revokedAt) {
           throw new ConflictException(
             'This login is already linked to another device',
@@ -315,11 +297,7 @@ export class ChatDevicesService {
     };
   }
 
-  /**
-   * Signs a device out: its logins end at once, so it can no longer read or do
-   * anything in the app. The device itself, its keys and its place in every
-   * group are untouched, and it comes back by logging in again.
-   */
+  /** Signs a device out: its logins end at once; the device, keys and group places are untouched. */
   async signOutDevice(
     userId: string,
     deviceId: string,
@@ -340,22 +318,7 @@ export class ChatDevicesService {
     return { message: 'Device signed out' };
   }
 
-  /**
-   * Claims one key package per active device of targetUserId, to add them all
-   * in one Commit (MLS membership is per device). Prefers a SINGLE_USE package,
-   * falling back to the device's LAST_RESORT one; a device with neither is skipped.
-   *
-   * Two ways to be allowed:
-   * - Messaging someone (no conversationId): a requester block and the target's
-   *   messageRequestSetting apply, unless claiming your own devices.
-   * - Finishing a change to a group (conversationId): the group must be MLS, the
-   *   caller ACTIVE, the target entitled to a leaf; devices already in the group
-   *   are skipped. A PENDING target additionally must not have blocked the requester (or
-   *   vice versa) nor set messageRequestSetting to NO_ONE (see assertMayClaimForGroup).
-   *
-   * excludeDeviceId leaves out the device creating the group; deviceIds limits
-   * the claim to those devices, so none registered meanwhile is claimed and wasted.
-   */
+  /** Claims one key package per active device of targetUserId (SINGLE_USE first, else LAST_RESORT; devices with neither are skipped), for messaging them or finishing a group change; excludeDeviceId and deviceIds narrow the devices. */
   async claimKeyPackagesForUser(
     requesterId: string,
     targetUserId: string,
@@ -392,7 +355,6 @@ export class ChatDevicesService {
         (!deviceIds || deviceIds.includes(device.id)),
     );
 
-    // The request above counted once; every extra package handed out counts too.
     if (devices.length > 1) {
       this.fetchRateLimiter.assertNotRateLimited(
         requesterId,
@@ -406,9 +368,7 @@ export class ChatDevicesService {
     );
     const offers = claims.filter((offer) => offer !== null);
 
-    // Own devices and devices for a group can legitimately be none (nothing new
-    // to add); someone else's account with nothing to claim means they can't be
-    // messaged yet.
+    // Own or group claims may be empty; someone else's account with nothing to claim is not messageable yet.
     if (offers.length === 0 && !isOwnDevices && !conversationId) {
       throw new NotFoundException(
         'This user has no available devices to message yet',
@@ -448,8 +408,6 @@ export class ChatDevicesService {
       await this.assertPendingInviteeStillConsents(requesterId, targetUserId);
     }
 
-    // A group with no MLS roster has nothing to finish, and no key package of
-    // anyone's is ever needed for it.
     if (!(await this.mlsGroupRosterRepository.hasRoster(conversationId))) {
       throw new ForbiddenException('This conversation has no MLS group yet');
     }
@@ -549,10 +507,7 @@ export class ChatDevicesService {
     requesterId: string,
     targetUserId: string,
   ) {
-    // Asymmetric, matching chat.service.ts's assertSenderHasNotBlockedRecipient:
-    // the requester's own block stops them, but being blocked BY the target
-    // doesn't - a blocked-by party can still message today (silently), so it
-    // must still be able to provision a device to encrypt that message with.
+    // Asymmetric: only the requester's own block stops them, not being blocked by the target.
     const requesterBlockedTarget = await this.blocksService.isBlocked(
       requesterId,
       targetUserId,
@@ -576,12 +531,7 @@ export class ChatDevicesService {
     }
   }
 
-  /**
-   * Public: stage 4 (MlsHandshakesService) reuses this exact ownership
-   * check rather than re-implementing it - a device submitting a handshake
-   * or fetching Welcomes has to pass the same "do you own this active
-   * device" test as uploading key packages does.
-   */
+  /** Asserts the caller owns this active device. */
   async assertOwnActiveDevice(userId: string, deviceId: string) {
     const device = await this.chatDevicesRepository.findById(deviceId);
 
@@ -603,14 +553,7 @@ export class ChatDevicesService {
     return device;
   }
 
-  /**
-   * Confirms this login is linked to a device (see linkSessionToDevice) and that
-   * device is still owned and active - the gate a message-send endpoint runs
-   * before accepting ciphertext. Membership work only schedules the Remove Commit
-   * that evicts a revoked device's leaf; it doesn't block sends before that
-   * Commit lands, so a revoked device's still-valid session cookie could
-   * otherwise keep submitting encrypted messages in the meantime.
-   */
+  /** Confirms this login is linked to a device that is still owned and active; the gate for message sends. */
   async assertSessionLinkedToActiveDevice(
     userId: string,
     sessionId: string,

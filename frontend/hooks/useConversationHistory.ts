@@ -44,18 +44,7 @@ function unseen<Message extends HistoryMessage>(incoming: Message[], ...shown: M
   return incoming.filter((message) => !known.has(message.id));
 }
 
-/**
- * Scroll-back history for one conversation, layered over the newest-messages window the caller
- * already polls: older batches load as the user nears the top, the scroll position is held steady
- * as they are prepended, and a 429 from the server pauses loading with a countdown, then resumes
- * on its own if the user is still sitting at the top.
- *
- * The window shifts forward as messages arrive; anything that falls off its end is folded into the
- * older history instead of being lost (see messagesFallenOutOfWindow). Switching conversations
- * starts everything over - done by comparing against the last render rather than in an effect,
- * the pattern React recommends for deriving state from a changed input
- * (https://react.dev/learn/you-might-not-need-an-effect).
- */
+/** Scroll-back history over the caller's newest window: loads older batches near the top, holds scroll position, pauses on 429. */
 export function useConversationHistory<Message extends HistoryMessage>(
   conversationId: string,
   newestPage: MessagesPage<Message> | undefined,

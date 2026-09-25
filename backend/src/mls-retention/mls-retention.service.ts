@@ -18,12 +18,7 @@ interface PruneRule {
   deleteBatch: (now: Date) => Promise<number>;
 }
 
-/**
- * Prunes MLS rows nothing will read again. mls_handshakes is deliberately NOT pruned: members
- * catch up by applying every Commit in order, so the log is bounded by retiring dormant devices.
- * mls_group_members is not pruned either: removed rows rebuild the roster for members lagging on old epochs.
- * Expired key packages are purged by MlsKeyPackageCleanupService.
- */
+/** Prunes MLS rows nothing will read again; handshakes and group members are deliberately kept. */
 @Injectable()
 export class MlsRetentionService {
   private readonly logger = new Logger(MlsRetentionService.name);

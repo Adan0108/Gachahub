@@ -9,12 +9,7 @@ import type { LeafIndex } from 'ts-mls/treemath.js';
 import { bytesEqual } from '../common/utils/bytes';
 import { getPinnedCiphersuiteImpl } from '../common/utils/mls-pinned-ciphersuite';
 
-/**
- * A GroupInfo is the public snapshot a device joins from, so what the server
- * hands out must at least be one, for this conversation, at the epoch it says.
- * A joining device checks the tree inside it against the server's roster before
- * it acts; the signature is checked separately by assertGroupInfoSignedBy.
- */
+/** Asserts a GroupInfo is a snapshot for this conversation at the stated epoch; the signature is checked by assertGroupInfoSignedBy. */
 export function assertIsGroupInfoFor(
   payload: Uint8Array,
   conversationId: string,

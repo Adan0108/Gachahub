@@ -5,13 +5,6 @@ import { TsMlsDeviceIdentityStore, TsMlsGroupSessionFactory } from './tsMlsAdapt
 import { EncryptedIndexedDbDeviceIdentityStorage } from '../storage/deviceIdentityStorage';
 import { resetMlsDatabaseForTests } from '../storage/mlsEncryptedStore';
 
-/**
- * Stage 6: the step-2 bake-off's TsMlsDeviceIdentityStore never persisted
- * anything (a fresh crypto.randomUUID() every construction, key packages in
- * a plain Map) - contractTests.ts never needed it to. These tests exercise
- * the real behavior a browser reload requires: a brand-new instance over
- * the same backing storage must recover as the SAME device, not a new one.
- */
 describe('TsMlsDeviceIdentityStore persistence', () => {
   beforeEach(() => {
     globalThis.indexedDB = new IDBFactory();
@@ -31,8 +24,6 @@ describe('TsMlsDeviceIdentityStore persistence', () => {
     const before = new TsMlsDeviceIdentityStore(storage);
     const credentialBefore = await before.provision('user-1');
 
-    // A brand-new instance, same backing storage - what actually happens on
-    // a page reload (the old in-memory object is gone).
     const after = new TsMlsDeviceIdentityStore(storage);
 
     expect(await after.isProvisioned()).toBe(true);
@@ -65,8 +56,6 @@ describe('TsMlsDeviceIdentityStore persistence', () => {
       throw new Error('generateKeyPackages(1) returned no key packages');
     }
 
-    // Bob's key package is uploaded and someone invites him - meanwhile his
-    // own tab has reloaded, so a fresh store/factory must handle the Welcome.
     const bobAfterReload = new TsMlsDeviceIdentityStore(bobStorage);
     const bobFactoryAfterReload = new TsMlsGroupSessionFactory(bobAfterReload);
 

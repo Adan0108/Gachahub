@@ -16,16 +16,11 @@ import {
 import { encodeIdentity } from './identityCodec';
 import { getImpl } from './tsMlsShared';
 
-// Prefixed before signing a session-link challenge, so the device key never signs raw server bytes that
-// could double as an MLS structure. Duplicated in backend session-link-proof.ts - keep both in step; each
-// side has a test that pins this exact string.
+// Prefixed before signing a session-link challenge, so the device key never signs raw server bytes that could double as an MLS structure
 export const SESSION_LINK_LABEL = 'gachahub/session-link/v1\n';
 const SESSION_LINK_CHALLENGE_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 
-// ts-mls's own defaultLifetime is notBefore=0/notAfter=max-int64 - an
-// effectively-infinite key package a real server should never accept.
-// Matches the backend's MAX_KEY_PACKAGE_LIFETIME_SECONDS
-// (chat-devices/mls-key-package.util.ts) - keep the two in sync.
+// ts-mls's own defaultLifetime is notBefore=0/notAfter=max-int64 - an effectively-infinite key package a real server should never accept
 const KEY_PACKAGE_LIFETIME_DAYS = 90;
 
 function boundedLifetime() {
@@ -39,11 +34,7 @@ function boundedLifetime() {
 export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
   private deviceId: DeviceId | undefined;
   private credential: DeviceCredential | undefined;
-  // One persistent identity signing keypair, reused for every key package
-  // this device ever creates. generateKeyPackage() (no "WithKey") mints a
-  // FRESH signature key on every call - using it directly would mean each
-  // key package for the same device reports a different signaturePublicKey,
-  // making device identity meaningless for pinning/safety-number checks.
+  // One persistent identity signing keypair, reused for every key package this device ever creates. generateKeyPackage() (no "WithKey") mints a FRESH signature key on every call - using it directly would mean each key package for the same device reports a different signaturePublicKey, making device identity meaningless for pinning/safety-number checks
   private signatureKeyPair: { signKey: Uint8Array; publicKey: Uint8Array } | undefined;
   private nextKeyPackageId = 0;
   readonly keyPackagesById = new Map<string, StoredKeyPackage>();
@@ -59,8 +50,6 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
   }
 
   async provision(userId: UserId): Promise<DeviceCredential> {
-    // Nothing to hydrate once we're about to establish fresh state - and a
-    // concurrent hydration finishing afterward must not clobber it.
     this.hydrationPromise = Promise.resolve();
 
     const impl = await getImpl();
@@ -78,11 +67,7 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
       this.signatureKeyPair,
       impl,
     );
-    // Never uploaded, never offered to anyone - this device's own package
-    // for founding groups it creates itself (TsMlsGroupSessionFactory.
-    // create/pickOwnKeyPackage). Tagged FOUNDER, not SINGLE_USE, so it's
-    // found by that explicit kind rather than by happening to be the
-    // first entry generateKeyPackages() hasn't added yet.
+    // Never uploaded, never offered to anyone - this device's own package for founding groups it creates itself (TsMlsGroupSessionFactory. create/pickOwnKeyPackage)
     this.storeKeyPackage(kp.publicPackage, kp.privatePackage, 'FOUNDER');
     this.credential = {
       userId,
@@ -140,15 +125,7 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
     );
   }
 
-  /**
-   * Returns raw base64-free encodeMlsMessage(mls_key_package) bytes - no
-   * adapter-specific wrapping. This is exactly what the backend's
-   * KeyPackageItemDto.payload expects once base64-encoded, and exactly what
-   * stageCommit's offer.keyPackage expects on the other end - a real
-   * KeyPackageRef (computed from the key package itself, see
-   * findMatchingKeyPackage below) is what lets a joiner recognize a Welcome
-   * addressed to it, not an out-of-band id.
-   */
+  /** Returns raw base64-free encodeMlsMessage(mls_key_package) bytes - no adapter-specific wrapping */
   async generateKeyPackages(
     count: number,
     kind: 'SINGLE_USE' | 'LAST_RESORT' = 'SINGLE_USE',
@@ -174,20 +151,7 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
     return out;
   }
 
-  /**
-   * Removes a used SINGLE_USE key package's private key from local storage
-   * - its one-time secret has already been spent by the join it was
-   * matched to, so keeping it around only extends how long that key
-   * material sits on disk for no benefit, and lets a replayed/duplicated
-   * Welcome for a different conversation be satisfied by it again. Only
-   * SINGLE_USE is ever actually consumed here (an allow-list, not a
-   * LAST_RESORT deny-list): LAST_RESORT is meant to satisfy more than one
-   * Welcome when a device has no SINGLE_USE packages left, and FOUNDER is
-   * never uploaded or offered to begin with, so findMatchingKeyPackage
-   * could never legitimately match either kind anyway - this is defense
-   * in depth against that assumption ever breaking, not the thing
-   * currently preventing it.
-   */
+  /** Removes a used SINGLE_USE key package's private key from local storage - its one-time secret has already been spent by the join it was matched to, so keeping it around only extends how long that key material sits on disk for no benefit, and lets a replayed/duplicated Welcome for a different conversation be satisfied by it again */
   async consumeKeyPackage(id: string): Promise<void> {
     const stored = this.keyPackagesById.get(id);
     if (!stored || stored.kind !== 'SINGLE_USE') {
@@ -210,8 +174,7 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
   private ensureHydrated(): Promise<void> {
     if (!this.hydrationPromise) {
       this.hydrationPromise = this.hydrate().catch((error: unknown) => {
-        // Let a real storage failure be retried on the next call instead of
-        // permanently wedging this store on one bad attempt.
+        // Let a real storage failure be retried on the next call instead of permanently wedging this store on one bad attempt
         this.hydrationPromise = undefined;
         throw error;
       });

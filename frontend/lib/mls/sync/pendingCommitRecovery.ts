@@ -33,7 +33,6 @@ interface PendingCommit {
   change?: EventChange;
 }
 
-/** The slice of the session cache the recovery drives. */
 export interface PendingCommitHost {
   get(conversationId: ConversationId): Promise<GroupSession>;
   adopt(conversationId: ConversationId, session: GroupSession): Promise<void>;
@@ -48,7 +47,7 @@ export type NoticeRecorder = (
 
 /** Saves a submitted Commit before it goes out and settles it later when its outcome was never seen. */
 export class PendingCommitRecovery {
-  // Conversations known to have no pending-Commit record, so a read need not open storage for it.
+  // Conversations known to have no pending-Commit record, so a read need not open storage for it
   private readonly noPending = new Set<ConversationId>();
 
   constructor(
@@ -112,7 +111,7 @@ export class PendingCommitRecovery {
     if (this.noPending.has(conversationId)) return;
 
     const bytes = await this.storage.load(pendingCommitKey(conversationId)).catch((error: unknown) => {
-      // An unreadable record is dropped below like a corrupt one.
+      // An unreadable record is dropped below like a corrupt one
       if (error instanceof UnreadableRecordError) return new Uint8Array();
       throw error;
     });

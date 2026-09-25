@@ -9,14 +9,7 @@ import {
   type OnIllegalMembershipChange,
 } from './plan-membership-changes';
 
-/**
- * Applies membership events (add, remove, accept, decline) to a conversation's
- * participants. Everything happens in one transaction under the conversation's
- * row lock, so what is read about the MLS group - whether it exists, who has a
- * device in it - cannot change before the participants are written. A Commit
- * accepted in between would otherwise leave someone ACTIVE without a device, or
- * decline someone whose devices it just added.
- */
+/** Applies membership events to a conversation's participants in one transaction under the conversation row lock. */
 @Injectable()
 export class ChatMembershipRepository {
   constructor(
@@ -73,16 +66,7 @@ export class ChatMembershipRepository {
     return count;
   }
 
-  /**
-   * PENDING participants (group invite or DM message request) whose invite has sat
-   * unanswered since before `cutoff`, grouped by conversation. PENDING is entitled to
-   * an MLS leaf (see leaf-entitlement.ts), so an invite nobody ever accepts or
-   * declines would otherwise be permanent cryptographic membership - see
-   * ChatInviteExpiryService, which turns this into an EXPIRE_INVITE per conversation.
-   *
-   * Keyed on pendingSince, not updatedAt (which any mute/read/pin would bump), oldest
-   * first and capped at `limit` per call so the sweep can page through a backlog.
-   */
+  /** PENDING participants whose invite predates `cutoff`, grouped by conversation, oldest first, capped at `limit`. */
   async findExpiredPendingInvites(
     cutoff: Date,
     limit: number,

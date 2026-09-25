@@ -673,11 +673,7 @@ describe('MlsHandshakesService', () => {
     });
 
     describe('resubmitting an epoch that already settled - recovering from a crash', () => {
-      // The epoch is no longer the live frontier, so a fresh snapshot/signature check is skipped: a
-      // forged resubmission can still never mutate anything, because acceptExternalJoin's own epoch
-      // compare-and-set only ever accepts the FIRST commit at a given epoch. What resubmitting the exact
-      // same, already-verified bytes is FOR is telling apart "my own join won" (duplicate) from "a
-      // different change one this epoch" (conflict) - see syncEngine.ts's resolvePendingJoin.
+      // resubmitting the same verified bytes tells "my own join won" from a conflict
       it('does not re-verify the signature against a live snapshot - the epoch has already moved on', async () => {
         const join = await buildTestExternalJoin('conv-1', {
           userId: 'user-1',

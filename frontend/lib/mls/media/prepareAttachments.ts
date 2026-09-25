@@ -19,7 +19,6 @@ export type BlobUploader = (blobs: OpaqueBlob[]) => Promise<string[]>;
 
 export type AttachmentStage = 'encrypting' | 'uploading';
 
-/** Throws before any work if the selection can never be sent - so the tray can say why up front. */
 export function assertSendable(files: Pick<File, 'name' | 'size'>[]): void {
   if (files.length > MAX_FILES_PER_MESSAGE) {
     throw new AttachmentError('too-large', `Attach at most ${MAX_FILES_PER_MESSAGE} files`);

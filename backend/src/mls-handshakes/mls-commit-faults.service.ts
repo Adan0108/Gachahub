@@ -13,13 +13,7 @@ import { MlsFaultReportRateLimiterService } from './mls-fault-report-rate-limite
 import { MlsHandshakesRepository } from './mls-handshakes.repository';
 import { ParticipantStateRepository } from '../mls-group-roster/participant-state.repository';
 
-/**
- * Where a member's client tells the server it refused a Commit. Without this a
- * refused Commit freezes the conversation for every member who checks, with no
- * trace of who sent it or why - a buggy client (not even a malicious one) that
- * declares the wrong membership would do it. Recording it, and alerting, gives
- * whoever looks into it the sender and the reason.
- */
+/** Records a member client's report that it refused a Commit, and alerts. */
 @Injectable()
 export class MlsCommitFaultsService {
   constructor(
@@ -42,8 +36,7 @@ export class MlsCommitFaultsService {
     await this.chatDevicesService.assertOwnActiveDevice(userId, dto.deviceId);
     await this.assertDeviceIsInGroup(conversationId, userId, dto.deviceId);
 
-    // Only a Commit that exists can be reported, which also bounds how many
-    // distinct faults one member can file.
+    // Only an existing Commit can be reported.
     const handshake = await this.mlsHandshakesRepository.findHandshakeByEpoch(
       conversationId,
       dto.epoch,

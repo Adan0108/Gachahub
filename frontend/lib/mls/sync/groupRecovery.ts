@@ -23,7 +23,6 @@ export class GroupRecovery {
     private readonly selfJoiner: SelfJoiner,
   ) {}
 
-  /** One bounded self-join try for a group this device has no state for (see SelfJoiner). */
   recoverMissingGroup(conversationId: ConversationId): Promise<boolean> {
     return this.selfJoiner.recoverMissingGroup(conversationId);
   }
@@ -32,7 +31,7 @@ export class GroupRecovery {
   async recoverUnreadableGroup(conversationId: ConversationId): Promise<boolean> {
     if (this.groupProblems.get(conversationId)?.kind !== 'state-unreadable') return false;
 
-    // Probe and wipe under one lock, so another tab cannot save a readable copy in between.
+    // Probe and wipe under one lock, so another tab cannot save a readable copy in between
     const outcome = await this.host.runExclusive(conversationId, async () => {
       if (await this.isSavedStateReadable(conversationId)) {
         this.groupProblems.clear(conversationId);
@@ -45,7 +44,7 @@ export class GroupRecovery {
     });
     if (outcome !== 'wiped') return outcome === 'readable';
 
-    // The problem stays flagged until the rejoin succeeds; the cooldown starts here.
+    // The problem stays flagged until the rejoin succeeds; the cooldown starts here
     return this.selfJoiner.recoverMissingGroup(conversationId, { replacingUnreadable: true });
   }
 

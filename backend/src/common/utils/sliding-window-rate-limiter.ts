@@ -14,13 +14,7 @@ export interface SlidingWindowRateLimiterConfig {
   message: string;
 }
 
-/**
- * In-memory sliding-window limiter, optionally with a lockout after the cap is
- * crossed. The ordering below is load-bearing, which is why it lives in one place:
- * touching the lockout on every read keeps it from being evicted early, and
- * dropping the window when a lockout starts keeps the fetches counted before it
- * from being counted again once it ends. A rejected attempt is never recorded.
- */
+/** In-memory sliding-window limiter with an optional lockout; the ordering below is load-bearing. */
 export class SlidingWindowRateLimiter {
   private readonly recent = new Map<string, number[]>();
   private readonly lockedUntil = new Map<string, number>();

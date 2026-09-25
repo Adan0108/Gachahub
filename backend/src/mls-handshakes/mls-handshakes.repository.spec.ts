@@ -14,14 +14,6 @@ jest.mock('../mls-group-roster/mls-group-roster.repository', () => ({
 
 import { MlsHandshakesRepository } from './mls-handshakes.repository';
 
-/**
- * acceptHandshake ties the roster and the participant rows to the Commit in
- * one transaction (threat-model §3), and its rules decide who may be added or
- * removed - security-sensitive enough for a direct test, mocking $transaction
- * rather than relying on the service layer to exercise it indirectly. The
- * rules themselves are covered case by case in mls-membership-rules.spec.ts;
- * this checks they are wired in and that everything happens atomically.
- */
 describe('MlsHandshakesRepository.acceptHandshake', () => {
   function buildTx() {
     return {

@@ -42,7 +42,7 @@ interface SerializableHandshake {
   id: string;
   conversationId: string;
   epoch: number;
-  /** Null once the sending device (and its owning account) has been deleted - the Commit itself is kept regardless (see schema.prisma's MlsHandshake.senderDeviceId doc). */
+  /** Null once the sending device (and its owning account) has been deleted. */
   senderDeviceId: string | null;
   payload: Uint8Array;
   /** False for Commits from before membership was tracked, which carry nothing to check. */
@@ -128,11 +128,7 @@ export class MlsHandshakesService {
     }));
   }
 
-  /**
-   * A device adds itself to the group with no member online. The server sees the
-   * whole commit (it is public), and accepts only a plain join by the caller's
-   * own registered device; every member then checks it like any other add.
-   */
+  /** A device adds itself to the group via a public external commit; only a plain join by the caller's own device is accepted. */
   async submitExternalJoin(
     userId: string,
     conversationId: string,
@@ -156,11 +152,7 @@ export class MlsHandshakesService {
       },
     );
 
-    // Only the live frontier needs a fresh signature check: a forged commit can only mutate state there -
-    // the epoch compare-and-set below refuses anything targeting an epoch that already settled. Resubmitting
-    // THIS device's own already-accepted join (recovering from a crash between accept and save) lands here
-    // too, with the exact same bytes; acceptExternalJoin's own duplicate-vs-conflict check (identical to the
-    // one every ordinary Commit resubmission already relies on) is what tells that apart from a real race.
+    // Only the live frontier needs a fresh signature check; the epoch compare-and-set refuses settled epochs.
     const currentEpoch =
       await this.mlsHandshakesRepository.getCurrentEpoch(conversationId);
     if (currentEpoch === null) {
@@ -245,12 +237,7 @@ export class MlsHandshakesService {
     return handshakes.map((handshake) => this.serializeHandshake(handshake));
   }
 
-  /**
-   * Who is in the group at `epoch`, by the server's records. A member checks
-   * its whole ratchet tree against this after joining and after every Commit:
-   * the per-Commit attestation only proves the tree stayed honest if it started
-   * honest, and nothing else vouches for the leaves the group was created with.
-   */
+  /** Who is in the group at `epoch`, by the server's records; members check their ratchet tree against it. */
   async getRosterAtEpoch(
     userId: string,
     conversationId: string,
@@ -348,9 +335,7 @@ export class MlsHandshakesService {
 
   private toSubmitResponse(result: HandshakeAcceptResult) {
     if (result.outcome === 'conflict') {
-      // 409: the caller's Commit lost the race for this epoch. The body
-      // carries the winning handshake so the caller can catch up rather
-      // than just being told "try again" with nothing to act on.
+      // 409: lost the race for this epoch; the body carries the winning handshake.
       throw new ConflictException({
         message: 'Another commit already won this epoch',
         outcome: 'conflict',

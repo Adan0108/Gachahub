@@ -11,13 +11,7 @@ export interface WorkDevice {
   deviceId: string;
 }
 
-/**
- * The membership changes one conversation is waiting on, as far as the
- * requesting device can carry them out: devices to add (for people entitled
- * to be in the group) and devices to remove (for people who are not, or whose
- * device is gone). The device turns this into one Commit and submits it; the
- * server's acceptance of that Commit is what completes the change.
- */
+/** The membership changes one conversation is waiting on, as far as the requesting device can carry them out. */
 export interface MembershipWorkItem {
   conversationId: string;
   /** The epoch the Commit must be built from. */
@@ -41,27 +35,7 @@ export interface DeviceRecord extends WorkDevice {
   revoked: boolean;
 }
 
-/**
- * Turns what the server knows about each conversation into the work a device
- * can do, using the same entitlement rules the server enforces on a Commit
- * (chat/membership/leaf-entitlement.ts) - so anything a Commit may legitimately
- * do is something this can ask for, and nothing it asks for will be refused.
- *
- * - Add: every unrevoked device of an entitled user that is not in the group.
- *   This covers someone joining, a member's new device, and a device that had
- *   no key package when its owner joined. A PENDING invitee the requester may
- *   not claim key packages for (see refusingInviteeIds) is left out.
- * - Remove: every device in the group whose owner is not entitled, or whose
- *   device is revoked or gone. This covers someone leaving, a lost or stolen
- *   device, and a leftover device of a user who is no longer a member.
- *
- * A Commit changes at most MAX_DEVICES_PER_COMMIT devices each way, so a
- * larger backlog is handed out in chunks (lowest device ids first): once one
- * Commit lands, the next poll yields the rest.
- *
- * Needs the conversation's COMPLETE participant list: a member left out would
- * look like someone with no right to be there.
- */
+/** Turns what the server knows about each conversation into the add/remove work a device can do, capped at MAX_DEVICES_PER_COMMIT each way (lowest ids first); needs the COMPLETE participant list. */
 export function buildMembershipWork(params: {
   conversations: readonly ConversationFacts[];
   /** Every device of the entitled users and every device in the groups, revoked or not. Missing means deleted. */

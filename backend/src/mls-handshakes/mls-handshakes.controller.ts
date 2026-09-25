@@ -176,7 +176,6 @@ export class MlsHandshakesController {
     );
   }
 
-  // A POST because it takes a lease on the work it returns; a GET must be safe to repeat and prefetch.
   @Post('devices/:deviceId/membership-work')
   @ApiOperation({
     summary:
@@ -190,7 +189,6 @@ export class MlsHandshakesController {
     return this.mlsMembershipWorkService.getMembershipWork(
       session.user.id,
       deviceId,
-      // `full` costs more, so clients ask for it rarely; the default is the cheap scope.
       { scope: scope ?? 'pending', after, conversationId },
     );
   }

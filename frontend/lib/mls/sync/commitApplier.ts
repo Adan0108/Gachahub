@@ -49,7 +49,7 @@ export class CommitApplier {
         events.push(...(await this.applyHandshake(conversationId, session, handshake)));
       }
 
-      // Commits from before membership was tracked have no roster to check against.
+      // Commits from before membership was tracked have no roster to check against
       if (handshakes.some((handshake) => handshake.membershipDeclared)) {
         await this.verifier.assertTreeMatchesRoster(conversationId, session);
       }
@@ -93,7 +93,7 @@ export class CommitApplier {
       throw this.refusedCommit(conversationId, handshake.epoch, problem);
     }
 
-    // Only a commit that passed every check is worth telling the user about.
+    // Only a commit that passed every check is worth telling the user about
     return this.deriveEvents(conversationId, session, {
       change: result.membershipChange,
       epoch: result.epoch,
@@ -155,7 +155,7 @@ export class CommitApplier {
     const result = await session.process(wireBytes);
 
     if (result.kind === 'commit') {
-      // A Commit outside catch-up has no declaration to check it against, so it is always refused.
+      // A Commit outside catch-up has no declaration to check it against, so it is always refused
       this.cache.drop(conversationId);
       this.noteRefusedCommit(conversationId);
       const problem = await this.verifier.checkCommit(

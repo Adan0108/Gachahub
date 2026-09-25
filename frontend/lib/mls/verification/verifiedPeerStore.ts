@@ -12,7 +12,7 @@ export interface VerifiedPeerStore {
   remove(key: PeerKey): Promise<void>;
 }
 
-// Keyed per account and peer so logins never share verification but conversations do.
+// Keyed per account and peer so logins never share verification but conversations do
 const recordId = ({ ownUserId, peerUserId }: PeerKey) => JSON.stringify(['peer', ownUserId, peerUserId]);
 
 export class InMemoryVerifiedPeerStore implements VerifiedPeerStore {
@@ -33,7 +33,6 @@ export class InMemoryVerifiedPeerStore implements VerifiedPeerStore {
 
 const VERIFIED_PEER_STORE = 'verifiedPeers';
 
-/** Encrypted-at-rest verification records - see mlsEncryptedStore.ts for the shared AES-GCM/IndexedDB plumbing. */
 export class EncryptedIndexedDbVerifiedPeerStore implements VerifiedPeerStore {
   async get(key: PeerKey): Promise<PeerVerification | undefined> {
     const db = await openMlsDatabase();

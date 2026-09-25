@@ -15,8 +15,6 @@ import {
   type Proposal,
   type PublicMessage,
 } from 'ts-mls';
-// Not re-exported from the package root - internal but reachable via the
-// package's own "./*.js" subpath export map (see ts-mls's package.json).
 import { toNodeIndex, nodeToLeafIndex } from 'ts-mls/treemath.js';
 import { decryptSenderData } from 'ts-mls/privateMessage.js';
 import type { GroupSession } from '../contract/client';
@@ -125,16 +123,11 @@ export class TsMlsGroupSession implements GroupSession {
     let incomingKind: 'commit' | 'proposal' | undefined;
     let proposalInfo:
       { proposal: Proposal; proposer: DeviceCredential; isExternal: boolean } | undefined;
-    // A member-sent proposal whose credential didn't decode - distinct from
-    // proposalInfo being absent (e.g. this was a commit, not a proposal).
+    // A member-sent proposal whose credential didn't decode - distinct from proposalInfo being absent (e.g. this was a commit, not a proposal)
     let proposalCredentialMismatch = false;
     const treeBeforeCommit = this.state.ratchetTree;
 
-    // SenderData is encrypted separately from the actual message content
-    // (a lighter, non-ratchet-consuming layer meant for exactly this kind
-    // of metadata lookup), so peeking at it here doesn't touch the
-    // per-generation keys processPrivateMessage still needs to consume
-    // right after - safe to decrypt both without double-consuming anything.
+    // SenderData is encrypted separately from the actual message content (a lighter, non-ratchet-consuming layer meant for exactly this kind of metadata lookup), so peeking at it here doesn't touch the per-generation keys processPrivateMessage still needs to consume right after - safe to decrypt both without double-consuming anything
     const senderData = await decryptSenderData(
       decoded.privateMessage,
       this.state.keySchedule.senderDataSecret,
@@ -147,11 +140,7 @@ export class TsMlsGroupSession implements GroupSession {
         ? decodeIdentity(senderNode.leaf.credential.identity)
         : undefined;
 
-    // Resolved from the tree as it stood BEFORE this message - no
-    // one-time key consumed yet - so an application message with an
-    // unidentifiable sender can be rejected here instead of after
-    // decrypting it, where there'd be no way to "undo" that consumption
-    // just to report the failure.
+    // Resolved from the tree as it stood BEFORE this message - no one-time key consumed yet - so an application message with an unidentifiable sender can be rejected here instead of after decrypting it, where there'd be no way to "undo" that consumption just to report the failure
     if (decoded.privateMessage.contentType === 'application' && !senderIdentity) {
       return { kind: 'rejected', reason: 'credential-mismatch' };
     }
@@ -165,10 +154,7 @@ export class TsMlsGroupSession implements GroupSession {
         incomingKind = incoming.kind;
         if (incoming.kind === 'proposal') {
           const senderLeaf = incoming.proposal.senderLeafIndex;
-          // Only a "member" sender has a leaf index (sender.d.ts) - a
-          // standalone proposal with none came through some other channel
-          // (external_senders, a new-member self-proposal/commit), none of
-          // which this app configures anywhere today.
+          // Only a "member" sender has a leaf index (sender.d.ts) - a standalone proposal with none came through some other channel (external_senders, a new-member self-proposal/commit), none of which this app configures anywhere today
           const isExternal = senderLeaf === undefined;
           const senderNode = !isExternal ? treeBeforeCommit[senderLeaf * 2] : undefined;
           const proposerCredential =
@@ -176,12 +162,7 @@ export class TsMlsGroupSession implements GroupSession {
               ? decodeIdentity(senderNode.leaf.credential.identity)
               : undefined;
 
-          // A real member sent this (not external) but its credential
-          // isn't decodable - reporting it under a fabricated 'unknown'
-          // identity would silently defeat any pinning/safety-number check
-          // built on DeviceCredential.signatureKey. Reject it outright
-          // instead; 'external' proposals genuinely have no member
-          // identity to report, which 'unknown' below still covers.
+          // A real member sent this (not external) but its credential isn't decodable - reporting it under a fabricated 'unknown' identity would silently defeat any pinning/safety-number check built on DeviceCredential.signatureKey
           if (!isExternal && !proposerCredential) {
             proposalCredentialMismatch = true;
             return 'reject';
@@ -195,12 +176,7 @@ export class TsMlsGroupSession implements GroupSession {
             isExternal,
           };
 
-          // types.ts's ProcessResult.isExternal doc: a GroupSession MUST
-          // reject an external proposal whose proposalType is 'add' - a
-          // compromised server could otherwise insert an attacker's device
-          // through this channel. Returning 'reject' here stops ts-mls from
-          // ever applying it to local state (processProposal is skipped);
-          // the caller still learns about it via the isExternal flag above.
+          // types.ts's ProcessResult.isExternal doc: a GroupSession MUST reject an external proposal whose proposalType is 'add' - a compromised server could otherwise insert an attacker's device through this channel
           if (isExternal && incoming.proposal.proposal.proposalType === 'add') {
             return 'reject';
           }
@@ -222,8 +198,7 @@ export class TsMlsGroupSession implements GroupSession {
       }
       return {
         kind: 'application',
-        // Guaranteed resolved: the early return above already rejected
-        // this message before processPrivateMessage ran if it weren't.
+        // Guaranteed resolved: the early return above already rejected this message before processPrivateMessage ran if it weren't
         senderDeviceId: senderIdentity!.deviceId,
         epoch: Number(this.state.groupContext.epoch),
         envelope,
@@ -258,10 +233,7 @@ export class TsMlsGroupSession implements GroupSession {
     };
   }
 
-  /**
-   * A device joining by itself sends a public commit. Anything else sent as a public message is refused:
-   * every other change to the group travels as a private message.
-   */
+  /** A device joining by itself sends a public commit */
   private async processExternalCommit(publicMessage: PublicMessage): Promise<ProcessResult> {
     const { content } = publicMessage;
     if (!bytesEqual(content.groupId, encodeConversationId(this.conversationId))) {
@@ -366,13 +338,7 @@ export class TsMlsGroupSession implements GroupSession {
 
     let welcome: { deviceIds: DeviceId[]; welcomeBytes: Uint8Array } | undefined;
     if (commitResult.welcome && addedDeviceIds.length > 0) {
-      // One Welcome message carries secrets for every newly-added device at
-      // once (Welcome.secrets[], each entry a KeyPackageRef) - the same
-      // bytes are for every added device, and each recognizes its own entry
-      // itself (joinFromWelcome/findMatchingKeyPackage), same as a real MLS
-      // client would. ratchetTreeExtension: true above means the tree
-      // travels inside this Welcome's own GroupInfo - joinGroup recovers it
-      // from there, no separate out-of-band tree needed.
+      // One Welcome message carries secrets for every newly-added device at once (Welcome.secrets[], each entry a KeyPackageRef) - the same bytes are for every added device, and each recognizes its own entry itself (joinFromWelcome/findMatchingKeyPackage), same as a real MLS client would. ratchetTreeExtension: true above means the tree travels inside this Welcome's own GroupInfo - joinGroup recovers it from there, no separate out-of-band tree needed
       const welcomeBytes = encodeMlsMessage({
         welcome: commitResult.welcome,
         wireformat: 'mls_welcome',

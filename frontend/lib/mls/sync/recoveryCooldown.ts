@@ -1,6 +1,6 @@
 import type { ConversationId } from '../contract/types';
 
-// One self-join try per conversation per window, so a group that cannot be rejoined is not hammered.
+// One self-join try per conversation per window, so a group that cannot be rejoined is not hammered
 export const RECOVERY_COOLDOWN_MS = 5 * 60_000;
 
 /** When a group's last recovery try was, so every kind of recovery shares one window per conversation. */

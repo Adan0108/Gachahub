@@ -5,12 +5,7 @@ const DB_VERSION = 4;
 const KEY_STORE = 'cryptoKeys';
 const ENCRYPTION_KEY_RECORD = 'local-encryption-key';
 
-/**
- * Every object store this app's local MLS secrets live in - listed once so
- * opening the database always creates the full schema, and
- * wipeAllLocalMlsSecrets always clears every one of them, not just whichever
- * store a particular caller happens to know about.
- */
+/** Every object store this app's local MLS secrets live in - listed once so opening the database always creates the full schema, and wipeAllLocalMlsSecrets always clears every one of them, not just whichever store a particular caller happens to know about */
 const DATA_STORE_NAMES = ['deviceIdentity', 'groupSessions', 'decryptedMessages', 'verifiedPeers', 'membershipEvents', 'backupState'] as const;
 export type DataStoreName = (typeof DATA_STORE_NAMES)[number];
 
@@ -30,13 +25,6 @@ function isTaggedBigInt(value: unknown): value is TaggedBigInt {
   return typeof value === 'object' && value !== null && '$bigint' in value;
 }
 
-/**
- * Generic value -> bytes codec for anything this store encrypts: plain
- * objects (PersistedDeviceIdentity) as well as bare Uint8Array (a
- * GroupSession's serialize() output). ts-mls's types nest Uint8Array (key
- * material) and bigint (Lifetime.notBefore/notAfter) values that JSON can't
- * represent directly - tagged so they round-trip exactly.
- */
 export function serializeToBytes(value: unknown): Uint8Array {
   const json = JSON.stringify(value, (_key, v: unknown) => {
     if (v instanceof Uint8Array) {
@@ -88,13 +76,13 @@ export class MlsWipedError extends Error {
   }
 }
 
-// How long an open may wait behind another tab's old-version connection before giving up.
+// How long an open may wait behind another tab's old-version connection before giving up
 const OPEN_BLOCKED_TIMEOUT_MS = 10_000;
 const WIPE_CHANNEL_NAME = 'gachahub-mls-wipe';
 
 let dbPromise: Promise<IDBDatabase> | undefined;
 let openConnection: IDBDatabase | undefined;
-// Bumped by every wipe, in this tab or another: a write that began under an older one is dropped.
+// Bumped by every wipe, in this tab or another: a write that began under an older one is dropped
 let wipeGeneration = 0;
 const wipeListeners = new Set<() => void>();
 let wipeChannel: BroadcastChannel | undefined;
@@ -118,7 +106,6 @@ export function assertNotWiped(generation: number): void {
   if (generation !== wipeGeneration) throw new MlsWipedError();
 }
 
-/** The current wipe generation: snapshot it when a task starts, then assertNotWiped before each write. */
 export function currentWipeGeneration(): number {
   return wipeGeneration;
 }
@@ -134,7 +121,7 @@ function ensureWipeChannel(): BroadcastChannel | undefined {
   if (wipeChannel || typeof BroadcastChannel === 'undefined') return wipeChannel;
   wipeChannel = new BroadcastChannel(WIPE_CHANNEL_NAME);
   wipeChannel.onmessage = noteWipe;
-  // Node keeps its loop alive for an open channel; a browser has no such method.
+  // Node keeps its loop alive for an open channel; a browser has no such method
   (wipeChannel as { unref?: () => void }).unref?.();
   return wipeChannel;
 }
@@ -167,13 +154,13 @@ function connect(): Promise<IDBDatabase> {
         return;
       }
       openConnection = db;
-      // A stale connection must not drop a newer one's cache.
+      // A stale connection must not drop a newer one's cache
       const forget = () => {
         if (openConnection !== db) return;
         openConnection = undefined;
         dbPromise = undefined;
       };
-      // Another tab upgrading or deleting the database: let go now and reopen on next use.
+      // Another tab upgrading or deleting the database: let go now and reopen on next use
       db.onversionchange = () => {
         db.close();
         forget();
@@ -190,7 +177,7 @@ function connect(): Promise<IDBDatabase> {
 
 export function openMlsDatabase(): Promise<IDBDatabase> {
   ensureWipeChannel();
-  // A failed open is not cached, so the next call retries.
+  // A failed open is not cached, so the next call retries
   const opening: Promise<IDBDatabase> = (dbPromise ??= connect().catch((error: unknown) => {
     if (dbPromise === opening) dbPromise = undefined;
     throw error;
@@ -214,14 +201,7 @@ function idbRequest<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
-/**
- * Reads the stored AES-GCM key if present, otherwise generates and stores
- * one. The candidate key is generated OUTSIDE any transaction and re-checked
- * for a race winner inside a single readwrite transaction - awaiting a
- * non-IndexedDB promise (generateKey) while a transaction is open risks the
- * browser auto-committing it before a later `put` ever runs, and two tabs
- * provisioning at once must not end up with two different keys.
- */
+/** Reads the stored AES-GCM key if present, otherwise generates and stores one */
 async function getOrCreateEncryptionKey(db: IDBDatabase, generation: number): Promise<CryptoKey> {
   const readTx = db.transaction(KEY_STORE, 'readonly');
   const existing = await idbRequest<CryptoKey | undefined>(
@@ -236,7 +216,7 @@ async function getOrCreateEncryptionKey(db: IDBDatabase, generation: number): Pr
     'decrypt',
   ]);
 
-  // A wipe while the key was being made must not get a new one stored behind it.
+  // A wipe while the key was being made must not get a new one stored behind it
   assertNotWiped(generation);
   const writeTx = db.transaction(KEY_STORE, 'readwrite');
   const store = writeTx.objectStore(KEY_STORE);
@@ -248,12 +228,6 @@ async function getOrCreateEncryptionKey(db: IDBDatabase, generation: number): Pr
   return candidate;
 }
 
-/**
- * Encrypts `value` and stores it under `recordId` in `storeName`, using this
- * browser profile's single non-extractable AES-GCM key (threat-model §2,
- * §5) - shared across every local MLS secret so revoking the device via
- * wipeAllLocalMlsSecrets makes all of them equally unrecoverable at once.
- */
 export async function encryptAndStore(
   db: IDBDatabase,
   storeName: DataStoreName,
@@ -339,7 +313,7 @@ export async function deleteRecord(
 
 /** Broadcasts first so other tabs stop writing, then clears; caches drop and listeners hear even when the clear fails. */
 async function wipeStores(storeNames: readonly string[]): Promise<void> {
-  // Before the first await: any write already under way is dropped from here on.
+  // Before the first await: any write already under way is dropped from here on
   wipeGeneration += 1;
   ensureWipeChannel()?.postMessage('wiped');
   try {
@@ -353,18 +327,11 @@ async function wipeStores(storeNames: readonly string[]): Promise<void> {
   }
 }
 
-/**
- * Nukes every locally stored MLS secret - device identity, every group
- * session, and the encryption key itself. Used by device revocation ("log
- * out this device everywhere" - irreversible): once the identity is gone,
- * any persisted group state it could decrypt is equally dead, not worth
- * leaving behind as undecryptable clutter.
- */
+/** Nukes every locally stored MLS secret - device identity, every group session, and the encryption key itself */
 export function wipeAllLocalMlsSecrets(): Promise<void> {
   return wipeStores([KEY_STORE, ...DATA_STORE_NAMES]);
 }
 
-/** Clears group state only: for replacing a dead device identity while keeping decrypted history readable. */
 export function wipeGroupSessionState(): Promise<void> {
   return wipeStores(['groupSessions']);
 }

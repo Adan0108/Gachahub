@@ -25,8 +25,7 @@ jest.mock('../media/media.service', () => ({
 jest.mock('../chat-devices/chat-devices.service', () => ({
   ChatDevicesService: class {},
 }));
-// real Prisma namespace, not a stub - the code under test checks `instanceof`
-// Prisma.PrismaClientKnownRequestError, which only works against the same class
+// Real Prisma namespace: the code under test checks instanceof PrismaClientKnownRequestError.
 function loadActualPrisma() {
   const actual: { Prisma: typeof import('../generated/prisma/client').Prisma } =
     jest.requireActual('../generated/prisma/client');
@@ -467,9 +466,7 @@ describe('ChatMessagingService', () => {
         );
       });
 
-      // Count/mix/missing-upload policy is enforced by, and tested directly
-      // against, MediaService.resolveAttachableMedia. This just checks
-      // createDirectMessage propagates a rejection instead of swallowing it.
+      // createDirectMessage must propagate a media rejection, not swallow it.
       it('propagates a media resolution rejection and creates nothing', async () => {
         mediaService.resolveAttachableMedia.mockRejectedValue(
           new BadRequestException('A chat message supports at most 4 images'),

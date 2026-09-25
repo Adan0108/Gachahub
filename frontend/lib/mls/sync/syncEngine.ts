@@ -146,11 +146,7 @@ export class SyncEngine {
     return this.seedNewGroupWithMembers(conversationId, [userId]);
   }
 
-  /**
-   * Seeds a group this device has just created: one Commit adds every active device of `userIds` and
-   * of this user. Only for a brand-new group; later changes go through reconcileMembership. Throws
-   * EpochConflictError if another device's commit won first (the group is then caught up on the winner).
-   */
+  /** Seeds a group this device has just created: one Commit adds every active device of `userIds` and of this user */
   async seedNewGroupWithMembers(
     conversationId: ConversationId,
     userIds: UserId[],
@@ -165,7 +161,7 @@ export class SyncEngine {
     );
     added.push(...myOtherDevices.map((claimed) => toKeyPackageOffer(this.ownUserId, claimed)));
 
-    // Without a Commit this device's leaf is never recorded server-side, so nothing could ever bootstrap the group.
+    // Without a Commit this device's leaf is never recorded server-side, so nothing could ever bootstrap the group
     if (added.length === 0) {
       throw new NoEncryptableMembersError(conversationId);
     }
@@ -173,7 +169,6 @@ export class SyncEngine {
     return this.submitMembershipChange(conversationId, { added, removed: [] });
   }
 
-  /** Finishes the server-authorized adds and removals (see MembershipReconciler); calls queue so none claims key packages twice. */
   reconcileMembership(options: ReconcileOptions = {}): Promise<ReconcileSummary> {
     const run = this.reconcileQueue.then(() =>
       new MembershipReconciler(this, this.deviceId).reconcile(options),
@@ -202,22 +197,18 @@ export class SyncEngine {
     await this.keyPackageSupply?.maybeReplenish();
   }
 
-  /** Joins every group this device is entitled to by itself (see SelfJoiner). */
   joinGroupsByItself(options: { scope?: 'pending' | 'full' } = {}): Promise<ConversationId[]> {
     return this.selfJoiner.joinGroupsByItself(options);
   }
 
-  /** Adds this device to one group from its published snapshot (see SelfJoiner). */
   joinByExternalCommit(conversationId: ConversationId): Promise<boolean> {
     return this.selfJoiner.joinByExternalCommit(conversationId);
   }
 
-  /** One bounded self-join try for a group this device has no state for (see GroupRecovery). */
   recoverMissingGroup(conversationId: ConversationId): Promise<boolean> {
     return this.recovery.recoverMissingGroup(conversationId);
   }
 
-  /** One bounded repair for saved state that cannot be decrypted (see GroupRecovery). */
   recoverUnreadableGroup(conversationId: ConversationId): Promise<boolean> {
     return this.recovery.recoverUnreadableGroup(conversationId);
   }
@@ -227,7 +218,6 @@ export class SyncEngine {
     return this.recovery.waitMs(conversationId);
   }
 
-  /** Joins every pending Welcome (see WelcomeJoiner). */
   processPendingWelcomes(): ReturnType<WelcomeJoiner['processPendingWelcomes']> {
     return this.welcomes.processPendingWelcomes();
   }
@@ -250,9 +240,9 @@ export class SyncEngine {
           recipientDeviceIds: welcome.deviceIds,
           payload: bytesToBase64(welcome.welcomeBytes),
         },
-        // Published so another device can join by itself later, with no member online.
+        // Published so another device can join by itself later, with no member online
         groupInfo: publishableGroupInfo(groupInfo),
-        // The server checks this against the authorized roster, every other member against the Commit.
+        // The server checks this against the authorized roster, every other member against the Commit
         addedDeviceIds: change.added.map((offer) => offer.credential.deviceId),
         removedDeviceIds: change.removed.map((credential) => credential.deviceId),
       };
@@ -262,16 +252,16 @@ export class SyncEngine {
         removed: change.removed,
       };
 
-      // Merge and save the post-Commit state BEFORE submitting: MLS cannot apply a device's own Commit later.
+      // Merge and save the post-Commit state BEFORE submitting: MLS cannot apply a device's own Commit later
       let response: Awaited<ReturnType<typeof api.submitMlsHandshake>>;
       try {
         await session.commitAccepted();
         await this.pendingCommits.save(conversationId, request, await session.serialize(), eventChange);
         response = await api.submitMlsHandshake(conversationId, request);
       } catch (error) {
-        // The merged copy is unconfirmed; disk still holds the last epoch the server is known to have.
+        // The merged copy is unconfirmed; disk still holds the last epoch the server is known to have
         this.cache.drop(conversationId);
-        // A definitive refusal will never be accepted, so nothing is left to settle later.
+        // A definitive refusal will never be accepted, so nothing is left to settle later
         if (isDefinitiveRejection(error)) {
           await this.pendingCommits.discard(conversationId).catch(warnSettleLost);
         }
@@ -279,7 +269,7 @@ export class SyncEngine {
       }
 
       if (response.outcome === 'conflict') {
-        // The merged copy is the rejected Commit's: it must not survive in memory whatever fails below.
+        // The merged copy is the rejected Commit's: it must not survive in memory whatever fails below
         this.cache.drop(conversationId);
         await this.pendingCommits.discard(conversationId);
         const reloaded = await this.factory.restore(conversationId, epochBefore);
@@ -288,7 +278,7 @@ export class SyncEngine {
         throw new EpochConflictError(conversationId, expectedEpoch);
       }
 
-      // Declared-seen first, the pending record last, so a failure in between is settled on the next open.
+      // Declared-seen first, the pending record last, so a failure in between is settled on the next open
       await this.verifier.markDeclaredSeen(conversationId);
       await this.cache.persist(conversationId, session);
       await this.pendingCommits.finishAccepted(
@@ -307,7 +297,7 @@ export class SyncEngine {
       const session = await this.openSession(conversationId);
       let sinceEpoch = await session.currentEpoch();
 
-      // A capped response says hasMore: keep going while each page moves the group forward.
+      // A capped response says hasMore: keep going while each page moves the group forward
       for (;;) {
         const page = readPage<Handshake>(
           // eslint-disable-next-line no-await-in-loop -- each page starts from the epoch the last one reached
@@ -323,7 +313,6 @@ export class SyncEngine {
         sinceEpoch = reached;
       }
 
-      // Caught up with every Commit the server has, so an earlier refusal no longer stands.
       this.groupProblems.clear(conversationId);
       return session.currentEpoch();
     });
@@ -335,7 +324,7 @@ export class SyncEngine {
     wireBytes: Uint8Array,
   ): Promise<ProcessResult> {
     return this.cache.runExclusive(conversationId, async () => {
-      // Reading at the current epoch does not need a pending Commit settled, so an unreachable server must not block it.
+      // Reading at the current epoch does not need a pending Commit settled, so an unreachable server must not block it
       const session = await this.openSession(conversationId, 'best-effort');
       return this.applier.applyIncoming(conversationId, session, wireBytes);
     });
@@ -354,7 +343,7 @@ export class SyncEngine {
     });
   }
 
-  /** The current local epoch; throws GroupStateUnavailableError without a session. Locked so a cache miss cannot race. */
+  /** The current local epoch; throws GroupStateUnavailableError without a session */
   async getCurrentEpoch(conversationId: ConversationId): Promise<Epoch> {
     return this.cache.runExclusive(conversationId, async () => {
       const session = await this.openSession(conversationId);
@@ -413,10 +402,7 @@ export class SyncEngine {
     this.pendingCommits.forgetKnownAbsent();
   }
 
-  /**
-   * The cached session, after settling what a crash may have left half done: a submitted Commit, or a self-join with no saved group.
-   * Writing needs the Commit settled; a read may go on without it when the server cannot be reached.
-   */
+  /** The cached session, after settling what a crash may have left half done: a submitted Commit, or a self-join with no saved group */
   private async openSession(
     conversationId: ConversationId,
     settle: 'required' | 'best-effort' = 'required',
@@ -427,7 +413,7 @@ export class SyncEngine {
     try {
       return await this.cache.get(conversationId);
     } catch (error) {
-      // A failed join resolution must never hide that there is no group: recovery keys off this error.
+      // A failed join resolution must never hide that there is no group: recovery keys off this error
       if (
         error instanceof GroupStateUnavailableError &&
         (await this.tryResolvePendingJoin(conversationId))

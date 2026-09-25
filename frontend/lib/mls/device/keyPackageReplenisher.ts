@@ -39,7 +39,7 @@ export class KeyPackageReplenisher implements KeyPackageSupply {
 
     this.inFlight = this.replenish()
       .then(() => {
-        // Only a run that finished starts the wait; a failed top-up at low stock is retried at the next poll.
+        // Only a run that finished starts the wait; a failed top-up at low stock is retried at the next poll
         this.lastCheckAt = now;
       })
       .catch((error: unknown) => {

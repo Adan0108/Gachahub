@@ -80,8 +80,7 @@ describe('SubmitHandshakeDto', () => {
       removedDeviceIds: [],
     };
 
-    // regression: a group too big to publish a snapshot for must still be able to accept ordinary
-    // Commits - the client omits the field entirely, and this must not be a 400 on every add/remove.
+    // regression: a group too big for a snapshot omits the field and must not get a 400
     it('accepts a Commit with the snapshot omitted', async () => {
       const errors = await validate(plainToInstance(SubmitHandshakeDto, valid));
 
@@ -133,8 +132,7 @@ describe('SubmitHandshakeDto', () => {
       expect(await propertiesWithErrors(valid)).toEqual([]);
     });
 
-    // the server validates against what is declared, so leaving it out must
-    // be refused rather than read as "changes no one"
+    // leaving it out is refused, not read as "changes no one"
     it.each(['addedDeviceIds', 'removedDeviceIds'])(
       'requires %s',
       async (field) => {

@@ -7,7 +7,6 @@ const PICKER_SELECT = { id: true, name: true, image: true } as const;
 const pickableBy = (callerId: string) =>
   ({
     status: 'ACTIVE',
-    // Hiding those who blocked the caller reveals a block by absence; accepted so blockers never see their target.
     blockedUsers: { none: { blockedId: callerId } },
     blockedBy: { none: { blockerId: callerId } },
   }) as const;

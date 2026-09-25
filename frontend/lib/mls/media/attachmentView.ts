@@ -4,7 +4,7 @@ import { MAX_FILE_NAME_LENGTH } from './limits';
 
 export type AttachmentKind = 'image' | 'video' | 'file';
 
-// Deliberately short: anything else (svg, html, ...) is offered as a download, never rendered.
+// Deliberately short: anything else (svg, html, ...) is offered as a download, never rendered
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 const VIDEO_MIMES = new Set(['video/mp4', 'video/webm', 'video/quicktime']);
 
@@ -15,7 +15,6 @@ export function attachmentKind(mime: string): AttachmentKind {
   return 'file';
 }
 
-/** The mime the sender claimed only reaches a blob when it is one we render; otherwise it stays opaque. */
 export function safeBlobType(mime: string): string {
   return attachmentKind(mime) === 'file' ? 'application/octet-stream' : mime.toLowerCase();
 }
@@ -68,7 +67,6 @@ export type EnvelopeView =
   | { kind: 'text'; text: string }
   | { kind: 'attachment'; caption: string; files: AttachmentFile[] };
 
-// re-validated because the local cache and history restores are not covered by the decrypt-time check
 export function envelopeView(envelope: unknown): EnvelopeView | null {
   if (isAttachmentEnvelope(envelope)) {
     return { kind: 'attachment', caption: envelope.body ?? '', files: envelope.files };

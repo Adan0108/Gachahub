@@ -1,10 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { perMinutePerUserLimiter } from '../common/utils/sliding-window-rate-limiter';
 
-/**
- * Per-user limits on joining groups by yourself. Fetching a snapshot is cheap
- * but enumerable; a join advances a group's epoch, so it gets a tighter cap.
- */
+/** Per-user limits on joining groups by yourself; joins get a tighter cap. */
 @Injectable()
 export class MlsSelfJoinRateLimiterService {
   private readonly fetchLimiter = perMinutePerUserLimiter(

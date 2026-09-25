@@ -2,7 +2,7 @@ import { api } from '../../api';
 import type { Epoch } from '../contract/types';
 import { readPage } from './pagedResponse';
 
-// Mirrors the backend's per-request handshake cap.
+// Mirrors the backend's per-request handshake cap
 export const HANDSHAKE_PAGE_SIZE = 100;
 export const WELCOME_PAGE_SIZE = 50;
 

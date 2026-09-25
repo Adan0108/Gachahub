@@ -300,7 +300,6 @@ describe('MembershipReconciler', () => {
 
       await new MembershipReconciler(fakeEngine(), 'dev-1').reconcile();
 
-      // 45 fits, u2 (10) would make 55, u3 (3) makes 48
       expect(vi.mocked(api.claimChatDeviceKeyPackages).mock.calls.map(([user]) => user)).toEqual([
         'big',
         'u3',

@@ -47,11 +47,7 @@ function DeviceRow({ device, isCurrent, isConfirming, isBusy, onAsk, onCancel, o
   );
 }
 
-/**
- * The user's own chat devices with per-device and remove-all-others actions, each behind a confirm
- * step. Removing this device is not offered here (that is sign-out). Render with a `key` that
- * changes on open so the confirm step resets, like GroupSettingsModal.
- */
+/** The user's own chat devices with confirm-gated remove actions; render with a `key` that changes on open. */
 export function DevicesModal({ currentDeviceId, isOpen, onClose, syncEngine, triggerRef }) {
   const modalRef = useModalFocusTrap(isOpen, onClose, triggerRef);
   const { devices, remove } = useChatDevices(isOpen, syncEngine);

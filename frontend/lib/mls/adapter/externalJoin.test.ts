@@ -44,7 +44,6 @@ describe('joining a group by external commit', () => {
 
     const joined = await carol.factory.joinExternally(CONVERSATION, groupInfo);
 
-    // the members process the joiner's public commit and land on the same epoch
     const seenByAlice = await aliceSession.process(joined.commitBytes);
     const seenByBob = await bobSession.process(joined.commitBytes);
     expect(seenByAlice).toMatchObject({ kind: 'commit', epoch: 2 });
@@ -58,7 +57,6 @@ describe('joining a group by external commit', () => {
     expect(seenByAlice.membershipChange.removed).toEqual([]);
     await expect(joined.session.currentEpoch()).resolves.toBe(2);
 
-    // and they can all talk to each other
     expect(await read(joined.session, await aliceSession.encrypt(text('hi carol')))).toMatchObject({
       body: 'hi carol',
     });

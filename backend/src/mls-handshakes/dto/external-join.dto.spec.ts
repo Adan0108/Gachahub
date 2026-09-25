@@ -16,8 +16,7 @@ describe('ExternalJoinDto', () => {
     expect(await validate(dto)).toHaveLength(0);
   });
 
-  // regression: a group whose GroupInfo is too big to publish must still be able to join by itself -
-  // the client omits the field entirely rather than sending nothing, and this must not be a 400.
+  // regression: a group with no publishable GroupInfo omits the field and must not get a 400
   it('accepts a request with the snapshot omitted, for a group too big to publish one', async () => {
     const dto = plainToInstance(ExternalJoinDto, {
       deviceId: 'device-1',

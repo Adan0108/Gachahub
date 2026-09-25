@@ -123,7 +123,6 @@ describe('SyncEngine resilience', () => {
       expect(factory.keyPackageSpent).toBe(false);
       expect(api.consumeMlsWelcome).not.toHaveBeenCalled();
 
-      // the rerun finds the saved group at the same epoch: nothing to join, just consume it
       factory.crashAfterSave = false;
       const second = await engine.processPendingWelcomes();
 
@@ -229,7 +228,6 @@ describe('SyncEngine resilience', () => {
       await expect(engine.syncCommits('conv-1')).rejects.toThrow(MembershipMismatchError);
       expect(engine.groupProblems.get('conv-1')).toEqual({ kind: 'refused-commit' });
 
-      // a refused group is never "recovered" by rejoining
       await expect(engine.recoverMissingGroup('conv-1')).resolves.toBe(false);
       expect(factory.joinExternally).not.toHaveBeenCalled();
 
@@ -402,7 +400,6 @@ describe('SyncEngine resilience', () => {
 
       await expect(engine.syncCommits('conv-1')).rejects.toThrow('network down');
 
-      // not a refused commit: nothing was found wrong, so the group is not flagged
       expect(engine.groupProblems.get('conv-1')).toBeUndefined();
       expect(await storage.load('conv-1')).toEqual(new Uint8Array([0]));
 
@@ -557,7 +554,6 @@ describe('SyncEngine resilience', () => {
       await engine.recoverUnreadableGroup('conv-1');
 
       expect(engine.recoveryWaitMs('conv-1')).toBeGreaterThan(0);
-      // the missing-group path is inside the same window
       await expect(engine.recoverMissingGroup('conv-1')).resolves.toBe(false);
       expect(factory.joinExternally).toHaveBeenCalledTimes(1);
     });

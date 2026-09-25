@@ -86,20 +86,7 @@ export class MlsHandshakesRepository {
     });
   }
 
-  /**
-   * Atomic compare-and-set: mlsEpoch only advances when expectedEpoch still
-   * matches, so exactly one Commit ever wins a given epoch. A loser gets
-   * back whatever handshake DID win, so it can tell a harmless retry (same
-   * payload) from a real conflict (someone else's Commit) it must catch up
-   * on - the server never resolves crypto conflicts itself, only ordering.
-   *
-   * The epoch bump, the roster and participant changes the Commit makes (see
-   * applyMembershipChange), and the handshake/welcome rows all happen in one
-   * transaction (threat-model §3: "the two must be kept in sync in the same
-   * transaction"). If any rule is broken the whole Commit is rejected and
-   * rolled back, including the epoch bump, rather than leaving an epoch
-   * advanced with no matching handshake row or the two rosters out of step.
-   */
+  /** Atomic compare-and-set on mlsEpoch: one Commit wins an epoch and a loser gets the winning handshake back; epoch, roster and handshake rows change in one transaction. */
   private async acceptCommit(
     params: CommitToAccept,
   ): Promise<HandshakeAcceptResult> {
@@ -115,7 +102,6 @@ export class MlsHandshakesRepository {
     const accepted = await this.prisma.$transaction(async (tx) => {
       const advanced = await tx.chatConversation.updateMany({
         where: { id: conversationId, mlsEpoch: expectedEpoch },
-        // The Commit is the work the lease was for, so the next round starts clean.
         data: {
           mlsEpoch: { increment: 1 },
           mlsWorkLeaseDeviceId: null,
@@ -173,8 +159,7 @@ export class MlsHandshakesRepository {
     });
 
     if (!winner) {
-      // Only reachable if conversationId itself vanished mid-request -
-      // callers check participation (and therefore existence) beforehand.
+      // Only reachable if the conversation vanished mid-request.
       throw new Error(
         `No handshake found for conversation ${conversationId} at epoch ${expectedEpoch}`,
       );
@@ -187,17 +172,7 @@ export class MlsHandshakesRepository {
     };
   }
 
-  /**
-   * Brings the roster and the participant rows in line with the Commit being
-   * accepted, after checking its declared changes against the authorized
-   * roster (mls-membership-rules.ts). MLS Add is only ever the cryptographic
-   * side effect of a decision the server already made - a Commit can never be
-   * the thing that first grants conversation membership.
-   *
-   * The Commit that creates the group is special: the roster is empty, the
-   * sender's device is the founder, and anyone already ACTIVE without a device
-   * in the new group is moved to JOINING.
-   */
+  /** Applies the Commit's declared changes to the roster and participant rows after checking them against the authorized roster; the group-creating Commit makes the sender the founder. */
   private async applyMembershipChange(
     tx: Prisma.TransactionClient,
     params: {
@@ -234,8 +209,7 @@ export class MlsHandshakesRepository {
     }
 
     if (groupJustActivated && expectedEpoch !== 0) {
-      // The group already ran before membership was tracked, so who is in it
-      // is unknown - guessing would let the two rosters silently disagree.
+      // Group predates membership tracking, so its members are unknown.
       throw new BadRequestException(
         'This conversation predates membership tracking and cannot be extended',
       );

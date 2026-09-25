@@ -1,10 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { perMinutePerUserLimiter } from '../common/utils/sliding-window-rate-limiter';
 
-/**
- * Per-user caps on the MLS endpoints a device hits. Ceilings sit well above
- * honest use (a poll every ~5s per device, up to 10 devices per user).
- */
+/** Per-user caps on the MLS endpoints a device hits, well above honest use. */
 @Injectable()
 export class MlsRequestRateLimiterService {
   private readonly submitLimiter = perMinutePerUserLimiter(

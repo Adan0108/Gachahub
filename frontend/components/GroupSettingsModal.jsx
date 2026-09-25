@@ -9,21 +9,7 @@ import { activeMembers, initialOf, myParticipant } from "../lib/chatDisplay";
 import { SafetyBadge } from "./SafetyStatus";
 import { UserPicker } from "./UserPicker";
 
-/**
- * Group management: title/photo, member list with roles, promote/demote and transfer ownership
- * (owner-only), add/remove members, leave group. Pulled out of chat/page.jsx as its own concern -
- * everything here reads or mutates a group conversation's own settings, distinct from the thread
- * itself.
- *
- * `refreshChat` and `onLeft` are the only things this needs from the parent beyond the
- * conversation itself: refetching the conversation lists after any change, and clearing the
- * parent's selected conversation once this device leaves the group.
- *
- * The parent must render this with `key={isOpen ? conversation?.id : "closed"}` (see
- * chat/page.jsx) - that forces a fresh mount every time it opens, which is what seeds the
- * editable fields from the current conversation with no effect needed, and discards any
- * abandoned edits from a previous time it was open instead of them lingering in memory.
- */
+/** Group settings: title/photo, members and roles, add/remove, leave. Render with a changing `key` on open to reseed fields. */
 export function GroupSettingsModal({
   conversation,
   currentUserId,

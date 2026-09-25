@@ -70,12 +70,7 @@ function ChatSkeletonRow() {
   );
 }
 
-/**
- * Shown instead of the real layout while the session is still resolving -
- * mirrors .chat-layout's actual shape (sidebar rows + an empty thread) so
- * the page doesn't visibly restructure once real data replaces it, unlike
- * a generic "Checking your session..." message in an unrelated-looking box.
- */
+/** Skeleton shown while the session resolves; mirrors .chat-layout's shape. */
 function ChatSkeleton() {
   return (
     <div className="page chat-page" aria-busy="true" aria-label="Loading conversations">
@@ -125,13 +120,9 @@ export default function ChatPage() {
     ? selectedId
     : currentList[0]?.id || "";
   const activeConversation = currentList.find((conversation) => conversation.id === activeId);
-  // DM-only - a group's send recipients are recomputed per-send inside sendMessage below, since
-  // they can change between sends (an added member). Declared here, not down by the other
-  // derived values after the loading gate, since sendMessage's mutation (which closes over it)
-  // is itself declared before that gate too.
+  // DM-only; a group's recipients are recomputed per send.
   const peer = conversationPeer(activeConversation, user?.id);
-  // A pending group invite can already read and decrypt real history - only sending stays
-  // gated until accept (see canSendMessages below).
+  // A pending group invite can read history; only sending is gated until accept.
   const isPendingGroupInvite =
     activeConversation?.type === "GROUP" &&
     myParticipant(activeConversation, user?.id)?.state === "PENDING";
@@ -169,10 +160,7 @@ export default function ChatPage() {
   const readableMessageIdsKey = readableMessageIds.join(",");
   const messagesEndRef = useRef(null);
   const [draft, setDraft] = useState("");
-  // Sent messages waiting on the network - shown immediately as their own
-  // bubble instead of leaving the composer stuck for however long the send
-  // actually takes (MLS encrypt + a real round trip). Keyed by a client-side
-  // id since the server hasn't assigned one yet.
+  // Sent messages awaiting the network, keyed by a client-side id.
   const [pendingMessages, setPendingMessages] = useState([]);
   const attachmentPicker = useAttachmentPicker();
   const fileInputRef = useRef(null);
@@ -211,11 +199,7 @@ export default function ChatPage() {
         );
       } catch (error) {
         if (error?.code !== "DEVICE_REVOKED" && error?.code !== "SESSION_NOT_LINKED") throw error;
-        // This device was retired (dormancy, cap eviction) or its login lost its link
-        // server-side. Reprovisions so the NEXT attempt uses a live, linked device - but
-        // doesn't retry THIS send: a freshly provisioned device starts with no local state
-        // for any group (self-join runs on its own independent poll, see useSyncEngine), so
-        // an immediate retry here would just fail the same way for a different reason.
+        // Device retired or unlinked: reprovision for the next attempt, no retry of this send.
         if (!(await reprovisionDevice())) {
           throw new Error("Couldn't reconnect this device. Try again in a moment.", {
             cause: error,
@@ -232,10 +216,7 @@ export default function ChatPage() {
       setPendingMessages((prev) =>
         prev.filter((pending) => pending.clientId !== variables.clientId),
       );
-      // Merge the sent message straight into the cache instead of
-      // invalidating - a refetch is a second full round trip the sender
-      // gains nothing from, since the plaintext is already cached locally
-      // from the send itself (see useDecryptedMessages).
+      // Merge the sent message into the cache instead of refetching.
       queryClient.setQueryData(queryKeys.chatMessages(activeId), (old) => {
         if (!old || old.items.some((item) => item.id === response.message.id)) {
           return old;
@@ -265,14 +246,7 @@ export default function ChatPage() {
     mutationFn: () =>
       api.createDirectMessage({
         recipientUserId: newChatRecipients[0]?.id,
-        // Placeholder only - a real conversationId doesn't exist until this
-        // call creates one, so the actual encrypted MLS group can't be set
-        // up until afterward (see sendEncryptedChatMessage's
-        // ensureConversationGroup call, which finishes the job on the first
-        // real send below). This placeholder message stays permanently
-        // undecryptable - contentType SYSTEM tells the thread to render it
-        // as a "Conversation started" divider instead of a chat bubble, so
-        // it never looks like a message someone sent and failed to decrypt.
+        // Placeholder message; SYSTEM type renders it as a "Conversation started" divider.
         message: { ciphertext: "placeholder-pending-mls-setup", contentType: "SYSTEM" },
       }),
     onSuccess: async (result) => {
@@ -298,11 +272,7 @@ export default function ChatPage() {
   const activePendingCount = pendingMessages.filter(
     (pending) => pending.conversationId === activeId,
   ).length;
-  // Follows the latest message - re-runs when the message list grows (a send, or a new one
-  // arriving), as messages individually finish decrypting and pop in, and the instant a message
-  // is sent (its optimistic bubble), not only once the real round trip confirms it - otherwise
-  // sending several messages in quick succession leaves the view stuck above them until the
-  // slowest one finally lands.
+  // Follows the latest message, including optimistic bubbles.
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
   }, [activeId, messages.data?.items?.length, decryptedCount, activePendingCount]);
@@ -381,12 +351,9 @@ export default function ChatPage() {
   const activeConversationName = conversationDisplayName(activeConversation, user?.id);
   const activeGroupMembers = activeMembers(activeConversation);
   const myGroupParticipant = myParticipant(activeConversation, user?.id);
-  // Not ACTIVE covers a still-pending invite, and being removed/declined/blocked - the backend
-  // rejects a send in every one of those states, so the composer shouldn't invite trying at all.
+  // Sending is rejected unless ACTIVE (pending, removed, declined, blocked).
   const canSendMessages = myGroupParticipant?.state === "ACTIVE";
-  // A group whose only invitees are all still PENDING has nobody to encrypt to yet - sending
-  // would throw (see syncEngine's NoEncryptableMembersError), so the composer says why up front
-  // instead of only surfacing that as an error after the attempt.
+  // A group with only PENDING invitees has nobody to encrypt to yet.
   const isGroupAwaitingAcceptance =
     canSendMessages &&
     activeConversation?.type === "GROUP" &&
@@ -764,9 +731,7 @@ export default function ChatPage() {
                     const files = attachmentPicker.files;
                     if (!text && files.length === 0) return;
                     const clientId = crypto.randomUUID();
-                    // Show the bubble and free up the input immediately -
-                    // the actual send (MLS encrypt + network) keeps running
-                    // in the background and reconciles onSuccess/onError.
+                    // Show the bubble and free the input; the send reconciles in the background.
                     setPendingMessages((prev) => [
                       ...prev,
                       { clientId, text, files, conversationId: activeId },
@@ -865,7 +830,6 @@ export default function ChatPage() {
         conversation={activeConversation}
         currentUserId={user?.id}
         isOpen={isGroupSettingsOpen}
-        // Forces a fresh mount every time it opens - see GroupSettingsModal's own doc comment.
         key={isGroupSettingsOpen ? activeId : "group-settings-closed"}
         onClose={() => setIsGroupSettingsOpen(false)}
         onLeft={() => setSelectedId("")}

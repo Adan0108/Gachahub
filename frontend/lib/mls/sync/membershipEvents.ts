@@ -40,11 +40,7 @@ function groupByUser(devices: DeviceIdentity[]): Map<UserId, DeviceIdentity[]> {
   return byUser;
 }
 
-/**
- * What a verified commit means for people: a first device is a join, a last device gone is a
- * leave, and any further device of someone already in is a new sign-in. A removed extra device
- * says nothing about the person, so it prints nothing.
- */
+/** What a verified commit means for people: a first device is a join, a last device gone is a leave, and any further device of someone already in is a new sign-in */
 export function deriveMembershipEvents(input: DeriveInput): MembershipEvent[] {
   const { conversationId, epoch, at, change, leavesAfter, ownDeviceId } = input;
   if (!leavesAfter) return [];

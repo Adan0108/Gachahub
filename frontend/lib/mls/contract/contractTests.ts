@@ -7,13 +7,6 @@ import type {
 import type { DeviceCredential, KeyPackageOffer } from './types';
 import { CredentialMismatchError } from './errors';
 
-/**
- * The step 2 bake-off entry point: implement this once per candidate
- * library (ts-mls, OpenMLS-WASM, ...) as a thin adapter, then call
- * runMlsClientContractTests(candidate) from that candidate's own test file.
- * The winner is whichever candidate actually passes this suite, not
- * whichever compiles first (critique C2).
- */
 export interface MlsClientCandidate {
   name: string;
   /** A fresh, independent store per call - each call simulates a distinct browser device. */
@@ -72,10 +65,6 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
   const conversationId = 'conversation-1';
 
   describe(`MlsClient contract: ${candidate.name}`, () => {
-    // A device's identity is only meaningful for pinning/safety-number
-    // verification if it's actually stable - an implementation that mints a
-    // fresh signing key per key package would make every "device" look like
-    // a different one each time, defeating the point of DeviceCredential.
     it("reports a stable credential across multiple key packages", async () => {
       const alice = await setUpDevice(candidate, 'user-alice');
       const before = await alice.store.getOwnCredential();
@@ -95,9 +84,6 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
       const aliceGroup = await alice.factory.create(conversationId);
       const bobGroup = await addDevice(aliceGroup, bob, conversationId);
 
-      // Bob must process the Commit that added Carol before decrypting
-      // anything sent after that epoch - he's an existing member now, not
-      // just a bystander.
       const { wireBytes: addCarolWire, welcome } = await aliceGroup.stageCommit({
         added: [await offerKeyPackage(carol)],
         removed: [],
@@ -144,9 +130,6 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
       });
       await aliceGroup.commitAccepted();
 
-      // Bob's own client processing his own removal is a real scenario
-      // (his other device, or a delayed delivery before he's fully cut
-      // off) - it must not throw, just reflect that he's out.
       const bobRemovalResult = await bobGroup.process(removeBobWire);
       expect(bobRemovalResult.kind).toBe('commit');
 
@@ -287,10 +270,6 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
       const aliceGroup = await alice.factory.create(conversationId);
       const bobGroup = await addDevice(aliceGroup, bob, conversationId);
 
-      // Alice and Bob both try to add someone in the same epoch - only one
-      // commit can win per epoch (ChatConversation.mlsEpoch compare-and-set
-      // on the backend, simulated here as "whoever calls commitAccepted
-      // first for this epoch wins").
       const aliceAttempt = await aliceGroup.stageCommit({
         added: [await offerKeyPackage(carol)],
         removed: [],
@@ -302,11 +281,8 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
 
       expect(aliceAttempt.expectedEpoch).toBe(bobAttempt.expectedEpoch);
 
-      // Alice's commit wins the race.
       await aliceGroup.commitAccepted();
 
-      // Bob's loses - his client must discard the staged commit cleanly,
-      // then catch up on the winning one.
       await bobGroup.commitRejected();
       const bobCatchUp = await bobGroup.process(aliceAttempt.wireBytes);
       expect(bobCatchUp.kind).toBe('commit');
@@ -314,7 +290,6 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
       const epochAfter = await bobGroup.currentEpoch();
       expect(epochAfter).toBe(aliceAttempt.expectedEpoch + 1);
 
-      // Bob is free to retry his own proposal against the new epoch.
       const retry = await bobGroup.stageCommit({
         added: [await offerKeyPackage(dave)],
         removed: [],
@@ -331,8 +306,6 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
       const aliceGroup = await alice.factory.create(conversationId);
       const bobGroup = await addDevice(aliceGroup, bob, conversationId);
 
-      // Bob goes offline from here - he never processes the next 2 epochs
-      // until the very end, in one batch, oldest first.
       const missedWire: Uint8Array[] = [];
 
       const addCarol = await aliceGroup.stageCommit({
@@ -400,8 +373,6 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
       const first = await aliceGroup.encrypt({ v: 1, type: 'text', body: 'first' });
       const second = await aliceGroup.encrypt({ v: 1, type: 'text', body: 'second' });
 
-      // second arrives before first - a real possibility over an
-      // unordered transport within a single epoch (no commit in between).
       const secondResult = await bobGroup.process(second);
       const firstResult = await bobGroup.process(first);
 
@@ -422,7 +393,7 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
       const forgedOffer = await offerKeyPackage(mallory);
       forgedOffer.credential = {
         ...forgedOffer.credential,
-        userId: 'user-bob', // claims to be Bob, key package actually belongs to Mallory
+        userId: 'user-bob',
       };
 
       await expect(
@@ -468,9 +439,6 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
         throw new Error('missing Bob Welcome');
       }
 
-      // A server bug or attacker relabels which conversation this Welcome
-      // is delivered for - the client must catch the mismatch itself
-      // rather than trusting the server's routing.
       await expect(
         bob.factory.joinFromWelcome('a-different-conversation', bobWelcome.welcomeBytes),
       ).rejects.toThrow(CredentialMismatchError);

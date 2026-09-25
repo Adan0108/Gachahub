@@ -4,12 +4,7 @@ import {
   type CiphersuiteImpl,
 } from 'ts-mls';
 
-/**
- * Ciphersuite this backend accepts for MLS key packages - matches the
- * frontend's ts-mls adapter (frontend/lib/mls/tsMlsAdapter.ts). Pinned to
- * exactly one (critique C1) rather than accepting whatever a client sends,
- * so uploads can never mix ciphersuites.
- */
+/** The one ciphersuite accepted for MLS key packages; matches the frontend's ts-mls adapter. */
 export const PINNED_CIPHERSUITE =
   'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519';
 

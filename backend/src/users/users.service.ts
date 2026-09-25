@@ -50,12 +50,7 @@ export class UsersService {
     });
   }
 
-  /**
-   * Public profile for viewing another user, e.g. clicking their name in a
-   * group chat. isBlockedByMe only reflects the viewer's own block, never
-   * whether the target has blocked the viewer back - same guiding principle
-   * as chat's participant flags (never leak the reverse direction).
-   */
+  /** Public profile of another user; isBlockedByMe reflects only the viewer's own block. */
   async getPublicProfile(userId: string, viewerId?: string) {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, status: 'ACTIVE' },

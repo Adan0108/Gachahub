@@ -10,15 +10,7 @@ export type PrismaTransaction = Parameters<
   Parameters<PrismaService['$transaction']>[0]
 >[0];
 
-/**
- * Atomically claims uploads for attachment (UPLOADED -> ATTACHED) in the
- * caller's own transaction, so the claim and the caller's own insert
- * (PostMedia/ChatMessageMedia row) either both commit or both roll back.
- *
- * Throws if any id couldn't be claimed - already attached, wrong
- * owner/purpose, or gone - so a message/post can never end up with only
- * some of its media attached.
- */
+/** Claims uploads UPLOADED -> ATTACHED in the caller's transaction; throws unless every id is claimed. */
 export async function claimUploadsForAttachment(
   tx: PrismaTransaction,
   params: { ids: string[]; userId: string; purpose: MediaPurpose },
@@ -143,14 +135,7 @@ export class MediaRepository {
     });
   }
 
-  /**
-   * Flags an upload whose release (Cloudinary delete after its parent was
-   * deleted) failed, so a retry job can pick it up later instead of leaving
-   * it stuck ATTACHED - which cleanup permanently excludes - forever.
-   *
-   * Matches from ATTACHED or RELEASE_FAILED so a retry that fails again just
-   * bumps updatedAt (via @updatedAt) and pushes the next retry out.
-   */
+  /** Flags an upload whose release failed so a retry job can pick it up; also matches RELEASE_FAILED. */
   markReleaseFailed(id: string) {
     return this.prisma.mediaUpload.updateMany({
       where: {
@@ -163,10 +148,7 @@ export class MediaRepository {
     });
   }
 
-  /**
-   * Uploads flagged RELEASE_FAILED whose last attempt was far enough back to
-   * retry again. take caps one run's blast radius, same as findExpiredUploads.
-   */
+  /** RELEASE_FAILED uploads whose last attempt is old enough to retry, capped by `take`. */
   findReleaseFailedUploads(retryCutoff: Date, take = 50) {
     return this.prisma.mediaUpload.findMany({
       where: {
@@ -233,10 +215,7 @@ export class MediaRepository {
     });
   }
 
-  /**
-   * Helper for feature repositories that need to attach uploads in their
-   * own Prisma transaction.
-   */
+  /** Attaches uploads inside a feature repository's own transaction. */
   getPrisma(): PrismaService {
     return this.prisma;
   }

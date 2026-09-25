@@ -45,9 +45,6 @@ model User {
   blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
   blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
 
-  // Notification model/migration pulled in from origin/Notifications (not yet
-  // merged to main) to resolve migration drift against the shared dev DB -
-  // see BACKLOG.md.
   receivedNotifications Notification[] @relation("NotificationRecipient")
   actedNotifications    Notification[] @relation("NotificationActor")
 
@@ -276,17 +273,9 @@ enum ChatParticipantState {
   DECLINED
   BLOCKED
   ARCHIVED
-  /// Authorized to join an MLS-encrypted conversation but no device is in the MLS group yet.
-  /// Becomes ACTIVE in the same transaction that accepts the Commit adding their device.
+  /// Authorized to join an MLS conversation; becomes ACTIVE when the Commit adding their device is accepted.
   JOINING
-  /// Being removed from an MLS-encrypted conversation: cut off server-side immediately, but their
-  /// devices are still MLS members. Becomes DECLINED in the same transaction that accepts the
-  /// Remove Commit. Only entered when they have a device in the group to remove; otherwise the
-  /// removal is final at once, since nothing could ever complete it and LEAVING blocks sends.
-  ///
-  /// ACTIVE means authorized, not "every device is in the group": a new device, or one that had no
-  /// key package when the member joined, is added by a member's app later (membership work). The
-  /// entitled states are defined once, in chat/membership/leaf-entitlement.ts.
+  /// Being removed from an MLS conversation: cut off server-side at once, DECLINED when the Remove Commit is accepted; final immediately if no device is in the group.
   LEAVING
 }
 
@@ -324,17 +313,10 @@ model ChatConversation {
   createdBy     String?
   lastMessageId String?
 
-  /// MLS group epoch (stage 4 - backend/docs/mls-threat-model.md). Advanced
-  /// only via an atomic compare-and-set (MlsHandshakesRepository.
-  /// acceptHandshake) so exactly one commit ever wins a given epoch. Int,
-  /// not BigInt - Prisma's BigInt breaks JSON.stringify, and 2^31 epochs is
-  /// plenty for any conversation's lifetime.
+  /// MLS group epoch; advanced only by an atomic compare-and-set so one Commit wins each epoch.
   mlsEpoch Int @default(0)
 
-  /// Who is currently finishing this conversation's membership changes, and until when. Every online
-  /// member gets the same work; without this each would claim single-use key packages for the same
-  /// joiner and only one Commit could win, burning the rest. The work endpoint hands a conversation
-  /// to one device at a time, and the lease clears when a Commit is accepted or simply expires.
+  /// Which device is currently finishing this conversation's membership changes, and until when; clears on an accepted Commit or expiry.
   mlsWorkLeaseDeviceId String?
   mlsWorkLeaseUntil    DateTime?
 
@@ -359,8 +341,7 @@ model ChatConversation {
   @@map("chat_conversations")
 }
 
-/// The newest public snapshot of a conversation's MLS group (a GroupInfo). A device joins the group by
-/// itself from this, with no member online. Kept only while it describes the group's current epoch.
+/// The newest public GroupInfo snapshot of a conversation's MLS group; kept only while it matches the current epoch.
 model MlsGroupInfo {
   conversationId String   @id
   /// The epoch this snapshot describes; only ever moves forward.
@@ -472,8 +453,6 @@ model ChatMessageMedia {
   createdAt DateTime @default(now())
 
   message     ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  // Restrict, not Cascade: a media upload attached to a sent message must
-  // never be deleted out from under it, same guarantee PostMedia gives posts.
   mediaUpload MediaUpload @relation(fields: [mediaUploadId], references: [id], onDelete: Restrict)
 
   @@index([messageId, sortOrder])
@@ -511,12 +490,7 @@ model ChatMessageReaction {
 
   message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
   user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // Cascade, not Restrict: deleting a Game cascades to its ChatEmotes, and a Restrict here
-  // would abort that whole delete with an opaque FK violation. Not SetNull either, because
-  // a reaction must carry exactly one of `emoji` / `emoteId` (see ChatService.reactToMessage)
-  // and nulling `emoteId` would leave a reaction with no content. Routine emote removal is
-  // the soft delete via ChatEmote.deletedAt; a hard delete means the emote is really gone,
-  // so its reactions should go with it.
+  // Cascade: a reaction must carry exactly one of emoji/emoteId, so a hard-deleted emote takes its reactions.
   emote   ChatEmote?  @relation(fields: [emoteId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId])
@@ -551,12 +525,7 @@ model ChatEmote {
 
   reactions ChatMessageReaction[]
 
-  // Only constrains game-scoped emotes: global emotes have a NULL `gameId`, and PostgreSQL
-  // treats NULLs as distinct, so this never fires for scope = GLOBAL. Global shortcode
-  // uniqueness is enforced by the partial unique index "chat_emotes_global_shortcode_key"
-  // (chat_emotes(shortcode) WHERE "gameId" IS NULL), added by hand in migration
-  // 20260805093000_add_global_emote_shortcode_unique because Prisma cannot express
-  // partial indexes. Keep that migration when regenerating this model.
+  // Only game-scoped emotes; global shortcode uniqueness is a hand-added partial index in migration 20260805093000.
   @@unique([scope, gameId, shortcode])
   @@index([gameId])
   @@index([createdById])
@@ -755,10 +724,7 @@ enum MediaUploadStatus {
   ATTACHED
   DELETED
   FAILED
-  /// An ATTACHED upload whose parent (e.g. a chat message) was deleted, but
-  /// releasing its Cloudinary asset failed. Retried on a backoff by the
-  /// owning feature (see ChatMediaReleaseRetryService) instead of leaking
-  /// forever, since ATTACHED itself is permanently excluded from cleanup.
+  /// An ATTACHED upload whose Cloudinary release failed; retried on a backoff by ChatMediaReleaseRetryService.
   RELEASE_FAILED
 }
 
@@ -774,11 +740,9 @@ model MediaUpload {
   opaqueKind MediaOpaqueKind?
 
   /// Cloudinary immutable asset identifier.
-  /// Useful for ownership checks and future asset management.
   assetId String? @unique
 
-  /// Cloudinary public ID generated by the backend.
-  /// The frontend must never choose this value.
+  /// Cloudinary public ID generated by the backend, never chosen by the frontend.
   publicId String @unique
 
   secureUrl String?
@@ -790,8 +754,7 @@ model MediaUpload {
   height   Int?
   duration Float?
 
-  /// Signature returned in Cloudinary's successful upload response.
-  /// Retaining it is optional but useful for auditing and debugging.
+  /// Signature from Cloudinary's upload response; optional.
   responseSignature String?
 
   createdAt  DateTime  @default(now())
@@ -848,10 +811,6 @@ model Comment {
   @@map("comments")
 }
 
-// Pulled in from origin/Notifications (not yet merged to main) to resolve
-// migration drift: that branch already ran this migration against the
-// shared dev DB, so our local history and schema need to match it too.
-// See BACKLOG.md.
 enum NotificationType {
   POST_LIKED
   POST_COMMENTED
@@ -901,28 +860,18 @@ model Notification {
   @@map("notifications")
 }
 
-// MLS E2E encryption - stage 3 (devices and key packages) of the plan in
-// backend/docs/mls-threat-model.md. An MLS member is a device, not a user
-// (threat-model §2) - ChatParticipant/receipts/socket rooms stay
-// user-scoped for everything they already do; this sits underneath.
+// MLS devices and key packages: an MLS member is a device, not a user.
 model ChatDevice {
-  /// Client-supplied, not server-generated: the client mints this id and
-  /// embeds it in the MLS credential of every key package it creates,
-  /// before ever registering with the server. The server's id MUST be the
-  /// same value or credential-vs-registration checks can never match.
+  /// Client-supplied id, embedded in the MLS credential of every key package; the server must use the same value.
   id                 String @id
   userId             String
   signaturePublicKey Bytes
-  /// Pinned MLS ciphersuite name this device generates key packages under,
-  /// e.g. "MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519". Rejecting anything
-  /// else at upload time avoids ever mixing ciphersuites within one device.
+  /// Pinned MLS ciphersuite name this device's key packages use.
   ciphersuite        String
 
   createdAt  DateTime  @default(now())
   lastSeenAt DateTime  @default(now())
-  /// Set by explicit revocation ("log out this device everywhere"), by the dormancy sweep (unseen
-  /// 60 days) and by cap eviction of the least-recently-seen device - never by an ordinary logout
-  /// (threat-model §2).
+  /// Set by explicit revocation, the 60-day dormancy sweep, or cap eviction; never by an ordinary logout.
   revokedAt  DateTime?
 
   user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -935,10 +884,9 @@ model ChatDevice {
 }
 
 enum MlsKeyPackageKind {
-  /// Claimed exactly once, then never reusable again (critique C1).
+  /// Claimed exactly once, never reusable.
   SINGLE_USE
-  /// Never consumed by a claim - the fallback so a device with zero
-  /// SINGLE_USE packages left can still be added to a group.
+  /// Never consumed by a claim; the fallback when no SINGLE_USE packages remain.
   LAST_RESORT
 }
 
@@ -952,65 +900,33 @@ model MlsKeyPackage {
 
   createdAt       DateTime  @default(now())
   expiresAt       DateTime
-  /// Only ever set for SINGLE_USE packages. LAST_RESORT is read without
-  /// being claimed, so this stays null for the device's whole lifetime.
+  /// Only set for SINGLE_USE packages; LAST_RESORT is read without being claimed.
   claimedAt       DateTime?
   claimedByUserId String?
 
   device ChatDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
   @@index([deviceId, kind, claimedAt])
-  /// MlsKeyPackageCleanupService's hourly deleteExpiredKeyPackages filters
-  /// on expiresAt alone across the whole table - a full scan without this.
+  /// Serves the hourly deleteExpiredKeyPackages filter on expiresAt alone.
   @@index([expiresAt])
   @@map("mls_key_packages")
 }
 
-// MLS E2E encryption - stage 4 (handshake log) of the plan in
-// backend/docs/mls-threat-model.md. A Commit is the only thing that may
-// ever advance ChatConversation.mlsEpoch, and only one Commit may ever win
-// a given epoch - enforced by the @@unique below plus an atomic
-// compare-and-set (MlsHandshakesRepository.acceptHandshake); the conversation
-// row lock (lockConversation) only serializes membership planning around it.
-//
-// Retained by design: this log is never pruned. A member catches up by applying
-// every Commit in order, so deleting any row would strand it. Growth is bounded
-// by retiring dormant devices (60 days), not by deleting history; consumed
-// Welcomes, old faults and claimed key packages are pruned by MlsRetentionService.
+// Handshake log: a Commit is the only thing that advances mlsEpoch, one per epoch. Never pruned, since members replay every Commit.
 model MlsHandshake {
   id             String  @id @default(cuid())
   conversationId String
-  /// The epoch this Commit was built FROM - ChatConversation.mlsEpoch's
-  /// value at the moment the sender started building it, matching the
-  /// compare-and-set's WHERE clause. Applying this Commit moves the group
-  /// to epoch+1. @@unique below is the actual guarantee: at most one
-  /// Commit may ever resolve a given epoch.
+  /// The epoch this Commit was built FROM; applying it moves the group to epoch+1, and @@unique allows one Commit per epoch.
   epoch          Int
-  /// Nullable, and SetNull on delete - this Commit's payload is shared
-  /// group state every member still needs to reach the current epoch, not
-  /// the sender's property. Cascading it away with the sender's device
-  /// (e.g. their account gets deleted) would leave a permanent gap in the
-  /// handshake log: any member who hadn't caught up past it could never
-  /// reach a later epoch, since process() must apply every Commit in
-  /// order. Losing the sender's identity on this one row is an acceptable
-  /// trade for keeping the conversation recoverable for everyone else.
+  /// Nullable, SetNull on delete: the Commit is shared group state members still need, so it must outlive the sender's device.
   senderDeviceId String?
 
-  /// Opaque encoded MLS Commit bytes - the server never inspects the
-  /// content, only routes and orders it (threat-model: server is a relay).
+  /// Opaque encoded MLS Commit bytes; the server only routes and orders them.
   payload       Bytes
-  /// SHA-256 of payload, so a network-retried submission of the same
-  /// Commit can be recognized as a duplicate instead of a real conflict.
+  /// SHA-256 of payload, to recognise retried duplicate submissions.
   payloadSha256 String
 
-  /// What this Commit does to the group, as declared by its sender and attested by the server. The
-  /// server cannot read a Commit, so it validates the sender's declared device ids against the
-  /// authorized roster (see MlsGroupMember) and records, from its own registry, whose device each one
-  /// is: addedDevices = [{ deviceId, userId, signaturePublicKey (base64) }] from ChatDevice, and
-  /// removedDevices = [{ deviceId, userId }] from the roster. Every other member's client checks the
-  /// Commit against these - id, owner AND key - and treats a mismatch as a fault. False for Commits
-  /// accepted before membership was tracked; the arrays are then empty because nothing was declared,
-  /// not because nothing changed.
+  /// Declared and server-attested device changes: addedDevices = [{ deviceId, userId, signaturePublicKey (base64) }], removedDevices = [{ deviceId, userId }]; other members verify against them. False (arrays empty) for Commits accepted before tracking.
   membershipDeclared Boolean @default(false)
   addedDevices       Json    @default("[]")
   removedDevices     Json    @default("[]")
@@ -1024,9 +940,7 @@ model MlsHandshake {
   @@map("mls_handshakes")
 }
 
-/// A Welcome is per-recipient-device, unlike a Commit (which every existing
-/// member processes) - delivered once, then marked consumed so it's never
-/// handed out twice.
+/// Per-recipient-device Welcome, delivered once then marked consumed.
 model MlsWelcome {
   id                String @id @default(cuid())
   conversationId    String
@@ -1046,23 +960,7 @@ model MlsWelcome {
   @@map("mls_welcomes")
 }
 
-/// The server's record of which devices are leaves in a conversation's MLS ratchet tree. The tree
-/// itself is opaque to the server; this is kept in sync with accepted Commits in the same
-/// transaction (MlsHandshakesRepository.acceptHandshake) so the server always knows who still
-/// holds group secrets.
-///
-/// deviceId and userId are deliberately plain strings, not relations: a leaf outlives its device
-/// row (deleting an account cascades ChatDevice away, but the leaf keeps holding group secrets
-/// until a Remove Commit lands), and the row must still say whose leaf it was to queue that removal.
-///
-/// A row is history once removedEpoch is set - a device removed and later re-added gets a new row.
-/// Epochs are the group's epoch AFTER the Commit (the founder device joins at 0).
-///
-/// No @@unique here: at most one ACTIVE row (removedEpoch IS NULL) may exist per device, which
-/// Prisma cannot express as a WHERE-scoped unique index, so the real constraint is a hand-written
-/// partial unique index in migration 20260921100000_add_mls_group_membership
-/// ("mls_group_members_active_device_key"), alongside a CHECK on the epochs
-/// ("mls_group_members_epochs_check"). Keep both migration lines when regenerating.
+/// Which devices are leaves in a conversation's MLS ratchet tree, kept in sync with accepted Commits. deviceId/userId are plain strings so a leaf outlives its device; a row is history once removedEpoch is set. The one-active-row-per-device partial unique index and epochs CHECK live in migration 20260921100000_add_mls_group_membership.
 model MlsGroupMember {
   id             String @id @default(cuid())
   conversationId String
@@ -1083,11 +981,7 @@ model MlsGroupMember {
   @@map("mls_group_members")
 }
 
-/// A member's client refused a Commit: it did not do what the server recorded for it (or could not be
-/// checked). The conversation is stuck at that epoch for that member, and for everyone else who
-/// checks, until someone looks. Kept so an admin can see which sender and which Commit, instead of
-/// the group silently freezing. senderDeviceId and reporterDeviceId are plain strings, like
-/// MlsGroupMember's, so the record outlives the devices.
+/// A member's client refused a Commit; recorded so an admin can see which sender and Commit froze the group. Device ids are plain strings so the record outlives the devices.
 model MlsCommitFault {
   id               String  @id @default(cuid())
   conversationId   String
