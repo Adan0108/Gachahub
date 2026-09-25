@@ -20,7 +20,9 @@ import { FollowsModule } from './follows/follows.module';
 import { FeedModule } from './feed/feed.module';
 import { CommonModule } from './common/common.module';
 import { ChatDevicesModule } from './chat-devices/chat-devices.module';
+import { ChatBackupModule } from './chat-backup/chat-backup.module';
 import { MlsHandshakesModule } from './mls-handshakes/mls-handshakes.module';
+import { MlsRetentionModule } from './mls-retention/mls-retention.module';
 import { DevModule } from './dev/dev.module';
 import { env } from './config/env';
 
@@ -48,7 +50,9 @@ import { env } from './config/env';
     GameModeratorsModule,
     ChatModule,
     ChatDevicesModule,
+    ChatBackupModule,
     MlsHandshakesModule,
+    MlsRetentionModule,
     MediaModule,
     PostsModule,
     CommentsModule,

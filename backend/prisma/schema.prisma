@@ -53,7 +53,12 @@ model User {
 
   chatDevices ChatDevice[]
 
+  chatBackupKey   ChatBackupKey?
+  chatBackupBlobs ChatBackupBlob[]
+
   @@unique([email])
+  // Trigram index for the picker's ILIKE (needs the pg_trgm extension); see migration 20260925150200.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "user_name_trgm_idx")
   @@map("user")
 }
 
@@ -381,6 +386,8 @@ model ChatParticipant {
   mutedUntil        DateTime?
   blockedAt         DateTime?
   deletedAt         DateTime?
+  /// When the row last entered PENDING; null otherwise. Invite expiry keys off this, not updatedAt.
+  pendingSince      DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -391,6 +398,7 @@ model ChatParticipant {
   @@unique([conversationId, userId])
   @@index([userId, state])
   @@index([conversationId, state])
+  // Partial index on pendingSince WHERE state = 'PENDING' lives only in migration 20260925140100 (Prisma can't express it).
   @@map("chat_participants")
 }
 
@@ -734,6 +742,12 @@ enum MediaResourceType {
   VIDEO
 }
 
+/// Encrypted chat blob flavour; null on a MediaUpload means plain media.
+enum MediaOpaqueKind {
+  BLOB
+  THUMB
+}
+
 enum MediaUploadStatus {
   INITIATED
   UPLOADED
@@ -755,6 +769,9 @@ model MediaUpload {
   purpose      MediaPurpose
   resourceType MediaResourceType
   status       MediaUploadStatus @default(INITIATED)
+
+  /// Set for encrypted chat blobs (stored raw); resourceType is then unused.
+  opaqueKind MediaOpaqueKind?
 
   /// Cloudinary immutable asset identifier.
   /// Useful for ownership checks and future asset management.
@@ -903,8 +920,9 @@ model ChatDevice {
 
   createdAt  DateTime  @default(now())
   lastSeenAt DateTime  @default(now())
-  /// Explicit revocation only (e.g. "log out this device everywhere") -
-  /// an ordinary logout must NOT set this (threat-model §2).
+  /// Set by explicit revocation ("log out this device everywhere"), by the dormancy sweep (unseen
+  /// 60 days) and by cap eviction of the least-recently-seen device - never by an ordinary logout
+  /// (threat-model §2).
   revokedAt  DateTime?
 
   user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -952,8 +970,13 @@ model MlsKeyPackage {
 // backend/docs/mls-threat-model.md. A Commit is the only thing that may
 // ever advance ChatConversation.mlsEpoch, and only one Commit may ever win
 // a given epoch - enforced by the @@unique below plus an atomic
-// compare-and-set (MlsHandshakesRepository.acceptHandshake), never by
-// application-level locking.
+// compare-and-set (MlsHandshakesRepository.acceptHandshake); the conversation
+// row lock (lockConversation) only serializes membership planning around it.
+//
+// Retained by design: this log is never pruned. A member catches up by applying
+// every Commit in order, so deleting any row would strand it. Growth is bounded
+// by retiring dormant devices (60 days), not by deleting history; consumed
+// Welcomes, old faults and claimed key packages are pruned by MlsRetentionService.
 model MlsHandshake {
   id             String  @id @default(cuid())
   conversationId String
@@ -1018,6 +1041,8 @@ model MlsWelcome {
   recipientDevice ChatDevice       @relation(fields: [recipientDeviceId], references: [id], onDelete: Cascade)
 
   @@index([recipientDeviceId, consumedAt])
+  /// Conversation deletes cascade here; without this each one scans the table.
+  @@index([conversationId])
   @@map("mls_welcomes")
 }
 
@@ -1053,7 +1078,8 @@ model MlsGroupMember {
 
   @@index([conversationId, removedEpoch])
   @@index([conversationId, userId])
-  @@index([deviceId])
+  /// The poll's "is this device in the group" probes filter on both columns.
+  @@index([deviceId, removedEpoch])
   @@map("mls_group_members")
 }
 
@@ -1079,4 +1105,43 @@ model MlsCommitFault {
   @@unique([conversationId, epoch, reporterDeviceId])
   @@index([conversationId, epoch])
   @@map("mls_commit_faults")
+}
+
+/// Turns on encrypted history backup for a user. keyCheck is the client's encryption of a fixed string under the
+/// backup key; the key itself never reaches the server.
+model ChatBackupKey {
+  userId    String   @id
+  keyCheck  Bytes
+  createdAt DateTime @default(now())
+  /// Secret derived from the backup key by the client; verifies the proof that authorises replacing the key. Null on rows made before proofs existed.
+  replaceSecret      Bytes?
+  /// Single-use challenge for a key replacement; cleared when consumed.
+  challengeNonce     Bytes?
+  challengeExpiresAt DateTime?
+  /// When a proof-less delete request takes effect; the backup stays usable until then. Null when none is scheduled.
+  deletionScheduledAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("chat_backup_keys")
+}
+
+/// One message's decrypted envelope, encrypted client-side under the backup key. conversationId and messageId are
+/// plain strings, not relations, so a backup outlives a deleted message or conversation.
+model ChatBackupBlob {
+  id             String   @id @default(cuid())
+  userId         String
+  conversationId String
+  messageId      String
+  ciphertext     Bytes
+  /// ciphertext length in bytes, kept so the quota is a cheap SUM.
+  size           Int
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+  /// Paging on restore walks a user's blobs in (createdAt, id) order.
+  @@index([userId, createdAt, id])
+  @@map("chat_backup_blobs")
 }
