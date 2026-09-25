@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type {
@@ -22,6 +23,15 @@ import {
 import { ConfirmMediaUploadsDto } from './dto/confirm-media-uploads.dto';
 import { ConfirmMediaUploadDto } from './dto/confirm-media-upload.dto';
 import { MediaRepository } from './media.repository';
+import {
+  cloudinaryResourceTypeFor,
+  MAX_PENDING_OPAQUE_UPLOADS,
+  opaqueFolder,
+  opaqueKindOf,
+  OPAQUE_MAX_BYTES,
+  rawDeliveryUrl,
+  type OpaqueBlobKind,
+} from './opaque-blob';
 
 const IMAGE_FORMATS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif']);
 const VIDEO_FORMATS = new Set(['mp4', 'webm', 'mov']);
@@ -39,11 +49,15 @@ export class MediaService {
 
   async createUploadSignatures(dto: CreateUploadSignaturesDto, userId: string) {
     this.validateBatchPolicy(dto);
-    await this.enforceSignatureRateLimit(userId);
+    await this.enforceSignatureRateLimit(userId, dto.items.length);
+    await this.enforcePendingOpaqueCap(userId, dto);
 
     const items = await Promise.all(
       dto.items.map(async (item) => {
-        const resourceType = item.resourceType as MediaResourceType;
+        const opaqueKind = item.opaqueKind as OpaqueBlobKind | undefined;
+        // opaque rows have no schema value of their own; IMAGE is never read for them
+        const resourceType = (item.resourceType ??
+          'IMAGE') as MediaResourceType;
         const purpose = dto.purpose as MediaPurpose;
 
         /*
@@ -52,7 +66,9 @@ export class MediaService {
          * A browser cannot upload into another user's folder by replacing
          * this value because folder/public_id are included in the signature.
          */
-        const folder = this.createFolder(purpose, userId);
+        const folder = opaqueKind
+          ? opaqueFolder(opaqueKind, userId)
+          : this.createFolder(purpose, userId);
         const generatedName = randomUUID();
         const publicId = `${folder}/${generatedName}`;
 
@@ -61,18 +77,11 @@ export class MediaService {
           purpose,
           resourceType,
           publicId,
+          opaqueKind,
         });
 
-        const uploadPreset =
-          resourceType === 'IMAGE'
-            ? process.env.CLOUDINARY_IMAGE_UPLOAD_PRESET
-            : process.env.CLOUDINARY_VIDEO_UPLOAD_PRESET;
-
-        if (!uploadPreset) {
-          throw new Error(
-            `Missing Cloudinary upload preset for ${resourceType}`,
-          );
-        }
+        // size caps: preset in the Cloudinary console + getAsset check at confirm
+        const uploadPreset = this.uploadPresetFor(resourceType, opaqueKind);
 
         /*
          * We include folder and public_id consistently in the signature.
@@ -94,8 +103,16 @@ export class MediaService {
           uploadId: upload.id,
           cloudName: process.env.CLOUDINARY_CLOUD_NAME,
           apiKey: process.env.CLOUDINARY_API_KEY,
-          resourceType: resourceType === 'IMAGE' ? 'image' : 'video',
-          uploadUrl: this.createCloudinaryUploadUrl(resourceType),
+          resourceType: cloudinaryResourceTypeFor({
+            publicId,
+            resourceType,
+            opaqueKind,
+          }),
+          uploadUrl: this.createCloudinaryUploadUrl(
+            publicId,
+            resourceType,
+            opaqueKind,
+          ),
           uploadPreset,
           folder: folderOnly,
           publicId: filenameOnly,
@@ -230,7 +247,7 @@ export class MediaService {
       );
     }
 
-    this.validateUploadedAsset(upload.resourceType, dto);
+    const verifiedBytes = await this.validateUploadedAsset(upload, dto);
 
     try {
       const confirmed = await this.mediaRepository.markUploaded({
@@ -238,8 +255,8 @@ export class MediaService {
         assetId: dto.assetId,
         secureUrl: dto.secureUrl,
         version: dto.version,
-        format: dto.format.toLowerCase(),
-        bytes: dto.bytes,
+        format: (dto.format ?? 'bin').toLowerCase(),
+        bytes: verifiedBytes,
         width: dto.width,
         height: dto.height,
         duration: dto.duration,
@@ -313,7 +330,9 @@ export class MediaService {
    * writes can never leave a link row pointing at a dead upload - call this
    * first, then do both DB writes together in one transaction.
    */
-  async destroyAttachedCloudinaryAsset(mediaUploadId: string): Promise<boolean> {
+  async destroyAttachedCloudinaryAsset(
+    mediaUploadId: string,
+  ): Promise<boolean> {
     const upload = await this.mediaRepository.findById(mediaUploadId);
 
     if (
@@ -347,10 +366,12 @@ export class MediaService {
   private async destroyCloudinaryAsset(upload: {
     publicId: string;
     resourceType: MediaResourceType;
+    opaqueKind?: OpaqueBlobKind | null;
   }): Promise<void> {
-    const resourceType = upload.resourceType === 'IMAGE' ? 'image' : 'video';
-
-    await this.cloudinaryService.deleteAsset(upload.publicId, resourceType);
+    await this.cloudinaryService.deleteAsset(
+      upload.publicId,
+      cloudinaryResourceTypeFor(upload),
+    );
   }
 
   /**
@@ -425,6 +446,8 @@ export class MediaService {
     maxImages: number;
     maxVideos: number;
     entityLabel: string;
+    // omit to reject opaque blobs for callers that don't support them
+    maxOpaqueBlobs?: number;
   }) {
     if (params.ids.length === 0) {
       return [];
@@ -443,6 +466,14 @@ export class MediaService {
       throw new BadRequestException(
         `Media uploads cannot be attached: ${missing.join(', ')}`,
       );
+    }
+
+    const opaqueKinds = uploads.map((upload) => opaqueKindOf(upload));
+
+    if (opaqueKinds.some((kind) => kind !== null)) {
+      this.assertOpaquePolicy(opaqueKinds, params);
+
+      return uploads;
     }
 
     const imageCount = uploads.filter(
@@ -473,7 +504,66 @@ export class MediaService {
     return uploads;
   }
 
+  private assertOpaquePolicy(
+    kinds: Array<OpaqueBlobKind | null>,
+    params: { maxOpaqueBlobs?: number; entityLabel: string },
+  ) {
+    if (kinds.some((kind) => kind === null)) {
+      throw new BadRequestException(
+        `A ${params.entityLabel} cannot mix encrypted and plain media`,
+      );
+    }
+
+    if (!params.maxOpaqueBlobs) {
+      throw new BadRequestException(
+        `A ${params.entityLabel} does not support encrypted attachments`,
+      );
+    }
+
+    const blobs = kinds.filter((kind) => kind === 'BLOB').length;
+    const thumbs = kinds.length - blobs;
+
+    if (blobs > params.maxOpaqueBlobs) {
+      throw new BadRequestException(
+        `A ${params.entityLabel} supports at most ${params.maxOpaqueBlobs} encrypted attachments`,
+      );
+    }
+
+    if (thumbs > blobs) {
+      throw new BadRequestException(
+        'Encrypted thumbnails cannot outnumber their attachments',
+      );
+    }
+  }
+
   private validateBatchPolicy(dto: CreateUploadSignaturesDto) {
+    for (const item of dto.items) {
+      if (!item.resourceType === !item.opaqueKind) {
+        throw new BadRequestException(
+          'Each item needs exactly one of resourceType or opaqueKind',
+        );
+      }
+
+      if (item.opaqueKind && dto.purpose !== MediaPurposeDto.CHAT) {
+        throw new BadRequestException(
+          'Opaque uploads are only allowed for chat',
+        );
+      }
+    }
+
+    // opaque counts are enforced at attach time
+    const opaqueItems = dto.items.filter((item) => item.opaqueKind).length;
+
+    if (opaqueItems > 0 && opaqueItems < dto.items.length) {
+      throw new BadRequestException(
+        'A batch cannot mix encrypted and plain media',
+      );
+    }
+
+    if (opaqueItems > 0) {
+      return;
+    }
+
     const images = dto.items.filter(
       (item) => item.resourceType === MediaResourceTypeDto.IMAGE,
     ).length;
@@ -530,10 +620,29 @@ export class MediaService {
     }
   }
 
-  private validateUploadedAsset(
-    resourceType: MediaResourceType,
+  /** Returns the byte size to store: Cloudinary's own figure for opaque blobs. */
+  private async validateUploadedAsset(
+    upload: {
+      publicId: string;
+      resourceType: MediaResourceType;
+      opaqueKind?: OpaqueBlobKind | null;
+    },
     dto: ConfirmMediaUploadDto,
-  ) {
+  ): Promise<number> {
+    const opaqueKind = opaqueKindOf(upload);
+
+    if (opaqueKind) {
+      await this.verifyOpaqueAsset(opaqueKind, upload.publicId, dto);
+
+      return dto.bytes;
+    }
+
+    const resourceType = upload.resourceType;
+
+    if (!dto.format) {
+      throw new BadRequestException('Media format is required');
+    }
+
     const format = dto.format.toLowerCase();
 
     if (resourceType === 'IMAGE') {
@@ -563,9 +672,82 @@ export class MediaService {
         throw new BadRequestException('Video duration is required');
       }
     }
+
+    return dto.bytes;
   }
 
-  private async enforceSignatureRateLimit(userId: string) {
+  private async verifyOpaqueAsset(
+    kind: OpaqueBlobKind,
+    publicId: string,
+    dto: ConfirmMediaUploadDto,
+  ): Promise<void> {
+    const cap = OPAQUE_MAX_BYTES[kind];
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+
+    if (!cloudName) {
+      throw new Error('CLOUDINARY_CLOUD_NAME is not configured');
+    }
+
+    // the response signature only covers public_id+version, so pin the URL
+    const expectedUrl = rawDeliveryUrl({
+      cloudName,
+      version: dto.version,
+      publicId,
+    });
+
+    if (dto.secureUrl !== expectedUrl) {
+      throw new BadRequestException(
+        'Opaque upload URL does not match its asset',
+      );
+    }
+
+    if (dto.bytes > cap) {
+      throw new BadRequestException(
+        `Encrypted upload exceeds the ${cap / 1024} KB limit`,
+      );
+    }
+
+    // client-asserted bytes/assetId are untrusted; ask Cloudinary
+    let asset: Awaited<ReturnType<CloudinaryService['getAsset']>>;
+
+    try {
+      asset = await this.cloudinaryService.getAsset(publicId, 'raw');
+    } catch {
+      throw new ServiceUnavailableException('Could not verify the upload');
+    }
+
+    if (
+      asset.resource_type !== 'raw' ||
+      asset.asset_id !== dto.assetId ||
+      typeof asset.bytes !== 'number' ||
+      asset.bytes > cap
+    ) {
+      throw new BadRequestException('Encrypted upload failed verification');
+    }
+  }
+
+  private async enforcePendingOpaqueCap(
+    userId: string,
+    dto: CreateUploadSignaturesDto,
+  ) {
+    const requested = dto.items.filter((item) => item.opaqueKind).length;
+
+    if (requested === 0) {
+      return;
+    }
+
+    const pending = await this.mediaRepository.countPendingOpaque(userId);
+
+    if (pending + requested > MAX_PENDING_OPAQUE_UPLOADS) {
+      throw new HttpException(
+        'Too many unattached encrypted uploads',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  // counts items, not requests, so a full batch costs what its uploads cost
+  private async enforceSignatureRateLimit(userId: string, items: number) {
     const limit = Number(process.env.MEDIA_SIGNATURE_RATE_LIMIT ?? 30);
 
     const windowSeconds = Number(
@@ -584,16 +766,18 @@ export class MediaService {
 
     const key = `media:signature-rate:${userId}`;
 
-    const count = await this.redisService.incrementWithExpiry(
-      key,
-      windowSeconds,
-    );
-
-    if (count > limit) {
-      throw new HttpException(
-        'Too many upload authorization requests',
-        HttpStatus.TOO_MANY_REQUESTS,
+    for (let i = 0; i < items; i++) {
+      const count = await this.redisService.incrementWithExpiry(
+        key,
+        windowSeconds,
       );
+
+      if (count > limit) {
+        throw new HttpException(
+          'Too many upload authorization requests',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
     }
   }
 
@@ -601,12 +785,36 @@ export class MediaService {
     return `gachahub/${purpose.toLowerCase()}/${userId}`;
   }
 
-  private createCloudinaryUploadUrl(resourceType: MediaResourceType): string {
+  private createCloudinaryUploadUrl(
+    publicId: string,
+    resourceType: MediaResourceType,
+    opaqueKind?: OpaqueBlobKind,
+  ): string {
     const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const kind = cloudinaryResourceTypeFor({
+      publicId,
+      resourceType,
+      opaqueKind,
+    });
 
-    return `https://api.cloudinary.com/v1_1/${cloudName}/${
-      resourceType === 'IMAGE' ? 'image' : 'video'
-    }/upload`;
+    return `https://api.cloudinary.com/v1_1/${cloudName}/${kind}/upload`;
+  }
+
+  private uploadPresetFor(
+    resourceType: MediaResourceType,
+    opaqueKind?: OpaqueBlobKind,
+  ): string {
+    const [name, preset] = opaqueKind
+      ? ['CHAT_BLOB', process.env.CLOUDINARY_CHAT_BLOB_UPLOAD_PRESET]
+      : resourceType === 'IMAGE'
+        ? ['IMAGE', process.env.CLOUDINARY_IMAGE_UPLOAD_PRESET]
+        : ['VIDEO', process.env.CLOUDINARY_VIDEO_UPLOAD_PRESET];
+
+    if (!preset) {
+      throw new Error(`Missing Cloudinary upload preset for ${name}`);
+    }
+
+    return preset;
   }
 
   private isCloudinarySecureUrl(value: string): boolean {

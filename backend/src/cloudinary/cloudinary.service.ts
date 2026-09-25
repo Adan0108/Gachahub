@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { v2 as CloudinaryType } from 'cloudinary';
 import { CLOUDINARY } from './cloudinary.constants';
 
-type ResourceType = 'image' | 'video';
+type ResourceType = 'image' | 'video' | 'raw';
 
 interface GenerateUploadSignatureParams {
   publicId: string;

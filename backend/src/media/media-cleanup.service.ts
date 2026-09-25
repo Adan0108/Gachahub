@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { DiscordLoggerService } from '../common/discord/discord-logger.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { MediaRepository } from './media.repository';
+import { cloudinaryResourceTypeFor } from './opaque-blob';
 
 @Injectable()
 export class MediaCleanupService {
@@ -130,7 +131,7 @@ export class MediaCleanupService {
          */
         await this.cloudinaryService.deleteAsset(
           upload.publicId,
-          upload.resourceType === 'IMAGE' ? 'image' : 'video',
+          cloudinaryResourceTypeFor(upload),
         );
 
         /**

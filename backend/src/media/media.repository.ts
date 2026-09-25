@@ -1,5 +1,6 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import type {
+  MediaOpaqueKind,
   MediaPurpose,
   MediaResourceType,
 } from '../generated/prisma/client';
@@ -51,6 +52,7 @@ export class MediaRepository {
     purpose: MediaPurpose;
     resourceType: MediaResourceType;
     publicId: string;
+    opaqueKind?: MediaOpaqueKind;
   }) {
     return this.prisma.mediaUpload.create({
       data: {
@@ -58,7 +60,18 @@ export class MediaRepository {
         purpose: params.purpose,
         resourceType: params.resourceType,
         publicId: params.publicId,
+        opaqueKind: params.opaqueKind,
         status: 'INITIATED',
+      },
+    });
+  }
+
+  countPendingOpaque(userId: string) {
+    return this.prisma.mediaUpload.count({
+      where: {
+        userId,
+        opaqueKind: { not: null },
+        status: { in: ['INITIATED', 'UPLOADED'] },
       },
     });
   }
