@@ -27,13 +27,14 @@ export class GroupRecovery {
     return this.selfJoiner.recoverMissingGroup(conversationId);
   }
 
-  /** If saved state is still unreadable, wipes that one group's local copy and self-joins; true when a retry is worthwhile. */
-  async recoverUnreadableGroup(conversationId: ConversationId): Promise<boolean> {
-    if (this.groupProblems.get(conversationId)?.kind !== 'state-unreadable') return false;
+  /** For a refused-commit or unreadable group, wipes that one group's local copy and self-joins; true when a retry is worthwhile. */
+  async recoverBrokenGroup(conversationId: ConversationId): Promise<boolean> {
+    const kind = this.groupProblems.get(conversationId)?.kind;
+    if (kind !== 'state-unreadable' && kind !== 'refused-commit') return false;
 
     // Probe and wipe under one lock, so another tab cannot save a readable copy in between
     const outcome = await this.host.runExclusive(conversationId, async () => {
-      if (await this.isSavedStateReadable(conversationId)) {
+      if (kind === 'state-unreadable' && (await this.isSavedStateReadable(conversationId))) {
         this.groupProblems.clear(conversationId);
         return 'readable';
       }
@@ -45,7 +46,7 @@ export class GroupRecovery {
     if (outcome !== 'wiped') return outcome === 'readable';
 
     // The problem stays flagged until the rejoin succeeds; the cooldown starts here
-    return this.selfJoiner.recoverMissingGroup(conversationId, { replacingUnreadable: true });
+    return this.selfJoiner.recoverMissingGroup(conversationId, { replacingBroken: true });
   }
 
   /** Milliseconds until another recovery try is allowed for this group; 0 when one is allowed now. */

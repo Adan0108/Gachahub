@@ -29,7 +29,7 @@ function fakeEngine() {
     syncCommits: vi.fn(),
     processPendingWelcomes: vi.fn(),
     processIncoming: vi.fn(),
-    recoverUnreadableGroup: vi.fn().mockResolvedValue(false),
+    recoverBrokenGroup: vi.fn().mockResolvedValue(false),
     recoveryWaitMs: vi.fn().mockReturnValue(0),
   };
 }

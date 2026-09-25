@@ -296,7 +296,7 @@ describe('SyncEngine resilience', () => {
         });
         await expect(engine.getCurrentEpoch('conv-1')).rejects.toBeInstanceOf(GroupStateCorruptedError);
 
-        await expect(engine.recoverUnreadableGroup('conv-1')).resolves.toBe(true);
+        await expect(engine.recoverBrokenGroup('conv-1')).resolves.toBe(true);
 
         expect(factory.joinExternally).toHaveBeenCalledTimes(1);
         expect(engine.groupProblems.get('conv-1')).toBeUndefined();
@@ -311,10 +311,10 @@ describe('SyncEngine resilience', () => {
         factory.joinExternally.mockRejectedValue(new Error('no snapshot'));
         await expect(engine.getCurrentEpoch('conv-1')).rejects.toBeInstanceOf(GroupStateCorruptedError);
 
-        await expect(engine.recoverUnreadableGroup('conv-1')).resolves.toBe(false);
+        await expect(engine.recoverBrokenGroup('conv-1')).resolves.toBe(false);
         state.broken = true;
         engine.groupProblems.mark('conv-1', 'state-unreadable');
-        await expect(engine.recoverUnreadableGroup('conv-1')).resolves.toBe(false);
+        await expect(engine.recoverBrokenGroup('conv-1')).resolves.toBe(false);
 
         expect(factory.joinExternally).toHaveBeenCalledTimes(1);
       });
@@ -334,7 +334,7 @@ describe('SyncEngine resilience', () => {
         const { engine, factory } = setUp({ storage });
         await expect(engine.getCurrentEpoch('conv-1')).rejects.toBeInstanceOf(GroupStateCorruptedError);
 
-        await expect(engine.recoverUnreadableGroup('conv-1')).resolves.toBe(true);
+        await expect(engine.recoverBrokenGroup('conv-1')).resolves.toBe(true);
 
         expect(reads).toBe(2);
         expect(load).toHaveBeenCalled();
@@ -346,7 +346,7 @@ describe('SyncEngine resilience', () => {
       it('does nothing for a group that is not flagged unreadable', async () => {
         const { engine, factory } = setUp();
 
-        await expect(engine.recoverUnreadableGroup('conv-1')).resolves.toBe(false);
+        await expect(engine.recoverBrokenGroup('conv-1')).resolves.toBe(false);
 
         expect(factory.joinExternally).not.toHaveBeenCalled();
       });
@@ -458,7 +458,7 @@ describe('SyncEngine resilience', () => {
       });
       await expect(engine.getCurrentEpoch('conv-1')).rejects.toBeInstanceOf(GroupStateCorruptedError);
 
-      await expect(engine.recoverUnreadableGroup('conv-1')).resolves.toBe(true);
+      await expect(engine.recoverBrokenGroup('conv-1')).resolves.toBe(true);
 
       expect(factory.joinExternally).toHaveBeenCalledTimes(1);
       expect(await storage.load('conv-1')).toEqual(new Uint8Array([2]));
@@ -535,12 +535,12 @@ describe('SyncEngine resilience', () => {
       await expect(engine.getCurrentEpoch('conv-1')).rejects.toBeInstanceOf(GroupStateCorruptedError);
 
       state.deleteFails = true;
-      await expect(engine.recoverUnreadableGroup('conv-1')).rejects.toThrow('delete failed');
+      await expect(engine.recoverBrokenGroup('conv-1')).rejects.toThrow('delete failed');
       expect(engine.recoveryWaitMs('conv-1')).toBe(0);
 
       state.deleteFails = false;
       engine.groupProblems.mark('conv-1', 'state-unreadable');
-      await expect(engine.recoverUnreadableGroup('conv-1')).resolves.toBe(true);
+      await expect(engine.recoverBrokenGroup('conv-1')).resolves.toBe(true);
     });
 
     it('is one window shared by both kinds of recovery, and reports what is left of it', async () => {
@@ -551,7 +551,7 @@ describe('SyncEngine resilience', () => {
       factory.joinExternally.mockRejectedValue(new Error('no snapshot'));
       await expect(engine.getCurrentEpoch('conv-1')).rejects.toBeInstanceOf(GroupStateCorruptedError);
 
-      await engine.recoverUnreadableGroup('conv-1');
+      await engine.recoverBrokenGroup('conv-1');
 
       expect(engine.recoveryWaitMs('conv-1')).toBeGreaterThan(0);
       await expect(engine.recoverMissingGroup('conv-1')).resolves.toBe(false);
@@ -575,7 +575,7 @@ describe('SyncEngine resilience', () => {
       engine.groupProblems.mark('conv-1', 'state-unreadable');
       const readsBefore = load.mock.calls.filter(([id]) => id === 'conv-1').length;
 
-      const repair = engine.recoverUnreadableGroup('conv-1');
+      const repair = engine.recoverBrokenGroup('conv-1');
       await new Promise((resolve) => setTimeout(resolve, 20));
 
       expect(load.mock.calls.filter(([id]) => id === 'conv-1')).toHaveLength(readsBefore);
@@ -672,9 +672,27 @@ describe('SyncEngine resilience', () => {
       });
       await expect(engine.getCurrentEpoch('conv-1')).rejects.toBeInstanceOf(GroupStateCorruptedError);
 
-      await expect(engine.recoverUnreadableGroup('conv-1')).resolves.toBe(true);
+      await expect(engine.recoverBrokenGroup('conv-1')).resolves.toBe(true);
 
       expect(flagDuringRejoin).toEqual({ kind: 'state-unreadable' });
+      expect(engine.groupProblems.get('conv-1')).toBeUndefined();
+    });
+
+    it('rejoins a group flagged as refused, so it does not stay frozen', async () => {
+      const api = await mocks();
+      const { engine, factory, storage } = setUp();
+      await storage.save('conv-1', new Uint8Array([7]));
+      engine.groupProblems.mark('conv-1', 'refused-commit');
+      vi.mocked(api.getMlsGroupInfo).mockResolvedValue({ epoch: 1, groupInfo: 'AA==' } as never);
+      vi.mocked(api.submitMlsExternalJoin).mockResolvedValue({ outcome: 'accepted' } as never);
+      factory.joinExternally.mockResolvedValue({
+        session: asSession(new FakeSession(2)),
+        commitBytes: new Uint8Array([1]),
+        groupInfoBytes: new Uint8Array([2]),
+      });
+
+      await expect(engine.recoverBrokenGroup('conv-1')).resolves.toBe(true);
+
       expect(engine.groupProblems.get('conv-1')).toBeUndefined();
     });
 
@@ -689,7 +707,7 @@ describe('SyncEngine resilience', () => {
       factory.joinExternally.mockRejectedValue(new Error('no snapshot'));
       await expect(engine.getCurrentEpoch('conv-1')).rejects.toBeInstanceOf(GroupStateCorruptedError);
 
-      await expect(engine.recoverUnreadableGroup('conv-1')).resolves.toBe(false);
+      await expect(engine.recoverBrokenGroup('conv-1')).resolves.toBe(false);
 
       expect(engine.groupProblems.get('conv-1')).toEqual({ kind: 'state-unavailable' });
     });

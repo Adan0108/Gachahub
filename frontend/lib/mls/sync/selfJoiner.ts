@@ -164,15 +164,14 @@ export class SelfJoiner {
     });
   }
 
-  /** One bounded self-join try for a group this device has no state for (never one that was refused or is unreadable: those stay as they are) */
+  /** One bounded self-join try for a group this device has no state for (a refused or unreadable one only after its copy was discarded) */
   async recoverMissingGroup(
     conversationId: ConversationId,
-    options: { replacingUnreadable?: boolean } = {},
+    options: { replacingBroken?: boolean } = {},
   ): Promise<boolean> {
     const kind = this.groupProblems.get(conversationId)?.kind;
-    if (kind === 'refused-commit') return false;
-    // The caller has just discarded the unreadable copy: the flag stays up until the rejoin works
-    if (kind === 'state-unreadable' && !options.replacingUnreadable) return false;
+    // The caller has just discarded the broken copy: the flag stays up until the rejoin works
+    if (kind && !options.replacingBroken && kind !== 'state-unavailable') return false;
 
     if (!this.cooldown.tryStart(conversationId)) return false;
 
@@ -184,7 +183,7 @@ export class SelfJoiner {
     if (await this.hasUsableState(conversationId)) return true;
 
     // An unreadable state is already flagged more precisely by getSession; a discarded one is now just missing
-    if (options.replacingUnreadable || !this.groupProblems.get(conversationId)) {
+    if (options.replacingBroken || !this.groupProblems.get(conversationId)) {
       this.groupProblems.mark(conversationId, 'state-unavailable');
     }
     return false;

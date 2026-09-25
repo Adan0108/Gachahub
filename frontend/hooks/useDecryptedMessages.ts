@@ -3,7 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSyncEngine } from './useSyncEngine';
 import { useDeviceIdentity } from './useDeviceIdentity';
-import { GroupStateCorruptedError, GroupStateUnavailableError } from '../lib/mls/contract/errors';
+import {
+  GroupStateCorruptedError,
+  GroupStateUnavailableError,
+  MembershipMismatchError,
+} from '../lib/mls/contract/errors';
 import { wasSentByDevice } from '../lib/mls/messaging/messageOrigin';
 import { base64ToBytes } from '../lib/mls/storage/base64';
 import {
@@ -25,8 +29,8 @@ async function syncCommitsRecoveringMissingWelcome(
   try {
     await syncEngine.syncCommits(conversationId);
   } catch (error) {
-    if (error instanceof GroupStateCorruptedError) {
-      if (!(await syncEngine.recoverUnreadableGroup(conversationId))) throw error;
+    if (error instanceof GroupStateCorruptedError || error instanceof MembershipMismatchError) {
+      if (!(await syncEngine.recoverBrokenGroup(conversationId))) throw error;
       await syncEngine.syncCommits(conversationId);
       return;
     }

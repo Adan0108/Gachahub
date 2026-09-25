@@ -209,8 +209,8 @@ export class SyncEngine {
     return this.recovery.recoverMissingGroup(conversationId);
   }
 
-  recoverUnreadableGroup(conversationId: ConversationId): Promise<boolean> {
-    return this.recovery.recoverUnreadableGroup(conversationId);
+  recoverBrokenGroup(conversationId: ConversationId): Promise<boolean> {
+    return this.recovery.recoverBrokenGroup(conversationId);
   }
 
   /** How long until another recovery try is allowed for this group; 0 when one is allowed now. */
