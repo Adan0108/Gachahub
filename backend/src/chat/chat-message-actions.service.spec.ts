@@ -35,6 +35,7 @@ jest.mock('../generated/prisma/client', () => ({
   Prisma: loadActualPrisma(),
 }));
 
+import { MembershipChangePendingException } from '../common/exceptions/membership-change-pending.exception';
 import { ChatAccessService } from './chat-access.service';
 import { ChatMessageActionsService } from './chat-message-actions.service';
 
@@ -536,6 +537,28 @@ describe('ChatMessageActionsService', () => {
   });
 
   describe('editMessage', () => {
+    it('makes the sender wait while a group member is still being removed', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue({
+        id: 'message-1',
+        status: 'SENT',
+        senderId: 'user-1',
+        conversation: {
+          participants: [
+            { userId: 'user-1', state: 'ACTIVE' },
+            { userId: 'user-2', state: 'LEAVING' },
+          ],
+        },
+      });
+
+      await expect(
+        service.editMessage('user-1', 'message-1', {
+          ciphertext: 'new-cipher',
+        } as any),
+      ).rejects.toThrow(MembershipChangePendingException);
+
+      expect(repository.updateMessage).not.toHaveBeenCalled();
+    });
+
     it('updates the message on success', async () => {
       repository.findMessageWithParticipants.mockResolvedValue({
         id: 'message-1',

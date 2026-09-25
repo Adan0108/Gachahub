@@ -26,6 +26,15 @@ interface UseDeviceIdentityResult {
   revokeDevice: () => Promise<void>;
   /** Re-attempts provisioning after a failure, without needing a full page reload. */
   retry: () => void;
+  /**
+   * Re-runs provisioning on demand and returns the (possibly different) credential - for a send
+   * that just failed because the backend says this device is no longer linked or was revoked
+   * (retired by dormancy, or cap eviction) since the last successful provision. Unlike retry(),
+   * this is awaitable: the caller needs the fresh credential's deviceId back, not just a
+   * re-render. Updates the same state retry() does, so useSyncEngine picks up the new device on
+   * its very next call.
+   */
+  reprovision: () => Promise<DeviceCredential>;
 }
 
 /**
@@ -80,5 +89,23 @@ export function useDeviceIdentity(): UseDeviceIdentityResult {
     setAttempt((current) => current + 1);
   }
 
-  return { credential, isReady: credential !== undefined, error, revokeDevice, retry };
+  async function reprovision(): Promise<DeviceCredential> {
+    if (!user?.id) {
+      throw new Error('Cannot reprovision a device with no signed-in user');
+    }
+    const fresh = await ensureDeviceProvisioned(getSharedDeviceIdentityStore(), user.id);
+    setCredential(fresh);
+    setError(undefined);
+    provisioningUserIdRef.current = user.id;
+    return fresh;
+  }
+
+  return {
+    credential,
+    isReady: credential !== undefined,
+    error,
+    revokeDevice,
+    retry,
+    reprovision,
+  };
 }

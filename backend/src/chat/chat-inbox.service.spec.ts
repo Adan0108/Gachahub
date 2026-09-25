@@ -6,6 +6,9 @@ import {
 jest.mock('./chat.repository', () => ({
   ChatRepository: class {},
 }));
+jest.mock('./membership/chat-membership.repository', () => ({
+  ChatMembershipRepository: class {},
+}));
 jest.mock('../follows/follows.service', () => ({
   FollowsService: class {},
 }));
@@ -96,6 +99,15 @@ describe('ChatInboxService', () => {
     isModerator: jest.fn(),
   };
 
+  const membershipService = {
+    acceptInvite: jest.fn(),
+    declineInvite: jest.fn(),
+  };
+
+  const historyFetchRateLimiter = {
+    assertNotRateLimited: jest.fn(),
+  };
+
   let chatAccessService: ChatAccessService;
   let service: ChatInboxService;
 
@@ -111,6 +123,8 @@ describe('ChatInboxService', () => {
       repository as any,
       chatAccessService,
       blocksService as any,
+      membershipService as any,
+      historyFetchRateLimiter as any,
     );
     blocksService.getBlockedIdsAmong.mockResolvedValue(new Set());
     blocksService.isBlocked.mockResolvedValue(false);
@@ -349,59 +363,76 @@ describe('ChatInboxService', () => {
     const requestMethods: Array<{
       name: string;
       call: (userId: string, conversationId: string) => Promise<unknown>;
-      targetState: string;
+      membershipCall: jest.Mock;
     }> = [
       {
         name: 'acceptRequest',
         call: (u, c) => service.acceptRequest(u, c),
-        targetState: 'ACTIVE',
+        membershipCall: membershipService.acceptInvite,
       },
       {
         name: 'declineRequest',
         call: (u, c) => service.declineRequest(u, c),
-        targetState: 'DECLINED',
+        membershipCall: membershipService.declineInvite,
       },
     ];
 
     it.each(requestMethods)(
       '$name rejects when the conversation is not found',
-      async ({ call }) => {
+      async ({ call, membershipCall }) => {
         repository.findParticipant.mockResolvedValue(null);
 
         await expect(call('user-1', 'conversation-1')).rejects.toThrow(
           NotFoundException,
         );
+        expect(membershipCall).not.toHaveBeenCalled();
       },
     );
 
     it.each(requestMethods)(
-      '$name rejects when the conversation is not pending',
-      async ({ call }) => {
+      '$name treats a conversation the user deleted as not found',
+      async ({ call, membershipCall }) => {
+        repository.findParticipant.mockResolvedValue({
+          userId: 'user-1',
+          state: 'PENDING',
+          deletedAt: new Date(),
+        });
+
+        await expect(call('user-1', 'conversation-1')).rejects.toThrow(
+          NotFoundException,
+        );
+        expect(membershipCall).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(requestMethods)(
+      '$name hands the change to the membership service and returns the updated participant',
+      async ({ call, membershipCall }) => {
+        const updated = { userId: 'user-1', state: 'JOINING' };
+        repository.findParticipant
+          .mockResolvedValueOnce({ userId: 'user-1', state: 'PENDING' })
+          .mockResolvedValueOnce(updated);
+        membershipCall.mockResolvedValue(undefined);
+
+        await expect(call('user-1', 'conversation-1')).resolves.toBe(updated);
+
+        expect(membershipCall).toHaveBeenCalledWith('conversation-1', 'user-1');
+      },
+    );
+
+    it.each(requestMethods)(
+      '$name surfaces the membership service rejecting a conversation that is not pending',
+      async ({ call, membershipCall }) => {
         repository.findParticipant.mockResolvedValue({
           userId: 'user-1',
           state: 'ACTIVE',
         });
+        membershipCall.mockRejectedValue(
+          new BadRequestException('Conversation is not pending'),
+        );
 
         await expect(call('user-1', 'conversation-1')).rejects.toThrow(
           BadRequestException,
-        );
-      },
-    );
-
-    it.each(requestMethods)(
-      '$name moves a pending conversation to $targetState',
-      async ({ call, targetState }) => {
-        repository.findParticipant.mockResolvedValue({
-          userId: 'user-1',
-          state: 'PENDING',
-        });
-
-        await call('user-1', 'conversation-1');
-
-        expect(repository.updateParticipantState).toHaveBeenCalledWith(
-          'conversation-1',
-          'user-1',
-          targetState,
         );
       },
     );
@@ -572,6 +603,27 @@ describe('ChatInboxService', () => {
       );
       expect(otherParticipant?.state).toBe('ACTIVE');
     });
+
+    // regression: title/photoUrl come back from Prisma on every conversation
+    // (include doesn't restrict scalars) but were being dropped when shaping
+    // the summary, leaving the frontend with no name to show for a group.
+    it('includes a group conversation title and photo in the summary', async () => {
+      repository.findInboxConversations.mockResolvedValue([
+        {
+          ...buildConversation('group-1', new Date('2024-01-01'), null),
+          type: 'GROUP',
+          title: 'Team Build Chat',
+          photoUrl: 'https://cdn.gachahub.com/chat/groups/team-build.png',
+        },
+      ]);
+
+      const [result] = await service.listConversations('user-1');
+
+      expect(result.title).toBe('Team Build Chat');
+      expect(result.photoUrl).toBe(
+        'https://cdn.gachahub.com/chat/groups/team-build.png',
+      );
+    });
   });
 
   describe('listMessageRequests', () => {
@@ -725,16 +777,16 @@ describe('ChatInboxService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('rejects a pending group invitee before they accept', async () => {
+    it('allows a pending group invitee to read message history before they accept', async () => {
       repository.findParticipant.mockResolvedValue({
         userId: 'user-1',
         state: 'PENDING',
       });
-      repository.findConversationType.mockResolvedValue({ type: 'GROUP' });
+      repository.findMessages.mockResolvedValue([]);
 
       await expect(
         service.findMessages('user-1', 'conversation-1', {} as any),
-      ).rejects.toThrow(ForbiddenException);
+      ).resolves.toBeDefined();
     });
 
     it('allows a pending direct message request to preview history', async () => {
@@ -742,7 +794,6 @@ describe('ChatInboxService', () => {
         userId: 'user-1',
         state: 'PENDING',
       });
-      repository.findConversationType.mockResolvedValue({ type: 'DIRECT' });
       repository.findMessages.mockResolvedValue([]);
 
       await expect(
@@ -770,6 +821,46 @@ describe('ChatInboxService', () => {
         beforeMessageId: 'message-5',
         limit: 30,
       });
+    });
+
+    it('does not rate limit the initial page, only paginated fetches', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findMessages.mockResolvedValue([]);
+
+      await service.findMessages('user-1', 'conversation-1', {} as any);
+
+      expect(
+        historyFetchRateLimiter.assertNotRateLimited,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('rate limits a paginated fetch before touching the cursor or the database', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      historyFetchRateLimiter.assertNotRateLimited.mockImplementationOnce(
+        () => {
+          throw new Error('rate limited');
+        },
+      );
+
+      await expect(
+        service.findMessages('user-1', 'conversation-1', {
+          beforeMessageId: 'message-5',
+          limit: 30,
+        }),
+      ).rejects.toThrow('rate limited');
+
+      expect(historyFetchRateLimiter.assertNotRateLimited).toHaveBeenCalledWith(
+        'user-1',
+        'conversation-1',
+      );
+      expect(repository.findSentMessageInConversation).not.toHaveBeenCalled();
+      expect(repository.findMessages).not.toHaveBeenCalled();
     });
 
     it('rejects a beforeMessageId that does not belong to this conversation', async () => {

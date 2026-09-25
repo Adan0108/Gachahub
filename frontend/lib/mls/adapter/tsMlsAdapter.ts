@@ -2,6 +2,7 @@ import {
   createApplicationMessage,
   createCommit,
   createGroup,
+  createGroupInfoWithExternalPubAndRatchetTree,
   decodeMlsMessage,
   encodeMlsMessage,
   encodeGroupState,
@@ -10,7 +11,9 @@ import {
   getCiphersuiteImpl,
   getCiphersuiteFromName,
   joinGroup,
+  joinGroupExternal,
   processPrivateMessage,
+  processPublicMessage,
   emptyPskIndex,
   defaultCapabilities,
   type Credential,
@@ -21,6 +24,7 @@ import {
   type RatchetTree,
   type LeafIndex,
   type Proposal,
+  type PublicMessage,
 } from 'ts-mls';
 // Not re-exported from the package root - internal but reachable via the
 // package's own "./*.js" subpath export map (see ts-mls's package.json).
@@ -28,11 +32,7 @@ import { toNodeIndex, nodeToLeafIndex } from 'ts-mls/treemath.js';
 import { defaultClientConfig } from 'ts-mls/clientConfig.js';
 import { decryptSenderData } from 'ts-mls/privateMessage.js';
 import { makeKeyPackageRef } from 'ts-mls/keyPackage.js';
-import type {
-  DeviceIdentityStore,
-  GroupSession,
-  GroupSessionFactory,
-} from '../contract/client';
+import type { DeviceIdentityStore, GroupSession, GroupSessionFactory } from '../contract/client';
 import type {
   ConversationId,
   DeviceCredential,
@@ -43,7 +43,14 @@ import type {
   ProcessResult,
   UserId,
 } from '../contract/types';
-import { CredentialMismatchError } from '../contract/errors';
+import {
+  CredentialMismatchError,
+  MembershipMismatchError,
+  StaleWelcomeError,
+} from '../contract/errors';
+import { bytesEqual } from '../bytes';
+import { decodeIdentity, encodeIdentity } from './identityCodec';
+import { diffLeafMembership, listLeafCredentials } from './leafMembership';
 import type { MlsClientCandidate } from '../contract/contractTests';
 import {
   InMemoryDeviceIdentityStorage,
@@ -61,6 +68,12 @@ import {
  * separate decision once a library is actually chosen.
  */
 export const CIPHERSUITE_NAME = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519';
+
+// Prefixed before signing a session-link challenge, so the device key never signs raw server bytes that
+// could double as an MLS structure. Duplicated in backend session-link-proof.ts - keep both in step; each
+// side has a test that pins this exact string.
+export const SESSION_LINK_LABEL = 'gachahub/session-link/v1\n';
+const SESSION_LINK_CHALLENGE_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 
 // ts-mls's own defaultLifetime is notBefore=0/notAfter=max-int64 - an
 // effectively-infinite key package a real server should never accept.
@@ -82,38 +95,6 @@ function getImpl(): Promise<CiphersuiteImpl> {
   return cachedImpl;
 }
 
-function encodeIdentity(userId: UserId, deviceId: DeviceId): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify({ userId, deviceId }));
-}
-
-/**
- * Parses a ratchet-tree leaf's credential identity - bytes that arrived
- * over the wire (via a Welcome or Commit from the server, which never
- * inspects Welcome contents) rather than something this device produced
- * itself. Returns undefined instead of throwing for anything malformed, so
- * one bad credential can be rejected as data (a normal ProcessResult) by
- * the caller instead of crashing out of process() with a raw SyntaxError -
- * which would otherwise repeat identically on every retry, permanently
- * wedging that conversation's sync.
- */
-function decodeIdentity(identity: Uint8Array): { userId: UserId; deviceId: DeviceId } | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(identity));
-  } catch {
-    return undefined;
-  }
-  if (
-    typeof parsed !== 'object' ||
-    parsed === null ||
-    typeof (parsed as { userId?: unknown }).userId !== 'string' ||
-    typeof (parsed as { deviceId?: unknown }).deviceId !== 'string'
-  ) {
-    return undefined;
-  }
-  return parsed as { userId: UserId; deviceId: DeviceId };
-}
-
 function encodeConversationId(conversationId: ConversationId): Uint8Array {
   return new TextEncoder().encode(conversationId);
 }
@@ -130,18 +111,6 @@ function isPlaintextEnvelope(value: unknown): value is PlaintextEnvelope {
   );
 }
 
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  for (let i = 0; i < a.length; i += 1) {
-    if (a[i] !== b[i]) {
-      return false;
-    }
-  }
-  return true;
-}
-
 export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
   private deviceId: DeviceId | undefined;
   private credential: DeviceCredential | undefined;
@@ -155,7 +124,9 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
   readonly keyPackagesById = new Map<string, StoredKeyPackage>();
   private hydrationPromise: Promise<void> | undefined;
 
-  constructor(private readonly storage: DeviceIdentityStorage = new InMemoryDeviceIdentityStorage()) {}
+  constructor(
+    private readonly storage: DeviceIdentityStorage = new InMemoryDeviceIdentityStorage(),
+  ) {}
 
   async isProvisioned(): Promise<boolean> {
     await this.ensureHydrated();
@@ -197,12 +168,51 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
     return this.credential;
   }
 
+  async signSessionLinkChallenge(challenge: string): Promise<Uint8Array> {
+    if (!SESSION_LINK_CHALLENGE_SHAPE.test(challenge)) {
+      throw new Error('Unexpected challenge format');
+    }
+    await this.ensureHydrated();
+    if (!this.signatureKeyPair) {
+      throw new Error('Device not provisioned yet');
+    }
+    const message = new TextEncoder().encode(SESSION_LINK_LABEL + challenge);
+    return (await getImpl()).signature.sign(this.signatureKeyPair.signKey, message);
+  }
+
   async getOwnCredential(): Promise<DeviceCredential> {
     await this.ensureHydrated();
     if (!this.credential) {
       throw new Error('Device not provisioned yet');
     }
     return this.credential;
+  }
+
+  /** A fresh key package that is never uploaded or stored: for a join this device makes by itself. */
+  async createEphemeralKeyPackage(): Promise<{
+    publicPackage: KeyPackage;
+    privatePackage: PrivateKeyPackage;
+  }> {
+    await this.ensureHydrated();
+    return this.buildKeyPackage();
+  }
+
+  private async buildKeyPackage() {
+    if (!this.credential || !this.signatureKeyPair || !this.deviceId) {
+      throw new Error('Device not provisioned yet');
+    }
+    const mlsCredential: Credential = {
+      credentialType: 'basic',
+      identity: encodeIdentity(this.credential.userId, this.deviceId),
+    };
+    return generateKeyPackageWithKey(
+      mlsCredential,
+      defaultCapabilities(),
+      boundedLifetime(),
+      [],
+      this.signatureKeyPair,
+      await getImpl(),
+    );
   }
 
   /**
@@ -222,22 +232,10 @@ export class TsMlsDeviceIdentityStore implements DeviceIdentityStore {
     if (!this.credential || !this.signatureKeyPair || !this.deviceId) {
       throw new Error('Device not provisioned yet');
     }
-    const impl = await getImpl();
-    const mlsCredential: Credential = {
-      credentialType: 'basic',
-      identity: encodeIdentity(this.credential.userId, this.deviceId),
-    };
     const out: Uint8Array[] = [];
     for (let i = 0; i < count; i += 1) {
       // eslint-disable-next-line no-await-in-loop -- each key package's keygen depends on none of the others, but ts-mls's API is one-at-a-time
-      const kp = await generateKeyPackageWithKey(
-        mlsCredential,
-        defaultCapabilities(),
-        boundedLifetime(),
-        [],
-        this.signatureKeyPair,
-        impl,
-      );
+      const kp = await this.buildKeyPackage();
       this.storeKeyPackage(kp.publicPackage, kp.privatePackage, kind);
       out.push(
         encodeMlsMessage({
@@ -354,10 +352,14 @@ function findLeafIndexByIdentity(
   return undefined;
 }
 
+/** The public, signed snapshot other devices need to join a group by themselves. */
+async function encodeGroupInfoFor(state: ClientState, impl: CiphersuiteImpl): Promise<Uint8Array> {
+  const groupInfo = await createGroupInfoWithExternalPubAndRatchetTree(state, [], impl);
+  return encodeMlsMessage({ groupInfo, wireformat: 'mls_group_info', version: 'mls10' });
+}
+
 class TsMlsGroupSession implements GroupSession {
-  private staged:
-    | { newState: ClientState; welcome: Uint8Array | undefined }
-    | undefined;
+  private staged: { newState: ClientState; welcome: Uint8Array | undefined } | undefined;
 
   constructor(
     public readonly conversationId: ConversationId,
@@ -369,8 +371,18 @@ class TsMlsGroupSession implements GroupSession {
     return Number(this.state.groupContext.epoch);
   }
 
+  async listLeaves(): Promise<DeviceCredential[] | undefined> {
+    return listLeafCredentials(this.state.ratchetTree);
+  }
+
   async peekEpoch(wireBytes: Uint8Array): Promise<Epoch | undefined> {
     const decoded = decodeMlsMessage(wireBytes, 0)?.[0];
+    if (decoded?.wireformat === 'mls_public_message') {
+      const { groupId, epoch } = decoded.publicMessage.content;
+      return bytesEqual(groupId, encodeConversationId(this.conversationId))
+        ? Number(epoch)
+        : undefined;
+    }
     if (!decoded || decoded.wireformat !== 'mls_private_message') {
       return undefined;
     }
@@ -382,6 +394,9 @@ class TsMlsGroupSession implements GroupSession {
 
   async process(wireBytes: Uint8Array): Promise<ProcessResult> {
     const decoded = decodeMlsMessage(wireBytes, 0)?.[0];
+    if (decoded?.wireformat === 'mls_public_message') {
+      return this.processExternalCommit(decoded.publicMessage);
+    }
     if (!decoded || decoded.wireformat !== 'mls_private_message') {
       return { kind: 'rejected', reason: 'malformed' };
     }
@@ -394,8 +409,7 @@ class TsMlsGroupSession implements GroupSession {
 
     let incomingKind: 'commit' | 'proposal' | undefined;
     let proposalInfo:
-      | { proposal: Proposal; proposer: DeviceCredential; isExternal: boolean }
-      | undefined;
+      { proposal: Proposal; proposer: DeviceCredential; isExternal: boolean } | undefined;
     // A member-sent proposal whose credential didn't decode - distinct from
     // proposalInfo being absent (e.g. this was a commit, not a proposal).
     let proposalCredentialMismatch = false;
@@ -517,10 +531,49 @@ class TsMlsGroupSession implements GroupSession {
       };
     }
 
+    const membershipChange = diffLeafMembership(treeBeforeCommit, this.state.ratchetTree);
+    if (!membershipChange) {
+      return { kind: 'rejected', reason: 'credential-mismatch' };
+    }
+
     return {
       kind: 'commit',
       epoch: Number(this.state.groupContext.epoch),
-      membershipChange: null, // best-effort for this spike, see note in stageCommit
+      membershipChange,
+    };
+  }
+
+  /**
+   * A device joining by itself sends a public commit. Anything else sent as a public message is refused:
+   * every other change to the group travels as a private message.
+   */
+  private async processExternalCommit(publicMessage: PublicMessage): Promise<ProcessResult> {
+    const { content } = publicMessage;
+    if (!bytesEqual(content.groupId, encodeConversationId(this.conversationId))) {
+      return { kind: 'rejected', reason: 'wrong-conversation' };
+    }
+    if (content.sender.senderType !== 'new_member_commit' || content.contentType !== 'commit') {
+      return { kind: 'rejected', reason: 'malformed' };
+    }
+
+    const treeBeforeCommit = this.state.ratchetTree;
+    const result = await processPublicMessage(
+      this.state,
+      publicMessage,
+      emptyPskIndex,
+      await getImpl(),
+    );
+    this.state = result.newState;
+
+    const membershipChange = diffLeafMembership(treeBeforeCommit, this.state.ratchetTree);
+    if (!membershipChange) {
+      return { kind: 'rejected', reason: 'credential-mismatch' };
+    }
+
+    return {
+      kind: 'commit',
+      epoch: Number(this.state.groupContext.epoch),
+      membershipChange,
     };
   }
 
@@ -539,6 +592,7 @@ class TsMlsGroupSession implements GroupSession {
   async stageCommit(change: MembershipChangeRequest): Promise<{
     wireBytes: Uint8Array;
     expectedEpoch: Epoch;
+    groupInfo: Uint8Array;
     welcomes: Array<{ deviceId: DeviceId; welcomeBytes: Uint8Array }>;
   }> {
     const impl = await getImpl();
@@ -614,7 +668,12 @@ class TsMlsGroupSession implements GroupSession {
       }
     }
 
-    return { wireBytes, expectedEpoch, welcomes };
+    return {
+      wireBytes,
+      expectedEpoch,
+      groupInfo: await encodeGroupInfoFor(commitResult.newState, impl),
+      welcomes,
+    };
   }
 
   async commitAccepted(): Promise<void> {
@@ -673,9 +732,46 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
     return new TsMlsGroupSession(conversationId, state, credential);
   }
 
+  async joinExternally(
+    conversationId: ConversationId,
+    groupInfoBytes: Uint8Array,
+  ): Promise<{ session: GroupSession; commitBytes: Uint8Array; groupInfoBytes: Uint8Array }> {
+    const decoded = decodeMlsMessage(groupInfoBytes, 0)?.[0];
+    if (!decoded || decoded.wireformat !== 'mls_group_info') {
+      throw new CredentialMismatchError('Bytes do not contain an MLS GroupInfo message');
+    }
+    if (!bytesEqual(decoded.groupInfo.groupContext.groupId, encodeConversationId(conversationId))) {
+      throw new CredentialMismatchError(
+        `GroupInfo is for a different conversation than "${conversationId}"`,
+      );
+    }
+
+    const credential = await this.store.getOwnCredential();
+    const impl = await getImpl();
+    const keyPackage = await this.store.createEphemeralKeyPackage();
+    const { publicMessage, newState } = await joinGroupExternal(
+      decoded.groupInfo,
+      keyPackage.publicPackage,
+      keyPackage.privatePackage,
+      false,
+      impl,
+    );
+
+    return {
+      session: new TsMlsGroupSession(conversationId, newState, credential),
+      commitBytes: encodeMlsMessage({
+        publicMessage,
+        wireformat: 'mls_public_message',
+        version: 'mls10',
+      }),
+      groupInfoBytes: await encodeGroupInfoFor(newState, impl),
+    };
+  }
+
   async joinFromWelcome(
     conversationId: ConversationId,
     welcomeBytes: Uint8Array,
+    options: { verify?: (session: GroupSession) => Promise<void> } = {},
   ): Promise<GroupSession> {
     const decoded = decodeMlsMessage(welcomeBytes, 0)?.[0];
     if (!decoded || decoded.wireformat !== 'mls_welcome') {
@@ -712,12 +808,22 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
       );
     }
 
-    // Only after the join actually succeeds - a failed joinGroup or a
-    // wrong-conversation Welcome above should leave the package available
-    // for a genuine retry, not consume it on a doomed attempt.
+    const session = new TsMlsGroupSession(conversationId, state, credential);
+
+    try {
+      await options.verify?.(session);
+    } catch (error) {
+      // A definite refusal or a stale Welcome spends the package; a transport error keeps it for the retry.
+      if (error instanceof MembershipMismatchError || error instanceof StaleWelcomeError) {
+        await this.store.consumeKeyPackage(matching.id);
+      }
+      throw error;
+    }
+
+    // Spent only once the join is accepted, so a failed attempt leaves it for a retry.
     await this.store.consumeKeyPackage(matching.id);
 
-    return new TsMlsGroupSession(conversationId, state, credential);
+    return session;
   }
 
   private async findMatchingKeyPackage(

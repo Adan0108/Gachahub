@@ -24,7 +24,7 @@ describe('DevService', () => {
   it('throws when nodeEnv is production', () => {
     env.nodeEnv = 'production';
 
-    expect(() => new DevService({} as never)).toThrow(
+    expect(() => new DevService({} as never, {} as never)).toThrow(
       InternalServerErrorException,
     );
   });
@@ -32,7 +32,7 @@ describe('DevService', () => {
   it('throws for an unexpected nodeEnv value such as staging', () => {
     env.nodeEnv = 'staging';
 
-    expect(() => new DevService({} as never)).toThrow(
+    expect(() => new DevService({} as never, {} as never)).toThrow(
       InternalServerErrorException,
     );
   });
@@ -40,6 +40,54 @@ describe('DevService', () => {
   it('does not throw when nodeEnv is development', () => {
     env.nodeEnv = 'development';
 
-    expect(() => new DevService({} as never)).not.toThrow();
+    expect(() => new DevService({} as never, {} as never)).not.toThrow();
+  });
+
+  describe('deleting test users', () => {
+    const makeService = () => {
+      env.nodeEnv = 'development';
+      const prisma = {
+        user: {
+          findUnique: jest.fn().mockResolvedValue({ name: 'DevTest_1' }),
+          delete: jest.fn(),
+          deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
+        },
+        session: {
+          findMany: jest.fn().mockResolvedValue([
+            { id: 's1', token: 't1' },
+            { id: 's2', token: 't2' },
+          ]),
+        },
+      };
+      const terminator = { end: jest.fn() };
+      return {
+        prisma,
+        terminator,
+        service: new DevService(prisma as never, terminator as never),
+      };
+    };
+
+    it('ends the logins of a deleted user properly, before removing them', async () => {
+      const { service, terminator, prisma } = makeService();
+
+      await service.deleteTestUser('u1');
+
+      expect(prisma.session.findMany).toHaveBeenCalledWith({
+        where: { user: { id: 'u1' } },
+        select: { id: true, token: true },
+      });
+      expect(terminator.end).toHaveBeenCalledWith([
+        { id: 's1', token: 't1' },
+        { id: 's2', token: 't2' },
+      ]);
+    });
+
+    it('does the same when deleting every test user', async () => {
+      const { service, terminator } = makeService();
+
+      await service.deleteAllTestUsers();
+
+      expect(terminator.end).toHaveBeenCalledTimes(1);
+    });
   });
 });

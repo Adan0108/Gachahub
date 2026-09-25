@@ -17,6 +17,7 @@ describe('WebsocketGateway', () => {
     data: {} as { userId?: string },
     handshake: { headers: {} },
     join: jest.fn(),
+    emit: jest.fn(),
     disconnect: jest.fn(),
     ...overrides,
   });
@@ -29,32 +30,38 @@ describe('WebsocketGateway', () => {
 
   describe('handleConnection', () => {
     it('joins the user room on a valid session', async () => {
-      getSession.mockResolvedValue({ user: { id: 'user-1' } });
+      getSession.mockResolvedValue({
+        user: { id: 'user-1' },
+        session: { id: 'session-1' },
+      });
       const socket = makeSocket();
 
       await gateway.handleConnection(socket as any);
 
       expect(socket.data.userId).toBe('user-1');
       expect(socket.join).toHaveBeenCalledWith('user:user-1');
+      expect(socket.join).toHaveBeenCalledWith('session:session-1');
       expect(socket.disconnect).not.toHaveBeenCalled();
     });
 
-    it('disconnects when there is no session', async () => {
+    it('tells the browser it is signed out, then disconnects, when there is no session', async () => {
       getSession.mockResolvedValue(null);
       const socket = makeSocket();
 
       await gateway.handleConnection(socket as any);
 
+      expect(socket.emit).toHaveBeenCalledWith('session:revoked');
       expect(socket.disconnect).toHaveBeenCalledWith(true);
       expect(socket.join).not.toHaveBeenCalled();
     });
 
-    it('disconnects when session lookup throws', async () => {
+    it('disconnects on a backend error WITHOUT any signed-out signal - a hiccup must not log people out', async () => {
       getSession.mockRejectedValue(new Error('boom'));
       const socket = makeSocket();
 
       await gateway.handleConnection(socket as any);
 
+      expect(socket.emit).not.toHaveBeenCalled();
       expect(socket.disconnect).toHaveBeenCalledWith(true);
       expect(socket.join).not.toHaveBeenCalled();
     });

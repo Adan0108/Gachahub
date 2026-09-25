@@ -44,6 +44,14 @@ export interface DeviceIdentityStore {
    */
   provision(userId: UserId): Promise<DeviceCredential>;
 
+  /**
+   * Proves to the server, when linking a login to this device, that this browser holds the device key.
+   * Domain-separated (a fixed label is prefixed before signing) so a server that shapes the challenge to
+   * look like an MLS structure can never turn this into a signature over that structure - the device key
+   * signs nothing else, ever. Throws on a challenge that isn't the expected two-part token shape.
+   */
+  signSessionLinkChallenge(challenge: string): Promise<Uint8Array>;
+
   /** This device's own credential. Throws if not yet provisioned. */
   getOwnCredential(): Promise<DeviceCredential>;
 
@@ -53,10 +61,7 @@ export interface DeviceIdentityStore {
    * LAST_RESORT for the one reusable fallback package a device offers
    * when it has no SINGLE_USE packages left (critique C1).
    */
-  generateKeyPackages(
-    count: number,
-    kind?: 'SINGLE_USE' | 'LAST_RESORT',
-  ): Promise<Uint8Array[]>;
+  generateKeyPackages(count: number, kind?: 'SINGLE_USE' | 'LAST_RESORT'): Promise<Uint8Array[]>;
 
   /**
    * Marks a SINGLE_USE key package as spent once it's been matched to a
@@ -105,6 +110,14 @@ export interface GroupSession {
   peekEpoch(wireBytes: Uint8Array): Promise<Epoch | undefined>;
 
   /**
+   * Every leaf in the current ratchet tree, as device credentials - so the
+   * whole group can be checked against the server's roster, not just what
+   * each Commit changed. Undefined when a leaf carries a credential that
+   * can't be read.
+   */
+  listLeaves(): Promise<DeviceCredential[] | undefined>;
+
+  /**
    * Decrypts and applies one incoming wire item - application message,
    * proposal, or commit - in arrival order. Must be called serially per
    * conversation; the caller (SyncEngine) is responsible for never calling
@@ -133,6 +146,11 @@ export interface GroupSession {
   stageCommit(change: MembershipChangeRequest): Promise<{
     wireBytes: Uint8Array;
     expectedEpoch: Epoch;
+    /**
+     * A signed, public snapshot of the group as it will be AFTER this commit. The server keeps the
+     * newest one so a device can join by itself (joinExternally) with no member online.
+     */
+    groupInfo: Uint8Array;
     /** One Welcome per newly-added device. Empty when the commit only removed members. */
     welcomes: Array<{ deviceId: DeviceId; welcomeBytes: Uint8Array }>;
   }>;
@@ -168,10 +186,7 @@ export interface GroupSessionFactory {
   create(conversationId: ConversationId): Promise<GroupSession>;
 
   /** Restores a session from bytes produced by a prior GroupSession.serialize(). */
-  restore(
-    conversationId: ConversationId,
-    state: Uint8Array,
-  ): Promise<GroupSession>;
+  restore(conversationId: ConversationId, state: Uint8Array): Promise<GroupSession>;
 
   /**
    * Joins an existing group via a Welcome message - the only way a session
@@ -180,8 +195,28 @@ export interface GroupSessionFactory {
    * conversationId, or if it's addressed to a different device than this
    * store's own credential (critique C2's required test cases).
    */
+  /**
+   * Joins a group with no help from any member, from its published GroupInfo (an MLS "external
+   * commit"). Returns the joined session at the epoch AFTER the join, plus the public commit that
+   * makes it happen and the GroupInfo for that new epoch. Nothing is final until the server accepts
+   * the commit: the caller must not save or use the session before that.
+   */
+  joinExternally(
+    conversationId: ConversationId,
+    groupInfoBytes: Uint8Array,
+  ): Promise<{ session: GroupSession; commitBytes: Uint8Array; groupInfoBytes: Uint8Array }>;
+
   joinFromWelcome(
     conversationId: ConversationId,
     welcomeBytes: Uint8Array,
+    options?: {
+      /**
+       * Runs on the joined session before its key package is spent. Throwing
+       * MembershipMismatchError refuses the group for good, and StaleWelcomeError
+       * drops a Welcome that is not newer than the caller's group; both spend the
+       * package. Any other error keeps it, so the same Welcome can be retried.
+       */
+      verify?: (session: GroupSession) => Promise<void>;
+    },
   ): Promise<GroupSession>;
 }

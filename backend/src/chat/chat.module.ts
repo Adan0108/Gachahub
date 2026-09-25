@@ -12,6 +12,7 @@ import { ChatMediaReleaseRetryService } from './chat-media-release-retry.service
 import { ChatTypingGateway } from './realtime/chat-typing.gateway';
 import { ChatTypingService } from './realtime/chat-typing.service';
 import { ChatMessageRateLimiterService } from './chat-message-rate-limiter.service';
+import { ChatHistoryFetchRateLimiterService } from './chat-history-fetch-rate-limiter.service';
 import { SocketChatDeliveryService } from './realtime/socket-chat-delivery.service';
 import { OpaqueMessageEncryptionService } from './opaque-message-encryption.service';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
@@ -22,6 +23,11 @@ import { GamesModule } from '../games/games.module';
 import { GameModeratorsModule } from '../game-moderators/game-moderators.module';
 import { BlocksModule } from '../blocks/blocks.module';
 import { MediaModule } from '../media/media.module';
+import { MlsGroupRosterModule } from '../mls-group-roster/mls-group-roster.module';
+import { ChatDevicesModule } from '../chat-devices/chat-devices.module';
+import { ChatMembershipRepository } from './membership/chat-membership.repository';
+import { ChatMembershipService } from './membership/chat-membership.service';
+import { ChatInviteExpiryService } from './membership/chat-invite-expiry.service';
 
 /**
  * Chat feature module.
@@ -41,12 +47,17 @@ import { MediaModule } from '../media/media.module';
     GameModeratorsModule,
     BlocksModule,
     MediaModule,
+    MlsGroupRosterModule,
+    ChatDevicesModule,
   ],
   controllers: [ChatController],
   providers: [
     ChatRepository,
     ChatAccessService,
     ChatMessagingService,
+    ChatMembershipRepository,
+    ChatMembershipService,
+    ChatInviteExpiryService,
     ChatGroupService,
     ChatInboxService,
     ChatMessageActionsService,
@@ -54,6 +65,7 @@ import { MediaModule } from '../media/media.module';
     ChatTypingGateway,
     ChatTypingService,
     ChatMessageRateLimiterService,
+    ChatHistoryFetchRateLimiterService,
     {
       provide: CHAT_DELIVERY_PORT,
       useClass: SocketChatDeliveryService,

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import {
   ChatMessageContentType,
   ChatParticipantRole,
@@ -7,6 +7,8 @@ import {
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
+import { lockConversation } from './membership/lock-conversation';
 import {
   claimUploadsForAttachment,
   type PrismaTransaction,
@@ -38,7 +40,10 @@ export type ChatMessageMediaInput = {
  */
 @Injectable()
 export class ChatRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mlsGroupRosterRepository: MlsGroupRosterRepository,
+  ) {}
 
   /**
    * Finds a user by id
@@ -298,110 +303,42 @@ export class ChatRepository {
   }
 
   /**
-   * Add or reactivates member rows for a group.
-   *
-   * skip BLOCKED and already-ACTIVE rows, clears deletedAt/archivedAt and resets role to MEMBER when reactivating.
-   */
-  async addGroupMembers(
-    conversationId: string,
-    members: Array<{ userId: string; state: 'ACTIVE' | 'PENDING' }>,
-  ) {
-    const memberIdsByState = new Map<'ACTIVE' | 'PENDING', string[]>();
-
-    for (const member of members) {
-      const userIds = memberIdsByState.get(member.state) ?? [];
-      userIds.push(member.userId);
-      memberIdsByState.set(member.state, userIds);
-    }
-
-    return this.prisma.$transaction(async (tx) => {
-      for (const [state, userIds] of memberIdsByState) {
-        await tx.chatParticipant.updateMany({
-          where: {
-            conversationId,
-            userId: { in: userIds },
-            role: {
-              not: 'OWNER',
-            },
-            // already-active rows aren't being reactivated, leave them untouched
-            state: {
-              notIn: ['BLOCKED', 'ACTIVE'],
-            },
-          },
-          data: {
-            state,
-            role: 'MEMBER',
-            deletedAt: null,
-            archivedAt: null,
-          },
-        });
-      }
-
-      return tx.chatParticipant.createMany({
-        data: members.map((member) => ({
-          conversationId,
-          userId: member.userId,
-          role: 'MEMBER',
-          state: member.state,
-        })),
-        skipDuplicates: true,
-      });
-    });
-  }
-
-  /**
-   * Marks group members as declined/removed.
-   *
-   * OWNER participants are excluded so a group cannot lose ownership here.
-   */
-  removeGroupMembers(conversationId: string, userIds: string[]) {
-    return this.prisma.chatParticipant.updateMany({
-      where: {
-        conversationId,
-        userId: {
-          in: userIds,
-        },
-        role: {
-          not: 'OWNER',
-        },
-      },
-      data: {
-        state: 'DECLINED',
-      },
-    });
-  }
-
-  /**
    * Swaps OWNER between two participants in one transaction.
    *
    * Both updates happen together so the group is never
-   * briefly ownerless or briefly has two owner
+   * briefly ownerless or briefly has two owners. Runs under the conversation
+   * lock, and each write only matches a participant still in the state the
+   * caller checked, so a removal running alongside cannot leave a removed owner.
    */
   transferGroupOwnership(
     conversationId: string,
     currentOwnerUserId: string,
     newOwnerUserId: string,
   ) {
-    return this.prisma.$transaction([
-      this.prisma.chatParticipant.update({
-        where: {
-          conversationId_userId: {
-            conversationId,
-            userId: currentOwnerUserId,
-          },
-        },
-        data: { role: 'ADMIN' },
-      }),
-      this.prisma.chatParticipant.update({
-        where: {
-          conversationId_userId: {
-            conversationId,
-            userId: newOwnerUserId,
-          },
-        },
+    return this.prisma.$transaction(async (tx) => {
+      await lockConversation(tx, conversationId);
+
+      const promoted = await tx.chatParticipant.updateMany({
+        where: { conversationId, userId: newOwnerUserId, state: 'ACTIVE' },
         data: { role: 'OWNER' },
-      }),
-    ]);
+      });
+      const demoted = await tx.chatParticipant.updateMany({
+        where: { conversationId, userId: currentOwnerUserId, role: 'OWNER' },
+        data: { role: 'ADMIN' },
+      });
+
+      if (promoted.count !== 1 || demoted.count !== 1) {
+        throw new ConflictException('Group membership changed, try again');
+      }
+
+      // A $transaction callback that resolves to undefined sends an empty response body -
+      // fetch's response.json() throws on that client side, even though the transfer itself committed.
+      return tx.chatParticipant.findUniqueOrThrow({
+        where: {
+          conversationId_userId: { conversationId, userId: newOwnerUserId },
+        },
+      });
+    });
   }
 
   updateParticipantRole(
@@ -431,18 +368,6 @@ export class ChatRepository {
       include: {
         participants: true,
       },
-    });
-  }
-
-  /**
-   * Finds a conversation's type only.
-   *
-   * Used to gate group invite previews away from full message history.
-   */
-  findConversationType(conversationId: string) {
-    return this.prisma.chatConversation.findUnique({
-      where: { id: conversationId },
-      select: { type: true },
     });
   }
 
@@ -800,6 +725,46 @@ export class ChatRepository {
         blockedAt: state === 'BLOCKED' ? now : undefined,
         archivedAt: state === 'ARCHIVED' ? now : undefined,
       },
+    });
+  }
+
+  /**
+   * Closes a group when its owner leaves as the sole remaining active member - nobody left to
+   * transfer ownership to, and nobody left online to ever commit removing the owner's own leaf
+   * (a member cannot commit their own removal; another member's client has to). Marks the owner
+   * DECLINED and retires their device leaves in the roster in the same transaction, so the MLS
+   * side doesn't keep claiming a device whose owner has left, with nobody ever left to notice or
+   * fix it - unlike an ordinary removal, this is a direct administrative close, not a real
+   * Commit, since nobody remains to ever read this group's tree again either way.
+   */
+  async closeSoleOwnerGroup(
+    conversationId: string,
+    userId: string,
+    currentEpoch: number,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const participant = await tx.chatParticipant.update({
+        where: {
+          conversationId_userId: { conversationId, userId },
+        },
+        data: { state: 'DECLINED' },
+      });
+
+      const activeLeaves = await this.mlsGroupRosterRepository.findActiveLeaves(
+        conversationId,
+        tx,
+      );
+      const ownDeviceIds = activeLeaves
+        .filter((leaf) => leaf.userId === userId)
+        .map((leaf) => leaf.deviceId);
+      await this.mlsGroupRosterRepository.removeLeaves(
+        conversationId,
+        ownDeviceIds,
+        currentEpoch,
+        tx,
+      );
+
+      return participant;
     });
   }
 

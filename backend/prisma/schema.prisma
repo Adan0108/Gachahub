@@ -55,18 +55,21 @@ model User {
 }
 
 model Session {
-  id        String   @id
-  expiresAt DateTime
-  token     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  ipAddress String?
-  userAgent String?
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String   @id
+  expiresAt    DateTime
+  token        String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  ipAddress    String?
+  userAgent    String?
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The chat device this login belongs to, set when the browser links them; revoking that device ends this session.
+  chatDeviceId String?
 
   @@unique([token])
   @@index([userId])
+  @@index([chatDeviceId])
   @@map("session")
 }
 
@@ -265,6 +268,18 @@ enum ChatParticipantState {
   DECLINED
   BLOCKED
   ARCHIVED
+  /// Authorized to join an MLS-encrypted conversation but no device is in the MLS group yet.
+  /// Becomes ACTIVE in the same transaction that accepts the Commit adding their device.
+  JOINING
+  /// Being removed from an MLS-encrypted conversation: cut off server-side immediately, but their
+  /// devices are still MLS members. Becomes DECLINED in the same transaction that accepts the
+  /// Remove Commit. Only entered when they have a device in the group to remove; otherwise the
+  /// removal is final at once, since nothing could ever complete it and LEAVING blocks sends.
+  ///
+  /// ACTIVE means authorized, not "every device is in the group": a new device, or one that had no
+  /// key package when the member joined, is added by a member's app later (membership work). The
+  /// entitled states are defined once, in chat/membership/leaf-entitlement.ts.
+  LEAVING
 }
 
 enum ChatNotificationLevel {
@@ -308,21 +323,45 @@ model ChatConversation {
   /// plenty for any conversation's lifetime.
   mlsEpoch Int @default(0)
 
+  /// Who is currently finishing this conversation's membership changes, and until when. Every online
+  /// member gets the same work; without this each would claim single-use key packages for the same
+  /// joiner and only one Commit could win, burning the rest. The work endpoint hands a conversation
+  /// to one device at a time, and the lease clears when a Commit is accepted or simply expires.
+  mlsWorkLeaseDeviceId String?
+  mlsWorkLeaseUntil    DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  creator       User?             @relation("ChatConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
-  participants  ChatParticipant[]
-  directPair    ChatDirectPair?
-  messages      ChatMessage[]
-  mlsHandshakes MlsHandshake[]
-  mlsWelcomes   MlsWelcome[]
+  creator         User?             @relation("ChatConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  participants    ChatParticipant[]
+  directPair      ChatDirectPair?
+  messages        ChatMessage[]
+  mlsHandshakes   MlsHandshake[]
+  mlsWelcomes     MlsWelcome[]
+  mlsMembers      MlsGroupMember[]
+  mlsCommitFaults MlsCommitFault[]
+  mlsGroupInfo    MlsGroupInfo?
 
   @@index([type])
   @@index([status])
   @@index([updatedAt])
   @@index([createdBy])
   @@map("chat_conversations")
+}
+
+/// The newest public snapshot of a conversation's MLS group (a GroupInfo). A device joins the group by
+/// itself from this, with no member online. Kept only while it describes the group's current epoch.
+model MlsGroupInfo {
+  conversationId String   @id
+  /// The epoch this snapshot describes; only ever moves forward.
+  epoch          Int
+  payload        Bytes
+  updatedAt      DateTime @updatedAt
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("mls_group_infos")
 }
 
 model ChatParticipant {
@@ -933,6 +972,18 @@ model MlsHandshake {
   /// Commit can be recognized as a duplicate instead of a real conflict.
   payloadSha256 String
 
+  /// What this Commit does to the group, as declared by its sender and attested by the server. The
+  /// server cannot read a Commit, so it validates the sender's declared device ids against the
+  /// authorized roster (see MlsGroupMember) and records, from its own registry, whose device each one
+  /// is: addedDevices = [{ deviceId, userId, signaturePublicKey (base64) }] from ChatDevice, and
+  /// removedDevices = [{ deviceId, userId }] from the roster. Every other member's client checks the
+  /// Commit against these - id, owner AND key - and treats a mismatch as a fault. False for Commits
+  /// accepted before membership was tracked; the arrays are then empty because nothing was declared,
+  /// not because nothing changed.
+  membershipDeclared Boolean @default(false)
+  addedDevices       Json    @default("[]")
+  removedDevices     Json    @default("[]")
+
   createdAt DateTime @default(now())
 
   conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -994,4 +1045,64 @@ model OutboxEvent {
   @@index([status, availableAt, createdAt])
   @@index([aggregateId, createdAt])
   @@map("outbox_events")
+}
+
+/// The server's record of which devices are leaves in a conversation's MLS ratchet tree. The tree
+/// itself is opaque to the server; this is kept in sync with accepted Commits in the same
+/// transaction (MlsHandshakesRepository.acceptHandshake) so the server always knows who still
+/// holds group secrets.
+///
+/// deviceId and userId are deliberately plain strings, not relations: a leaf outlives its device
+/// row (deleting an account cascades ChatDevice away, but the leaf keeps holding group secrets
+/// until a Remove Commit lands), and the row must still say whose leaf it was to queue that removal.
+///
+/// A row is history once removedEpoch is set - a device removed and later re-added gets a new row.
+/// Epochs are the group's epoch AFTER the Commit (the founder device joins at 0).
+///
+/// No @@unique here: at most one ACTIVE row (removedEpoch IS NULL) may exist per device, which
+/// Prisma cannot express as a WHERE-scoped unique index, so the real constraint is a hand-written
+/// partial unique index in migration 20260921100000_add_mls_group_membership
+/// ("mls_group_members_active_device_key"), alongside a CHECK on the epochs
+/// ("mls_group_members_epochs_check"). Keep both migration lines when regenerating.
+model MlsGroupMember {
+  id             String @id @default(cuid())
+  conversationId String
+  deviceId       String
+  userId         String
+
+  addedEpoch   Int
+  removedEpoch Int?
+
+  createdAt DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, removedEpoch])
+  @@index([conversationId, userId])
+  @@index([deviceId])
+  @@map("mls_group_members")
+}
+
+/// A member's client refused a Commit: it did not do what the server recorded for it (or could not be
+/// checked). The conversation is stuck at that epoch for that member, and for everyone else who
+/// checks, until someone looks. Kept so an admin can see which sender and which Commit, instead of
+/// the group silently freezing. senderDeviceId and reporterDeviceId are plain strings, like
+/// MlsGroupMember's, so the record outlives the devices.
+model MlsCommitFault {
+  id               String  @id @default(cuid())
+  conversationId   String
+  /// The epoch the refused Commit was built from - identifies the handshake row.
+  epoch            Int
+  /// Who sent the refused Commit; null if that handshake row is gone.
+  senderDeviceId   String?
+  reporterDeviceId String
+  reason           String
+
+  createdAt DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, epoch, reporterDeviceId])
+  @@index([conversationId, epoch])
+  @@map("mls_commit_faults")
 }

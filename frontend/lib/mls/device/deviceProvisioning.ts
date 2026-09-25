@@ -1,6 +1,7 @@
 import { api } from '../../api';
 import { CIPHERSUITE_NAME, TsMlsDeviceIdentityStore } from '../adapter/tsMlsAdapter';
 import { bytesToBase64 } from '../storage/base64';
+import { wipeAllLocalMlsSecrets, wipeGroupSessionState } from '../storage/mlsEncryptedStore';
 import type { DeviceCredential, UserId } from '../contract/types';
 
 /**
@@ -16,7 +17,12 @@ const INITIAL_SINGLE_USE_KEY_PACKAGE_COUNT = 10;
 /** lib/api.js (plain JS, untyped) attaches the HTTP status to every thrown request error. */
 interface ApiError extends Error {
   status?: number;
+  code?: string;
 }
+
+/** The backend's codes for a device that is retired or unknown; a bare 404 (proxy, deploy) must never count. */
+const DEVICE_REVOKED = 'DEVICE_REVOKED';
+const DEVICE_NOT_FOUND = 'DEVICE_NOT_FOUND';
 
 // Keyed by store instance (not userId alone) so unrelated store instances -
 // e.g. in tests - never share an in-flight entry. Without this, several
@@ -57,6 +63,54 @@ async function ensureDeviceProvisionedUnsafe(
   store: TsMlsDeviceIdentityStore,
   userId: UserId,
 ): Promise<DeviceCredential> {
+  const credential = await provisionIfNeeded(store, userId);
+  if ((await linkSession(store, credential)) !== 'device-gone') return credential;
+
+  // The server retired this identity (e.g. dormant for months): replace it in
+  // place. Group state goes with it; the decrypted history stays readable, and
+  // the fresh device rejoins every group by itself.
+  await store.revoke();
+  await wipeGroupSessionState();
+  const fresh = await provisionAndRegister(store, userId);
+  await linkSession(store, fresh);
+  return fresh;
+}
+
+/**
+ * Proves to the server that this login is in this device, so signing the device out ends the login.
+ * Best effort: a failure only means that signing this device out would not end this login.
+ */
+async function linkSession(
+  store: TsMlsDeviceIdentityStore,
+  credential: DeviceCredential,
+): Promise<'linked' | 'failed' | 'device-gone'> {
+  try {
+    const response = (await api.chatDeviceSessionChallenge(credential.deviceId)) as {
+      challenge?: string;
+      alreadyLinked?: boolean;
+    };
+    if (response.alreadyLinked || !response.challenge) return 'linked';
+
+    const { challenge } = response;
+    const signature = await store.signSessionLinkChallenge(challenge);
+    await api.linkChatDeviceSession(credential.deviceId, {
+      challenge,
+      signature: bytesToBase64(signature),
+    });
+    return 'linked';
+  } catch (error) {
+    const { code } = error as ApiError;
+    if (code === DEVICE_REVOKED || code === DEVICE_NOT_FOUND) return 'device-gone';
+
+    console.warn('Could not link this login to its device', error);
+    return 'failed';
+  }
+}
+
+async function provisionIfNeeded(
+  store: TsMlsDeviceIdentityStore,
+  userId: UserId,
+): Promise<DeviceCredential> {
   if (await store.isProvisioned()) {
     const existing = await store.getOwnCredential();
     if (existing.userId === userId) {
@@ -69,6 +123,8 @@ async function ensureDeviceProvisionedUnsafe(
     // otherwise the old device stays ACTIVE and claimable on the backend
     // forever, with nothing left in this browser profile able to revoke it.
     await revokeDeviceEverywhere(store);
+    // A different person: their predecessor's decrypted history must not carry over.
+    await wipeAllLocalMlsSecrets();
   }
 
   return provisionAndRegister(store, userId);
@@ -119,9 +175,7 @@ async function provisionAndRegister(
  * stale local credential this browser still holds can never be revoked
  * again through a device row that no longer exists.
  */
-export async function revokeDeviceEverywhere(
-  store: TsMlsDeviceIdentityStore,
-): Promise<void> {
+export async function revokeDeviceEverywhere(store: TsMlsDeviceIdentityStore): Promise<void> {
   const credential = await store.getOwnCredential();
   try {
     await api.revokeChatDevice(credential.deviceId);

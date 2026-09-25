@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { MlsKeyPackageKind } from '../generated/prisma/client';
+import {
+  MlsKeyPackageKind,
+  type ChatParticipantState,
+} from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface NewKeyPackage {
@@ -21,6 +24,24 @@ export class ChatDevicesRepository {
       where: { id: userId },
       select: { id: true, messageRequestSetting: true },
     });
+  }
+
+  /** The participant state of each of these users in the conversation; users with no row are absent. */
+  async findParticipantStates(
+    conversationId: string,
+    userIds: string[],
+  ): Promise<Map<string, ChatParticipantState>> {
+    const participants = await this.prisma.chatParticipant.findMany({
+      where: { conversationId, userId: { in: userIds } },
+      select: { userId: true, state: true },
+    });
+
+    return new Map(
+      participants.map((participant) => [
+        participant.userId,
+        participant.state,
+      ]),
+    );
   }
 
   async createDeviceWithKeyPackages(params: {
@@ -67,6 +88,34 @@ export class ChatDevicesRepository {
     });
   }
 
+  touchLastSeen(deviceId: string) {
+    return this.prisma.chatDevice.updateMany({
+      where: { id: deviceId },
+      data: { lastSeenAt: new Date() },
+    });
+  }
+
+  findLeastRecentlySeenActiveDevice(userId: string) {
+    return this.prisma.chatDevice.findFirst({
+      where: { userId, revokedAt: null },
+      orderBy: { lastSeenAt: 'asc' },
+      select: { id: true, lastSeenAt: true },
+    });
+  }
+
+  /** Retires every device unseen since `cutoff`; returns how many. */
+  async retireDevicesUnseenSince(cutoff: Date): Promise<number> {
+    const result = await this.prisma.chatDevice.updateMany({
+      where: { revokedAt: null, lastSeenAt: { lt: cutoff } },
+      data: { revokedAt: new Date() },
+    });
+    return result.count;
+  }
+
+  countActiveDevices(userId: string): Promise<number> {
+    return this.prisma.chatDevice.count({ where: { userId, revokedAt: null } });
+  }
+
   findActiveDevicesForUser(userId: string) {
     return this.prisma.chatDevice.findMany({
       where: { userId, revokedAt: null },
@@ -75,7 +124,7 @@ export class ChatDevicesRepository {
 
   /**
    * Atomically claims one SINGLE_USE, unexpired key package belonging to
-   * any of the user's active devices (claim-once, critique C1) - the same
+   * the given active device (claim-once, critique C1) - the same
    * find-then-guarded-updateMany pattern already established for
    * MediaUpload claims (see MediaRepository/claimUploadsForAttachment).
    *
@@ -83,22 +132,23 @@ export class ChatDevicesRepository {
    * request wins the race for the row this call picked, until the pool is
    * genuinely exhausted (each attempt permanently excludes one id via
    * triedIds, so this always terminates) - a fixed retry cap would let
-   * ordinary contention on a popular user's pool silently fall back to the
+   * ordinary contention on a popular device's pool silently fall back to the
    * reused LAST_RESORT package while real unclaimed SINGLE_USE packages
    * still existed. MAX_CLAIM_ATTEMPTS is a defensive ceiling against a
    * runaway loop, not an expected limit.
    */
-  async claimSingleUseKeyPackage(userId: string, claimedByUserId: string) {
+  async claimSingleUseKeyPackage(deviceId: string, claimedByUserId: string) {
     const triedIds: string[] = [];
     const MAX_CLAIM_ATTEMPTS = 1000;
 
     for (let attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt += 1) {
       const candidate = await this.prisma.mlsKeyPackage.findFirst({
         where: {
+          deviceId,
           kind: 'SINGLE_USE',
           claimedAt: null,
           expiresAt: { gt: new Date() },
-          device: { userId, revokedAt: null },
+          device: { revokedAt: null },
           ...(triedIds.length > 0 ? { id: { notIn: triedIds } } : {}),
         },
         orderBy: { createdAt: 'asc' },
@@ -133,21 +183,86 @@ export class ChatDevicesRepository {
     return null;
   }
 
-  findLastResortKeyPackage(userId: string) {
+  findLastResortKeyPackage(deviceId: string) {
     return this.prisma.mlsKeyPackage.findFirst({
       where: {
+        deviceId,
         kind: 'LAST_RESORT',
         expiresAt: { gt: new Date() },
-        device: { userId, revokedAt: null },
+        device: { revokedAt: null },
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
+  /**
+   * Ties a login to the chat device of its browser, once. A link is only ever moved afterward via
+   * relinkSession below, and only when the device it currently points to is dead.
+   */
+  linkSession(sessionId: string, userId: string, deviceId: string) {
+    return this.prisma.session.updateMany({
+      where: { id: sessionId, userId, chatDeviceId: null },
+      data: { chatDeviceId: deviceId },
+    });
+  }
+
+  /**
+   * Repoints a login already linked to a device that's since been revoked or gone, to a live one -
+   * the one case the write-once link in linkSession is allowed to move. Without this, a login
+   * whose device got retired (dormancy, cap eviction) could never link a replacement: every future
+   * device this browser provisions would hit the same write-once conflict forever, with no way
+   * back short of signing out.
+   */
+  relinkSession(sessionId: string, userId: string, deviceId: string) {
+    return this.prisma.session.updateMany({
+      where: { id: sessionId, userId },
+      data: { chatDeviceId: deviceId },
+    });
+  }
+
+  async findSessionDeviceId(
+    sessionId: string,
+    userId: string,
+  ): Promise<string | null> {
+    const session = await this.prisma.session.findFirst({
+      where: { id: sessionId, userId },
+      select: { chatDeviceId: true },
+    });
+
+    return session?.chatDeviceId ?? null;
+  }
+
+  /** Retires a device for good (its identity is being replaced); it can never be used again. */
   revokeDevice(deviceId: string, userId: string) {
     return this.prisma.chatDevice.updateMany({
       where: { id: deviceId, userId },
       data: { revokedAt: new Date() },
+    });
+  }
+
+  /**
+   * The logins to end when a device is signed out: those linked to it. The
+   * caller's own login is kept, unless it is linked to this device - signing
+   * out the device you are in signs you out too.
+   */
+  async findLoginsOfDevice(
+    deviceId: string,
+    userId: string,
+    callerSessionId: string,
+  ): Promise<Array<{ id: string; token: string }>> {
+    const caller = await this.prisma.session.findFirst({
+      where: { id: callerSessionId, userId },
+      select: { chatDeviceId: true },
+    });
+    const signingOutOwnDevice = caller?.chatDeviceId === deviceId;
+
+    return this.prisma.session.findMany({
+      where: {
+        userId,
+        chatDeviceId: deviceId,
+        ...(signingOutOwnDevice ? {} : { id: { not: callerSessionId } }),
+      },
+      select: { id: true, token: true },
     });
   }
 

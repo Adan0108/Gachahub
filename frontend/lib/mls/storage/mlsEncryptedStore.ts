@@ -212,3 +212,10 @@ export async function wipeAllLocalMlsSecrets(): Promise<void> {
   const tx = db.transaction(storeNames, 'readwrite');
   await Promise.all(storeNames.map((name) => idbRequest(tx.objectStore(name).clear())));
 }
+
+/** Clears group state only: for replacing a dead device identity while keeping decrypted history readable. */
+export async function wipeGroupSessionState(): Promise<void> {
+  const db = await openMlsDatabase();
+  const tx = db.transaction('groupSessions', 'readwrite');
+  await idbRequest(tx.objectStore('groupSessions').clear());
+}

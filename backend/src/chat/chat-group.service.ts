@@ -7,6 +7,7 @@ import {
 import { MessageRequestSetting } from '../generated/prisma/client';
 import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
+import { ChatMembershipService } from './membership/chat-membership.service';
 import { CreateGroupChatDto } from './dto/create-group-chat.dto';
 import { TransferGroupOwnershipDto } from './dto/transfer-group-ownership.dto';
 import { UpdateGroupChatDto } from './dto/update-group-chat.dto';
@@ -25,6 +26,7 @@ export class ChatGroupService {
   constructor(
     private readonly chatRepository: ChatRepository,
     private readonly chatAccessService: ChatAccessService,
+    private readonly chatMembershipService: ChatMembershipService,
   ) {}
 
   /**
@@ -108,13 +110,21 @@ export class ChatGroupService {
 
     const members = await this.resolveGroupMemberStates(userId, users);
 
-    return this.chatRepository.addGroupMembers(conversationId, members);
+    return this.chatMembershipService.addMembers(
+      conversationId,
+      members.map((member) => ({
+        userId: member.userId,
+        entitlement: member.state === 'ACTIVE' ? 'DIRECT' : 'INVITE',
+      })),
+    );
   }
 
   /**
    * Removes members from a group chat.
    *
-   * Removed members are marked DECLINED so message history can remain intact.
+   * Removed members lose access at once and end up DECLINED so message history can
+   * remain intact; in an MLS-encrypted group that final step waits for a member's
+   * Remove Commit (see ChatMembershipService).
    */
   async removeGroupMembers(
     userId: string,
@@ -127,7 +137,7 @@ export class ChatGroupService {
       throw new BadRequestException('Use leave group instead');
     }
 
-    return this.chatRepository.removeGroupMembers(
+    return this.chatMembershipService.removeMembers(
       conversationId,
       Array.from(new Set(dto.userIds)),
     );
@@ -241,15 +251,17 @@ export class ChatGroupService {
         );
       }
 
-      // sole remaining member, nobody left to transfer to, group closes with them
-      return this.chatRepository.updateParticipantState(
+      // sole remaining member, nobody left to transfer to, group closes with them - and
+      // retires their device leaves too, not just their participant row (see
+      // ChatRepository.closeSoleOwnerGroup)
+      return this.chatRepository.closeSoleOwnerGroup(
         conversationId,
         userId,
-        'DECLINED',
+        conversation.mlsEpoch,
       );
     }
 
-    return this.chatRepository.removeGroupMembers(conversationId, [userId]);
+    return this.chatMembershipService.removeMembers(conversationId, [userId]);
   }
 
   /**

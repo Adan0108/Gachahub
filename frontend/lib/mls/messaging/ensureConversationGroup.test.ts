@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ensureConversationGroup } from './ensureConversationGroup';
-import { EpochConflictError, GroupStateUnavailableError } from '../contract/errors';
+import {
+  EpochConflictError,
+  GroupStateUnavailableError,
+  NoEncryptableMembersError,
+} from '../contract/errors';
 
 function fakeSyncEngine() {
   return {
     getCurrentEpoch: vi.fn(),
     createGroup: vi.fn(),
-    addUserToConversation: vi.fn(),
+    seedNewGroupWithMembers: vi.fn(),
     forgetConversation: vi.fn(),
   };
 }
@@ -19,17 +23,30 @@ describe('ensureConversationGroup', () => {
     await ensureConversationGroup(engine as any, 'conv-1', 'user-bob');
 
     expect(engine.createGroup).not.toHaveBeenCalled();
-    expect(engine.addUserToConversation).not.toHaveBeenCalled();
+    expect(engine.seedNewGroupWithMembers).not.toHaveBeenCalled();
   });
 
-  it('creates a group and adds the recipient when none exists yet', async () => {
+  it('creates a group and adds a single recipient when none exists yet', async () => {
     const engine = fakeSyncEngine();
     engine.getCurrentEpoch.mockRejectedValue(new GroupStateUnavailableError('conv-1'));
 
     await ensureConversationGroup(engine as any, 'conv-1', 'user-bob');
 
     expect(engine.createGroup).toHaveBeenCalledWith('conv-1');
-    expect(engine.addUserToConversation).toHaveBeenCalledWith('conv-1', 'user-bob');
+    expect(engine.seedNewGroupWithMembers).toHaveBeenCalledWith('conv-1', ['user-bob']);
+  });
+
+  it('creates a group and adds every founding member when given an array', async () => {
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockRejectedValue(new GroupStateUnavailableError('conv-1'));
+
+    await ensureConversationGroup(engine as any, 'conv-1', ['user-bob', 'user-carol']);
+
+    expect(engine.createGroup).toHaveBeenCalledWith('conv-1');
+    expect(engine.seedNewGroupWithMembers).toHaveBeenCalledWith('conv-1', [
+      'user-bob',
+      'user-carol',
+    ]);
   });
 
   it('propagates an unrelated error without attempting to create a group', async () => {
@@ -42,11 +59,11 @@ describe('ensureConversationGroup', () => {
     expect(engine.createGroup).not.toHaveBeenCalled();
   });
 
-  it('propagates a failure from addUserToConversation (e.g. recipient not yet active)', async () => {
+  it('propagates a failure from seedNewGroupWithMembers (e.g. recipient not yet active)', async () => {
     const engine = fakeSyncEngine();
     engine.getCurrentEpoch.mockRejectedValue(new GroupStateUnavailableError('conv-1'));
     engine.createGroup.mockResolvedValue(undefined);
-    engine.addUserToConversation.mockRejectedValue(
+    engine.seedNewGroupWithMembers.mockRejectedValue(
       new Error('User user-bob is not an active participant of this conversation'),
     );
 
@@ -59,7 +76,7 @@ describe('ensureConversationGroup', () => {
     const engine = fakeSyncEngine();
     engine.getCurrentEpoch.mockRejectedValue(new GroupStateUnavailableError('conv-1'));
     engine.createGroup.mockResolvedValue(undefined);
-    engine.addUserToConversation.mockRejectedValue(new Error('not an active participant'));
+    engine.seedNewGroupWithMembers.mockRejectedValue(new Error('not an active participant'));
 
     await expect(ensureConversationGroup(engine as any, 'conv-1', 'user-bob')).rejects.toThrow();
 
@@ -77,12 +94,30 @@ describe('ensureConversationGroup', () => {
     const engine = fakeSyncEngine();
     engine.getCurrentEpoch.mockRejectedValue(new GroupStateUnavailableError('conv-1'));
     engine.createGroup.mockResolvedValue(undefined);
-    engine.addUserToConversation.mockRejectedValue(new EpochConflictError('conv-1', 0));
+    engine.seedNewGroupWithMembers.mockRejectedValue(new EpochConflictError('conv-1', 0));
 
     await expect(ensureConversationGroup(engine as any, 'conv-1', 'user-bob')).rejects.toThrow(
       EpochConflictError,
     );
 
     expect(engine.forgetConversation).not.toHaveBeenCalled();
+  });
+
+  // regression: a group whose founding members are all still PENDING used to seed successfully
+  // at epoch 0 with no Commit sent at all - a group nothing could ever bootstrap afterward. Now
+  // seedNewGroupWithMembers refuses instead, and that refusal must discard the local group (like
+  // any other non-EpochConflict failure) so the next send retries seeding from scratch once
+  // someone has actually accepted.
+  it('drops the local group when nobody has accepted a new group invite yet', async () => {
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockRejectedValue(new GroupStateUnavailableError('conv-1'));
+    engine.createGroup.mockResolvedValue(undefined);
+    engine.seedNewGroupWithMembers.mockRejectedValue(new NoEncryptableMembersError('conv-1'));
+
+    await expect(
+      ensureConversationGroup(engine as any, 'conv-1', ['user-bob', 'user-carol']),
+    ).rejects.toThrow(NoEncryptableMembersError);
+
+    expect(engine.forgetConversation).toHaveBeenCalledWith('conv-1');
   });
 });

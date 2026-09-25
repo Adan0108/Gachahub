@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { auth } from '../auth/auth';
+import { SessionTerminator } from '../auth/session-terminator.service';
 import { env } from '../config/env';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -26,7 +27,10 @@ const TEST_USER_PASSWORD = 'DevTest123!';
 
 @Injectable()
 export class DevService {
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly sessionTerminator: SessionTerminator,
+  ) {
     // Defense in depth - DevModule should never even be registered outside
     // development (see app.module.ts), but a service that can mint a
     // session for any user id and mass-delete accounts is exactly the kind
@@ -92,6 +96,7 @@ export class DevService {
 
   async deleteTestUser(id: string): Promise<{ message: string }> {
     await this.assertTestUser(id);
+    await this.forgetLogins({ id });
     // Prisma's schema-level onDelete: Cascade on every direct User relation
     // (ChatDevice, ChatParticipant, ChatMessage.sender, Follow, etc.) does
     // the actual cleanup - a real DB-level ON DELETE CASCADE, not something
@@ -101,10 +106,22 @@ export class DevService {
   }
 
   async deleteAllTestUsers(): Promise<{ deleted: number }> {
-    const result = await this.prisma.user.deleteMany({
-      where: { name: { startsWith: TEST_USER_PREFIX } },
-    });
+    const where = { name: { startsWith: TEST_USER_PREFIX } };
+    await this.forgetLogins(where);
+    const result = await this.prisma.user.deleteMany({ where });
     return { deleted: result.count };
+  }
+
+  /** Deleting a user cascades their logins away in the database only, so end them properly first. */
+  private async forgetLogins(
+    userWhere: { id: string } | { name: { startsWith: string } },
+  ) {
+    const sessions = await this.prisma.session.findMany({
+      where: { user: userWhere },
+      select: { id: true, token: true },
+    });
+
+    await this.sessionTerminator.end(sessions);
   }
 
   private async assertTestUser(id: string) {

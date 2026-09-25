@@ -72,7 +72,11 @@ export class ChatController {
     @Session() session: UserSession,
     @Body() dto: CreateDirectMessageDto,
   ) {
-    return this.chatMessagingService.createDirectMessage(session.user.id, dto);
+    return this.chatMessagingService.createDirectMessage(
+      session.user.id,
+      session.session.id,
+      dto,
+    );
   }
 
   /**
@@ -345,6 +349,7 @@ export class ChatController {
   ) {
     return this.chatMessagingService.sendMessage(
       session.user.id,
+      session.session.id,
       conversationId,
       dto,
     );

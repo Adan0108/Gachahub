@@ -7,6 +7,7 @@ import {
   IsBase64,
   IsInt,
   IsNotEmpty,
+  IsOptional,
   IsString,
   MaxLength,
   Min,
@@ -35,6 +36,16 @@ export class SubmitHandshakeDto {
   payload!: string;
 
   @ApiProperty({
+    required: false,
+    description:
+      'Base64 GroupInfo for the epoch this Commit creates, so a device can later join by itself',
+  })
+  @IsOptional()
+  @IsBase64()
+  @MaxLength(60000)
+  groupInfo?: string;
+
+  @ApiProperty({
     type: [WelcomeItemDto],
     required: false,
     description: 'Welcomes for any devices newly added by this Commit',
@@ -49,4 +60,32 @@ export class SubmitHandshakeDto {
   @ValidateNested({ each: true })
   @Type(() => WelcomeItemDto)
   welcomes: WelcomeItemDto[] = [];
+
+  // Required, with no default: a client that leaves these out must be
+  // refused, not treated as "this Commit changes no one" - the server checks
+  // membership against what is declared here, and every other member's client
+  // checks the declaration against the Commit itself.
+  @ApiProperty({
+    type: [String],
+    description: 'Device ids this Commit adds - exactly the Welcome recipients',
+  })
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ArrayUnique()
+  @IsString({ each: true })
+  @IsNotEmpty({ each: true })
+  @MaxLength(64, { each: true })
+  addedDeviceIds!: string[];
+
+  @ApiProperty({
+    type: [String],
+    description: 'Device ids this Commit removes from the group',
+  })
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ArrayUnique()
+  @IsString({ each: true })
+  @IsNotEmpty({ each: true })
+  @MaxLength(64, { each: true })
+  removedDeviceIds!: string[];
 }

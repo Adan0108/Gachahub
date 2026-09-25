@@ -51,6 +51,12 @@ holding its own MLS identity and key packages.
   becomes a dead member of every group it was in — it can never come back
   online to be cooperatively removed. Needs a cleanup mechanism (staleness
   timeout + forced removal via `external_senders`, see §5).
+  **Superseded (2026-09-22):** built without `external_senders`, which was
+  never implemented. A 10-device-per-user cap plus a nightly job that retires
+  devices unseen for 60 days keeps the count bounded; membership work
+  (`membership-work.ts`) then removes a retired device's leaf the next time
+  any online member's client does a full reconcile pass — an ordinary Remove
+  by that member's own client, not a server-proposed one.
 
 **Decision (2026-09-14):** no formal device-approval flow for v1. GachaHub
 is web-only today — no iOS/Android app — so "a new device" mostly just
@@ -87,6 +93,15 @@ never as something to silently paper over.
   — never accept an external Add, or the server could silently insert an
   attacker's device using the same mechanism meant for cleanup.
 
+**Superseded (2026-09-22):** `external_senders` was never built. Removals of
+every kind — voluntary leave, ban, stale device — instead go through
+`membership-work.ts`: the server marks who is no longer entitled to a leaf
+(participant state, revocation, dormancy), and any online member's client
+picks that up as ordinary Remove work on its next poll and commits it itself.
+No server-proposed Remove exists, so the "never accept an external Add"
+client rule above was never load-bearing — there is no external proposal
+path in the shipped design for a client to accept or reject.
+
 **Decision (2026-09-14):** option (a) — a pending group invitee is added to
 the MLS group only once they accept, matching today's product behavior
 (pending = no history access).
@@ -99,6 +114,61 @@ complete immediately. Needs a queued/retry design (process the pending add
 the next time any existing member's client comes online) plus a "syncing…"
 UI state for the accepter instead of a silent failure. Not solved yet —
 flagging so it isn't discovered mid-implementation.
+
+**Superseded (2026-09-22):** solved by MLS external commits, not the
+queued/retry design sketched above. Every accepted Commit publishes a signed
+snapshot (`mls_group_infos`); a device with nobody online to add it fetches
+that snapshot and joins by itself (`mls-self-join.*`, `syncEngine.ts`'s
+`joinByExternalCommit`), with the server verifying the join's signature
+against the same snapshot before accepting it. No existing member needs to
+be online at accept time. The "syncing…" UI state is still not built.
+
+**Superseded (2026-09-23):** reversed. `PENDING` is now an entitled state
+(`leaf-entitlement.ts`) — a group invitee's device is added, and they can
+call `findMessages`, from the moment they're invited, not from accept.
+Accept/decline still exist, but as a request-inbox affordance layered on top
+of already-real access, not a gate on it (matching Kawaii Moe's team's
+discussion linked from this branch's history).
+
+This does **not** mean an invitee reads the group's actual full history.
+MLS forward secrecy means a device only derives the group's *current* epoch
+secret from the Commit that adds it — it cannot derive any earlier epoch's
+secret, so anything sent before that Commit stays permanently
+undecryptable to them, at any access speed. What this decision actually
+buys an invitee is: readable from *invite time* forward instead of from
+*accept time* forward (the gap between the two, previously wasted). "Read
+the whole chat" was the original ask; it is not what MLS can deliver here
+without changing how far back a Welcome's secrets reach, which this change
+does not attempt.
+
+New gaps this decision opens, not yet fully closed:
+- **Invite expiry** — `isLeafRemovable` treats PENDING as entitled with no
+  time limit, and nothing ever declines a stale invite on its own. An
+  ignored invite is permanent cryptographic membership: their device keeps
+  receiving every future epoch secret indefinitely.
+  `chat-invite-expiry.service.ts` (added 2026-09-23) expires one after 14
+  days of no response, routing it through the same REMOVE→LEAVING pipeline
+  as an admin removal.
+- **Stale consent at claim time** — the mutual-follow/messageRequestSetting
+  check that decides ACTIVE vs PENDING only runs once, at invite time.
+  Because PENDING is now entitled, a later key-package claim for a
+  still-pending invitee re-checks the DM consent gate fresh
+  (`assertMayClaimForGroup`), since an old invite is not standing consent to
+  actually receive key material later, particularly if the target changed
+  their settings or blocked the inviter in between.
+- **Decline briefly holds up the next send** — `DECLINE_INVITE` now routes
+  through `LEAVING` when the invitee already holds a leaf (same as any REMOVE),
+  and `assertNoMembershipChangePending` refuses sends in the conversation while
+  anyone is LEAVING, because a leaf still in the tree could decrypt them. This is
+  not a standing outage: only someone online and sending is affected, and their
+  own client resolves it - `sendEncryptedChatMessage` catches the refusal, runs
+  `reconcileMembership` (an ordinary Remove Commit by that member), and retries
+  under the new epoch. With nobody online nobody is sending, so there is nothing
+  to hold up. The cost is a short extra delay on the first send after a decline.
+  A member cannot Commit their own removal (RFC 9420), so the decliner's device
+  can't do it faster; the IETF SelfRemove draft (`draft-mahy-mls-selfremove`)
+  would let any member or external joiner commit a signed leave proposal, and is
+  the thing to look at if that delay ever matters.
 
 ## 4. Direct messages need devices to exist first
 
@@ -144,6 +214,16 @@ Written down so nobody assumes more privacy than actually exists:
   message text. This is real added scope for the frontend/backend media
   flow, not a small tweak — needs its own pass once the core message
   encryption is working.
+
+  **Superseded (2026-09-23):** not built, and deliberately deferred rather
+  than in progress. Chat messages still attach `mediaUploadId`s, and
+  `uploadPostMedia`/`uploadToCloudinary` (`frontend/lib/api.js`) still post
+  raw files straight to Cloudinary. This is the one gap of the four
+  2026-09-14 decisions this doc doesn't otherwise mark superseded or done -
+  written down explicitly so "required for v1" above doesn't read as
+  current status. Media sent through chat today is plaintext to the
+  storage provider, same as any other attachment on this app; nothing in
+  the product UI currently says so.
 - "Delete for everyone" only works if every recipient's client cooperates
   (deletes its local plaintext copy). The server can't force this. UI copy
   must not promise permanent deletion from other people's devices.
@@ -165,10 +245,39 @@ traces already are, not trusted to "just not come up."
    `BACKLOG.md`, not part of this branch.
 3. Pending group invites — added to the MLS group only on accept. Still
    needs a queued/retry design for "no existing member is online at
-   accept-time" (see §3).
+   accept-time" (see §3). **Superseded (2026-09-23):** reversed - a group
+   invitee is added on invite, not accept. See §3's 2026-09-23 note for what
+   this does and doesn't get them, and the gaps it opened.
 4. Media encryption — required for v1. Files encrypted client-side before
-   upload, key travels inside the MLS message.
+   upload, key travels inside the MLS message. **Superseded (2026-09-23):**
+   deferred, not built - see §6.
 
-All four decisions above are locked in. Remaining open question before
-coding starts: the reordered plan's step 1 (`MlsClient` contract tests)
-and step 2 (library bake-off) are next.
+All four decisions above are locked in as the intended design; #4 is not yet
+implemented (see §6). Remaining open question before coding starts: the
+reordered plan's step 1 (`MlsClient` contract tests) and step 2 (library
+bake-off) are next.
+
+## 8. Update (2026-09-22): what the running code actually defends
+
+Written against the `feat/chat-e2e-encryption` branch, so §1's decision stays
+honest as features land.
+
+**The server is the key directory AND the membership authority.** Every check
+clients run (per-commit declarations, the whole-tree-vs-roster comparison, the
+self-join rules) compares against the server's own records. They catch buggy
+or tampered *clients*, and passive database compromise - not a fully malicious
+server, which can register keys and fabricate membership it then attests.
+
+- The one-way "declared" marker stops a server *downgrading* verification for
+  a group, nothing more.
+- The integrity sweep (`common/integrity`, checks in `mls-integrity-checks.ts`) runs on the same server and data
+  it checks: it catches bugs and stuck flows, not tampering.
+- Session-link signatures are domain-separated (`gachahub/session-link/v1`),
+  so the server cannot use the link flow as an oracle to obtain a device's
+  signature over an MLS structure.
+- Self-join commits are signature-verified server side, so holding a login
+  cookie without the device's private key is not enough to submit one.
+
+Planned upgrades, in cost order: client-generated "X joined" notices, a
+per-user device list, member-signed invites, key transparency / safety
+numbers (see BACKLOG.md).
