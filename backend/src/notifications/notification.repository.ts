@@ -5,25 +5,36 @@ import {
   NotificationType,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '../generated/prisma/client';
 
 @Injectable()
 export class NotificationRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  create(data: {
-    recipientId: string;
-    actorId?: string | null;
-    type: NotificationType;
-    entityType: NotificationEntityType;
-    entityId: string;
-  }) {
-    return this.prisma.notification.create({
+  create(
+    data: {
+      recipientId: string;
+      actorId?: string | null;
+      type: NotificationType;
+      entityType: NotificationEntityType;
+      entityId: string;
+    },
+    transaction?: Prisma.TransactionClient,
+  ) {
+    const db = transaction ?? this.prisma;
+
+    return db.notification.create({
       data,
     });
   }
 
-  findRecipientById(recipientId: string) {
-    return this.prisma.user.findUnique({
+  findRecipientById(
+    recipientId: string,
+    transaction?: Prisma.TransactionClient,
+  ) {
+    const db = transaction ?? this.prisma;
+
+    return db.user.findUnique({
       where: {
         id: recipientId,
       },
@@ -126,17 +137,22 @@ export class NotificationRepository {
     });
   }
 
-  findExisting(params: {
-    recipientId: string;
-    actorId?: string | null;
-    type: NotificationType;
-    entityType: NotificationEntityType;
-    entityId: string;
-    since: Date;
-  }) {
+  findExisting(
+    params: {
+      recipientId: string;
+      actorId?: string | null;
+      type: NotificationType;
+      entityType: NotificationEntityType;
+      entityId: string;
+      since: Date;
+    },
+    transaction?: Prisma.TransactionClient,
+  ) {
     const { recipientId, actorId, type, entityType, entityId, since } = params;
 
-    return this.prisma.notification.findFirst({
+    const db = transaction ?? this.prisma;
+
+    return db.notification.findFirst({
       where: {
         recipientId,
         actorId: actorId ?? null,

@@ -207,10 +207,11 @@ describe('FollowsService', () => {
 
   describe('getFollowStatus', () => {
     it('reports both directions, checked independently', async () => {
-      repository.find.mockImplementation((followerId: string, followingId: string) =>
-        followerId === 'user-1' && followingId === 'user-2'
-          ? Promise.resolve({ followerId, followingId })
-          : Promise.resolve(null),
+      repository.find.mockImplementation(
+        (followerId: string, followingId: string) =>
+          followerId === 'user-1' && followingId === 'user-2'
+            ? Promise.resolve({ followerId, followingId })
+            : Promise.resolve(null),
       );
 
       const result = await service.getFollowStatus('user-1', 'user-2');

@@ -97,8 +97,7 @@ function readIdentity(credential: {
     ) {
       return { userId: parsed.userId, deviceId: parsed.deviceId };
     }
-  } catch {
-  }
+  } catch {}
   throw new BadRequestException('The joiner leaf identity is not readable');
 }
 

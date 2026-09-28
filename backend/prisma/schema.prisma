@@ -1088,3 +1088,13 @@ model ChatBackupBlob {
   @@index([userId, createdAt, id])
   @@map("chat_backup_blobs")
 }
+
+model ProcessedEvent {
+  eventId     String
+  consumer    String
+  processedAt DateTime @default(now())
+
+  @@id([eventId, consumer])
+  @@index([consumer, processedAt])
+  @@map("processed_events")
+}

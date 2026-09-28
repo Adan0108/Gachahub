@@ -30,7 +30,8 @@ export class FollowsController {
   @Get(':userId/follow-status')
   @ApiCookieAuth('better-auth.session_token')
   @ApiOperation({
-    summary: 'Check whether the current user and another user follow each other',
+    summary:
+      'Check whether the current user and another user follow each other',
   })
   followStatus(
     @Param('userId') userId: string,
