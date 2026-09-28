@@ -151,6 +151,16 @@ export function threadItemKey(item: ThreadItem): string {
   return item.kind === 'event' ? item.event.id : item.message.id;
 }
 
+/** Marks a message deleted in a cached list, so unsending shows at once instead of waiting on a refetch. */
+export function withOptimisticDelete<M extends { id: string; status?: string }>(
+  messages: M[],
+  messageId: string,
+): M[] {
+  return messages.map((message) =>
+    message.id === messageId ? { ...message, status: 'DELETED' } : message,
+  );
+}
+
 /** An undecryptable message bounded on both sides by readable ones was likely sent during a membership gap. */
 export function wasLikelySentDuringAbsence(
   messages: ThreadMessage[],

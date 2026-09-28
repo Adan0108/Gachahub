@@ -15,7 +15,7 @@
   --pink: #ff7abf;
   --sidebar: 222px;
   --content-max: 1320px;
-  --chat-radius: 3px;
+  --chat-radius: 12px;
   --chat-bubble-radius: 14px;
   color-scheme: dark;
 }
@@ -5274,9 +5274,17 @@ body {
   min-width: 0;
   min-height: 0;
   padding: 0;
-  overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--line);
+}
+
+.chat-thread {
+  overflow: hidden;
+}
+
+/* Visible, not hidden: the More/compose dropdowns are absolutely positioned and must not be clipped by this panel's own edge. */
+.chat-sidebar {
+  overflow: visible;
 }
 
 /* Both also carry the shared .panel class, which has its own border-radius
@@ -5286,6 +5294,12 @@ body {
 .panel.chat-sidebar,
 .panel.chat-thread {
   border-radius: var(--chat-radius);
+}
+
+/* Flush against the app's own left nav rail: no border or curve of its own on that side, so its edge doesn't show as a second line next to the rail's. */
+.panel.chat-sidebar {
+  border-left: 0;
+  border-radius: 0 var(--chat-radius) var(--chat-radius) 0;
 }
 
 .chat-sidebar {
@@ -5885,28 +5899,59 @@ body {
 
 .chat-message-time-wrap {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  /* Each child (quote, bubble, reactions) keeps its own width instead of all matching the widest one. */
+  align-items: flex-start;
   min-width: 0;
+}
+
+.chat-message-sender {
+  margin: 0 2px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+@keyframes chat-jump-highlight {
+  from {
+    background: color-mix(in srgb, var(--purple), transparent 55%);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+.jump-highlight {
+  animation: chat-jump-highlight 1.2s ease-out;
+  border-radius: var(--chat-radius);
+}
+
+.chat-message-row.mine .chat-message-time-wrap {
+  align-items: flex-end;
 }
 
 .chat-message-time-tip {
   position: absolute;
   top: -22px;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(-70%);
   padding: 3px 8px;
   border-radius: var(--chat-radius);
-  background: var(--panel2);
+  background: var(--panel);
   border: 1px solid var(--line);
   color: var(--muted-strong);
   font-size: 10px;
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
+  /* Instant to hide; the hover rule below adds its own delay just for showing it. */
   transition: opacity 0.1s ease;
 }
 
 .chat-message-time-wrap:hover .chat-message-time-tip {
   opacity: 1;
+  transition-delay: 1.5s;
 }
 
 .chat-message {
@@ -5979,6 +6024,299 @@ body {
   font-size: 10px;
   text-decoration: underline;
   cursor: pointer;
+}
+
+.chat-message.deleted {
+  font-style: italic;
+  color: var(--muted);
+  background: transparent;
+  border-style: dashed;
+}
+
+.chat-message.deleted p {
+  color: var(--muted);
+}
+
+/* Hidden until the row is hovered/focused, so the thread stays uncluttered otherwise. */
+.message-actions {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 6px);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--chat-radius);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.1s ease;
+}
+
+.chat-message-row.mine .message-actions {
+  left: auto;
+  right: calc(100% + 6px);
+}
+
+.chat-message-time-wrap:hover .message-actions,
+.chat-message-time-wrap:focus-within .message-actions,
+.message-actions.open {
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+
+.message-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-strong);
+}
+
+.message-actions button:hover {
+  background: var(--panel2);
+  color: var(--text);
+}
+
+.message-actions-menu-wrap {
+  position: relative;
+}
+
+.message-actions-picker {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+}
+
+.message-actions-picker button {
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+}
+
+.message-actions-more {
+  min-width: 100px;
+}
+
+.message-actions-more button svg {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.chat-reply-quote {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 240px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 0;
+  /* Flat where it meets the bubble right below, so the two read as one connected shape. */
+  border-radius: var(--chat-bubble-radius) var(--chat-bubble-radius) 4px 4px;
+  background: color-mix(in srgb, var(--muted), transparent 88%);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-reply-quote:hover {
+  filter: brightness(1.15);
+}
+
+.chat-message-row.mine .chat-reply-quote {
+  background: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+/* The bubble/tile right under a reply quote loses its own top rounding, so they sit flush together. */
+.chat-message-time-wrap:has(.chat-reply-quote) .chat-message,
+.chat-message-time-wrap:has(.chat-reply-quote) .chat-attachment-grid .chat-attachment-tile:first-child {
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+}
+
+.chat-reply-quote-sender {
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.chat-reply-quote-text,
+.chat-reply-quote-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-reply-quote-file {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-reply-quote-thumb {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  object-fit: cover;
+  opacity: 0.65;
+  filter: grayscale(0.4);
+}
+
+.chat-reaction-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.chat-reaction-chips button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel2);
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+
+.chat-reaction-chips button.mine {
+  border-color: var(--purple);
+  background: color-mix(in srgb, var(--purple), transparent 75%);
+  color: var(--text);
+}
+
+.chat-reply-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  padding: 8px 16px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.chat-reply-banner small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-strong);
+}
+
+.chat-reply-banner button {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.chat-reply-banner button:hover {
+  color: var(--text);
+}
+
+.attachment-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 6, 14, 0.92);
+}
+
+.attachment-lightbox-body {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  max-width: min(92vw, 1100px);
+  max-height: 90vh;
+}
+
+.attachment-lightbox-body img {
+  max-width: min(92vw, 1100px);
+  max-height: 78vh;
+  object-fit: contain;
+}
+
+.attachment-lightbox-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+
+.attachment-lightbox-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--chat-radius);
+  padding: 6px 12px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.attachment-lightbox-close,
+.attachment-lightbox-nav {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 20px;
+}
+
+.attachment-lightbox-close:hover,
+.attachment-lightbox-nav:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.attachment-lightbox-close {
+  top: 20px;
+  right: 20px;
+}
+
+.attachment-lightbox-nav.prev {
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.attachment-lightbox-nav.next {
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .chat-system-message {
@@ -6221,6 +6559,8 @@ body {
   padding: 10px 16px;
   border: 0;
   border-top: 1px solid var(--line);
+  /* Matches the panel's own bottom corners, so the focus outline below doesn't get clipped square against them. */
+  border-radius: 0 0 var(--chat-radius) var(--chat-radius);
   background: var(--panel2);
   transition: border-color 0.15s ease;
 }

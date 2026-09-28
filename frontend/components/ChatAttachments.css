@@ -58,6 +58,13 @@
   width: 100%;
   max-height: 320px;
   object-fit: cover;
+  transition: filter 0.15s ease;
+}
+
+/* A hint that the tile is clickable, not a full darken. */
+.chat-attachment-tile:hover img,
+.chat-attachment-tile:hover video {
+  filter: brightness(0.88);
 }
 
 .chat-attachment-tile video {

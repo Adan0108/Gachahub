@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -29,16 +29,19 @@ import { DevicesModal } from "../../components/DevicesModal";
 import { ChatBackupModal } from "../../components/ChatBackupModal";
 import { ThreadRow } from "../../components/ThreadRow";
 import { AttachmentComposerTray } from "../../components/AttachmentComposerTray";
+import { AttachmentLightbox } from "../../components/AttachmentLightbox";
 import { PendingContent } from "../../components/EnvelopeContent";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useAttachmentPicker } from "../../hooks/useAttachmentPicker";
 import { useDeviceIdentity } from "../../hooks/useDeviceIdentity";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
 import { useChatBackup } from "../../hooks/useChatBackup";
+import { useMenuDismiss } from "../../hooks/useMenuDismiss";
 import { useThreadData } from "../../hooks/useThreadData";
 import { sendEncryptedChatMessage } from "../../lib/mls/messaging/sendEncryptedMessage";
 import { sendAttachmentsWithCache } from "../../lib/mls/messaging/sendEncryptedAttachment";
-import { pendingStatusLabel } from "../../lib/mls/media/attachmentView";
+import { flattenVisualAttachments, pendingStatusLabel } from "../../lib/mls/media/attachmentView";
+import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightboxContext";
 import { api } from "../../lib/api";
 import { queries, queryKeys } from "../../lib/queries";
 import {
@@ -51,7 +54,9 @@ import {
   participantUser,
   relativeTime,
 } from "../../lib/chatDisplay";
-import { threadItemKey } from "../../lib/chatThread";
+import { threadItemKey, withOptimisticDelete } from "../../lib/chatThread";
+import { withOptimisticReaction } from "../../lib/chatReactions";
+import { getHiddenMessageIds, hideMessageForMe } from "../../lib/chatHiddenMessages";
 
 function ChatSkeletonRow() {
   return (
@@ -87,32 +92,6 @@ function ChatSkeleton() {
       </div>
     </div>
   );
-}
-
-/** Closes an open dropdown on Escape or a click outside its button+panel. */
-function useMenuDismiss(isOpen, onClose, buttonRef, menuRef) {
-  useEffect(() => {
-    if (!isOpen) return undefined;
-    const handle = (event) => {
-      if (event.key === "Escape") {
-        onClose();
-        return;
-      }
-      if (
-        event.type === "mousedown" &&
-        !menuRef.current?.contains(event.target) &&
-        !buttonRef.current?.contains(event.target)
-      ) {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handle);
-    window.addEventListener("mousedown", handle);
-    return () => {
-      window.removeEventListener("keydown", handle);
-      window.removeEventListener("mousedown", handle);
-    };
-  }, [isOpen, onClose, buttonRef, menuRef]);
 }
 
 export default function ChatPage() {
@@ -180,6 +159,8 @@ export default function ChatPage() {
   const readableMessageIdsKey = readableMessageIds.join(",");
   const messagesEndRef = useRef(null);
   const [draft, setDraft] = useState("");
+  // { id, senderName, preview } of the message being replied to, or null.
+  const [replyTarget, setReplyTarget] = useState(null);
   // Sent messages awaiting the network, keyed by a client-side id.
   const [pendingMessages, setPendingMessages] = useState([]);
   const attachmentPicker = useAttachmentPicker();
@@ -187,7 +168,7 @@ export default function ChatPage() {
   // Uploaded attachment entries by clientId, so a retry re-sends without re-uploading.
   const uploadedAttachmentsRef = useRef(new Map());
   const sendMessage = useMutation({
-    mutationFn: async ({ text, clientId, files }) => {
+    mutationFn: async ({ text, clientId, files, replyToId }) => {
       const recipientIds =
         activeConversation?.type === "GROUP"
           ? otherActiveMemberIds(activeConversation, user?.id)
@@ -216,6 +197,7 @@ export default function ChatPage() {
           recipientIds,
           text,
           clientId,
+          replyToId,
         );
       } catch (error) {
         if (error?.code !== "DEVICE_REVOKED" && error?.code !== "SESSION_NOT_LINKED") throw error;
@@ -259,6 +241,68 @@ export default function ChatPage() {
     );
     sendMessage.mutate({ text: pending.text, clientId: pending.clientId, files: pending.files });
   };
+
+  // Reactions are plaintext metadata, not part of the encrypted envelope. A socket event (handled
+  // in useChatSocket) refetches this same query for everyone else once the write lands.
+  const refetchMessages = () =>
+    queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(activeId) });
+  // Patches the reactor's own client immediately - the server round trip otherwise makes your own
+  // reaction feel laggy, since it only shows up again once the invalidated query refetches.
+  const applyOptimisticReaction = async (messageId, emoji) => {
+    const key = queryKeys.chatMessages(activeId);
+    await queryClient.cancelQueries({ queryKey: key });
+    const previous = queryClient.getQueryData(key);
+    queryClient.setQueryData(key, (old) =>
+      old ? { ...old, items: withOptimisticReaction(old.items, messageId, user?.id, emoji) } : old,
+    );
+    return { previous, key };
+  };
+  const rollbackOptimisticUpdate = (_error, _variables, context) => {
+    if (context) queryClient.setQueryData(context.key, context.previous);
+  };
+  const reactMutation = useMutation({
+    mutationFn: ({ messageId, emoji }) => api.reactToMessage(messageId, emoji),
+    onMutate: ({ messageId, emoji }) => applyOptimisticReaction(messageId, emoji),
+    onError: rollbackOptimisticUpdate,
+    onSettled: refetchMessages,
+  });
+  const removeReactionMutation = useMutation({
+    mutationFn: ({ messageId }) => api.removeReaction(messageId),
+    onMutate: ({ messageId }) => applyOptimisticReaction(messageId, null),
+    onError: rollbackOptimisticUpdate,
+    onSettled: refetchMessages,
+  });
+  const handleReact = (messageId, emoji, mineAlready) =>
+    (mineAlready ? removeReactionMutation : reactMutation).mutate({ messageId, emoji });
+  const deleteMessageMutation = useMutation({
+    mutationFn: (messageId) => api.deleteChatMessage(messageId),
+    onMutate: async (messageId) => {
+      const key = queryKeys.chatMessages(activeId);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData(key);
+      queryClient.setQueryData(key, (old) =>
+        old ? { ...old, items: withOptimisticDelete(old.items, messageId) } : old,
+      );
+      return { previous, key };
+    },
+    onError: rollbackOptimisticUpdate,
+    onSettled: refetchMessages,
+  });
+  const handleDelete = (messageId) => {
+    if (window.confirm("Unsend this message? This can't be undone.")) {
+      deleteMessageMutation.mutate(messageId);
+    }
+  };
+  const handleCopy = (text) => {
+    if (text) navigator.clipboard?.writeText(text).catch(() => {});
+  };
+
+  const [lightboxKey, setLightboxKey] = useState(null);
+  const flatAttachments = useMemo(
+    () => flattenVisualAttachments(displayMessages, decryptedMessages),
+    [displayMessages, decryptedMessages],
+  );
+  const lightboxIndex = flatAttachments.findIndex((item) => item.cacheKey === lightboxKey);
 
   const [isComposingNewChat, setIsComposingNewChat] = useState(false);
   const [newChatRecipients, setNewChatRecipients] = useState([]);
@@ -307,6 +351,28 @@ export default function ChatPage() {
     api.markChatDelivered(readableMessageIds).catch(() => {});
     api.markChatRead(activeId, readableMessageIds.at(-1)).catch(() => {});
   }, [activeId, readableMessageIds, readableMessageIdsKey]);
+
+  const [replyLightboxOwnerId, setReplyLightboxOwnerId] = useState(activeId);
+  const [hiddenMessageIds, setHiddenMessageIds] = useState(() => getHiddenMessageIds(activeId));
+  // None of these carry over to a different conversation - reset during render, not an effect,
+  // so it lands in the same paint instead of flashing the stale value first.
+  if (activeId !== replyLightboxOwnerId) {
+    setReplyLightboxOwnerId(activeId);
+    setReplyTarget(null);
+    setLightboxKey(null);
+    setHiddenMessageIds(getHiddenMessageIds(activeId));
+  }
+  const handleDeleteForMe = (messageId) => {
+    hideMessageForMe(activeId, messageId);
+    setHiddenMessageIds((current) => new Set(current).add(messageId));
+  };
+  const jumpToMessage = (messageId) => {
+    const row = document.getElementById(`chat-message-${messageId}`);
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    row.classList.add("jump-highlight");
+    setTimeout(() => row.classList.remove("jump-highlight"), 1200);
+  };
 
   const decryptedCount = Object.keys(decryptedMessages).length;
   const activePendingCount = pendingMessages.filter(
@@ -748,6 +814,7 @@ export default function ChatPage() {
                 ref={messagesContainerRef}
                 onScroll={handleMessagesScroll}
               >
+                <AttachmentLightboxContext.Provider value={setLightboxKey}>
                 <QueryNotice isLoading={messages.isLoading} isError={messages.isError} />
                 {groupProblem && (
                   <div className="chat-history-ceiling" role="alert">
@@ -777,17 +844,25 @@ export default function ChatPage() {
                     </button>
                   </div>
                 )}
-                {threadItems.map((item) => (
-                  <ThreadRow
-                    allMessages={displayMessages}
-                    conversation={activeConversation}
-                    decryptedById={decryptedMessages}
-                    item={item}
-                    key={threadItemKey(item)}
-                    now={threadNow}
-                    userId={user?.id}
-                  />
-                ))}
+                {threadItems
+                  .filter((item) => item.kind !== "message" || !hiddenMessageIds.has(item.message.id))
+                  .map((item) => (
+                    <ThreadRow
+                      allMessages={displayMessages}
+                      conversation={activeConversation}
+                      decryptedById={decryptedMessages}
+                      item={item}
+                      key={threadItemKey(item)}
+                      now={threadNow}
+                      onCopy={handleCopy}
+                      onDelete={handleDelete}
+                      onDeleteForMe={handleDeleteForMe}
+                      onJumpToMessage={jumpToMessage}
+                      onReact={handleReact}
+                      onReply={setReplyTarget}
+                      userId={user?.id}
+                    />
+                  ))}
                 {pendingMessages
                   .filter((pending) => pending.conversationId === activeId)
                   .map((pending) => (
@@ -824,7 +899,20 @@ export default function ChatPage() {
                     </div>
                   )}
                 <div className="chat-messages-end" ref={messagesEndRef} />
+                </AttachmentLightboxContext.Provider>
               </div>
+              {lightboxIndex >= 0 && (
+                <AttachmentLightbox
+                  index={lightboxIndex}
+                  items={flatAttachments}
+                  onClose={() => setLightboxKey(null)}
+                  onNavigate={(delta) =>
+                    setLightboxKey(
+                      flatAttachments[lightboxIndex + delta]?.cacheKey ?? lightboxKey,
+                    )
+                  }
+                />
+              )}
 
               {newChatNotice && newChatNotice.conversationId === activeId && (
                 <div className="chat-new-chat-notice">
@@ -860,24 +948,41 @@ export default function ChatPage() {
                   </div>
                 </div>
               ) : isDeviceReady && syncEngine ? (
-                <form
-                  className="chat-composer"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const text = draft.trim();
-                    const files = attachmentPicker.files;
-                    if (!text && files.length === 0) return;
-                    const clientId = crypto.randomUUID();
-                    // Show the bubble and free the input; the send reconciles in the background.
-                    setPendingMessages((prev) => [
-                      ...prev,
-                      { clientId, text, files, conversationId: activeId },
-                    ]);
-                    setDraft("");
-                    attachmentPicker.clear();
-                    sendMessage.mutate({ text, clientId, files });
-                  }}
-                >
+                <>
+                  {replyTarget && (
+                    <div className="chat-reply-banner">
+                      <small>
+                        Replying to <b>{replyTarget.senderName}</b>: {replyTarget.preview}
+                      </small>
+                      <button
+                        aria-label="Cancel reply"
+                        onClick={() => setReplyTarget(null)}
+                        type="button"
+                      >
+                        <FiX />
+                      </button>
+                    </div>
+                  )}
+                  <form
+                    className="chat-composer"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const text = draft.trim();
+                      const files = attachmentPicker.files;
+                      if (!text && files.length === 0) return;
+                      const clientId = crypto.randomUUID();
+                      // Show the bubble and free the input; the send reconciles in the background.
+                      setPendingMessages((prev) => [
+                        ...prev,
+                        { clientId, text, files, conversationId: activeId },
+                      ]);
+                      setDraft("");
+                      attachmentPicker.clear();
+                      const replyToId = replyTarget?.id;
+                      setReplyTarget(null);
+                      sendMessage.mutate({ text, clientId, files, replyToId });
+                    }}
+                  >
                   <AttachmentComposerTray
                     error={attachmentPicker.error}
                     files={attachmentPicker.files}
@@ -913,7 +1018,8 @@ export default function ChatPage() {
                   >
                     <FiSend />
                   </button>
-                </form>
+                  </form>
+                </>
               ) : deviceError ? (
                 <div className="chat-composer-disabled error">
                   <FiLock />

@@ -91,6 +91,17 @@ export function useChatSocket() {
       queryClient.invalidateQueries({ queryKey: queryKeys.chatRequests });
     });
 
+    // Reactions and deletes are rare compared to new messages, so a full
+    // refetch of that conversation's page is simpler than hand-patching one
+    // message's fields, and still just as live.
+    const refetchConversationMessages = (event) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(event.conversationId) });
+    };
+    socket.on('reaction:added', refetchConversationMessages);
+    socket.on('reaction:removed', refetchConversationMessages);
+    socket.on('message:deleted', refetchConversationMessages);
+    socket.on('message:edited', refetchConversationMessages);
+
     return () => {
       clearTimeout(reconnectTimer);
       socket.disconnect();

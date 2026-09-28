@@ -7,6 +7,7 @@ import {
   messageFullTimestamp,
   threadItemKey,
   wasLikelySentDuringAbsence,
+  withOptimisticDelete,
 } from './chatThread';
 import type { MembershipEvent } from './mls/sync/membershipEvents';
 
@@ -293,6 +294,15 @@ describe('messageFullTimestamp', () => {
     expect(messageFullTimestamp(new Date(2026, 8, 16, 14, 40).getTime(), 'en-US')).toBe(
       '16 September 2026, 14:40',
     );
+  });
+});
+
+describe('withOptimisticDelete', () => {
+  it('marks only the matching message deleted, leaving others untouched', () => {
+    const messages = [{ id: 'a', status: 'SENT' }, { id: 'b', status: 'SENT' }];
+    const result = withOptimisticDelete(messages, 'a');
+    expect(result).toEqual([{ id: 'a', status: 'DELETED' }, { id: 'b', status: 'SENT' }]);
+    expect(result[1]).toBe(messages[1]);
   });
 });
 

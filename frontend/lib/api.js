@@ -33,6 +33,9 @@ export const backendRoutes = {
   chatDirect: '/chat/direct',
   chatMessages: (conversationId) =>
     `/chat/conversations/${encodePathParam(conversationId)}/messages`,
+  chatMessage: (messageId) => `/chat/messages/${encodePathParam(messageId)}`,
+  chatMessageReactions: (messageId) =>
+    `/chat/messages/${encodePathParam(messageId)}/reactions`,
   chatAcceptRequest: (conversationId) => `/chat/requests/${encodePathParam(conversationId)}/accept`,
   chatDeclineRequest: (conversationId) =>
     `/chat/requests/${encodePathParam(conversationId)}/decline`,
@@ -604,6 +607,14 @@ export const api = {
       backendRoutes.chatRead(conversationId),
       lastReadMessageId ? { lastReadMessageId } : {},
     ),
+  // Reactions are plaintext (not part of the encrypted envelope) - one reaction per user per message.
+  reactToMessage: (messageId, emoji) =>
+    mutation(backendRoutes.chatMessageReactions(messageId), { emoji }),
+  removeReaction: (messageId) =>
+    mutation(backendRoutes.chatMessageReactions(messageId), undefined, { method: 'DELETE' }),
+  // Own message only; soft delete (server clears the ciphertext, the row stays for history).
+  deleteChatMessage: (messageId) =>
+    mutation(backendRoutes.chatMessage(messageId), undefined, { method: 'DELETE' }),
   // History backup: { enabled, keyCheck, deletionScheduledFor: ISO | null, blobCount, bytesUsed }. Blobs are opaque base64 ciphertext.
   getChatBackupStatus: () => request(backendRoutes.chatBackup),
   // Turns backup on: { keyCheck, replaceSecret }. Replacing an existing key also needs { replace: true, nonce, proof } and deletes every blob.

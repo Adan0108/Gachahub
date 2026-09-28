@@ -17,6 +17,7 @@ interface ThreadMessage {
   ciphertext: string;
   createdAt: string;
   contentType?: string;
+  status?: string;
 }
 
 interface NewestPage {
@@ -34,7 +35,10 @@ export function useThreadData(
   const history = useConversationHistory(conversationId, newestPage);
   const { displayMessages } = history;
   const decryptable = useMemo(
-    () => displayMessages.filter((message) => message.contentType !== "SYSTEM"),
+    () =>
+      displayMessages.filter(
+        (message) => message.contentType !== "SYSTEM" && message.status !== "DELETED",
+      ),
     [displayMessages],
   );
   const decrypted = useDecryptedMessages(conversationId, decryptable, userId);

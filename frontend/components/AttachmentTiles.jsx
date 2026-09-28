@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { FiPlay } from "react-icons/fi";
 import { useAttachmentBlobUrl } from "../hooks/useAttachmentBlobUrl";
+import { useOpenAttachment } from "../lib/mls/media/attachmentLightboxContext";
+import { autoLoadsWithoutTap } from "../lib/mls/media/attachmentView";
 import { DownloadButton } from "./AttachmentFileChip";
 import "./ChatAttachments.css";
 
-// Bigger images wait for a click instead of downloading as soon as they scroll into the thread.
+// Bigger images wait for the lightbox instead of downloading as soon as they scroll into the thread.
 const AUTO_LOAD_MAX_BYTES = 5 * 1024 * 1024;
 
 function tileStyle(thumb) {
@@ -24,33 +26,30 @@ function TileStatus({ state, idleLabel }) {
   );
 }
 
-/** Thumbnail first, full image once clicked; without a thumbnail, small images load straight away. */
+/** A GIF always auto-loads; other images show their thumbnail (or auto-load when small) and open the lightbox on click. */
 export function ImageTile({ file, source, thumbSource }) {
-  const [expanded, setExpanded] = useState(false);
-  const wantsFull = expanded || (!thumbSource && file.size <= AUTO_LOAD_MAX_BYTES);
+  const openAttachment = useOpenAttachment();
+  const autoLoadsFull = autoLoadsWithoutTap(file.mime) || (!thumbSource && file.size <= AUTO_LOAD_MAX_BYTES);
   const preview = useAttachmentBlobUrl(thumbSource, true);
-  const full = useAttachmentBlobUrl(source, wantsFull && Boolean(source));
+  const full = useAttachmentBlobUrl(source, autoLoadsFull && Boolean(source));
   const shown = full.status === "ready" ? full : preview;
 
   if (!source) return <span className="chat-attachment-error">File unavailable</span>;
 
   return (
-    <div>
-      <button
-        aria-label={`Show ${file.name}`}
-        className={`chat-attachment-tile ${full.status === "loading" ? "busy" : ""}`}
-        onClick={() => setExpanded(true)}
-        style={tileStyle(file.thumb)}
-        type="button"
-      >
-        {shown.status === "ready" ? (
-          <img alt={file.name} src={shown.url} />
-        ) : (
-          <TileStatus idleLabel="Tap to load" state={full.status === "error" ? full : shown} />
-        )}
-      </button>
-      {full.status === "ready" && <DownloadButton name={file.name} source={source} />}
-    </div>
+    <button
+      aria-label={`Open ${file.name}`}
+      className={`chat-attachment-tile ${shown.status === "loading" ? "busy" : ""}`}
+      onClick={() => openAttachment(source.cacheKey)}
+      style={tileStyle(file.thumb)}
+      type="button"
+    >
+      {shown.status === "ready" ? (
+        <img alt={file.name} src={shown.url} />
+      ) : (
+        <TileStatus idleLabel="Tap to load" state={shown} />
+      )}
+    </button>
   );
 }
 

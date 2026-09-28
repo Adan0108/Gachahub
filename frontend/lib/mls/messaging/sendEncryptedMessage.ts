@@ -16,6 +16,7 @@ export function sendEncryptedChatMessage(
   recipientUserId: UserId | UserId[],
   text: string,
   clientMessageId: string,
+  replyToId?: string,
 ) {
   return sendEncryptedEnvelope(
     syncEngine,
@@ -24,6 +25,8 @@ export function sendEncryptedChatMessage(
     recipientUserId,
     { v: 1, type: 'text', body: text },
     clientMessageId,
+    [],
+    replyToId,
   );
 }
 
@@ -36,6 +39,7 @@ export async function sendEncryptedEnvelope(
   envelope: PlaintextEnvelope,
   clientMessageId: string,
   mediaUploadIds: string[] = [],
+  replyToId?: string,
 ) {
   try {
     return await encryptAndSend(
@@ -46,6 +50,7 @@ export async function sendEncryptedEnvelope(
       envelope,
       clientMessageId,
       mediaUploadIds,
+      replyToId,
     );
   } catch (error) {
     if (!isMembershipChangePending(error)) throw error;
@@ -60,6 +65,7 @@ export async function sendEncryptedEnvelope(
       envelope,
       clientMessageId,
       mediaUploadIds,
+      replyToId,
     );
   }
 }
@@ -80,6 +86,7 @@ async function encryptAndSend(
   envelope: PlaintextEnvelope,
   clientMessageId: string,
   mediaUploadIds: string[],
+  replyToId?: string,
 ) {
   await ensureConversationGroup(syncEngine, conversationId, recipientUserId);
 
@@ -90,6 +97,7 @@ async function encryptAndSend(
     contentType: 'TEXT',
     clientMessageId,
     encryptionMeta: senderMeta(deviceId),
+    ...(replyToId ? { replyToId } : {}),
     ...(mediaUploadIds.length
       ? { media: mediaUploadIds.map((mediaUploadId, sortOrder) => ({ mediaUploadId, sortOrder })) }
       : {}),

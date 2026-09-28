@@ -1,4 +1,4 @@
-import type { AttachmentFile } from '../contract/types';
+import type { AttachmentFile, EncryptedBlobRef } from '../contract/types';
 import { isAttachmentEnvelope } from './attachmentEnvelope';
 import { MAX_FILE_NAME_LENGTH } from './limits';
 
@@ -13,6 +13,11 @@ export function attachmentKind(mime: string): AttachmentKind {
   if (IMAGE_MIMES.has(normalized)) return 'image';
   if (VIDEO_MIMES.has(normalized)) return 'video';
   return 'file';
+}
+
+/** A GIF is already animated in place; making the user tap it first would just delay the point of sending one. */
+export function autoLoadsWithoutTap(mime: string): boolean {
+  return mime.toLowerCase() === 'image/gif';
 }
 
 export function safeBlobType(mime: string): string {
@@ -73,6 +78,105 @@ export function envelopeView(envelope: unknown): EnvelopeView | null {
   }
   const { type, body } = (envelope ?? {}) as { type?: unknown; body?: unknown };
   return type === 'text' && typeof body === 'string' ? { kind: 'text', text: body } : null;
+}
+
+/** No caption and nothing but images/video: the bubble chrome would just be a frame around the media. */
+export function isMediaOnlyView(view: EnvelopeView | null): boolean {
+  return (
+    view?.kind === 'attachment' &&
+    !view.caption &&
+    view.files.length > 0 &&
+    view.files.every((file) => attachmentKind(file.mime) !== 'file')
+  );
+}
+
+export interface AttachmentSource {
+  cacheKey: string;
+  url: string;
+  ref: EncryptedBlobRef;
+  /** Plaintext size from the envelope; absent for thumbnails, which are only size-capped. */
+  size?: number;
+  mime: string;
+}
+
+export interface ResolvedAttachment extends IndexedAttachment {
+  source: AttachmentSource | null;
+  thumbSource: AttachmentSource | null;
+}
+
+function sourceFor(
+  messageId: string,
+  index: number,
+  variant: 'file' | 'thumb',
+  ref: EncryptedBlobRef,
+  mime: string,
+  url: string | undefined,
+  size?: number,
+): AttachmentSource | null {
+  if (!url) return null;
+  return { cacheKey: `${messageId}:${index}:${variant}`, url, ref, mime, size };
+}
+
+/** Resolves each file/thumb's Cloudinary URL from the message's media rows, keyed by upload id. */
+export function resolveAttachmentSources(
+  messageId: string,
+  files: AttachmentFile[],
+  urlByUploadId: Map<string, string>,
+): { visual: ResolvedAttachment[]; others: ResolvedAttachment[] } {
+  const { visual, others } = groupAttachments(files);
+  const withSources = ({ file, index }: IndexedAttachment): ResolvedAttachment => ({
+    file,
+    index,
+    source: sourceFor(messageId, index, 'file', file, file.mime, urlByUploadId.get(file.blob), file.size),
+    thumbSource: file.thumb
+      ? sourceFor(
+          messageId,
+          index,
+          'thumb',
+          file.thumb,
+          'image/jpeg',
+          urlByUploadId.get(file.thumb.blob),
+        )
+      : null,
+  });
+  return { visual: visual.map(withSources), others: others.map(withSources) };
+}
+
+export interface FlatAttachment {
+  cacheKey: string;
+  messageId: string;
+  file: AttachmentFile;
+  source: AttachmentSource;
+}
+
+interface DecryptedById {
+  [messageId: string]: { status: string; envelope?: unknown } | undefined;
+}
+
+interface MessageWithMedia {
+  id: string;
+  media?: { mediaUploadId: string; url: string }[];
+}
+
+/** Every image/video across the thread's decrypted messages, in order, so the lightbox can cycle through them. */
+export function flattenVisualAttachments(
+  messages: MessageWithMedia[],
+  decryptedById: DecryptedById,
+): FlatAttachment[] {
+  const flat: FlatAttachment[] = [];
+  for (const message of messages) {
+    if (decryptedById[message.id]?.status !== 'ok') continue;
+    const view = envelopeView(decryptedById[message.id]?.envelope);
+    if (view?.kind !== 'attachment') continue;
+    const urlByUploadId = new Map((message.media ?? []).map((item) => [item.mediaUploadId, item.url]));
+    const { visual } = resolveAttachmentSources(message.id, view.files, urlByUploadId);
+    for (const item of visual) {
+      if (item.source) {
+        flat.push({ cacheKey: item.source.cacheKey, messageId: message.id, file: item.file, source: item.source });
+      }
+    }
+  }
+  return flat;
 }
 
 /** Status line under an outgoing bubble while it is in flight. */
