@@ -8,6 +8,7 @@ import {
   NotificationEntityType,
   NotificationType,
   UserStatus,
+  type Prisma,
 } from '../generated/prisma/client';
 
 import { GetNotificationsQueryDto } from './dto/get-notifications-query.dto';
@@ -39,7 +40,10 @@ export class NotificationService {
    * - An existing recent duplicate
    * - null when notification should be skipped
    */
-  async createNotification(input: CreateNotificationInput) {
+  async createNotification(
+    input: CreateNotificationInput,
+    transaction?: Prisma.TransactionClient,
+  ) {
     const { recipientId, actorId, type, entityType, entityId } = input;
 
     // 1. Basic runtime validation.
@@ -75,9 +79,10 @@ export class NotificationService {
     // This becomes particularly important once notifications are created
     // asynchronously through Kafka because the recipient may disappear
     // between event publication and event consumption.
-    const recipient =
-      await this.notificationRepository.findRecipientById(recipientId);
-
+    const recipient = await this.notificationRepository.findRecipientById(
+      recipientId,
+      transaction,
+    );
     if (!recipient) {
       return null;
     }
@@ -107,6 +112,7 @@ export class NotificationService {
         entityId,
         since: dedupeSince,
       },
+      transaction,
     );
 
     // Duplicate processing is not considered an error.
@@ -115,13 +121,16 @@ export class NotificationService {
     }
 
     // 7. Persist the notification.
-    return this.notificationRepository.create({
-      recipientId,
-      actorId,
-      type,
-      entityType,
-      entityId,
-    });
+    return this.notificationRepository.create(
+      {
+        recipientId,
+        actorId,
+        type,
+        entityType,
+        entityId,
+      },
+      transaction,
+    );
   }
 
   /**
