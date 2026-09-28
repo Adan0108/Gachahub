@@ -165,4 +165,91 @@ describe("useConversationHistory", () => {
     expect(ids(hook.value.displayMessages)).toEqual(["m1", "m2", "m3", "m4", "m5"]);
     await hook.unmount();
   });
+
+  it("ignores an older batch that lands after switching conversations", async () => {
+    let resolveFirst!: (value: Page) => void;
+    getChatMessages.mockReturnValueOnce(new Promise<Page>((resolve) => (resolveFirst = resolve)));
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+    await hook.scrollToTop();
+
+    await hook.render({ conversationId: "c2", page: page([message(9)], "m9") });
+    await act(async () => resolveFirst(page(range(1, 2), null)));
+    await flush();
+
+    expect(ids(hook.value.displayMessages)).toEqual(["m9"]);
+    expect(hook.value.isLoadingOlder).toBe(false);
+    getChatMessages.mockResolvedValueOnce(page([message(8)], null));
+    await hook.scrollToTop();
+    expect(getChatMessages).toHaveBeenLastCalledWith("c2", { beforeMessageId: "m9", limit: 50 });
+    await hook.unmount();
+  });
+
+  it("fetches a cursor once when two scroll events arrive before a re-render", async () => {
+    let resolveFirst!: (value: Page) => void;
+    getChatMessages.mockReturnValueOnce(new Promise<Page>((resolve) => (resolveFirst = resolve)));
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+
+    await act(async () => {
+      hook.value.handleScroll({ currentTarget: { scrollTop: 0 } } as never);
+      hook.value.handleScroll({ currentTarget: { scrollTop: 0 } } as never);
+    });
+    await act(async () => resolveFirst(page(range(1, 2), null)));
+    await flush();
+
+    expect(getChatMessages).toHaveBeenCalledTimes(1);
+    expect(ids(hook.value.displayMessages)).toEqual(["m1", "m2", "m3", "m4", "m5"]);
+    await hook.unmount();
+  });
+
+  it("does not repeat a message a page returns that is already shown", async () => {
+    getChatMessages.mockResolvedValue(page(range(2, 3), null));
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+
+    await hook.scrollToTop();
+
+    expect(ids(hook.value.displayMessages)).toEqual(["m2", "m3", "m4", "m5"]);
+    await hook.unmount();
+  });
+
+  it("counts down from the real wait on the first render after a 429", async () => {
+    vi.useFakeTimers();
+    getChatMessages.mockRejectedValueOnce(
+      Object.assign(new Error("slow down"), { status: 429, retryAfterSeconds: 4 }),
+    );
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+    vi.setSystemTime(Date.now() + 60_000);
+
+    await hook.scrollToTop();
+
+    expect(hook.value.rateLimitSecondsLeft).toBe(4);
+    await hook.unmount();
+  });
+
+  it("surfaces a failure, waits for an explicit retry, then loads", async () => {
+    getChatMessages
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValueOnce(page(range(1, 2), null));
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+
+    await hook.scrollToTop();
+    expect(hook.value.historyError?.message).toBe("boom");
+    expect(hook.value.isWaitingOnRateLimit).toBe(false);
+
+    await hook.scrollToTop();
+    expect(getChatMessages).toHaveBeenCalledTimes(1);
+
+    await act(async () => hook.value.retryHistory());
+    await flush();
+
+    expect(getChatMessages).toHaveBeenCalledTimes(2);
+    expect(hook.value.historyError).toBeUndefined();
+    expect(ids(hook.value.displayMessages)).toEqual(["m1", "m2", "m3", "m4", "m5"]);
+    await hook.unmount();
+  });
 });
+

@@ -100,6 +100,25 @@ describe('buildMembershipWork', () => {
       },
     );
 
+    it('leaves out a PENDING invitee the requester may not claim for, but not other states', () => {
+      const result = buildMembershipWork({
+        conversations: [
+          conversation({
+            participants: [
+              { userId: 'me', state: 'ACTIVE' },
+              { userId: 'u2', state: 'PENDING' },
+              { userId: 'u3', state: 'PENDING' },
+            ],
+          }),
+        ],
+        devices: [myDevice, device('u2', 'd2'), device('u3', 'd3')],
+        requestingDeviceId: 'my-device',
+        refusingInviteeIds: new Set(['u2']),
+      });
+
+      expect(result[0]?.add).toEqual([{ userId: 'u3', deviceId: 'd3' }]);
+    });
+
     it('gives an ACTIVE member the devices they were missing when they joined', () => {
       const result = work(
         [
@@ -375,5 +394,91 @@ describe('buildMembershipWork', () => {
 
   it('returns nothing when no conversation is waiting', () => {
     expect(work([])).toEqual([]);
+  });
+});
+
+describe('buildMembershipWork chunking', () => {
+  const pad = (n: number) => `d${String(n).padStart(3, '0')}`;
+  const devicesOf = (userId: string, count: number, from = 0) =>
+    Array.from({ length: count }, (_, i) => device(userId, pad(from + i)));
+
+  it('hands out at most one Commit worth of adds, lowest device ids first, whatever order they arrive in', () => {
+    const devices = devicesOf('u2', 120).reverse();
+
+    const [item] = work(
+      [
+        conversation({
+          participants: [
+            { userId: 'me', state: 'ACTIVE' },
+            { userId: 'u2', state: 'JOINING' },
+          ],
+        }),
+      ],
+      devices,
+    );
+
+    expect(item.add).toHaveLength(50);
+    expect(item.add.map((d) => d.deviceId)).toEqual(
+      Array.from({ length: 50 }, (_, i) => pad(i)),
+    );
+  });
+
+  it('yields the rest on the next pass, once the first chunk is in the group', () => {
+    const devices = devicesOf('u2', 120);
+    const participants = [
+      { userId: 'me', state: 'ACTIVE' as const },
+      { userId: 'u2', state: 'ACTIVE' as const },
+    ];
+    const afterFirstCommit = devices.slice(0, 50).map((d) => ({
+      userId: d.userId,
+      deviceId: d.deviceId,
+    }));
+
+    const [item] = work(
+      [
+        conversation({
+          participants,
+          activeLeaves: [ME, ...afterFirstCommit],
+        }),
+      ],
+      devices,
+    );
+
+    expect(item.add.map((d) => d.deviceId)).toEqual(
+      Array.from({ length: 50 }, (_, i) => pad(50 + i)),
+    );
+  });
+
+  it('caps removes the same way', () => {
+    const leaves = devicesOf('gone', 75).map((d) => ({
+      userId: d.userId,
+      deviceId: d.deviceId,
+    }));
+
+    const [item] = work([
+      conversation({ activeLeaves: [ME, ...leaves.reverse()] }),
+    ]);
+
+    expect(item.remove).toHaveLength(50);
+    expect(item.remove[0].deviceId).toBe(pad(0));
+    expect(item.remove[49].deviceId).toBe(pad(49));
+  });
+
+  it('leaves unreachableUserIds alone when adds are chunked', () => {
+    const [item] = work(
+      [
+        conversation({
+          participants: [
+            { userId: 'me', state: 'ACTIVE' },
+            { userId: 'u2', state: 'ACTIVE' },
+            { userId: 'u3', state: 'JOINING' },
+          ],
+        }),
+      ],
+      devicesOf('u2', 60),
+    );
+
+    expect(item.add).toHaveLength(50);
+    expect(item.unreachableUserIds).toEqual(['u3']);
   });
 });

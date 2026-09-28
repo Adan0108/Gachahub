@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   Param,
   Post,
   Put,
@@ -21,6 +22,12 @@ import { UploadKeyPackagesDto } from './dto/upload-key-packages.dto';
 @Controller('chat-devices')
 export class ChatDevicesController {
   constructor(private readonly chatDevicesService: ChatDevicesService) {}
+
+  @Get()
+  @ApiOperation({ summary: "List the current user's own MLS devices" })
+  listDevices(@Session() session: UserSession) {
+    return this.chatDevicesService.listOwnDevices(session.user.id);
+  }
 
   @Post()
   @ApiOperation({ summary: 'Register a new MLS device for the current user' })
@@ -42,6 +49,21 @@ export class ChatDevicesController {
       session.user.id,
       deviceId,
       dto,
+    );
+  }
+
+  @Get(':deviceId/key-packages/status')
+  @ApiOperation({
+    summary:
+      'How many single-use key packages an owned device has left, and when its last-resort one expires',
+  })
+  keyPackageStatus(
+    @Session() session: UserSession,
+    @Param('deviceId') deviceId: string,
+  ) {
+    return this.chatDevicesService.getKeyPackageStatus(
+      session.user.id,
+      deviceId,
     );
   }
 
@@ -99,7 +121,11 @@ export class ChatDevicesController {
     @Session() session: UserSession,
     @Param('deviceId') deviceId: string,
   ) {
-    return this.chatDevicesService.revokeDevice(session.user.id, deviceId);
+    return this.chatDevicesService.revokeDevice(
+      session.user.id,
+      deviceId,
+      session.session.id,
+    );
   }
 
   @Post('claim/:userId')

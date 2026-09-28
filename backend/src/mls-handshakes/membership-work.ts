@@ -1,3 +1,4 @@
+import { MAX_DEVICES_PER_COMMIT } from './dto/submit-handshake.dto';
 import type { ChatParticipantState } from '../generated/prisma/client';
 import {
   isEntitledToLeaf,
@@ -10,13 +11,7 @@ export interface WorkDevice {
   deviceId: string;
 }
 
-/**
- * The membership changes one conversation is waiting on, as far as the
- * requesting device can carry them out: devices to add (for people entitled
- * to be in the group) and devices to remove (for people who are not, or whose
- * device is gone). The device turns this into one Commit and submits it; the
- * server's acceptance of that Commit is what completes the change.
- */
+/** The membership changes one conversation is waiting on, as far as the requesting device can carry them out. */
 export interface MembershipWorkItem {
   conversationId: string;
   /** The epoch the Commit must be built from. */
@@ -40,30 +35,22 @@ export interface DeviceRecord extends WorkDevice {
   revoked: boolean;
 }
 
-/**
- * Turns what the server knows about each conversation into the work a device
- * can do, using the same entitlement rules the server enforces on a Commit
- * (chat/membership/leaf-entitlement.ts) - so anything a Commit may legitimately
- * do is something this can ask for, and nothing it asks for will be refused.
- *
- * - Add: every unrevoked device of an entitled user that is not in the group.
- *   This covers someone joining, a member's new device, and a device that had
- *   no key package when its owner joined.
- * - Remove: every device in the group whose owner is not entitled, or whose
- *   device is revoked or gone. This covers someone leaving, a lost or stolen
- *   device, and a leftover device of a user who is no longer a member.
- *
- * Needs the conversation's COMPLETE participant list: a member left out would
- * look like someone with no right to be there.
- */
+/** Turns what the server knows about each conversation into the add/remove work a device can do, capped at MAX_DEVICES_PER_COMMIT each way (lowest ids first); needs the COMPLETE participant list. */
 export function buildMembershipWork(params: {
   conversations: readonly ConversationFacts[];
   /** Every device of the entitled users and every device in the groups, revoked or not. Missing means deleted. */
   devices: readonly DeviceRecord[];
   /** The device asking; it can never remove itself. */
   requestingDeviceId: string;
+  /** PENDING invitees the requester's claim would be refused for (they block, are blocked, or take no messages). */
+  refusingInviteeIds?: ReadonlySet<string>;
 }): MembershipWorkItem[] {
-  const { conversations, devices, requestingDeviceId } = params;
+  const {
+    conversations,
+    devices,
+    requestingDeviceId,
+    refusingInviteeIds = new Set<string>(),
+  } = params;
 
   const unrevokedDeviceIds = new Set(
     devices
@@ -97,6 +84,12 @@ export function buildMembershipWork(params: {
 
     for (const participant of conversation.participants) {
       if (!isEntitledToLeaf(participant.state)) continue;
+      if (
+        participant.state === 'PENDING' &&
+        refusingInviteeIds.has(participant.userId)
+      ) {
+        continue;
+      }
 
       const userDeviceIds =
         unrevokedDeviceIdsByUser.get(participant.userId) ?? [];
@@ -125,14 +118,23 @@ export function buildMembershipWork(params: {
       continue;
     }
 
+    const firstChunk = (devices: WorkDevice[]) =>
+      [...devices]
+        .sort((a, b) => compareIds(a.deviceId, b.deviceId))
+        .slice(0, MAX_DEVICES_PER_COMMIT);
+
     items.push({
       conversationId: conversation.id,
       epoch: conversation.mlsEpoch,
-      add,
-      remove,
+      add: firstChunk(add),
+      remove: firstChunk(remove),
       unreachableUserIds,
     });
   }
 
   return items;
+}
+
+function compareIds(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }

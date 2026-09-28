@@ -1,5 +1,9 @@
 import type { ChatParticipantState } from '../../generated/prisma/client';
-import { isEntitledToLeaf, isLeafRemovable } from './leaf-entitlement';
+import {
+  isEntitledToLeaf,
+  isLeafRemovable,
+  isMemberState,
+} from './leaf-entitlement';
 
 describe('isEntitledToLeaf', () => {
   it.each<ChatParticipantState>([
@@ -44,5 +48,24 @@ describe('isLeafRemovable', () => {
     expect(
       isLeafRemovable({ ownerState: 'PENDING', deviceIsGone: false }),
     ).toBe(false);
+  });
+});
+
+describe('isMemberState', () => {
+  it.each<ChatParticipantState>(['ACTIVE', 'ARCHIVED', 'BLOCKED'])(
+    'is true for %s',
+    (state) => {
+      expect(isMemberState(state)).toBe(true);
+    },
+  );
+
+  it.each<ChatParticipantState | undefined>([
+    'PENDING',
+    'JOINING',
+    'LEAVING',
+    'DECLINED',
+    undefined,
+  ])('is false for %s', (state) => {
+    expect(isMemberState(state)).toBe(false);
   });
 });

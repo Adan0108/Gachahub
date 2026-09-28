@@ -6,7 +6,11 @@ import { MlsGroupInfoRepository } from './mls-group-info.repository';
 
 describe('MlsGroupInfoRepository', () => {
   const db = {
-    mlsGroupInfo: { updateMany: jest.fn(), createMany: jest.fn() },
+    mlsGroupInfo: {
+      updateMany: jest.fn(),
+      createMany: jest.fn(),
+      count: jest.fn(),
+    },
     chatConversation: { findUnique: jest.fn() },
   };
   let repository: MlsGroupInfoRepository;
@@ -14,6 +18,18 @@ describe('MlsGroupInfoRepository', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     repository = new MlsGroupInfoRepository(db as unknown as PrismaService);
+  });
+
+  describe('describesEpoch', () => {
+    it('is true only when a snapshot for exactly that epoch is stored', async () => {
+      db.mlsGroupInfo.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+
+      await expect(repository.describesEpoch('conv-1', 5)).resolves.toBe(true);
+      await expect(repository.describesEpoch('conv-1', 5)).resolves.toBe(false);
+      expect(db.mlsGroupInfo.count).toHaveBeenCalledWith({
+        where: { conversationId: 'conv-1', epoch: 5 },
+      });
+    });
   });
 
   describe('save', () => {

@@ -1,13 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
   IsBase64,
-  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
-  Min,
 } from 'class-validator';
+import { BoundedEpoch } from './bounded-epoch.decorator';
 
 export class ExternalJoinDto {
   @ApiProperty({ description: 'The joining device, one of the caller devices' })
@@ -19,8 +18,7 @@ export class ExternalJoinDto {
   @ApiProperty({
     description: 'The epoch of the GroupInfo the join was built from',
   })
-  @IsInt()
-  @Min(0)
+  @BoundedEpoch()
   epoch!: number;
 
   @ApiProperty({

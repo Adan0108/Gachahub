@@ -9,14 +9,7 @@ import {
   type OnIllegalMembershipChange,
 } from './plan-membership-changes';
 
-/**
- * Applies membership events (add, remove, accept, decline) to a conversation's
- * participants. Everything happens in one transaction under the conversation's
- * row lock, so what is read about the MLS group - whether it exists, who has a
- * device in it - cannot change before the participants are written. A Commit
- * accepted in between would otherwise leave someone ACTIVE without a device, or
- * decline someone whose devices it just added.
- */
+/** Applies membership events to a conversation's participants in one transaction under the conversation row lock. */
 @Injectable()
 export class ChatMembershipRepository {
   constructor(
@@ -63,23 +56,26 @@ export class ChatMembershipRepository {
     });
   }
 
-  /**
-   * PENDING participants (group invite or DM message request) whose invite has sat
-   * unanswered since before `cutoff`, grouped by conversation. PENDING is entitled to
-   * an MLS leaf (see leaf-entitlement.ts), so an invite nobody ever accepts or
-   * declines would otherwise be permanent cryptographic membership - see
-   * ChatInviteExpiryService, which turns this into an EXPIRE_INVITE per conversation.
-   *
-   * updatedAt, not createdAt: a participant re-invited after DECLINED updates the
-   * same row rather than creating a new one, and Prisma's @updatedAt already tracks
-   * exactly "when they most recently entered PENDING" for that case.
-   */
+  /** Stamps PENDING rows written without pendingSince (e.g. by older code mid-deploy) so they start their expiry clock. */
+  async stampMissingPendingSince(now: Date): Promise<number> {
+    const { count } = await this.prisma.chatParticipant.updateMany({
+      where: { state: 'PENDING', pendingSince: null },
+      data: { pendingSince: now },
+    });
+
+    return count;
+  }
+
+  /** PENDING participants whose invite predates `cutoff`, grouped by conversation, oldest first, capped at `limit`. */
   async findExpiredPendingInvites(
     cutoff: Date,
+    limit: number,
   ): Promise<Map<string, string[]>> {
     const rows = await this.prisma.chatParticipant.findMany({
-      where: { state: 'PENDING', updatedAt: { lt: cutoff } },
+      where: { state: 'PENDING', pendingSince: { lt: cutoff } },
       select: { conversationId: true, userId: true },
+      orderBy: [{ pendingSince: 'asc' }, { id: 'asc' }],
+      take: limit,
     });
 
     const userIdsByConversationId = new Map<string, string[]>();

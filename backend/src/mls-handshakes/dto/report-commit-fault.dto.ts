@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsInt, IsNotEmpty, IsString, MaxLength, Min } from 'class-validator';
+import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { BoundedEpoch } from './bounded-epoch.decorator';
 
 export class ReportCommitFaultDto {
   @ApiProperty({ description: 'Device id reporting the refused Commit' })
@@ -9,8 +10,7 @@ export class ReportCommitFaultDto {
   deviceId!: string;
 
   @ApiProperty({ description: 'Epoch the refused Commit was built from' })
-  @IsInt()
-  @Min(0)
+  @BoundedEpoch()
   epoch!: number;
 
   @ApiProperty({ description: 'Why the client refused it' })

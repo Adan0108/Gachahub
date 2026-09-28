@@ -4,26 +4,12 @@ import { ensureConversationGroup } from './ensureConversationGroup';
 import { senderMeta } from './messageOrigin';
 import type { SyncEngine } from '../sync/syncEngine';
 import { EncryptedIndexedDbMessagePlaintextStore } from '../storage/messagePlaintextStore';
-import type { ConversationId, DeviceId, UserId } from '../contract/types';
+import type { ConversationId, DeviceId, PlaintextEnvelope, UserId } from '../contract/types';
 
 const plaintextStore = new EncryptedIndexedDbMessagePlaintextStore();
 
-/**
- * Encrypts `text` for `conversationId`, sends it, and saves the plaintext
- * locally under the server-assigned message id - the sender never decrypts
- * its own message later (that generation's key is already gone by the time
- * encryptMessage returns), so this is the only chance to ever cache it.
- *
- * `clientMessageId` must stay the same across retries of one message: the backend returns the message
- * it already stored for that id, so a retry after a lost response is not delivered twice.
- *
- * Ensures a local MLS group exists first (see ensureConversationGroup) so
- * this doubles as "finish setting up encryption" for a conversation that
- * was just created, or a request that just got accepted - the caller
- * doesn't need a separate step for that. `recipientUserId` takes an array
- * for a group conversation's other initial active members.
- */
-export async function sendEncryptedChatMessage(
+/** Encrypts `text` for `conversationId`, sends it, and saves the plaintext locally under the server-assigned message id - the sender never decrypts its own message later (that generation's key is already gone by the time encryptMessage returns), so this is the only chance to ever cache it. `clientMessageId` must stay the same across retries of one message: the backend returns the message it already stored for that id, so a retry after a lost response is not delivered twice */
+export function sendEncryptedChatMessage(
   syncEngine: SyncEngine,
   deviceId: DeviceId,
   conversationId: ConversationId,
@@ -31,30 +17,49 @@ export async function sendEncryptedChatMessage(
   text: string,
   clientMessageId: string,
 ) {
+  return sendEncryptedEnvelope(
+    syncEngine,
+    deviceId,
+    conversationId,
+    recipientUserId,
+    { v: 1, type: 'text', body: text },
+    clientMessageId,
+  );
+}
+
+/** Same send path for any envelope; `mediaUploadIds` are the already-uploaded encrypted blobs to attach. */
+export async function sendEncryptedEnvelope(
+  syncEngine: SyncEngine,
+  deviceId: DeviceId,
+  conversationId: ConversationId,
+  recipientUserId: UserId | UserId[],
+  envelope: PlaintextEnvelope,
+  clientMessageId: string,
+  mediaUploadIds: string[] = [],
+) {
   try {
     return await encryptAndSend(
       syncEngine,
       deviceId,
       conversationId,
       recipientUserId,
-      text,
+      envelope,
       clientMessageId,
+      mediaUploadIds,
     );
   } catch (error) {
     if (!isMembershipChangePending(error)) throw error;
 
-    // A member is being removed, so anything encrypted now would still be
-    // readable to them. Finish the removal, then encrypt again under the new
-    // epoch - the attempt that was refused is simply discarded, and one retry
-    // is all a pending change should ever need.
+    // A member is being removed, so anything encrypted now would still be readable to them
     await syncEngine.reconcileMembership({ conversationId });
     return encryptAndSend(
       syncEngine,
       deviceId,
       conversationId,
       recipientUserId,
-      text,
+      envelope,
       clientMessageId,
+      mediaUploadIds,
     );
   }
 }
@@ -72,12 +77,12 @@ async function encryptAndSend(
   deviceId: DeviceId,
   conversationId: ConversationId,
   recipientUserId: UserId | UserId[],
-  text: string,
+  envelope: PlaintextEnvelope,
   clientMessageId: string,
+  mediaUploadIds: string[],
 ) {
   await ensureConversationGroup(syncEngine, conversationId, recipientUserId);
 
-  const envelope = { v: 1 as const, type: 'text' as const, body: text };
   const { wireBytes, epoch } = await syncEngine.encryptMessage(conversationId, envelope);
 
   const response = await api.sendChatMessage(conversationId, {
@@ -85,6 +90,9 @@ async function encryptAndSend(
     contentType: 'TEXT',
     clientMessageId,
     encryptionMeta: senderMeta(deviceId),
+    ...(mediaUploadIds.length
+      ? { media: mediaUploadIds.map((mediaUploadId, sortOrder) => ({ mediaUploadId, sortOrder })) }
+      : {}),
   });
 
   await plaintextStore.save({

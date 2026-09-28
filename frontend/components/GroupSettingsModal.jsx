@@ -5,23 +5,11 @@ import { useMutation } from "@tanstack/react-query";
 import { FiLogOut, FiX } from "react-icons/fi";
 import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 import { api } from "../lib/api";
-import { activeMembers, initialOf, myParticipant, parseUserIds } from "../lib/chatDisplay";
+import { activeMembers, initialOf, myParticipant } from "../lib/chatDisplay";
+import { SafetyBadge } from "./SafetyStatus";
+import { UserPicker } from "./UserPicker";
 
-/**
- * Group management: title/photo, member list with roles, promote/demote and transfer ownership
- * (owner-only), add/remove members, leave group. Pulled out of chat/page.jsx as its own concern -
- * everything here reads or mutates a group conversation's own settings, distinct from the thread
- * itself.
- *
- * `refreshChat` and `onLeft` are the only things this needs from the parent beyond the
- * conversation itself: refetching the conversation lists after any change, and clearing the
- * parent's selected conversation once this device leaves the group.
- *
- * The parent must render this with `key={isOpen ? conversation?.id : "closed"}` (see
- * chat/page.jsx) - that forces a fresh mount every time it opens, which is what seeds the
- * editable fields from the current conversation with no effect needed, and discards any
- * abandoned edits from a previous time it was open instead of them lingering in memory.
- */
+/** Group settings: title/photo, members and roles, add/remove, leave. Render with a changing `key` on open to reseed fields. */
 export function GroupSettingsModal({
   conversation,
   currentUserId,
@@ -30,13 +18,15 @@ export function GroupSettingsModal({
   triggerRef,
   refreshChat,
   onLeft,
+  safety = {},
+  onVerify,
 }) {
   const modalRef = useModalFocusTrap(isOpen, onClose, triggerRef);
   const conversationId = conversation?.id;
 
   const [title, setTitle] = useState(conversation?.title || "");
   const [photoUrl, setPhotoUrl] = useState(conversation?.photoUrl || "");
-  const [addMemberIdsText, setAddMemberIdsText] = useState("");
+  const [newMembers, setNewMembers] = useState([]);
 
   const updateGroupDetails = useMutation({
     mutationFn: () =>
@@ -47,9 +37,12 @@ export function GroupSettingsModal({
     onSuccess: refreshChat,
   });
   const addMembers = useMutation({
-    mutationFn: () => api.addGroupMembers(conversationId, parseUserIds(addMemberIdsText)),
+    mutationFn: () => api.addGroupMembers(
+        conversationId,
+        newMembers.map((member) => member.id),
+      ),
     onSuccess: async () => {
-      setAddMemberIdsText("");
+      setNewMembers([]);
       await refreshChat();
     },
   });
@@ -158,6 +151,12 @@ export function GroupSettingsModal({
                       {participant.state === "LEAVING" && <span className="tag">Leaving…</span>}
                     </small>
                   </span>
+                  {!isSelf && participant.state === "ACTIVE" && (
+                    <SafetyBadge
+                      onVerify={() => onVerify?.(participant.userId)}
+                      safety={safety[participant.userId]}
+                    />
+                  )}
                   {canActOnMember && (
                     <span className="group-member-actions">
                       {isGroupOwner && participant.role !== "OWNER" && (
@@ -210,19 +209,20 @@ export function GroupSettingsModal({
             className="chat-new-form group-add-members-form"
             onSubmit={(event) => {
               event.preventDefault();
-              if (!addMemberIdsText.trim() || addMembers.isPending) return;
+              if (!newMembers.length || addMembers.isPending) return;
               addMembers.mutate();
             }}
           >
             <label htmlFor="group-add-members">Add members</label>
-            <textarea
+            <UserPicker
               disabled={addMembers.isPending}
+              excludeIds={conversation.participants.map((participant) => participant.userId)}
               id="group-add-members"
-              onChange={(event) => setAddMemberIdsText(event.target.value)}
-              placeholder="Paste GachaHub user IDs, one per line..."
-              value={addMemberIdsText}
+              multiple
+              onChange={setNewMembers}
+              value={newMembers}
             />
-            <button disabled={!addMemberIdsText.trim() || addMembers.isPending} type="submit">
+            <button disabled={!newMembers.length || addMembers.isPending} type="submit">
               {addMembers.isPending ? "Adding..." : "Add members"}
             </button>
             {addMembers.error && <small>{addMembers.error.message}</small>}

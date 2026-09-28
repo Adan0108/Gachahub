@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from '@thallesp/nestjs-better-auth';
-
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { auth } from './auth/auth';
@@ -25,7 +24,8 @@ import { PostsModule } from './posts/posts.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { UsersModule } from './users/users.module';
-
+import { ChatBackupModule } from './chat-backup/chat-backup.module';
+import { MlsRetentionModule } from './mls-retention/mls-retention.module';
 /**
  * Root application module.
  *
@@ -53,8 +53,10 @@ import { UsersModule } from './users/users.module';
 
     ChatModule,
     ChatDevicesModule,
+    ChatBackupModule,
     MlsHandshakesModule,
 
+    MlsRetentionModule,
     MediaModule,
     PostsModule,
     CommentsModule,

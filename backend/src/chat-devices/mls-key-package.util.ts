@@ -1,58 +1,27 @@
 import { BadRequestException } from '@nestjs/common';
-import {
-  decodeMlsMessage,
-  getCiphersuiteImpl,
-  getCiphersuiteFromName,
-  type CiphersuiteImpl,
-  type KeyPackage,
-} from 'ts-mls';
-// Not re-exported from the package root - reachable via ts-mls's own
-// "./*.js" subpath export map (same as the frontend adapter).
+import { decodeMlsMessage, type KeyPackage } from 'ts-mls';
+// Not re-exported from the package root; reached via ts-mls's "./*.js" subpath export.
 import { verifyKeyPackage } from 'ts-mls/keyPackage.js';
 import { bytesEqual } from '../common/utils/bytes';
+import {
+  getPinnedCiphersuiteImpl,
+  PINNED_CIPHERSUITE,
+} from '../common/utils/mls-pinned-ciphersuite';
 
-/**
- * Ciphersuite this backend accepts for MLS key packages - matches the
- * frontend's ts-mls adapter (frontend/lib/mls/tsMlsAdapter.ts). Pinned to
- * exactly one (critique C1) rather than accepting whatever a client sends,
- * so uploads can never mix ciphersuites.
- */
-export const PINNED_CIPHERSUITE =
-  'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519';
+export { PINNED_CIPHERSUITE };
 
 const MAX_KEY_PACKAGE_LIFETIME_SECONDS = 90 * 24 * 60 * 60;
-// A key package that isn't valid yet is still useless to us today - allow
-// only a small clock-skew tolerance, not a package scheduled to activate
-// far in the future.
+// Allows only a small clock-skew tolerance for a not-yet-valid package.
 const CLOCK_SKEW_TOLERANCE_SECONDS = 5 * 60;
-
-let cachedImpl: Promise<CiphersuiteImpl> | undefined;
-function getImpl(): Promise<CiphersuiteImpl> {
-  cachedImpl ??= getCiphersuiteImpl(getCiphersuiteFromName(PINNED_CIPHERSUITE));
-  return cachedImpl;
-}
 
 export interface ExpectedKeyPackageIdentity {
   userId: string;
   deviceId: string;
-  /**
-   * The device's claimed long-term identity signing key. Every key package
-   * a well-behaved device produces reuses this same key (see the frontend
-   * adapter's signatureKeyPair reuse fix) - checking it here catches a
-   * device whose registered signaturePublicKey has no actual relationship
-   * to the key its key packages are really signed with.
-   */
+  /** The device's claimed long-term identity signing key; must match the key its key packages are signed with. */
   signaturePublicKey: Uint8Array;
 }
 
-/**
- * Decodes and fully validates an uploaded MLS key package: real wire
- * format, real signature, pinned ciphersuite, a bounded lifetime, and a
- * credential that actually matches who the upload claims to be from
- * (threat-model §1 / critique C1's upload checks). Throws
- * BadRequestException on any failure - callers don't need a separate
- * validation pass.
- */
+/** Decodes and fully validates an uploaded key package; throws BadRequestException on any failure. */
 export async function decodeAndVerifyKeyPackage(
   payload: Uint8Array,
   expected: ExpectedKeyPackageIdentity,
@@ -64,11 +33,7 @@ export async function decodeAndVerifyKeyPackage(
       throw error;
     }
 
-    // ts-mls's decoder throws (CodecError and friends) on truncated/
-    // malformed binary input instead of returning undefined - without this,
-    // adversarial bytes on this endpoint surface as an unhandled 500
-    // (and fire the Discord error alert) instead of a clean 400. Never
-    // include the raw error/stack in the response - threat-model §7.
+    // Malformed bytes must surface as a 400, never leak the raw error.
     throw new BadRequestException('Not a valid MLS key package');
   }
 }
@@ -90,7 +55,7 @@ async function decodeAndVerifyKeyPackageUnsafe(
     );
   }
 
-  const impl = await getImpl();
+  const impl = await getPinnedCiphersuiteImpl();
   const isSignatureValid = await verifyKeyPackage(keyPackage, impl.signature);
   if (!isSignatureValid) {
     throw new BadRequestException('Key package signature is invalid');
@@ -143,17 +108,14 @@ async function decodeAndVerifyKeyPackageUnsafe(
     );
   }
 
-  // Duration alone isn't enough: a package with an 89-day span starting
-  // 300 days from now would pass that check but isn't valid yet.
+  // Duration alone is not enough: a future notBefore is not valid yet.
   if (notBefore > nowSeconds + BigInt(CLOCK_SKEW_TOLERANCE_SECONDS)) {
     throw new BadRequestException(
       'Key package is not valid yet (notBefore is in the future)',
     );
   }
 
-  // Bounding the duration and rejecting a future notBefore doesn't stop a
-  // window that's already fully elapsed (e.g. notBefore 100 days ago,
-  // notAfter 70 days ago) - that needs its own check against "now".
+  // A fully elapsed validity window needs its own check against now.
   if (notAfter <= nowSeconds) {
     throw new BadRequestException('Key package has already expired');
   }

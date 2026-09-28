@@ -7,6 +7,8 @@ import { MlsAuditRepository } from './mls-audit.repository';
 import { MlsIntegrityChecks } from './mls-integrity-checks';
 import { MlsCommitFaultsService } from './mls-commit-faults.service';
 import { MlsPendingService } from './mls-pending.service';
+import { MlsFaultReportRateLimiterService } from './mls-fault-report-rate-limiter.service';
+import { MlsRequestRateLimiterService } from './mls-request-rate-limiter.service';
 import { MlsSelfJoinRateLimiterService } from './mls-self-join-rate-limiter.service';
 import { MlsHandshakesController } from './mls-handshakes.controller';
 import { MlsHandshakesService } from './mls-handshakes.service';
@@ -35,6 +37,8 @@ import { MlsMembershipWorkService } from './mls-membership-work.service';
     MlsSelfJoinRepository,
     MlsSelfJoinService,
     MlsSelfJoinRateLimiterService,
+    MlsFaultReportRateLimiterService,
+    MlsRequestRateLimiterService,
     MlsPendingService,
     MlsAuditRepository,
     MlsIntegrityChecks,

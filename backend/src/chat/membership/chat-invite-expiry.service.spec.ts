@@ -3,6 +3,7 @@ import { ChatInviteExpiryService } from './chat-invite-expiry.service';
 describe('ChatInviteExpiryService', () => {
   const chatMembershipRepository = {
     findExpiredPendingInvites: jest.fn(),
+    stampMissingPendingSince: jest.fn(),
   };
   const chatMembershipService = {
     expireInvites: jest.fn(),
@@ -41,6 +42,61 @@ describe('ChatInviteExpiryService', () => {
       'u4',
     ]);
     expect(discordLogger.sendError).not.toHaveBeenCalled();
+  });
+
+  it('starts the expiry clock of PENDING rows that have no pendingSince before looking for expired ones', async () => {
+    chatMembershipRepository.findExpiredPendingInvites.mockResolvedValue(
+      new Map(),
+    );
+
+    await service.expireStaleInvites();
+
+    const stampOrder =
+      chatMembershipRepository.stampMissingPendingSince.mock
+        .invocationCallOrder[0];
+    const findOrder =
+      chatMembershipRepository.findExpiredPendingInvites.mock
+        .invocationCallOrder[0];
+    expect(stampOrder).toBeLessThan(findOrder);
+    const [stampedAt] = chatMembershipRepository.stampMissingPendingSince.mock
+      .calls[0] as [Date];
+    const [cutoff] = chatMembershipRepository.findExpiredPendingInvites.mock
+      .calls[0] as [Date];
+    expect(stampedAt.getTime() - cutoff.getTime()).toBe(
+      14 * 24 * 60 * 60 * 1000,
+    );
+  });
+
+  it('keeps sweeping full batches until a short one drains the backlog', async () => {
+    const fullBatch = new Map([
+      ['conv-1', Array.from({ length: 500 }, (_, i) => `u${i}`)],
+    ]);
+    chatMembershipRepository.findExpiredPendingInvites
+      .mockResolvedValueOnce(fullBatch)
+      .mockResolvedValueOnce(new Map([['conv-2', ['x']]]));
+    chatMembershipService.expireInvites.mockResolvedValue({ count: 1 });
+
+    await service.expireStaleInvites();
+
+    expect(
+      chatMembershipRepository.findExpiredPendingInvites,
+    ).toHaveBeenCalledTimes(2);
+    const [, limit] = chatMembershipRepository.findExpiredPendingInvites.mock
+      .calls[0] as [Date, number];
+    expect(limit).toBe(500);
+  });
+
+  it('stops when a full batch makes no progress instead of refetching it forever', async () => {
+    chatMembershipRepository.findExpiredPendingInvites.mockResolvedValue(
+      new Map([['conv-1', Array.from({ length: 500 }, (_, i) => `u${i}`)]]),
+    );
+    chatMembershipService.expireInvites.mockRejectedValue(new Error('boom'));
+
+    await service.expireStaleInvites();
+
+    expect(
+      chatMembershipRepository.findExpiredPendingInvites,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it('uses a 14-day cutoff', async () => {

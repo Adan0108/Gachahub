@@ -46,14 +46,17 @@ everything they already do (permissions, notifications, UI). A new
 holding its own MLS identity and key packages.
 
 - Logging out must not delete the device or its keys — only revocation
-  (explicit "log out this device everywhere" or account deletion) does.
+  does: explicit "log out this device everywhere", dormancy retirement, cap
+  eviction of the least-recently-seen device, or account deletion.
 - A device whose local storage is wiped (cleared browser data, reinstall)
   becomes a dead member of every group it was in — it can never come back
   online to be cooperatively removed. Needs a cleanup mechanism (staleness
   timeout + forced removal via `external_senders`, see §5).
   **Superseded (2026-09-22):** built without `external_senders`, which was
   never implemented. A 10-device-per-user cap plus a nightly job that retires
-  devices unseen for 60 days keeps the count bounded; membership work
+  devices unseen for 60 days keeps the count bounded (at the cap, the
+  least-recently-seen device is evicted, or the registration is refused if
+  every device was used recently); membership work
   (`membership-work.ts`) then removes a retired device's leaf the next time
   any online member's client does a full reconcile pass — an ordinary Remove
   by that member's own client, not a server-proposed one.
@@ -64,6 +67,11 @@ means "logged in from a browser this account hasn't used before," not the
 multi-device scenario Signal's linked-device flow is built for. A new
 device still registers silently on login, with device changes surfaced as
 a visible notice in the conversation ("Bob added a new device").
+
+**Not built yet (2026-09-25):** that in-conversation notice does not exist.
+A new device is added silently and nothing in the chat UI says so; "client-
+generated 'X joined' notices" and a per-user device list are still in the
+planned upgrades at the end of §8. The decision stands, the notice is owed.
 
 Login-location anomaly flagging (warn the user when a login comes from a
 very different location/IP than usual) is a related but separate feature —
@@ -148,14 +156,21 @@ New gaps this decision opens, not yet fully closed:
   receiving every future epoch secret indefinitely.
   `chat-invite-expiry.service.ts` (added 2026-09-23) expires one after 14
   days of no response, routing it through the same REMOVE→LEAVING pipeline
-  as an admin removal.
+  as an admin removal. Expiry keys off `chat_participants.pendingSince` (when
+  the row entered PENDING, not `updatedAt`) and sweeps in batches. The daily
+  run first stamps `pendingSince = now()` on PENDING rows that lack one
+  (written by older code mid-deploy), so they expire 14 days later; the
+  migration backfilled open invites with `now()`, a fresh 14-day grace.
 - **Stale consent at claim time** — the mutual-follow/messageRequestSetting
   check that decides ACTIVE vs PENDING only runs once, at invite time.
   Because PENDING is now entitled, a later key-package claim for a
   still-pending invitee re-checks the DM consent gate fresh
   (`assertMayClaimForGroup`), since an old invite is not standing consent to
   actually receive key material later, particularly if the target changed
-  their settings or blocked the inviter in between.
+  their settings or blocked the inviter in between. Only `NO_ONE` and blocks
+  (either direction) are rechecked; `FOLLOWERS` was judged against the real
+  inviter at invite time. The membership-work endpoint applies the same check
+  and leaves out such invitees, so they don't sit in every member's work loop.
 - **Decline briefly holds up the next send** — `DECLINE_INVITE` now routes
   through `LEAVING` when the invitee already holds a leaf (same as any REMOVE),
   and `assertNoMembershipChangePending` refuses sends in the conversation while
@@ -203,7 +218,8 @@ Written down so nobody assumes more privacy than actually exists:
 - `contentType`, `replyToId`, reaction `emoji`/`emoteId` — all plaintext
   columns today, unencrypted by MLS since MLS only wraps the message body.
 - Who's messaging whom, when, how often — full social graph and timing.
-- `encryptionMeta` is an untyped `@IsObject()` field. Nothing stops a buggy
+- `encryptionMeta` is an untyped `@IsObject()` field, now capped at 20000
+  characters of JSON (`BoundedJsonSizeConstraint`). Nothing stops a buggy
   client from accidentally putting plaintext in it. Needs a stricter shape
   once the real envelope format is decided (see reordered plan, item C4).
 - **Decision (2026-09-14):** media must be E2E encrypted too, not left as a
@@ -253,9 +269,8 @@ traces already are, not trusted to "just not come up."
    deferred, not built - see §6.
 
 All four decisions above are locked in as the intended design; #4 is not yet
-implemented (see §6). Remaining open question before coding starts: the
-reordered plan's step 1 (`MlsClient` contract tests) and step 2 (library
-bake-off) are next.
+implemented (see §6). The library question is settled (`ts-mls`) and the core
+encryption path is built; what remains open is listed in `BACKLOG.md`.
 
 ## 8. Update (2026-09-22): what the running code actually defends
 
@@ -281,3 +296,36 @@ server, which can register keys and fabricate membership it then attests.
 Planned upgrades, in cost order: client-generated "X joined" notices, a
 per-user device list, member-signed invites, key transparency / safety
 numbers (see BACKLOG.md).
+
+## 9. Retention (2026-09-25): what is pruned, and what is kept on purpose
+
+`MlsRetentionService` (`src/mls-retention/`, daily 5am) prunes, in batches:
+
+- consumed `mls_welcomes` older than 30 days;
+- unconsumed `mls_welcomes` of revoked devices (they never poll again);
+- `mls_commit_faults` older than 180 days;
+- claimed `SINGLE_USE` `mls_key_packages` 30 days past `claimedAt` (expired
+  ones are purged hourly by `MlsKeyPackageCleanupService`);
+
+`mls_group_members` is not pruned: removed rows (`removedEpoch` set) rebuild
+the roster for members lagging on old epochs.
+
+**Decided: `mls_handshakes` is never pruned.** A member catches up by applying
+every Commit in order from its own epoch, so deleting any row would strand
+every member behind it, and the joining/roster checks read old epochs. The log
+is bounded by retiring dormant devices (60 days), not by deleting history.
+The same applies to `mls_group_infos` (one row per conversation, replaced in
+place). Revisit only with a snapshot/checkpoint scheme, which does not exist.
+
+**Welcomes paging.** `GET .../welcomes?after=<welcomeId>` resumes past that
+Welcome (oldest first) so ones a client cannot consume never starve newer
+ones. A cursor that is not one of the device's Welcomes is a 400, so the
+client restarts deliberately instead of silently re-paging from the top.
+
+**Indexes added for these paths:** partial `chat_participants(pendingSince)
+WHERE state = 'PENDING'`, `mls_welcomes(conversationId)`,
+`mls_group_members(deviceId, removedEpoch)` (replaces `(deviceId)`), and a
+`pg_trgm` GIN on `user(name)` for the picker search. There is no
+`chat_devices(lastSeenAt)` index. They are built `CONCURRENTLY ... IF NOT
+EXISTS`: a failed build leaves an INVALID index that a retry silently skips,
+so check `pg_index.indisvalid`, `DROP INDEX CONCURRENTLY` it, then re-run.

@@ -180,6 +180,7 @@ describe('MediaService', () => {
         purpose: 'CHAT',
         status: 'UPLOADED',
         resourceType: 'IMAGE',
+        publicId: 'gachahub/chat/user-1/asset-1',
         assetId: 'asset-1',
         secureUrl: 'https://res.cloudinary.com/demo/image/upload/asset-1.jpg',
         format: 'jpg',
