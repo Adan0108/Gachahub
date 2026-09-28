@@ -5413,9 +5413,20 @@ body {
 }
 
 .chat-new-chat-notice button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
   background: transparent;
   color: var(--muted);
+}
+
+.chat-new-chat-notice button:hover {
+  color: var(--text);
 }
 
 .chat-sidebar-search > svg {
