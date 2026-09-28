@@ -7,11 +7,15 @@ import {
 import { Kafka, type Consumer, type EachMessagePayload } from 'kafkajs';
 
 import type { DomainEventType } from '../domain-events/domain-event.types';
-import type { Prisma } from '../generated/prisma/client';
+import type {
+  Notification as NotificationRecord,
+  Prisma,
+} from '../generated/prisma/client';
 import { KAFKA_TOPICS } from '../kafka/kafka-topics';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from './notification.service';
 import { ProcessedEventRepository } from './processed-event.repository';
+import { SocketNotificationDeliveryService } from './realtime/socket-notification-delivery.service';
 
 interface KafkaDomainEvent {
   eventId: string;
@@ -38,6 +42,7 @@ export class NotificationConsumerService
     private readonly notificationService: NotificationService,
     private readonly processedEventRepository: ProcessedEventRepository,
     private readonly prisma: PrismaService,
+    private readonly socketNotificationDeliveryService: SocketNotificationDeliveryService,
   ) {
     const brokers = process.env.KAFKA_BROKERS?.split(',')
       .map((broker) => broker.trim())
@@ -58,10 +63,18 @@ export class NotificationConsumerService
     });
   }
 
+  /**
+   * Starts the Kafka notification consumer when the NestJS module
+   * has finished initializing.
+   */
   async onModuleInit(): Promise<void> {
     await this.startConsumer();
   }
 
+  /**
+   * Gracefully disconnects the Kafka consumer when the application
+   * or module is shutting down.
+   */
   async onModuleDestroy(): Promise<void> {
     try {
       await this.consumer.disconnect();
@@ -76,6 +89,13 @@ export class NotificationConsumerService
     }
   }
 
+  /**
+   * Connects the notification consumer to Kafka and subscribes to
+   * the domain-event topics used by the notification system.
+   *
+   * Startup failures are retried because Kafka or its topics may not
+   * be immediately available when the backend starts.
+   */
   private async startConsumer(): Promise<void> {
     for (let attempt = 1; attempt <= STARTUP_MAX_ATTEMPTS; attempt++) {
       try {
@@ -101,6 +121,9 @@ export class NotificationConsumerService
           `Kafka consumer startup failed (${attempt}/${STARTUP_MAX_ATTEMPTS}): ${message}`,
         );
 
+        /*
+         * Reset the connection before attempting another startup.
+         */
         try {
           await this.consumer.disconnect();
         } catch {
@@ -118,6 +141,13 @@ export class NotificationConsumerService
     }
   }
 
+  /**
+   * Parses a Kafka message into a domain event and passes it through
+   * the notification-processing pipeline.
+   *
+   * Processing errors are rethrown so Kafka does not silently treat
+   * a failed event as successfully consumed.
+   */
   private async handleMessage({
     topic,
     partition,
@@ -145,65 +175,97 @@ export class NotificationConsumerService
     }
   }
 
+  /**
+   * Processes one domain event atomically.
+   *
+   * The ProcessedEvent claim and notification creation happen inside
+   * the same database transaction. This guarantees idempotency:
+   * either both changes commit or both are rolled back.
+   *
+   * Realtime delivery happens only after the transaction completes,
+   * ensuring clients never receive a notification that was later
+   * rolled back in the database.
+   */
   private async handleEvent(event: KafkaDomainEvent): Promise<void> {
-    await this.prisma.$transaction(async (transaction) => {
-      const claimed = await this.processedEventRepository.claim(
-        transaction,
-        event.eventId,
-        NOTIFICATION_CONSUMER,
-      );
+    const notification = await this.prisma.$transaction(
+      async (transaction): Promise<NotificationRecord | null> => {
+        const claimed = await this.processedEventRepository.claim(
+          transaction,
+          event.eventId,
+          NOTIFICATION_CONSUMER,
+        );
 
-      if (!claimed) {
-        this.logger.debug(`Skipping already processed event ${event.eventId}`);
+        if (!claimed) {
+          this.logger.debug(
+            `Skipping already processed event ${event.eventId}`,
+          );
 
-        return;
-      }
+          return null;
+        }
 
-      await this.processEvent(event, transaction);
-    });
-  }
+        return this.processEvent(event, transaction);
+      },
+    );
 
-  private async processEvent(
-    event: KafkaDomainEvent,
-    transaction: Prisma.TransactionClient,
-  ): Promise<void> {
-    switch (event.type) {
-      case 'post.liked':
-        await this.handlePostLiked(event, transaction);
-        return;
-
-      case 'comment.created':
-        await this.handleCommentCreated(event, transaction);
-        return;
-
-      case 'user.followed':
-        await this.handleUserFollowed(event, transaction);
-        return;
-
-      case 'user.mentioned':
-        this.logger.debug(`Ignoring unsupported event ${event.type}`);
-        return;
-
-      case 'chat.message.sent':
-      case 'chat.participant.added':
-        return;
-
-      default:
-        this.logger.warn(`Unknown domain event type: ${String(event.type)}`);
+    /*
+     * The database transaction has successfully committed at this point.
+     * Socket delivery is intentionally kept outside the transaction.
+     */
+    if (notification) {
+      this.socketNotificationDeliveryService.publish(notification);
     }
   }
 
+  /**
+   * Routes a domain event to the appropriate notification handler.
+   *
+   * Supported events return the created notification so it can be
+   * delivered through Socket.IO after the database transaction commits.
+   * Unsupported or irrelevant events return null.
+   */
+  private async processEvent(
+    event: KafkaDomainEvent,
+    transaction: Prisma.TransactionClient,
+  ): Promise<NotificationRecord | null> {
+    switch (event.type) {
+      case 'post.liked':
+        return this.handlePostLiked(event, transaction);
+
+      case 'comment.created':
+        return this.handleCommentCreated(event, transaction);
+
+      case 'user.followed':
+        return this.handleUserFollowed(event, transaction);
+
+      case 'user.mentioned':
+        this.logger.debug(`Ignoring unsupported event ${event.type}`);
+        return null;
+
+      case 'chat.message.sent':
+      case 'chat.participant.added':
+        return null;
+
+      default:
+        this.logger.warn(`Unknown domain event type: ${String(event.type)}`);
+        return null;
+    }
+  }
+
+  /**
+   * Converts a post.liked domain event into a POST_LIKED notification
+   * for the author of the liked post.
+   */
   private async handlePostLiked(
     event: KafkaDomainEvent,
     transaction: Prisma.TransactionClient,
-  ): Promise<void> {
+  ): Promise<NotificationRecord | null> {
     const payload = event.payload as {
       postId: string;
       postAuthorId: string;
       actorId: string;
     };
 
-    await this.notificationService.createNotification(
+    return this.notificationService.createNotification(
       {
         recipientId: payload.postAuthorId,
         actorId: payload.actorId,
@@ -215,10 +277,16 @@ export class NotificationConsumerService
     );
   }
 
+  /**
+   * Converts a comment.created event into either:
+   *
+   * - POST_COMMENTED when a user comments directly on a post.
+   * - COMMENT_REPLIED when a user replies to another comment.
+   */
   private async handleCommentCreated(
     event: KafkaDomainEvent,
     transaction: Prisma.TransactionClient,
-  ): Promise<void> {
+  ): Promise<NotificationRecord | null> {
     const payload = event.payload as {
       commentId: string;
       postId: string;
@@ -229,7 +297,7 @@ export class NotificationConsumerService
     };
 
     if (payload.parentCommentId && payload.parentCommentAuthorId) {
-      await this.notificationService.createNotification(
+      return this.notificationService.createNotification(
         {
           recipientId: payload.parentCommentAuthorId,
           actorId: payload.actorId,
@@ -239,11 +307,9 @@ export class NotificationConsumerService
         },
         transaction,
       );
-
-      return;
     }
 
-    await this.notificationService.createNotification(
+    return this.notificationService.createNotification(
       {
         recipientId: payload.postAuthorId,
         actorId: payload.actorId,
@@ -255,16 +321,20 @@ export class NotificationConsumerService
     );
   }
 
+  /**
+   * Converts a user.followed domain event into a USER_FOLLOWED
+   * notification for the followed user.
+   */
   private async handleUserFollowed(
     event: KafkaDomainEvent,
     transaction: Prisma.TransactionClient,
-  ): Promise<void> {
+  ): Promise<NotificationRecord | null> {
     const payload = event.payload as {
       targetUserId: string;
       actorId: string;
     };
 
-    await this.notificationService.createNotification(
+    return this.notificationService.createNotification(
       {
         recipientId: payload.targetUserId,
         actorId: payload.actorId,
@@ -276,6 +346,10 @@ export class NotificationConsumerService
     );
   }
 
+  /**
+   * Waits for the requested duration before another Kafka startup
+   * attempt is made.
+   */
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => {
       setTimeout(resolve, ms);

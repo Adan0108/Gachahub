@@ -1,9 +1,10 @@
+import type { DomainEventType } from '../domain-events/domain-event.types';
 import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import type { DomainEventType } from '../domain-events/domain-event.types';
 import { NotificationConsumerService } from './notification-consumer.service';
 import { NotificationService } from './notification.service';
 import { ProcessedEventRepository } from './processed-event.repository';
+import { SocketNotificationDeliveryService } from './realtime/socket-notification-delivery.service';
 
 interface TestKafkaDomainEvent {
   eventId: string;
@@ -30,6 +31,17 @@ describe('NotificationConsumerService', () => {
   let transactionMock: Prisma.TransactionClient;
   let transactionRunnerMock: jest.Mock;
 
+  const publishNotificationMock = jest.fn();
+
+  const socketNotificationDeliveryService = {
+    publish: publishNotificationMock,
+  } as unknown as SocketNotificationDeliveryService;
+
+  /**
+   * Provides controlled access to the private handleEvent method
+   * so the consumer's event-processing flow can be unit tested
+   * without changing the production method visibility.
+   */
   const handleEvent = (
     consumer: NotificationConsumerService,
     event: TestKafkaDomainEvent,
@@ -72,6 +84,7 @@ describe('NotificationConsumerService', () => {
       notificationService,
       processedEventRepository,
       prisma,
+      socketNotificationDeliveryService,
     );
   });
 
@@ -80,9 +93,26 @@ describe('NotificationConsumerService', () => {
   });
 
   describe('idempotent event processing', () => {
-    it('processes a new post.liked event', async () => {
+    /**
+     * Verifies that a new event is claimed, converted into a notification,
+     * committed through the transaction, and then published in realtime.
+     */
+    it('processes a new post.liked event and publishes it in realtime', async () => {
       claimMock.mockResolvedValue(true);
-      createNotificationMock.mockResolvedValue(null);
+
+      const notification = {
+        id: 'notification-1',
+        recipientId: 'user-b',
+        actorId: 'user-a',
+        type: 'POST_LIKED',
+        entityType: 'POST',
+        entityId: 'post-1',
+        readAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      createNotificationMock.mockResolvedValue(notification);
 
       const event: TestKafkaDomainEvent = {
         eventId: 'event-1',
@@ -117,8 +147,14 @@ describe('NotificationConsumerService', () => {
         },
         transactionMock,
       );
+
+      expect(publishNotificationMock).toHaveBeenCalledWith(notification);
     });
 
+    /**
+     * Verifies that an already-processed event is skipped completely
+     * and does not create or publish another notification.
+     */
     it('skips an event that was already processed', async () => {
       claimMock.mockResolvedValue(false);
 
@@ -144,8 +180,13 @@ describe('NotificationConsumerService', () => {
       );
 
       expect(createNotificationMock).not.toHaveBeenCalled();
+      expect(publishNotificationMock).not.toHaveBeenCalled();
     });
 
+    /**
+     * Verifies that notification-processing failures propagate upward
+     * and that realtime delivery does not happen when the transaction fails.
+     */
     it('propagates an error when notification processing fails', async () => {
       claimMock.mockResolvedValue(true);
 
@@ -172,10 +213,43 @@ describe('NotificationConsumerService', () => {
 
       expect(claimMock).toHaveBeenCalledTimes(1);
       expect(createNotificationMock).toHaveBeenCalledTimes(1);
+      expect(publishNotificationMock).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Verifies that a successfully processed event which intentionally
+     * produces no notification also produces no realtime socket event.
+     */
+    it('does not publish when notification creation returns null', async () => {
+      claimMock.mockResolvedValue(true);
+      createNotificationMock.mockResolvedValue(null);
+
+      const event: TestKafkaDomainEvent = {
+        eventId: 'event-null',
+        type: 'post.liked',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateId: 'post-1',
+        payload: {
+          postId: 'post-1',
+          postAuthorId: 'user-a',
+          actorId: 'user-a',
+        },
+      };
+
+      await handleEvent(service, event);
+
+      expect(claimMock).toHaveBeenCalledTimes(1);
+      expect(createNotificationMock).toHaveBeenCalledTimes(1);
+      expect(publishNotificationMock).not.toHaveBeenCalled();
     });
   });
 
   describe('event mappings', () => {
+    /**
+     * Verifies that a root-level comment creates a POST_COMMENTED
+     * notification for the post author.
+     */
     it('creates POST_COMMENTED for a root comment', async () => {
       claimMock.mockResolvedValue(true);
       createNotificationMock.mockResolvedValue(null);
@@ -210,6 +284,10 @@ describe('NotificationConsumerService', () => {
       );
     });
 
+    /**
+     * Verifies that a reply creates a COMMENT_REPLIED notification
+     * for the parent comment author.
+     */
     it('creates COMMENT_REPLIED for a reply', async () => {
       claimMock.mockResolvedValue(true);
       createNotificationMock.mockResolvedValue(null);
@@ -244,6 +322,10 @@ describe('NotificationConsumerService', () => {
       );
     });
 
+    /**
+     * Verifies that a follow event creates a USER_FOLLOWED notification
+     * for the target user.
+     */
     it('creates USER_FOLLOWED notification', async () => {
       claimMock.mockResolvedValue(true);
       createNotificationMock.mockResolvedValue(null);
