@@ -5396,6 +5396,28 @@ body {
   background: var(--bg);
 }
 
+.chat-new-chat-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 14px 0;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--purple), transparent 40%);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--purple), transparent 88%);
+}
+
+.chat-new-chat-notice small {
+  flex: 1;
+  color: var(--text);
+}
+
+.chat-new-chat-notice button {
+  flex: 0 0 auto;
+  background: transparent;
+  color: var(--muted);
+}
+
 .chat-sidebar-search > svg {
   flex: 0 0 auto;
   color: var(--muted);

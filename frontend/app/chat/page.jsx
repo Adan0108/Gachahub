@@ -122,10 +122,8 @@ export default function ChatPage() {
   const activeConversation = currentList.find((conversation) => conversation.id === activeId);
   // DM-only; a group's recipients are recomputed per send.
   const peer = conversationPeer(activeConversation, user?.id);
-  // A pending group invite can read history; only sending is gated until accept.
-  const isPendingGroupInvite =
-    activeConversation?.type === "GROUP" &&
-    myParticipant(activeConversation, user?.id)?.state === "PENDING";
+  // A pending invite (group invite or DM message request) can read history; only sending is gated until accept.
+  const isPendingInvite = myParticipant(activeConversation, user?.id)?.state === "PENDING";
   const messages = useQuery({
     ...queries.chatMessages(activeId),
     enabled: isAuthenticated && Boolean(activeId),
@@ -242,6 +240,18 @@ export default function ChatPage() {
 
   const [isComposingNewChat, setIsComposingNewChat] = useState(false);
   const [newChatRecipients, setNewChatRecipients] = useState([]);
+  const [newChatNotice, setNewChatNotice] = useState("");
+  const newChatRecipientId = newChatRecipients[0]?.id;
+  const newChatFollowStatus = useQuery({
+    ...queries.followStatus(newChatRecipientId),
+    enabled: isAuthenticated && Boolean(newChatRecipientId),
+  });
+  // Anything short of a mutual follow becomes a pending message request, not an active chat.
+  const newChatWillBeRequest = Boolean(
+    newChatRecipientId &&
+      newChatFollowStatus.data &&
+      !(newChatFollowStatus.data.following && newChatFollowStatus.data.followsMe),
+  );
   const startNewChat = useMutation({
     mutationFn: () =>
       api.createDirectMessage({
@@ -252,6 +262,11 @@ export default function ChatPage() {
     onSuccess: async (result) => {
       await refreshChat();
       setIsComposingNewChat(false);
+      setNewChatNotice(
+        result.recipientState === "PENDING"
+          ? `Message request sent to ${newChatRecipients[0]?.name || "them"}. They'll need to accept it before you can chat.`
+          : "",
+      );
       setNewChatRecipients([]);
       setView("inbox");
       setSelectedId(result.conversationId);
@@ -391,6 +406,7 @@ export default function ChatPage() {
                 onClick={() => {
                   setIsComposingNewChat((current) => !current);
                   setIsCreatingGroup(false);
+                  setNewChatNotice("");
                 }}
                 type="button"
               >
@@ -425,7 +441,11 @@ export default function ChatPage() {
                 value={newChatRecipients}
               />
               <button disabled={!newChatRecipients.length || startNewChat.isPending} type="submit">
-                {startNewChat.isPending ? "Starting..." : "Start Chat"}
+                {startNewChat.isPending
+                  ? "Sending..."
+                  : newChatWillBeRequest
+                    ? "Send Message Request"
+                    : "Start Chat"}
               </button>
               {startNewChat.error && <small>{startNewChat.error.message}</small>}
             </form>
@@ -467,6 +487,14 @@ export default function ChatPage() {
               </button>
               {createGroup.error && <small>{createGroup.error.message}</small>}
             </form>
+          )}
+          {newChatNotice && (
+            <div className="chat-new-chat-notice">
+              <small>{newChatNotice}</small>
+              <button aria-label="Dismiss" onClick={() => setNewChatNotice("")} type="button">
+                <FiX />
+              </button>
+            </div>
           )}
           <div className="chat-sidebar-search">
             <FiSearch aria-hidden="true" />
@@ -709,8 +737,10 @@ export default function ChatPage() {
                   <div>
                     <b>You can&apos;t send messages here</b>
                     <small>
-                      {isPendingGroupInvite
-                        ? "Accept the invite to start chatting."
+                      {isPendingInvite
+                        ? activeConversation?.type === "GROUP"
+                          ? "Accept the invite to start chatting."
+                          : "You haven't accepted this message request yet."
                         : "You are no longer an active participant in this conversation."}
                     </small>
                   </div>
