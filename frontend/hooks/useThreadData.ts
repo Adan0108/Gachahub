@@ -8,7 +8,7 @@ import { useMembershipEvents } from "./useMembershipEvents";
 import { useNewMessageAnnouncement } from "./useNewMessageAnnouncement";
 import { useSafetyNumbers } from "./useSafetyNumbers";
 import { otherActiveMemberIds, participantUser } from "../lib/chatDisplay";
-import { buildThreadItems } from "../lib/chatThread";
+import { buildThreadItems, eventsForDisplay } from "../lib/chatThread";
 
 interface ThreadMessage {
   id: string;
@@ -40,7 +40,12 @@ export function useThreadData(
   const groupProblem = useGroupProblem(conversationId);
   const safetyPeerIds: string[] = otherActiveMemberIds(conversation, userId);
   const safety = useSafetyNumbers(conversationId, userId, safetyPeerIds);
-  const membershipEvents = useMembershipEvents(conversationId);
+  const rawMembershipEvents = useMembershipEvents(conversationId);
+  const isGroup = (conversation as { type?: string } | undefined)?.type === "GROUP";
+  const membershipEvents = useMemo(
+    () => eventsForDisplay(rawMembershipEvents, isGroup),
+    [isGroup, rawMembershipEvents],
+  );
   const threadItems = useMemo(
     () =>
       buildThreadItems({

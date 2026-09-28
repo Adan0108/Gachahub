@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildThreadItems,
+  eventsForDisplay,
   membershipEventText,
   threadItemKey,
   wasLikelySentDuringAbsence,
@@ -28,6 +29,22 @@ const shape = (items: ReturnType<typeof buildThreadItems>) =>
   items.map((item) =>
     item.kind === 'message' ? item.message.id : item.kind === 'event' ? item.event.id : item.kind,
   );
+
+describe('eventsForDisplay', () => {
+  it('keeps every event kind for a group', () => {
+    const events = [event('e1', 0), { ...event('e2', 1), kind: 'device-added' as const }];
+
+    expect(eventsForDisplay(events, true)).toEqual(events);
+  });
+
+  it('drops joined/left for a DM, keeping only new-device notices', () => {
+    const joined = event('e1', 0);
+    const left = { ...event('e2', 1), kind: 'left' as const };
+    const deviceAdded = { ...event('e3', 2), kind: 'device-added' as const };
+
+    expect(eventsForDisplay([joined, left, deviceAdded], false)).toEqual([deviceAdded]);
+  });
+});
 
 describe('buildThreadItems', () => {
   it('collapses leading undecryptable messages into one banner', () => {

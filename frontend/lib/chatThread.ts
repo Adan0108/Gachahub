@@ -51,6 +51,11 @@ export function buildThreadItems<M extends ThreadMessage>(input: {
   return [...items, ...pendingEvents.map((event) => ({ kind: 'event' as const, event }))];
 }
 
+/** A DM's own leaf being added/removed isn't "joining a group" for either side; only a group chat shows those. */
+export function eventsForDisplay(events: MembershipEvent[], isGroup: boolean): MembershipEvent[] {
+  return isGroup ? events : events.filter((event) => event.kind === 'device-added');
+}
+
 /** One system line for an event; `name` is the person's display name, or undefined when unknown. */
 export function membershipEventText(
   event: MembershipEvent,
