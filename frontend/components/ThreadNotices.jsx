@@ -17,3 +17,12 @@ export function MembershipEventLine({ text }) {
     </div>
   );
 }
+
+/** Marks the start of a new time cluster in the thread. */
+export function TimestampDivider({ label }) {
+  return (
+    <div className="chat-timestamp-divider" role="note">
+      <span>{label}</span>
+    </div>
+  );
+}

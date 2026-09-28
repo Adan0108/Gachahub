@@ -2,6 +2,7 @@ import type { MembershipEvent } from './mls/sync/membershipEvents';
 
 interface ThreadMessage {
   id: string;
+  senderId?: string;
   createdAt?: string;
   contentType?: string;
 }
@@ -10,8 +11,23 @@ type DecryptState = { status: 'pending' | 'ok' | 'unavailable' } | undefined;
 
 export type ThreadItem<M extends ThreadMessage = ThreadMessage> =
   | { kind: 'history-banner' }
-  | { kind: 'message'; message: M; index: number }
+  | { kind: 'timestamp'; at: number }
+  | {
+      kind: 'message';
+      message: M;
+      index: number;
+      gapBefore: boolean;
+      /** Stacked right under the same sender's last bubble, tight and un-labelled. */
+      groupedWithPrevious: boolean;
+      /** Another bubble from the same sender follows immediately, so this one keeps the avatar/name hidden. */
+      groupedWithNext: boolean;
+    }
   | { kind: 'event'; event: MembershipEvent };
+
+/** A gap this long gets its own timestamp divider. */
+export const TIMESTAMP_DIVIDER_GAP_MS = 45 * 60 * 1000;
+/** A shorter gap gets no divider, just a bit of extra breathing room. */
+export const MESSAGE_GROUP_GAP_MS = 25 * 60 * 1000;
 
 /** Leading messages this device never could read: they predate it joining, so one banner covers them. */
 function leadingUnreadableIds(
@@ -40,20 +56,80 @@ export function buildThreadItems<M extends ThreadMessage>(input: {
   const pendingEvents = [...events].sort((a, b) => a.at - b.at);
 
   const items: ThreadItem<M>[] = hidden.size > 0 ? [{ kind: 'history-banner' }] : [];
+  let prevAt: number | undefined;
   messages.forEach((message, index) => {
     if (hidden.has(message.id)) return;
     const sentAt = message.createdAt ? Date.parse(message.createdAt) : Number.NaN;
     while (pendingEvents[0] && !Number.isNaN(sentAt) && pendingEvents[0].at <= sentAt) {
       items.push({ kind: 'event', event: pendingEvents.shift()! });
     }
-    items.push({ kind: 'message', message, index });
+    const gap = Number.isNaN(sentAt) ? 0 : (prevAt === undefined ? Infinity : sentAt - prevAt);
+    const showDivider = gap >= TIMESTAMP_DIVIDER_GAP_MS;
+    // "Conversation started" reads as the thread's own opener; its divider sits under it, not above.
+    const isConversationStart = message.contentType === 'SYSTEM';
+    if (showDivider && !isConversationStart) items.push({ kind: 'timestamp', at: sentAt });
+    items.push({
+      kind: 'message',
+      message,
+      index,
+      gapBefore: !showDivider && gap >= MESSAGE_GROUP_GAP_MS,
+      groupedWithPrevious: false,
+      groupedWithNext: false,
+    });
+    if (showDivider && isConversationStart) items.push({ kind: 'timestamp', at: sentAt });
+    if (!Number.isNaN(sentAt)) prevAt = sentAt;
   });
-  return [...items, ...pendingEvents.map((event) => ({ kind: 'event' as const, event }))];
+  return withGrouping([...items, ...pendingEvents.map((event) => ({ kind: 'event' as const, event }))]);
+}
+
+/** Two consecutive bubbles from the same sender, close enough in time and with nothing else between them, stack tight with one shared avatar/name. */
+function withGrouping<M extends ThreadMessage>(rawItems: ThreadItem<M>[]): ThreadItem<M>[] {
+  const withPrevious = rawItems.map((item, i) => {
+    if (item.kind !== 'message') return item;
+    const prev = rawItems[i - 1];
+    const groupedWithPrevious =
+      prev?.kind === 'message' &&
+      prev.message.senderId === item.message.senderId &&
+      item.message.contentType !== 'SYSTEM' &&
+      prev.message.contentType !== 'SYSTEM' &&
+      !item.gapBefore;
+    return { ...item, groupedWithPrevious };
+  });
+  return withPrevious.map((item, i) => {
+    if (item.kind !== 'message') return item;
+    const next = withPrevious[i + 1];
+    const groupedWithNext = next?.kind === 'message' && next.groupedWithPrevious;
+    return { ...item, groupedWithNext };
+  });
 }
 
 /** A DM's own leaf being added/removed isn't "joining a group" for either side; only a group chat shows those. */
 export function eventsForDisplay(events: MembershipEvent[], isGroup: boolean): MembershipEvent[] {
   return isGroup ? events : events.filter((event) => event.kind === 'device-added');
+}
+
+const pad2 = (value: number): string => String(value).padStart(2, '0');
+const timeLabel = (date: Date): string => `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+const startOfDay = (ms: number): number => {
+  const date = new Date(ms);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+};
+
+/** Messenger-style divider text: time only today, weekday name within the past week, full date otherwise. */
+export function messageDividerLabel(at: number, now: number, locale?: string): string {
+  const date = new Date(at);
+  const diffDays = Math.max(0, Math.round((startOfDay(now) - startOfDay(at)) / 86_400_000));
+  const time = timeLabel(date);
+  if (diffDays === 0) return time;
+  if (diffDays <= 6) return `${date.toLocaleDateString(locale, { weekday: 'short' })} ${time}`;
+  return `${date.getDate()} ${date.toLocaleDateString(locale, { month: 'short' })} ${date.getFullYear()}, ${time}`;
+}
+
+/** Full, unambiguous timestamp for a hover tooltip. */
+export function messageFullTimestamp(at: number, locale?: string): string {
+  const date = new Date(at);
+  return `${date.getDate()} ${date.toLocaleDateString(locale, { month: 'long' })} ${date.getFullYear()}, ${timeLabel(date)}`;
 }
 
 /** One system line for an event; `name` is the person's display name, or undefined when unknown. */
@@ -71,6 +147,7 @@ export function membershipEventText(
 /** Stable React key for a thread row. */
 export function threadItemKey(item: ThreadItem): string {
   if (item.kind === 'history-banner') return 'history-banner';
+  if (item.kind === 'timestamp') return `timestamp-${item.at}`;
   return item.kind === 'event' ? item.event.id : item.message.id;
 }
 

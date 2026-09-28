@@ -3,6 +3,8 @@ import {
   buildThreadItems,
   eventsForDisplay,
   membershipEventText,
+  messageDividerLabel,
+  messageFullTimestamp,
   threadItemKey,
   wasLikelySentDuringAbsence,
 } from './chatThread';
@@ -10,8 +12,9 @@ import type { MembershipEvent } from './mls/sync/membershipEvents';
 
 type Status = 'ok' | 'unavailable' | 'pending';
 const at = (minute: number) => new Date(Date.UTC(2026, 0, 1, 0, minute)).toISOString();
-const message = (id: string, minute: number, contentType?: string) => ({
+const message = (id: string, minute: number, contentType?: string, senderId = 'alice') => ({
   id,
+  senderId,
   createdAt: at(minute),
   contentType,
 });
@@ -54,7 +57,7 @@ describe('buildThreadItems', () => {
       events: [],
       collapseLeading: true,
     });
-    expect(shape(items)).toEqual(['history-banner', 'c']);
+    expect(shape(items)).toEqual(['history-banner', 'timestamp', 'c']);
   });
 
   it('keeps an undecryptable message that follows a readable one', () => {
@@ -64,7 +67,7 @@ describe('buildThreadItems', () => {
       events: [],
       collapseLeading: true,
     });
-    expect(shape(items)).toEqual(['a', 'b', 'c']);
+    expect(shape(items)).toEqual(['timestamp', 'a', 'b', 'c']);
   });
 
   it('steps over the conversation-started row and pending messages while collapsing', () => {
@@ -74,7 +77,7 @@ describe('buildThreadItems', () => {
       events: [],
       collapseLeading: true,
     });
-    expect(shape(items)).toEqual(['history-banner', 's', 'p', 'c']);
+    expect(shape(items)).toEqual(['history-banner', 's', 'timestamp', 'p', 'c']);
   });
 
   it('shows no banner when nothing is unreadable, and keeps everything when told not to collapse', () => {
@@ -91,8 +94,8 @@ describe('buildThreadItems', () => {
       events: [],
       collapseLeading: false,
     });
-    expect(shape(allOk)).toEqual(['a', 'b']);
-    expect(shape(uncollapsed)).toEqual(['a', 'b']);
+    expect(shape(allOk)).toEqual(['timestamp', 'a', 'b']);
+    expect(shape(uncollapsed)).toEqual(['timestamp', 'a', 'b']);
   });
 
   it('places events by time among messages, before a message with the same time', () => {
@@ -102,7 +105,7 @@ describe('buildThreadItems', () => {
       events: [event('late', 20), event('tie', 5), event('mid', 3)],
       collapseLeading: true,
     });
-    expect(shape(items)).toEqual(['a', 'mid', 'tie', 'b', 'c', 'late']);
+    expect(shape(items)).toEqual(['timestamp', 'a', 'mid', 'tie', 'b', 'c', 'late']);
   });
 
   it('records each message index in the original list', () => {
@@ -112,7 +115,123 @@ describe('buildThreadItems', () => {
       events: [],
       collapseLeading: true,
     });
-    expect(items[1]).toMatchObject({ kind: 'message', index: 1 });
+    expect(items[2]).toMatchObject({ kind: 'message', index: 1 });
+  });
+
+  it('always puts a timestamp above the first visible message', () => {
+    const items = buildThreadItems({
+      messages: [message('a', 1)],
+      decrypted: decrypted({ a: 'ok' }),
+      events: [],
+      collapseLeading: true,
+    });
+    expect(items[0]).toMatchObject({ kind: 'timestamp', at: Date.parse(at(1)) });
+  });
+
+  it('puts the divider under "conversation started", not above it', () => {
+    const items = buildThreadItems({
+      messages: [message('s', 0, 'SYSTEM')],
+      decrypted: decrypted({ s: 'ok' }),
+      events: [],
+      collapseLeading: true,
+    });
+    expect(shape(items)).toEqual(['s', 'timestamp']);
+  });
+
+  it('gives a message a full divider once the gap since the last one passes 45 minutes', () => {
+    const items = buildThreadItems({
+      messages: [message('a', 0), message('b', 45)],
+      decrypted: decrypted({ a: 'ok', b: 'ok' }),
+      events: [],
+      collapseLeading: true,
+    });
+    expect(shape(items)).toEqual(['timestamp', 'a', 'timestamp', 'b']);
+    expect(items.find((i) => i.kind === 'message' && i.message.id === 'b')).toMatchObject({
+      gapBefore: false,
+    });
+  });
+
+  it('flags only extra spacing, no divider, for a 25-45 minute gap', () => {
+    const items = buildThreadItems({
+      messages: [message('a', 0), message('b', 25)],
+      decrypted: decrypted({ a: 'ok', b: 'ok' }),
+      events: [],
+      collapseLeading: true,
+    });
+    expect(shape(items)).toEqual(['timestamp', 'a', 'b']);
+    expect(items[2]).toMatchObject({ kind: 'message', message: { id: 'b' }, gapBefore: true });
+  });
+
+  it('groups messages under 25 minutes apart with no divider and no extra spacing', () => {
+    const items = buildThreadItems({
+      messages: [message('a', 0), message('b', 24)],
+      decrypted: decrypted({ a: 'ok', b: 'ok' }),
+      events: [],
+      collapseLeading: true,
+    });
+    expect(shape(items)).toEqual(['timestamp', 'a', 'b']);
+    expect(items[2]).toMatchObject({ kind: 'message', message: { id: 'b' }, gapBefore: false });
+  });
+
+  it('stacks two close messages from the same sender, first marked as having a follower', () => {
+    const items = buildThreadItems({
+      messages: [message('a', 0), message('b', 1)],
+      decrypted: decrypted({ a: 'ok', b: 'ok' }),
+      events: [],
+      collapseLeading: true,
+    });
+    expect(items[1]).toMatchObject({
+      message: { id: 'a' },
+      groupedWithPrevious: false,
+      groupedWithNext: true,
+    });
+    expect(items[2]).toMatchObject({
+      message: { id: 'b' },
+      groupedWithPrevious: true,
+      groupedWithNext: false,
+    });
+  });
+
+  it('does not stack messages from two different senders', () => {
+    const items = buildThreadItems({
+      messages: [message('a', 0, undefined, 'alice'), message('b', 1, undefined, 'bob')],
+      decrypted: decrypted({ a: 'ok', b: 'ok' }),
+      events: [],
+      collapseLeading: true,
+    });
+    expect(items[2]).toMatchObject({ message: { id: 'b' }, groupedWithPrevious: false });
+  });
+
+  it('does not stack same-sender messages separated by a membership event', () => {
+    const items = buildThreadItems({
+      messages: [message('a', 0), message('b', 1)],
+      decrypted: decrypted({ a: 'ok', b: 'ok' }),
+      events: [event('e', 1)],
+      collapseLeading: true,
+    });
+    expect(shape(items)).toEqual(['timestamp', 'a', 'e', 'b']);
+    expect(items[3]).toMatchObject({ message: { id: 'b' }, groupedWithPrevious: false });
+  });
+
+  it('does not stack same-sender messages once the gap earns extra spacing', () => {
+    const items = buildThreadItems({
+      messages: [message('a', 0), message('b', 25)],
+      decrypted: decrypted({ a: 'ok', b: 'ok' }),
+      events: [],
+      collapseLeading: true,
+    });
+    expect(items[2]).toMatchObject({ message: { id: 'b' }, gapBefore: true, groupedWithPrevious: false });
+  });
+
+  it('never stacks the conversation-started row with a real message', () => {
+    const items = buildThreadItems({
+      messages: [message('s', 0, 'SYSTEM'), message('a', 1)],
+      decrypted: decrypted({ a: 'ok' }),
+      events: [],
+      collapseLeading: true,
+    });
+    const real = items.find((i) => i.kind === 'message' && i.message.id === 'a');
+    expect(real).toMatchObject({ groupedWithPrevious: false });
   });
 });
 
@@ -133,7 +252,47 @@ describe('membershipEventText', () => {
 describe('threadItemKey', () => {
   it('keys each row kind by its own id', () => {
     expect(threadItemKey({ kind: 'history-banner' })).toBe('history-banner');
-    expect(threadItemKey({ kind: 'message', message: message('m1', 0), index: 0 })).toBe('m1');
+    expect(
+      threadItemKey({
+        kind: 'message',
+        message: message('m1', 0),
+        index: 0,
+        gapBefore: false,
+        groupedWithPrevious: false,
+        groupedWithNext: false,
+      }),
+    ).toBe('m1');
+    expect(threadItemKey({ kind: 'timestamp', at: 123 })).toBe('timestamp-123');
+  });
+});
+
+// Local-time constructors, not UTC ISO strings: getHours()/toLocaleDateString() read the
+// system's local clock, so a fixed UTC instant would shift with the machine's timezone.
+describe('messageDividerLabel', () => {
+  const now = new Date(2026, 8, 28, 15, 0).getTime();
+
+  it('shows only the time for a message sent today', () => {
+    expect(messageDividerLabel(new Date(2026, 8, 28, 9, 5).getTime(), now, 'en-US')).toBe('09:05');
+  });
+
+  it('shows the weekday and time within the past 6 days', () => {
+    expect(messageDividerLabel(new Date(2026, 8, 23, 21, 13).getTime(), now, 'en-US')).toBe(
+      'Wed 21:13',
+    );
+  });
+
+  it('shows the full date and time once older than a week', () => {
+    expect(messageDividerLabel(new Date(2026, 8, 16, 14, 40).getTime(), now, 'en-US')).toBe(
+      '16 Sep 2026, 14:40',
+    );
+  });
+});
+
+describe('messageFullTimestamp', () => {
+  it('always spells out the full date', () => {
+    expect(messageFullTimestamp(new Date(2026, 8, 16, 14, 40).getTime(), 'en-US')).toBe(
+      '16 September 2026, 14:40',
+    );
   });
 });
 

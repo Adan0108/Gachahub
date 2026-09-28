@@ -6,11 +6,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FiArchive,
   FiCheck,
-  FiInbox,
+  FiEdit2,
   FiLock,
   FiMessageCircle,
   FiDatabase,
   FiMonitor,
+  FiMoreHorizontal,
   FiPaperclip,
   FiPlus,
   FiSearch,
@@ -52,12 +53,6 @@ import {
 } from "../../lib/chatDisplay";
 import { threadItemKey } from "../../lib/chatThread";
 
-const VIEWS = [
-  { key: "inbox", label: "All Chats", icon: FiInbox },
-  { key: "requests", label: "Requests", icon: FiShield },
-  { key: "archived", label: "Archived", icon: FiArchive },
-];
-
 function ChatSkeletonRow() {
   return (
     <div className="chat-skeleton-row">
@@ -92,6 +87,32 @@ function ChatSkeleton() {
       </div>
     </div>
   );
+}
+
+/** Closes an open dropdown on Escape or a click outside its button+panel. */
+function useMenuDismiss(isOpen, onClose, buttonRef, menuRef) {
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const handle = (event) => {
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (
+        event.type === "mousedown" &&
+        !menuRef.current?.contains(event.target) &&
+        !buttonRef.current?.contains(event.target)
+      ) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handle);
+    window.addEventListener("mousedown", handle);
+    return () => {
+      window.removeEventListener("keydown", handle);
+      window.removeEventListener("mousedown", handle);
+    };
+  }, [isOpen, onClose, buttonRef, menuRef]);
 }
 
 export default function ChatPage() {
@@ -144,6 +165,7 @@ export default function ChatPage() {
     threadItems,
     readableMessageIds,
     announcement,
+    now: threadNow,
   } = useThreadData(activeId, messages.data, activeConversation, user?.id);
 
   const {
@@ -240,7 +262,7 @@ export default function ChatPage() {
 
   const [isComposingNewChat, setIsComposingNewChat] = useState(false);
   const [newChatRecipients, setNewChatRecipients] = useState([]);
-  const [newChatNotice, setNewChatNotice] = useState("");
+  const [newChatNotice, setNewChatNotice] = useState(null);
   const newChatRecipientId = newChatRecipients[0]?.id;
   const newChatFollowStatus = useQuery({
     ...queries.followStatus(newChatRecipientId),
@@ -264,8 +286,11 @@ export default function ChatPage() {
       setIsComposingNewChat(false);
       setNewChatNotice(
         result.recipientState === "PENDING"
-          ? `Message request sent to ${newChatRecipients[0]?.name || "them"}. They'll need to accept it before you can chat.`
-          : "",
+          ? {
+              conversationId: result.conversationId,
+              text: `Message request sent to ${newChatRecipients[0]?.name || "them"}. They'll need to accept it before you can chat.`,
+            }
+          : null,
       );
       setNewChatRecipients([]);
       setView("inbox");
@@ -350,6 +375,21 @@ export default function ChatPage() {
   // Mounted here (not in the modal) so uploads resume after every reload.
   const backup = useChatBackup(user?.id);
 
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const moreMenuButtonRef = useRef(null);
+  const moreMenuRef = useRef(null);
+  useMenuDismiss(isMoreMenuOpen, () => setIsMoreMenuOpen(false), moreMenuButtonRef, moreMenuRef);
+
+  const [isComposeMenuOpen, setIsComposeMenuOpen] = useState(false);
+  const composeMenuButtonRef = useRef(null);
+  const composeMenuRef = useRef(null);
+  useMenuDismiss(
+    isComposeMenuOpen,
+    () => setIsComposeMenuOpen(false),
+    composeMenuButtonRef,
+    composeMenuRef,
+  );
+
   if (isSessionLoading || !isAuthenticated) {
     return <ChatSkeleton />;
   }
@@ -381,49 +421,118 @@ export default function ChatPage() {
           <div className="chat-sidebar-head">
             <span>Conversations</span>
             <div className="chat-sidebar-tools">
-              <button
-                aria-label="Your devices"
-                title="Your devices"
-                onClick={() => setIsDevicesOpen(true)}
-                ref={devicesButtonRef}
-                type="button"
-              >
-                <FiMonitor />
-              </button>
-              <button
-                aria-label="Message backup"
-                title="Message backup"
-                onClick={() => setIsBackupOpen(true)}
-                ref={backupButtonRef}
-                type="button"
-              >
-                <FiDatabase />
-              </button>
-            </div>
-            <div className="chat-sidebar-actions">
-              <button
-                aria-label="New chat"
-                onClick={() => {
-                  setIsComposingNewChat((current) => !current);
-                  setIsCreatingGroup(false);
-                  setNewChatNotice("");
-                }}
-                type="button"
-              >
-                <FiPlus /> New Chat
-              </button>
-              <button
-                aria-label="New group"
-                onClick={() => {
-                  setIsCreatingGroup((current) => !current);
-                  setIsComposingNewChat(false);
-                }}
-                type="button"
-              >
-                <FiUsers /> New Group
-              </button>
+              <div className="chat-menu-wrap">
+                <button
+                  aria-expanded={isMoreMenuOpen}
+                  aria-haspopup="menu"
+                  aria-label="More"
+                  className="chat-icon-button"
+                  onClick={() => setIsMoreMenuOpen((current) => !current)}
+                  ref={moreMenuButtonRef}
+                  title="More"
+                  type="button"
+                >
+                  <FiMoreHorizontal />
+                </button>
+                {isMoreMenuOpen && (
+                  <div className="chat-menu" ref={moreMenuRef} role="menu">
+                    <button
+                      onClick={() => {
+                        setIsMoreMenuOpen(false);
+                        setIsDevicesOpen(true);
+                      }}
+                      ref={devicesButtonRef}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <FiMonitor /> Your devices
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsMoreMenuOpen(false);
+                        setIsBackupOpen(true);
+                      }}
+                      ref={backupButtonRef}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <FiDatabase /> Backup
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsMoreMenuOpen(false);
+                        setView((current) => (current === "requests" ? "inbox" : "requests"));
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <FiShield /> Requests
+                      {requests.data?.length > 0 && <b>{requests.data.length}</b>}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsMoreMenuOpen(false);
+                        setView((current) => (current === "archived" ? "inbox" : "archived"));
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <FiArchive /> Archived
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="chat-menu-wrap">
+                <button
+                  aria-expanded={isComposeMenuOpen}
+                  aria-haspopup="menu"
+                  aria-label="New conversation"
+                  className="chat-icon-button"
+                  onClick={() => setIsComposeMenuOpen((current) => !current)}
+                  ref={composeMenuButtonRef}
+                  title="New conversation"
+                  type="button"
+                >
+                  <FiEdit2 />
+                </button>
+                {isComposeMenuOpen && (
+                  <div className="chat-menu" ref={composeMenuRef} role="menu">
+                    <button
+                      onClick={() => {
+                        setIsComposeMenuOpen(false);
+                        setIsComposingNewChat(true);
+                        setIsCreatingGroup(false);
+                        setNewChatNotice(null);
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <FiPlus /> New Chat
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsComposeMenuOpen(false);
+                        setIsCreatingGroup(true);
+                        setIsComposingNewChat(false);
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <FiUsers /> New Group
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
+          {view !== "inbox" && (
+            <div className="chat-view-banner">
+              <span>{view === "requests" ? "Requests" : "Archived"}</span>
+              <button onClick={() => setView("inbox")} type="button">
+                <FiX /> All chats
+              </button>
+            </div>
+          )}
           {isComposingNewChat && (
             <form
               className="chat-new-form"
@@ -433,6 +542,16 @@ export default function ChatPage() {
                 startNewChat.mutate();
               }}
             >
+              <div className="chat-new-form-head">
+                <b>New Chat</b>
+                <button
+                  aria-label="Cancel"
+                  onClick={() => setIsComposingNewChat(false)}
+                  type="button"
+                >
+                  <FiX />
+                </button>
+              </div>
               <label htmlFor="new-chat-recipient">Recipient</label>
               <UserPicker
                 disabled={startNewChat.isPending}
@@ -461,6 +580,12 @@ export default function ChatPage() {
                 createGroup.mutate();
               }}
             >
+              <div className="chat-new-form-head">
+                <b>New Group</b>
+                <button aria-label="Cancel" onClick={() => setIsCreatingGroup(false)} type="button">
+                  <FiX />
+                </button>
+              </div>
               <label htmlFor="new-group-title">Group name</label>
               <input
                 autoFocus
@@ -488,14 +613,6 @@ export default function ChatPage() {
               {createGroup.error && <small>{createGroup.error.message}</small>}
             </form>
           )}
-          {newChatNotice && (
-            <div className="chat-new-chat-notice">
-              <small>{newChatNotice}</small>
-              <button aria-label="Dismiss" onClick={() => setNewChatNotice("")} type="button">
-                <FiX />
-              </button>
-            </div>
-          )}
           <div className="chat-sidebar-search">
             <FiSearch aria-hidden="true" />
             <input
@@ -504,29 +621,6 @@ export default function ChatPage() {
               type="text"
               value={search}
             />
-          </div>
-          <div className="chat-tabs" role="tablist" aria-label="Message views">
-            {VIEWS.map(({ key, label, icon: Icon }) => (
-              <button
-                aria-selected={view === key}
-                className={view === key ? "active" : ""}
-                key={key}
-                onClick={() => setView(key)}
-                role="tab"
-                type="button"
-              >
-                <Icon />
-                <span>{label}</span>
-                {key !== "archived" && (
-                  <b>
-                    {key === "inbox"
-                      ? conversations.data?.reduce((total, item) => total + item.unreadCount, 0) ||
-                        0
-                      : requests.data?.length || 0}
-                  </b>
-                )}
-              </button>
-            ))}
           </div>
           <QueryNotice
             isLoading={listQuery.isLoading}
@@ -690,6 +784,7 @@ export default function ChatPage() {
                     decryptedById={decryptedMessages}
                     item={item}
                     key={threadItemKey(item)}
+                    now={threadNow}
                     userId={user?.id}
                   />
                 ))}
@@ -731,6 +826,14 @@ export default function ChatPage() {
                 <div className="chat-messages-end" ref={messagesEndRef} />
               </div>
 
+              {newChatNotice && newChatNotice.conversationId === activeId && (
+                <div className="chat-new-chat-notice">
+                  <small>{newChatNotice.text}</small>
+                  <button aria-label="Dismiss" onClick={() => setNewChatNotice(null)} type="button">
+                    <FiX />
+                  </button>
+                </div>
+              )}
               {!canSendMessages ? (
                 <div className="chat-composer-disabled">
                   <FiLock />

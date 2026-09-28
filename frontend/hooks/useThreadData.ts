@@ -6,6 +6,7 @@ import { useDecryptedMessages } from "./useDecryptedMessages";
 import { useGroupProblem } from "./useGroupProblem";
 import { useMembershipEvents } from "./useMembershipEvents";
 import { useNewMessageAnnouncement } from "./useNewMessageAnnouncement";
+import { useNowTick } from "./useNowTick";
 import { useSafetyNumbers } from "./useSafetyNumbers";
 import { otherActiveMemberIds, participantUser } from "../lib/chatDisplay";
 import { buildThreadItems, eventsForDisplay } from "../lib/chatThread";
@@ -73,6 +74,9 @@ export function useThreadData(
     participantUser(conversation, lastMessage?.senderId)?.name || "GachaHub member",
   );
 
+  // Coarse tick: only timestamp-divider text needs to react to time passing, not the item list itself.
+  const now = useNowTick(60_000);
+
   return {
     ...history,
     decrypted,
@@ -82,5 +86,6 @@ export function useThreadData(
     threadItems,
     readableMessageIds,
     announcement,
+    now,
   };
 }
