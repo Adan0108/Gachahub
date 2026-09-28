@@ -97,6 +97,7 @@ export class DevService {
   async deleteTestUser(id: string): Promise<{ message: string }> {
     await this.assertTestUser(id);
     await this.forgetLogins({ id });
+    await this.detachMediaUploads({ id });
     // Prisma's schema-level onDelete: Cascade on every direct User relation
     // (ChatDevice, ChatParticipant, ChatMessage.sender, Follow, etc.) does
     // the actual cleanup - a real DB-level ON DELETE CASCADE, not something
@@ -108,8 +109,28 @@ export class DevService {
   async deleteAllTestUsers(): Promise<{ deleted: number }> {
     const where = { name: { startsWith: TEST_USER_PREFIX } };
     await this.forgetLogins(where);
+    await this.detachMediaUploads(where);
     const result = await this.prisma.user.deleteMany({ where });
     return { deleted: result.count };
+  }
+
+  /** ChatMessageMedia/PostMedia -> MediaUpload is RESTRICT, so a user's own upload can outlive the message/post that's about to cascade away with them; drop those links first. */
+  private async detachMediaUploads(
+    userWhere: { id: string } | { name: { startsWith: string } },
+  ) {
+    const users = await this.prisma.user.findMany({
+      where: userWhere,
+      select: { id: true },
+    });
+    const userIds = users.map((user) => user.id);
+    if (userIds.length === 0) return;
+
+    await this.prisma.chatMessageMedia.deleteMany({
+      where: { mediaUpload: { userId: { in: userIds } } },
+    });
+    await this.prisma.postMedia.deleteMany({
+      where: { mediaUpload: { userId: { in: userIds } } },
+    });
   }
 
   /** Deleting a user cascades their logins away in the database only, so end them properly first. */

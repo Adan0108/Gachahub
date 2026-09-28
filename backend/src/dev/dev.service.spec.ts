@@ -49,6 +49,7 @@ describe('DevService', () => {
       const prisma = {
         user: {
           findUnique: jest.fn().mockResolvedValue({ name: 'DevTest_1' }),
+          findMany: jest.fn().mockResolvedValue([{ id: 'u1' }]),
           delete: jest.fn(),
           deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
         },
@@ -58,6 +59,8 @@ describe('DevService', () => {
             { id: 's2', token: 't2' },
           ]),
         },
+        chatMessageMedia: { deleteMany: jest.fn() },
+        postMedia: { deleteMany: jest.fn() },
       };
       const terminator = { end: jest.fn() };
       return {
@@ -88,6 +91,22 @@ describe('DevService', () => {
       await service.deleteAllTestUsers();
 
       expect(terminator.end).toHaveBeenCalledTimes(1);
+    });
+
+    it('drops chat and post media links before the user, so the RESTRICT on mediaUpload never fires', async () => {
+      const { service, prisma } = makeService();
+
+      await service.deleteTestUser('u1');
+
+      expect(prisma.chatMessageMedia.deleteMany).toHaveBeenCalledWith({
+        where: { mediaUpload: { userId: { in: ['u1'] } } },
+      });
+      expect(prisma.postMedia.deleteMany).toHaveBeenCalledWith({
+        where: { mediaUpload: { userId: { in: ['u1'] } } },
+      });
+      expect(prisma.chatMessageMedia.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.user.delete.mock.invocationCallOrder[0],
+      );
     });
   });
 });
