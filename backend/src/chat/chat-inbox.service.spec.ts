@@ -108,6 +108,10 @@ describe('ChatInboxService', () => {
     assertNotRateLimited: jest.fn(),
   };
 
+  const chatDelivery = {
+    publishRequestAccepted: jest.fn(),
+  };
+
   let chatAccessService: ChatAccessService;
   let service: ChatInboxService;
 
@@ -125,11 +129,13 @@ describe('ChatInboxService', () => {
       blocksService as any,
       membershipService as any,
       historyFetchRateLimiter as any,
+      chatDelivery as any,
     );
     blocksService.getBlockedIdsAmong.mockResolvedValue(new Set());
     blocksService.isBlocked.mockResolvedValue(false);
     followsService.isFollowing.mockResolvedValue({ following: false });
     repository.countUnreadMessagesForConversations.mockResolvedValue([]);
+    repository.findParticipants.mockResolvedValue([]);
   });
 
   describe('conversation participant toggles (permission)', () => {
@@ -436,6 +442,42 @@ describe('ChatInboxService', () => {
         );
       },
     );
+
+    it('acceptRequest notifies the other active participants so they find out right away', async () => {
+      repository.findParticipant
+        .mockResolvedValueOnce({ userId: 'user-2', state: 'PENDING' })
+        .mockResolvedValueOnce({ userId: 'user-2', state: 'ACTIVE' });
+      membershipService.acceptInvite.mockResolvedValue(undefined);
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-2', state: 'ACTIVE', deletedAt: null },
+        { userId: 'user-1', state: 'ACTIVE', deletedAt: null },
+        { userId: 'user-3', state: 'PENDING', deletedAt: null },
+        { userId: 'user-4', state: 'ACTIVE', deletedAt: new Date() },
+      ]);
+
+      await service.acceptRequest('user-2', 'conversation-1');
+
+      expect(chatDelivery.publishRequestAccepted).toHaveBeenCalledWith({
+        conversationId: 'conversation-1',
+        userId: 'user-2',
+        recipientUserIds: ['user-1'],
+      });
+    });
+
+    it('acceptRequest skips notifying when nobody else is an active participant', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-2',
+        state: 'ACTIVE',
+      });
+      membershipService.acceptInvite.mockResolvedValue(undefined);
+      repository.findParticipants.mockResolvedValue([
+        { userId: 'user-2', state: 'ACTIVE', deletedAt: null },
+      ]);
+
+      await service.acceptRequest('user-2', 'conversation-1');
+
+      expect(chatDelivery.publishRequestAccepted).not.toHaveBeenCalled();
+    });
   });
 
   describe('markDelivered', () => {

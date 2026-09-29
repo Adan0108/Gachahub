@@ -15,6 +15,7 @@ import {
   membershipEventText,
   messageDividerLabel,
   messageFullTimestamp,
+  replyOriginalSenderLabel,
   wasLikelySentDuringAbsence,
 } from "../lib/chatThread";
 
@@ -40,27 +41,40 @@ function ReplyQuoteMedia({ replyToId, file, media }) {
   return <span>an attachment</span>;
 }
 
-/** The quoted preview above a reply: the original text, its first attachment, or a plain fallback once it's out of view. Click jumps to it. */
-function ReplyQuote({ message, conversation, allMessages, decryptedById, userId, onJumpToMessage }) {
+/** "X replied to Y" - sits above the quote, sized to its own text rather than matching the bubble below it. */
+function ReplyLabel({ message, conversation, messagesById, userId }) {
   if (!message.replyToId) return null;
-  const original = allMessages.find((item) => item.id === message.replyToId) ?? message.replyTo;
-  const senderLabel =
-    original?.senderId === userId ? "yourself" : participantUser(conversation, original?.senderId)?.name;
+  const mine = message.senderId === userId;
+  const replierLabel = mine ? "You" : participantUser(conversation, message.senderId)?.name || "Someone";
+  const original = messagesById.get(message.replyToId) ?? message.replyTo;
+  const originalSenderLabel = replyOriginalSenderLabel(
+    message.senderId,
+    original?.senderId,
+    userId,
+    participantUser(conversation, original?.senderId)?.name,
+  );
+  return (
+    <div className="chat-reply-label">
+      <FiCornerUpLeft aria-hidden="true" />
+      {replierLabel} replied to {originalSenderLabel}
+    </div>
+  );
+}
+
+/** The quoted original, sized to match the reply bubble right under it. Click jumps to it. */
+function ReplyQuote({ message, messagesById, decryptedById, onJumpToMessage }) {
+  if (!message.replyToId) return null;
+  const original = messagesById.get(message.replyToId) ?? message.replyTo;
   const decrypted = decryptedById[message.replyToId];
   const view = decrypted?.status === "ok" ? envelopeView(decrypted.envelope) : null;
 
   return (
-    <button
-      className="chat-reply-quote"
-      onClick={() => onJumpToMessage(message.replyToId)}
-      type="button"
-    >
-      <FiCornerUpLeft aria-hidden="true" />
-      <span className="chat-reply-quote-sender">{senderLabel || "a message"}</span>
+    <button className="chat-reply-quote" onClick={() => onJumpToMessage(message.replyToId)} type="button">
       {view?.kind === "text" && <span className="chat-reply-quote-text">{view.text}</span>}
       {view?.kind === "attachment" && view.files[0] && (
         <ReplyQuoteMedia file={view.files[0]} media={original?.media} replyToId={message.replyToId} />
       )}
+      {!view && <span>a message</span>}
     </button>
   );
 }
@@ -90,8 +104,9 @@ function MessageBubble({
   decrypted,
   conversation,
   userId,
-  allMessages,
+  messagesById,
   decryptedById,
+  neighbors,
   index,
   gapBefore,
   groupedWithPrevious,
@@ -110,8 +125,11 @@ function MessageBubble({
   const mediaOnly = isMediaOnlyView(view);
   const copyText = view?.kind === "text" ? view.text : view?.kind === "attachment" ? view.caption : "";
   const showSenderName = !mine && conversation.type === "GROUP" && !groupedWithPrevious;
-  const rowClass = [
-    "chat-message-row",
+  const rowClass = ["chat-message-row", mine && "mine"].filter(Boolean).join(" ");
+  // The gap-before/grouped spacing lives on this wrapper, not rowClass - it's the actual
+  // .chat-messages flex child now, so putting the margin on both would double it up.
+  const hoverZoneClass = [
+    "chat-message-hover-zone",
     mine && "mine",
     gapBefore && "gap-before",
     groupedWithPrevious && "grouped",
@@ -134,7 +152,7 @@ function MessageBubble({
         <div>
           <b>Message unavailable</b>
           <p>
-            {wasLikelySentDuringAbsence(allMessages, decryptedById, index)
+            {wasLikelySentDuringAbsence(neighbors, index)
               ? "Sent while you weren't in the group."
               : "This device can't decrypt this message."}
           </p>
@@ -143,48 +161,56 @@ function MessageBubble({
     );
 
   return (
-    <div className={rowClass} id={`chat-message-${message.id}`}>
-      {!mine && (
-        <span className={`chat-avatar small ${groupedWithNext ? "placeholder" : ""}`}>
-          {!groupedWithNext && initialOf(sender?.name)}
-        </span>
-      )}
-      <div className="chat-message-time-wrap">
-        {showSenderName && (
-          <small className="chat-message-sender">{sender?.name || "GachaHub member"}</small>
+    <div className={hoverZoneClass}>
+      <div className={rowClass} id={`chat-message-${message.id}`}>
+        {!mine && (
+          <span className={`chat-avatar small ${groupedWithNext ? "placeholder" : ""}`}>
+            {!groupedWithNext && initialOf(sender?.name)}
+          </span>
         )}
-        <MessageActions
-          canCopy={Boolean(copyText)}
-          isMine={mine}
-          onCopy={() => onCopy(copyText)}
-          onDelete={() => onDelete(message.id)}
-          onDeleteForMe={() => onDeleteForMe(message.id)}
-          onReact={(emoji) => onReact(message.id, emoji)}
-          onReply={() =>
-            onReply({
-              id: message.id,
-              senderName: mine ? "yourself" : sender?.name || "GachaHub member",
-              preview: copyText ? copyText.slice(0, 80) : "an attachment",
-            })
-          }
-        />
-        <ReplyQuote
-          allMessages={allMessages}
-          conversation={conversation}
-          decryptedById={decryptedById}
-          message={message}
-          onJumpToMessage={onJumpToMessage}
-          userId={userId}
-        />
-        {body}
-        {!Number.isNaN(sentAt) && (
-          <span className="chat-message-time-tip">{messageFullTimestamp(sentAt)}</span>
-        )}
-        <ReactionChips
-          onToggle={(emoji, mineAlready) => onReact(message.id, emoji, mineAlready)}
-          reactions={message.reactions}
-          userId={userId}
-        />
+        <div className="chat-message-time-wrap">
+          {showSenderName && (
+            <small className="chat-message-sender">{sender?.name || "GachaHub member"}</small>
+          )}
+          <MessageActions
+            canCopy={Boolean(copyText)}
+            isMine={mine}
+            onCopy={() => onCopy(copyText)}
+            onDelete={() => onDelete(message.id)}
+            onDeleteForMe={() => onDeleteForMe(message.id)}
+            onReact={(emoji) => onReact(message.id, emoji)}
+            onReply={() =>
+              onReply({
+                id: message.id,
+                senderName: mine ? "yourself" : sender?.name || "GachaHub member",
+                preview: copyText ? copyText.slice(0, 80) : "an attachment",
+              })
+            }
+          />
+          <ReplyLabel
+            conversation={conversation}
+            message={message}
+            messagesById={messagesById}
+            userId={userId}
+          />
+          <div className="chat-reply-and-bubble">
+            <ReplyQuote
+              decryptedById={decryptedById}
+              message={message}
+              messagesById={messagesById}
+              onJumpToMessage={onJumpToMessage}
+            />
+            {body}
+          </div>
+          {!Number.isNaN(sentAt) && (
+            <span className="chat-message-time-tip">{messageFullTimestamp(sentAt)}</span>
+          )}
+          <ReactionChips
+            onToggle={(emoji, mineAlready) => onReact(message.id, emoji, mineAlready)}
+            reactions={message.reactions}
+            userId={userId}
+          />
+        </div>
       </div>
     </div>
   );
@@ -195,8 +221,9 @@ export function ThreadRow({
   item,
   conversation,
   userId,
-  allMessages,
+  messagesById,
   decryptedById,
+  neighbors,
   now,
   onReply,
   onReact,
@@ -235,10 +262,11 @@ export function ThreadRow({
   if (!decrypted || decrypted.status === "pending") return null;
   return (
     <MessageBubble
-      allMessages={allMessages}
+      messagesById={messagesById}
       conversation={conversation}
       decrypted={decrypted}
       decryptedById={decryptedById}
+      neighbors={neighbors}
       gapBefore={gapBefore}
       groupedWithNext={groupedWithNext}
       groupedWithPrevious={groupedWithPrevious}

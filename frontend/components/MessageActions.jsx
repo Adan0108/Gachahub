@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { FiCopy, FiCornerUpLeft, FiEyeOff, FiMoreHorizontal, FiSmile, FiTrash2 } from "react-icons/fi";
+import { floatingPortal, floatingStyle, useFloatingPosition } from "../hooks/useFloatingPosition";
 import { useMenuDismiss } from "../hooks/useMenuDismiss";
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
@@ -24,6 +25,8 @@ export function MessageActions({
   const moreMenuRef = useRef(null);
   useMenuDismiss(isReactOpen, () => setIsReactOpen(false), reactButtonRef, reactMenuRef);
   useMenuDismiss(isMoreOpen, () => setIsMoreOpen(false), moreButtonRef, moreMenuRef);
+  const reactStyle = useFloatingPosition(isReactOpen, reactButtonRef, reactMenuRef);
+  const moreStyle = useFloatingPosition(isMoreOpen, moreButtonRef, moreMenuRef, { align: "end" });
 
   return (
     <div className={`message-actions ${isReactOpen || isMoreOpen ? "open" : ""}`}>
@@ -36,23 +39,29 @@ export function MessageActions({
         >
           <FiSmile />
         </button>
-        {isReactOpen && (
-          <div className="message-actions-picker" ref={reactMenuRef} role="menu">
-            {QUICK_EMOJIS.map((emoji) => (
-              <button
-                key={emoji}
-                onClick={() => {
-                  onReact(emoji);
-                  setIsReactOpen(false);
-                }}
-                role="menuitem"
-                type="button"
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        )}
+        {isReactOpen &&
+          floatingPortal(
+            <div
+              className="message-actions-picker"
+              ref={reactMenuRef}
+              role="menu"
+              style={floatingStyle(reactStyle)}
+            >
+              {QUICK_EMOJIS.map((emoji) => (
+                <button
+                  key={emoji}
+                  onClick={() => {
+                    onReact(emoji);
+                    setIsReactOpen(false);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>,
+          )}
       </div>
       <button aria-label="Reply" onClick={onReply} type="button">
         <FiCornerUpLeft />
@@ -66,44 +75,50 @@ export function MessageActions({
         >
           <FiMoreHorizontal />
         </button>
-        {isMoreOpen && (
-          <div className="chat-menu message-actions-more" ref={moreMenuRef} role="menu">
-            {canCopy && (
-              <button
-                onClick={() => {
-                  onCopy();
-                  setIsMoreOpen(false);
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <FiCopy /> Copy
-              </button>
-            )}
-            <button
-              onClick={() => {
-                onDeleteForMe();
-                setIsMoreOpen(false);
-              }}
-              role="menuitem"
-              type="button"
+        {isMoreOpen &&
+          floatingPortal(
+            <div
+              className="chat-menu message-actions-more"
+              ref={moreMenuRef}
+              role="menu"
+              style={floatingStyle(moreStyle)}
             >
-              <FiEyeOff /> Delete for me
-            </button>
-            {isMine && (
+              {canCopy && (
+                <button
+                  onClick={() => {
+                    onCopy();
+                    setIsMoreOpen(false);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <FiCopy /> Copy
+                </button>
+              )}
               <button
                 onClick={() => {
-                  onDelete();
+                  onDeleteForMe();
                   setIsMoreOpen(false);
                 }}
                 role="menuitem"
                 type="button"
               >
-                <FiTrash2 /> Unsend
+                <FiEyeOff /> Delete for me
               </button>
-            )}
-          </div>
-        )}
+              {isMine && (
+                <button
+                  onClick={() => {
+                    onDelete();
+                    setIsMoreOpen(false);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <FiTrash2 /> Unsend
+                </button>
+              )}
+            </div>,
+          )}
       </div>
     </div>
   );

@@ -66,6 +66,7 @@ export function useDecryptedMessages(
   conversationId: ConversationId,
   messages: ChatMessageRow[],
   currentUserId: string | undefined,
+  deletedMessageIds: string[] = [],
 ): Record<string, DecryptedMessageState> {
   const syncEngine = useSyncEngine();
   const ownDeviceId = useDeviceIdentity().credential?.deviceId;
@@ -92,6 +93,28 @@ export function useDecryptedMessages(
     clearTimeout(retryTimerRef.current);
     setDecrypted({});
   }, [conversationId]);
+
+  // Unsent (by anyone, on any device) - drop the cached plaintext so a reply quoting it stops
+  // showing the text, and it isn't sitting in IndexedDB after the message it belongs to is gone.
+  useEffect(() => {
+    if (deletedMessageIds.length === 0) return;
+    setDecrypted((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of deletedMessageIds) {
+        if (id in next) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    for (const id of deletedMessageIds) {
+      plaintextStore
+        .remove(id)
+        .catch((error: unknown) => console.warn(`Could not remove unsent message ${id}`, error));
+    }
+  }, [deletedMessageIds]);
 
   // Regaining connectivity resets the retry budget and forces an immediate rescan.
   useEffect(() => {

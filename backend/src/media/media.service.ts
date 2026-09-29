@@ -49,7 +49,7 @@ export class MediaService {
 
   async createUploadSignatures(dto: CreateUploadSignaturesDto, userId: string) {
     this.validateBatchPolicy(dto);
-    await this.enforceSignatureRateLimit(userId, dto.items.length);
+    await this.enforceSignatureRateLimit(userId, dto.items);
     await this.enforcePendingOpaqueCap(userId, dto);
 
     const items = await Promise.all(
@@ -683,8 +683,15 @@ export class MediaService {
     }
   }
 
-  // counts items, not requests, so a full batch costs what its uploads cost
-  private async enforceSignatureRateLimit(userId: string, items: number) {
+  // Counts items, not requests, so a full batch costs what its uploads cost - but a THUMB is
+  // never a separate upload the user asked for, only the encrypted preview that rides along with
+  // its own BLOB, so it doesn't consume its own unit. Without this, one ordinary image (BLOB +
+  // THUMB) already cost 2 units, so a handful of normal multi-image chat sends in the same
+  // window could trip the limit well before the user had sent anywhere near `limit` images.
+  private async enforceSignatureRateLimit(
+    userId: string,
+    items: { opaqueKind?: string }[],
+  ) {
     const limit = Number(process.env.MEDIA_SIGNATURE_RATE_LIMIT ?? 30);
 
     const windowSeconds = Number(
@@ -702,8 +709,11 @@ export class MediaService {
     }
 
     const key = `media:signature-rate:${userId}`;
+    const billableCount = items.filter(
+      (item) => item.opaqueKind !== 'THUMB',
+    ).length;
 
-    for (let i = 0; i < items; i++) {
+    for (let i = 0; i < billableCount; i++) {
       const count = await this.redisService.incrementWithExpiry(
         key,
         windowSeconds,

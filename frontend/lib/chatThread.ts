@@ -161,12 +161,45 @@ export function withOptimisticDelete<M extends { id: string; status?: string }>(
   );
 }
 
-/** An undecryptable message bounded on both sides by readable ones was likely sent during a membership gap. */
-export function wasLikelySentDuringAbsence(
+/** How "X replied to ___" names the original sender, from the viewer's own point of view. */
+export function replyOriginalSenderLabel(
+  replierSenderId: string,
+  originalSenderId: string | undefined,
+  viewerId: string | undefined,
+  originalSenderName: string | undefined,
+): string {
+  if (!originalSenderId) return 'a message';
+  if (originalSenderId === replierSenderId) return replierSenderId === viewerId ? 'yourself' : 'themself';
+  if (originalSenderId === viewerId) return 'You';
+  return originalSenderName || 'a message';
+}
+
+export interface ReadableNeighbors {
+  before: boolean[];
+  after: boolean[];
+}
+
+/** One O(n) pass over the thread: for each index, whether a readable message appears before/after it. */
+export function readableNeighbors(
   messages: ThreadMessage[],
   decrypted: Record<string, DecryptState>,
-  index: number,
-): boolean {
-  const isOk = (message: ThreadMessage) => decrypted[message.id]?.status === 'ok';
-  return messages.slice(0, index).some(isOk) && messages.slice(index + 1).some(isOk);
+): ReadableNeighbors {
+  const before: boolean[] = new Array(messages.length);
+  const after: boolean[] = new Array(messages.length);
+  let seen = false;
+  for (let i = 0; i < messages.length; i += 1) {
+    before[i] = seen;
+    if (decrypted[messages[i]!.id]?.status === 'ok') seen = true;
+  }
+  seen = false;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    after[i] = seen;
+    if (decrypted[messages[i]!.id]?.status === 'ok') seen = true;
+  }
+  return { before, after };
+}
+
+/** An undecryptable message bounded on both sides by readable ones was likely sent during a membership gap. */
+export function wasLikelySentDuringAbsence(neighbors: ReadableNeighbors, index: number): boolean {
+  return neighbors.before[index] === true && neighbors.after[index] === true;
 }

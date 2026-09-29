@@ -111,7 +111,7 @@ export function UserPicker({
         <small className="user-picker-hint">Type at least {USER_SEARCH_MIN_CHARS} characters.</small>
       )}
       {isOpen && search.isLoading && (
-        <div className="user-picker-status" role="status">
+        <div className="user-picker-status loading" role="status">
           Searching...
         </div>
       )}

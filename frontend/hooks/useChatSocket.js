@@ -7,6 +7,15 @@ import { useCurrentUser } from './useCurrentUser';
 import { API_BASE_URL } from '../lib/api';
 import { queryKeys } from '../lib/queries';
 import { MAX_RECONNECT_ATTEMPTS, reconnectDelayMs } from '../lib/socketReconnect';
+import { typingSignal } from '../lib/chatTypingSignal';
+
+// How long a typing:start this tab sent stays valid without a fresh ping before it emits
+// typing:stop on its own - matches the usual "stopped typing" idle window other chat apps use.
+const TYPING_STOP_AFTER_IDLE_MS = 3000;
+// Defensive only: clears a peer's typing state on this end even if their typing:stop never
+// arrives (a dropped event, a crash) - the backend's own disconnect handling clears its side,
+// but doesn't broadcast a stop, so without this a stuck "typing..." would never go away.
+const TYPING_EXPIRE_MS = 6000;
 
 /**
  * Live push for new chat messages, so one shows up as soon as it's sent
@@ -102,8 +111,76 @@ export function useChatSocket() {
     socket.on('message:deleted', refetchConversationMessages);
     socket.on('message:edited', refetchConversationMessages);
 
+    // The other side accepted a message request this tab sent - a one-shot notice, not steady
+    // state, so the chat page reads it once via the same cache-write bridge and clears it.
+    socket.on('request:accepted', (event) => {
+      queryClient.setQueryData(queryKeys.chatRequestAccepted(event.conversationId), event);
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
+    });
+
+    // Outgoing: the composer (mounted separately, in app/chat/page.jsx) pings typingSignal while
+    // the user types; turn that into throttled typing:start/typing:stop on this one socket.
+    const typingStopTimers = new Map();
+    const typingStarted = new Set();
+    const unsubscribeTyping = typingSignal.subscribe((conversationId, active) => {
+      clearTimeout(typingStopTimers.get(conversationId));
+      typingStopTimers.delete(conversationId);
+      if (active) {
+        if (!typingStarted.has(conversationId)) {
+          typingStarted.add(conversationId);
+          socket.emit('typing:start', { conversationId });
+        }
+        typingStopTimers.set(
+          conversationId,
+          setTimeout(() => {
+            typingStarted.delete(conversationId);
+            typingStopTimers.delete(conversationId);
+            socket.emit('typing:stop', { conversationId });
+          }, TYPING_STOP_AFTER_IDLE_MS),
+        );
+        return;
+      }
+      if (typingStarted.delete(conversationId)) {
+        socket.emit('typing:stop', { conversationId });
+      }
+    });
+
+    // Incoming: who's typing, per conversation, straight into the query cache - the chat page
+    // reads it with a plain useQuery the same way it reads everything else socket-pushed.
+    const typingExpireTimers = new Map();
+    const setTypingUser = (conversationId, userId, isTyping) => {
+      queryClient.setQueryData(queryKeys.chatTyping(conversationId), (old = []) =>
+        isTyping
+          ? old.includes(userId)
+            ? old
+            : [...old, userId]
+          : old.filter((id) => id !== userId),
+      );
+    };
+    socket.on('typing:start', (event) => {
+      const timerKey = `${event.conversationId}:${event.userId}`;
+      clearTimeout(typingExpireTimers.get(timerKey));
+      setTypingUser(event.conversationId, event.userId, true);
+      typingExpireTimers.set(
+        timerKey,
+        setTimeout(() => {
+          typingExpireTimers.delete(timerKey);
+          setTypingUser(event.conversationId, event.userId, false);
+        }, TYPING_EXPIRE_MS),
+      );
+    });
+    socket.on('typing:stop', (event) => {
+      const timerKey = `${event.conversationId}:${event.userId}`;
+      clearTimeout(typingExpireTimers.get(timerKey));
+      typingExpireTimers.delete(timerKey);
+      setTypingUser(event.conversationId, event.userId, false);
+    });
+
     return () => {
       clearTimeout(reconnectTimer);
+      unsubscribeTyping();
+      typingStopTimers.forEach(clearTimeout);
+      typingExpireTimers.forEach(clearTimeout);
       socket.disconnect();
     };
   }, [isAuthenticated, user?.id, queryClient]);

@@ -107,12 +107,31 @@ describe('MediaService opaque chat blobs', () => {
       await service.createUploadSignatures(
         {
           purpose: 'CHAT',
+          items: [
+            { opaqueKind: 'BLOB' },
+            { opaqueKind: 'THUMB' },
+            { opaqueKind: 'BLOB' },
+            { opaqueKind: 'THUMB' },
+          ],
+        } as any,
+        'user-1',
+      );
+
+      // 2 BLOBs, not 4 items - a THUMB rides along with its own BLOB, it isn't a separate upload
+      // the user asked for, so it doesn't cost its own unit against the per-user budget.
+      expect(redisService.incrementWithExpiry).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not charge a rate-limit unit for a thumbnail on its own', async () => {
+      await service.createUploadSignatures(
+        {
+          purpose: 'CHAT',
           items: [{ opaqueKind: 'BLOB' }, { opaqueKind: 'THUMB' }],
         } as any,
         'user-1',
       );
 
-      expect(redisService.incrementWithExpiry).toHaveBeenCalledTimes(2);
+      expect(redisService.incrementWithExpiry).toHaveBeenCalledTimes(1);
     });
 
     it('rejects when an item pushes the counter over the limit', async () => {
@@ -120,11 +139,13 @@ describe('MediaService opaque chat blobs', () => {
         .mockResolvedValueOnce(30)
         .mockResolvedValueOnce(31);
 
+      // Two billable BLOBs, so the loop actually reaches the second, over-limit increment - a
+      // THUMB here wouldn't count at all (see the tests above) and would never trip this.
       await expect(
         service.createUploadSignatures(
           {
             purpose: 'CHAT',
-            items: [{ opaqueKind: 'BLOB' }, { opaqueKind: 'THUMB' }],
+            items: [{ opaqueKind: 'BLOB' }, { opaqueKind: 'BLOB' }],
           } as any,
           'user-1',
         ),

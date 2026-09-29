@@ -9,7 +9,7 @@ import { useNewMessageAnnouncement } from "./useNewMessageAnnouncement";
 import { useNowTick } from "./useNowTick";
 import { useSafetyNumbers } from "./useSafetyNumbers";
 import { otherActiveMemberIds, participantUser } from "../lib/chatDisplay";
-import { buildThreadItems, eventsForDisplay } from "../lib/chatThread";
+import { buildThreadItems, eventsForDisplay, readableNeighbors } from "../lib/chatThread";
 
 interface ThreadMessage {
   id: string;
@@ -41,7 +41,20 @@ export function useThreadData(
       ),
     [displayMessages],
   );
-  const decrypted = useDecryptedMessages(conversationId, decryptable, userId);
+  const deletedMessageIds = useMemo(
+    () => displayMessages.filter((message) => message.status === "DELETED").map((message) => message.id),
+    [displayMessages],
+  );
+  const decrypted = useDecryptedMessages(conversationId, decryptable, userId, deletedMessageIds);
+  // Built once per change instead of every row re-deriving its own O(n) lookups.
+  const messagesById = useMemo(
+    () => new Map(displayMessages.map((message) => [message.id, message])),
+    [displayMessages],
+  );
+  const neighbors = useMemo(
+    () => readableNeighbors(displayMessages, decrypted),
+    [displayMessages, decrypted],
+  );
   const groupProblem = useGroupProblem(conversationId);
   const safetyPeerIds: string[] = otherActiveMemberIds(conversation, userId);
   const safety = useSafetyNumbers(conversationId, userId, safetyPeerIds);
@@ -84,6 +97,8 @@ export function useThreadData(
   return {
     ...history,
     decrypted,
+    messagesById,
+    neighbors,
     groupProblem,
     safety,
     safetyPeerIds,

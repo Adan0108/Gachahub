@@ -6,14 +6,15 @@ import { GroupStateCorruptedError } from '../lib/mls/contract/errors';
 import { MAX_RETRY_ATTEMPTS, nextRetryDelayMs } from '../lib/mls/messaging/decryptRetry';
 import { useDecryptedMessages } from './useDecryptedMessages';
 
-const { plaintextGet, plaintextSave } = vi.hoisted(() => ({
+const { plaintextGet, plaintextSave, plaintextRemove } = vi.hoisted(() => ({
   plaintextGet: vi.fn(),
   plaintextSave: vi.fn(),
+  plaintextRemove: vi.fn(),
 }));
 
 vi.mock('../lib/mls/storage/messagePlaintextStore', () => ({
   EncryptedIndexedDbMessagePlaintextStore: vi.fn().mockImplementation(function FakeStore() {
-    return { get: plaintextGet, save: plaintextSave };
+    return { get: plaintextGet, save: plaintextSave, remove: plaintextRemove };
   }),
 }));
 
@@ -45,8 +46,18 @@ function renderHook() {
   const root: Root = createRoot(container);
   let latest: Record<string, unknown> = {};
 
-  function Harness(props: { conversationId: string; messages: unknown[]; currentUserId: string }) {
-    latest = useDecryptedMessages(props.conversationId as never, props.messages as never, props.currentUserId);
+  function Harness(props: {
+    conversationId: string;
+    messages: unknown[];
+    currentUserId: string;
+    deletedMessageIds?: string[];
+  }) {
+    latest = useDecryptedMessages(
+      props.conversationId as never,
+      props.messages as never,
+      props.currentUserId,
+      props.deletedMessageIds,
+    );
     return null;
   }
 
@@ -54,7 +65,12 @@ function renderHook() {
     get value() {
       return latest;
     },
-    render: async (props: { conversationId: string; messages: unknown[]; currentUserId: string }) => {
+    render: async (props: {
+      conversationId: string;
+      messages: unknown[];
+      currentUserId: string;
+      deletedMessageIds?: string[];
+    }) => {
       await act(async () => {
         root.render(createElement(Harness, props));
         for (let i = 0; i < 10; i += 1) await Promise.resolve();
@@ -75,6 +91,7 @@ describe('useDecryptedMessages', () => {
     vi.clearAllMocks();
     plaintextGet.mockResolvedValue(undefined);
     plaintextSave.mockResolvedValue(undefined);
+    plaintextRemove.mockResolvedValue(undefined);
     vi.mocked(useDeviceIdentity).mockReturnValue({
       credential: { deviceId: 'device-1' },
       isReady: true,
@@ -322,6 +339,44 @@ describe('useDecryptedMessages', () => {
       await hook.render({ conversationId: 'conv-1', messages: [message('m1')], currentUserId: 'me' });
 
       expect(hook.value.m1).toEqual({ status: 'unavailable' });
+      hook.unmount();
+    });
+  });
+
+  describe('purging unsent messages', () => {
+    it('drops a message from state and the plaintext store once it is reported deleted', async () => {
+      const engine = fakeEngine();
+      engine.isAtCurrentEpoch.mockResolvedValue(true);
+      engine.processIncoming.mockResolvedValue({
+        kind: 'application',
+        senderDeviceId: 'their-device',
+        epoch: 1,
+        envelope: { v: 1, type: 'text', body: 'hi' },
+      });
+      vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+      const hook = renderHook();
+
+      await hook.render({ conversationId: 'conv-1', messages: [message('m1')], currentUserId: 'me' });
+      expect(hook.value.m1).toMatchObject({ status: 'ok' });
+
+      await hook.render({
+        conversationId: 'conv-1',
+        messages: [],
+        currentUserId: 'me',
+        deletedMessageIds: ['m1'],
+      });
+      await flush();
+
+      expect(hook.value.m1).toBeUndefined();
+      expect(plaintextRemove).toHaveBeenCalledWith('m1');
+      hook.unmount();
+    });
+
+    it('does nothing when nothing is deleted', async () => {
+      const hook = renderHook();
+      await hook.render({ conversationId: 'conv-1', messages: [], currentUserId: 'me', deletedMessageIds: [] });
+
+      expect(plaintextRemove).not.toHaveBeenCalled();
       hook.unmount();
     });
   });

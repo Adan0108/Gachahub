@@ -40,6 +40,16 @@ describe('InMemoryMessagePlaintextStore', () => {
     const store = new InMemoryMessagePlaintextStore();
     await expect(store.get('never-saved')).resolves.toBeUndefined();
   });
+
+  it('remove drops a saved message, and is a no-op for one that was never saved', async () => {
+    const store = new InMemoryMessagePlaintextStore();
+    await store.save(sampleMessage());
+
+    await store.remove('msg-1');
+    await store.remove('never-saved');
+
+    await expect(store.get('msg-1')).resolves.toBeUndefined();
+  });
 });
 
 describe('EncryptedIndexedDbMessagePlaintextStore', () => {
@@ -68,5 +78,14 @@ describe('EncryptedIndexedDbMessagePlaintextStore', () => {
   it('returns undefined for a message that was never saved', async () => {
     const store = new EncryptedIndexedDbMessagePlaintextStore();
     await expect(store.get('never-saved')).resolves.toBeUndefined();
+  });
+
+  it('remove drops a saved message from IndexedDB', async () => {
+    const store = new EncryptedIndexedDbMessagePlaintextStore();
+    await store.save(sampleMessage());
+
+    await store.remove('msg-1');
+
+    await expect(store.get('msg-1')).resolves.toBeUndefined();
   });
 });

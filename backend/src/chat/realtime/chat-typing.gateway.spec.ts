@@ -21,7 +21,7 @@ describe('ChatTypingGateway', () => {
 
   const makeSocket = (overrides: Record<string, unknown> = {}) => ({
     id: 'socket-1',
-    data: {} as { userId?: string },
+    data: {} as { userId?: string; authReady?: Promise<void> },
     ...overrides,
   });
 
@@ -97,6 +97,47 @@ describe('ChatTypingGateway', () => {
         chatMessageActionsService.getTypingRecipients,
       ).not.toHaveBeenCalled();
       expect(server.to).not.toHaveBeenCalled();
+    });
+
+    it('waits for authReady instead of dropping the event when userId is not set yet', async () => {
+      chatMessageActionsService.getTypingRecipients.mockResolvedValue([
+        'user-2',
+      ]);
+      const socket = makeSocket();
+      let resolveAuth: () => void = () => {};
+      socket.data.authReady = new Promise<void>((resolve) => {
+        resolveAuth = resolve;
+      });
+
+      const call = gateway.handleTypingStart(socket as any, {
+        conversationId: 'conversation-1',
+      });
+      // Simulates WebsocketGateway.handleConnection's async auth finishing just after this
+      // handler started, but before it gave up on socket.data.userId.
+      socket.data.userId = 'user-1';
+      resolveAuth();
+      await call;
+
+      expect(
+        chatMessageActionsService.getTypingRecipients,
+      ).toHaveBeenCalledWith('conversation-1', 'user-1');
+      expect(server.emit).toHaveBeenCalledWith('typing:start', {
+        conversationId: 'conversation-1',
+        userId: 'user-1',
+      });
+    });
+
+    it('still does nothing if authReady settles without ever setting a userId', async () => {
+      const socket = makeSocket();
+      socket.data.authReady = Promise.resolve();
+
+      await gateway.handleTypingStart(socket as any, {
+        conversationId: 'conversation-1',
+      });
+
+      expect(
+        chatMessageActionsService.getTypingRecipients,
+      ).not.toHaveBeenCalled();
     });
 
     it('does nothing when the payload has no conversationId', async () => {

@@ -5,7 +5,7 @@ import { MAX_FILE_NAME_LENGTH } from './limits';
 export type AttachmentKind = 'image' | 'video' | 'file';
 
 // Deliberately short: anything else (svg, html, ...) is offered as a download, never rendered
-const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif']);
 const VIDEO_MIMES = new Set(['video/mp4', 'video/webm', 'video/quicktime']);
 
 export function attachmentKind(mime: string): AttachmentKind {
@@ -65,6 +65,21 @@ export function groupAttachments(files: AttachmentFile[]): {
     (attachmentKind(file.mime) === 'file' ? others : visual).push({ file, index });
   });
   return { visual, others };
+}
+
+/** Discord-style grid sections: at most this many visual attachments share one uniform grid. */
+export const MAX_ATTACHMENTS_PER_GRID = 6;
+
+/** Splits a message's visual attachments into grid-sized sections, each rendered as its own grid - a 7th image lands in a new section rather than cramming into the first one. */
+export function chunkVisualAttachments<T>(
+  visual: T[],
+  size: number = MAX_ATTACHMENTS_PER_GRID,
+): T[][] {
+  const chunks: T[][] = [];
+  for (let start = 0; start < visual.length; start += size) {
+    chunks.push(visual.slice(start, start + size));
+  }
+  return chunks;
 }
 
 /** What a thread bubble should show for a decrypted envelope; null means an unsupported type. */
@@ -147,6 +162,7 @@ export interface FlatAttachment {
   messageId: string;
   file: AttachmentFile;
   source: AttachmentSource;
+  thumbSource: AttachmentSource | null;
 }
 
 interface DecryptedById {
@@ -158,10 +174,11 @@ interface MessageWithMedia {
   media?: { mediaUploadId: string; url: string }[];
 }
 
-/** Every image/video across the thread's decrypted messages, in order, so the lightbox can cycle through them. */
-export function flattenVisualAttachments(
+/** Shared by flattenVisualAttachments/flattenOtherAttachments - only which half of a message's resolved attachments `pick` reads back differs. */
+function flattenAttachments(
   messages: MessageWithMedia[],
   decryptedById: DecryptedById,
+  pick: (resolved: { visual: ResolvedAttachment[]; others: ResolvedAttachment[] }) => ResolvedAttachment[],
 ): FlatAttachment[] {
   const flat: FlatAttachment[] = [];
   for (const message of messages) {
@@ -169,14 +186,36 @@ export function flattenVisualAttachments(
     const view = envelopeView(decryptedById[message.id]?.envelope);
     if (view?.kind !== 'attachment') continue;
     const urlByUploadId = new Map((message.media ?? []).map((item) => [item.mediaUploadId, item.url]));
-    const { visual } = resolveAttachmentSources(message.id, view.files, urlByUploadId);
-    for (const item of visual) {
+    const resolved = resolveAttachmentSources(message.id, view.files, urlByUploadId);
+    for (const item of pick(resolved)) {
       if (item.source) {
-        flat.push({ cacheKey: item.source.cacheKey, messageId: message.id, file: item.file, source: item.source });
+        flat.push({
+          cacheKey: item.source.cacheKey,
+          messageId: message.id,
+          file: item.file,
+          source: item.source,
+          thumbSource: item.thumbSource,
+        });
       }
     }
   }
   return flat;
+}
+
+/** Every image/video across the thread's decrypted messages, in order, so the lightbox can cycle through them. */
+export function flattenVisualAttachments(
+  messages: MessageWithMedia[],
+  decryptedById: DecryptedById,
+): FlatAttachment[] {
+  return flattenAttachments(messages, decryptedById, (resolved) => resolved.visual);
+}
+
+/** Every non-visual (file-chip) attachment across the thread's decrypted messages, in order - the conversation info panel's Files tab. */
+export function flattenOtherAttachments(
+  messages: MessageWithMedia[],
+  decryptedById: DecryptedById,
+): FlatAttachment[] {
+  return flattenAttachments(messages, decryptedById, (resolved) => resolved.others);
 }
 
 /** Status line under an outgoing bubble while it is in flight. */

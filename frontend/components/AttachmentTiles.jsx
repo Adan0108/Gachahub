@@ -27,7 +27,7 @@ function TileStatus({ state, idleLabel }) {
 }
 
 /** A GIF always auto-loads; other images show their thumbnail (or auto-load when small) and open the lightbox on click. */
-export function ImageTile({ file, source, thumbSource }) {
+export function ImageTile({ file, source, thumbSource, uniform }) {
   const openAttachment = useOpenAttachment();
   const autoLoadsFull = autoLoadsWithoutTap(file.mime) || (!thumbSource && file.size <= AUTO_LOAD_MAX_BYTES);
   const preview = useAttachmentBlobUrl(thumbSource, true);
@@ -41,7 +41,10 @@ export function ImageTile({ file, source, thumbSource }) {
       aria-label={`Open ${file.name}`}
       className={`chat-attachment-tile ${shown.status === "loading" ? "busy" : ""}`}
       onClick={() => openAttachment(source.cacheKey)}
-      style={tileStyle(file.thumb)}
+      // A grouped tile crops to a uniform square (see .chat-attachment-grid:not(.count-1) in
+      // ChatAttachments.css) - the image's own ratio would otherwise fight that via this inline
+      // style, which always wins over a class rule.
+      style={uniform ? undefined : tileStyle(file.thumb)}
       type="button"
     >
       {shown.status === "ready" ? (
@@ -54,7 +57,7 @@ export function ImageTile({ file, source, thumbSource }) {
 }
 
 /** Click-to-load: nothing but the poster (if any) is fetched until the user asks to play. */
-export function VideoTile({ file, source, thumbSource }) {
+export function VideoTile({ file, source, thumbSource, uniform }) {
   const [playing, setPlaying] = useState(false);
   const poster = useAttachmentBlobUrl(thumbSource, true);
   const video = useAttachmentBlobUrl(source, playing && Boolean(source));
@@ -70,7 +73,7 @@ export function VideoTile({ file, source, thumbSource }) {
           aria-label={`Play ${file.name}`}
           className={`chat-attachment-tile ${video.status === "loading" ? "busy" : ""}`}
           onClick={() => setPlaying(true)}
-          style={tileStyle(file.thumb)}
+          style={uniform ? undefined : tileStyle(file.thumb)}
           type="button"
         >
           {poster.status === "ready" && <img alt="" src={poster.url} />}

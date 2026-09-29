@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -11,6 +12,8 @@ import { ChatHistoryFetchRateLimiterService } from './chat-history-fetch-rate-li
 import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
 import { MarkMessagesDeliveredDto } from './dto/mark-messages-delivered.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
+import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
+import type { ChatDeliveryPort } from './ports/chat-delivery.port';
 
 /**
  * Inbox listing, per-conversation settings, and read/delivery receipts.
@@ -27,6 +30,8 @@ export class ChatInboxService {
     private readonly blocksService: BlocksService,
     private readonly chatMembershipService: ChatMembershipService,
     private readonly historyFetchRateLimiter: ChatHistoryFetchRateLimiterService,
+    @Inject(CHAT_DELIVERY_PORT)
+    private readonly chatDelivery: ChatDeliveryPort,
   ) {}
 
   /**
@@ -174,7 +179,34 @@ export class ChatInboxService {
 
     await this.chatMembershipService.acceptInvite(conversationId, userId);
 
+    await this.notifyRequestAccepted(conversationId, userId);
+
     return this.chatRepository.findParticipant(conversationId, userId);
+  }
+
+  /** Lets the request's original sender(s) know right away, instead of only finding out on the next unrelated refetch. */
+  private async notifyRequestAccepted(
+    conversationId: string,
+    accepterUserId: string,
+  ) {
+    const participants =
+      await this.chatRepository.findParticipants(conversationId);
+    const recipientUserIds = participants
+      .filter(
+        (participant) =>
+          participant.userId !== accepterUserId &&
+          !participant.deletedAt &&
+          participant.state === 'ACTIVE',
+      )
+      .map((participant) => participant.userId);
+
+    if (recipientUserIds.length === 0) return;
+
+    await this.chatDelivery.publishRequestAccepted({
+      conversationId,
+      userId: accepterUserId,
+      recipientUserIds,
+    });
   }
 
   /**

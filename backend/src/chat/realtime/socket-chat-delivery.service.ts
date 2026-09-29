@@ -5,6 +5,7 @@ import {
   ChatDeliveryPort,
   ChatMessageCreatedEvent,
   ChatMessageActionEvent,
+  ChatRequestAcceptedEvent,
 } from '../ports/chat-delivery.port';
 
 type ChatSocketEventName =
@@ -12,7 +13,8 @@ type ChatSocketEventName =
   | 'message:edited'
   | 'message:deleted'
   | 'reaction:added'
-  | 'reaction:removed';
+  | 'reaction:removed'
+  | 'request:accepted';
 
 // real ChatDeliveryPort now, was noop before, ChatService untouched either way
 @Injectable()
@@ -50,6 +52,13 @@ export class SocketChatDeliveryService implements ChatDeliveryPort {
 
   publishReactionRemoved(event: ChatMessageActionEvent): Promise<void> {
     return this.emitActionEvent('reaction:removed', event);
+  }
+
+  publishRequestAccepted(event: ChatRequestAcceptedEvent): Promise<void> {
+    return this.emitToRecipients('request:accepted', event.recipientUserIds, {
+      conversationId: event.conversationId,
+      userId: event.userId,
+    });
   }
 
   // shared by edit/delete/reaction events, only the event name differs

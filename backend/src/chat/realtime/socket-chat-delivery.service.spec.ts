@@ -85,6 +85,38 @@ describe('SocketChatDeliveryService', () => {
     expect(to).not.toHaveBeenCalled();
   });
 
+  describe('publishRequestAccepted', () => {
+    it('emits request:accepted to every recipient room with the accepter id', async () => {
+      const emit = jest.fn();
+      const to = jest.fn().mockReturnValue({ emit });
+      registry.server = { to } as unknown as Server;
+
+      await service.publishRequestAccepted({
+        conversationId: 'conversation-1',
+        userId: 'user-2',
+        recipientUserIds: ['user-1'],
+      });
+
+      expect(to).toHaveBeenCalledWith('user:user-1');
+      expect(emit).toHaveBeenCalledWith('request:accepted', {
+        conversationId: 'conversation-1',
+        userId: 'user-2',
+      });
+    });
+
+    it('does nothing when no server is registered yet', async () => {
+      registry.server = undefined;
+
+      await expect(
+        service.publishRequestAccepted({
+          conversationId: 'conversation-1',
+          userId: 'user-2',
+          recipientUserIds: ['user-1'],
+        }),
+      ).resolves.toBeUndefined();
+    });
+  });
+
   describe('action events (edit/delete/react)', () => {
     const actionEvent: ChatMessageActionEvent = {
       conversationId: 'conversation-1',

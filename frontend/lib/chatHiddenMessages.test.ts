@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getHiddenMessageIds, hideMessageForMe } from './chatHiddenMessages';
+import { getHiddenMessageIds, hideMessageForMe, unhideMessageForMe } from './chatHiddenMessages';
 
 function fakeLocalStorage() {
   const store = new Map<string, string>();
@@ -30,5 +30,19 @@ describe('chatHiddenMessages', () => {
     hideMessageForMe('c1', 'm1');
     hideMessageForMe('c1', 'm2');
     expect(getHiddenMessageIds('c1')).toEqual(new Set(['m1', 'm2']));
+  });
+
+  it('unhideMessageForMe undoes a hide, leaving the rest untouched', () => {
+    hideMessageForMe('c1', 'm1');
+    hideMessageForMe('c1', 'm2');
+
+    unhideMessageForMe('c1', 'm1');
+
+    expect(getHiddenMessageIds('c1')).toEqual(new Set(['m2']));
+  });
+
+  it('unhideMessageForMe is a no-op for a message that was never hidden', () => {
+    unhideMessageForMe('c1', 'm1');
+    expect(getHiddenMessageIds('c1')).toEqual(new Set());
   });
 });

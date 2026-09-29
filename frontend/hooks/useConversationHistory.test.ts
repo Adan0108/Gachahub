@@ -251,5 +251,45 @@ describe("useConversationHistory", () => {
     expect(ids(hook.value.displayMessages)).toEqual(["m1", "m2", "m3", "m4", "m5"]);
     await hook.unmount();
   });
+
+  it("patchOlder edits messages this hook holds locally, which the query cache never sees", async () => {
+    getChatMessages.mockResolvedValue(page(range(1, 2), null));
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+    await hook.scrollToTop();
+    expect(ids(hook.value.displayMessages)).toEqual(["m1", "m2", "m3", "m4", "m5"]);
+
+    await act(async () => {
+      hook.value.patchOlder((items) =>
+        items.map((item) => (item.id === "m1" ? { ...item, id: "m1-edited" } : item)),
+      );
+    });
+    await flush();
+
+    expect(ids(hook.value.displayMessages)).toEqual(["m1-edited", "m2", "m3", "m4", "m5"]);
+    await hook.unmount();
+  });
+
+  it("patchOlder returns the pre-edit array, so a failed optimistic edit can be rolled back", async () => {
+    getChatMessages.mockResolvedValue(page(range(1, 2), null));
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+    await hook.scrollToTop();
+
+    let snapshot: Message[] = [];
+    await act(async () => {
+      snapshot = hook.value.patchOlder((items) => items.filter((item) => item.id !== "m1"));
+    });
+    await flush();
+    expect(ids(hook.value.displayMessages)).toEqual(["m2", "m3", "m4", "m5"]);
+
+    await act(async () => {
+      hook.value.patchOlder(() => snapshot);
+    });
+    await flush();
+
+    expect(ids(hook.value.displayMessages)).toEqual(["m1", "m2", "m3", "m4", "m5"]);
+    await hook.unmount();
+  });
 });
 

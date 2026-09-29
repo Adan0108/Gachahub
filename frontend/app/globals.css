@@ -13,6 +13,7 @@
   --purple: #7c5cff;
   --cyan: #5bd6ff;
   --pink: #ff7abf;
+  --chat-bubble-mine: #2f8fef;
   --sidebar: 222px;
   --content-max: 1320px;
   --chat-radius: 12px;
@@ -3096,6 +3097,7 @@ select:focus-visible {
   --purple: #8b6cff;
   --cyan: #7ab7ff;
   --pink: #ff7ac8;
+  --chat-bubble-mine: #3a9aff;
   color-scheme: dark;
 }
 
@@ -3110,6 +3112,7 @@ select:focus-visible {
   --purple: #6f52d9;
   --cyan: #2274c8;
   --pink: #c94f8f;
+  --chat-bubble-mine: #1c74d4;
   color-scheme: light;
 }
 
@@ -5269,6 +5272,12 @@ body {
   min-height: 0;
 }
 
+/* A third column only exists while the conversation info panel is open - grid's default
+   auto-flow: row would otherwise drop a 3rd item to a new row instead of beside .chat-thread. */
+.chat-layout.info-open {
+  grid-template-columns: minmax(280px, 0.36fr) minmax(0, 1fr) minmax(280px, 320px);
+}
+
 .chat-sidebar,
 .chat-thread {
   min-width: 0;
@@ -5344,10 +5353,8 @@ body {
 }
 
 .chat-menu {
-  position: absolute;
+  /* top/left come from useFloatingPosition's inline style, not from here. */
   z-index: 40;
-  top: calc(100% + 8px);
-  left: 0;
   display: grid;
   min-width: 190px;
   padding: 6px;
@@ -5383,6 +5390,16 @@ body {
   color: #fff;
   font-size: 10px;
   font-weight: 700;
+}
+
+.chat-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+
+.chat-menu button.danger {
+  color: var(--pink);
 }
 
 .chat-view-banner {
@@ -5456,7 +5473,7 @@ body {
   display: grid;
   gap: 6px;
   margin: 10px 14px 0;
-  padding: 12px;
+  padding: 12px 12px 18px;
   border: 1px solid var(--line);
   border-radius: var(--chat-radius);
   background: var(--bg);
@@ -5484,8 +5501,9 @@ body {
   border-color: var(--purple);
 }
 
-.chat-new-form button {
+.chat-new-form button[type="submit"] {
   justify-self: start;
+  margin-top: 8px;
   border: 0;
   border-radius: var(--chat-radius);
   padding: 7px 14px;
@@ -5547,6 +5565,42 @@ body {
 
 .chat-new-chat-notice button:hover {
   color: var(--text);
+}
+
+.chat-new-chat-notice button.chat-new-chat-notice-action {
+  width: auto;
+  height: auto;
+  padding: 4px 10px;
+  border: 1px solid var(--purple);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@keyframes chat-request-accepted-pop {
+  0% {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.03);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.chat-request-accepted-notice {
+  transform-origin: center;
+  animation: chat-request-accepted-pop 0.35s ease-out;
+}
+
+.chat-request-accepted-notice > svg {
+  flex: 0 0 auto;
+  color: var(--purple);
+  font-size: 16px;
 }
 
 .chat-sidebar-search > svg {
@@ -5761,8 +5815,31 @@ body {
 }
 
 .chat-thread {
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.chat-dropzone-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: color-mix(in srgb, var(--bg), transparent 15%);
+  border: 2px dashed var(--purple);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 15px;
+  pointer-events: none;
+}
+
+.chat-dropzone-overlay svg {
+  font-size: 28px;
+  color: var(--purple);
 }
 
 .chat-thread-head {
@@ -5811,6 +5888,18 @@ body {
   font-weight: 700;
 }
 
+/* Overrides .chat-thread-actions button's text-pill sizing back to the round icon button it
+   already is everywhere else (sidebar More/compose) - two classes beats that one class + element. */
+.chat-thread-actions .chat-icon-button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 400;
+}
+
 .chat-thread-actions button:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--purple), transparent 40%);
   color: var(--text);
@@ -5837,12 +5926,243 @@ body {
   color: var(--pink);
 }
 
+/* Conversation info panel - docked beside .chat-thread (see .chat-layout.info-open), not a
+   modal, so the main thread stays interactive alongside it. */
+.chat-conversation-info {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--chat-radius);
+  background: var(--panel);
+}
+
+.chat-info-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.chat-info-head button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+}
+
+.chat-info-head button:hover {
+  background: var(--panel2);
+  color: var(--text);
+}
+
+.chat-info-head b {
+  font-size: 14px;
+}
+
+.chat-info-body {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 16px;
+}
+
+.chat-info-banner {
+  height: 64px;
+  /* Static for now - see BACKLOG.md for user-customizable banners. */
+  background: linear-gradient(135deg, var(--purple), var(--chat-bubble-mine));
+}
+
+.chat-info-profile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: -30px;
+  padding: 0 16px 16px;
+}
+
+.chat-info-profile .chat-avatar.large {
+  width: 76px;
+  height: 76px;
+  border-width: 3px;
+  border-color: var(--panel);
+  font-size: 24px;
+}
+
+.chat-info-profile b {
+  font-size: 16px;
+}
+
+.chat-info-encryption-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--panel2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.chat-info-quick-actions {
+  display: flex;
+  justify-content: center;
+  gap: 22px;
+  padding: 0 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chat-info-quick-actions button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.chat-info-quick-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 16px;
+}
+
+.chat-info-quick-actions button:hover .chat-info-quick-icon {
+  background: color-mix(in srgb, var(--purple), transparent 80%);
+  color: var(--purple);
+}
+
+.chat-info-section {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chat-info-section:last-child {
+  border-bottom: 0;
+}
+
+.chat-info-section-label {
+  padding: 8px 8px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.chat-info-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+}
+
+.chat-info-row:hover:not(:disabled) {
+  background: var(--panel2);
+}
+
+.chat-info-row:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.chat-info-row small {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.chat-info-row.danger {
+  color: var(--pink);
+}
+
+.chat-info-empty {
+  padding: 24px 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.chat-info-media-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.chat-info-media-grid .chat-attachment-tile {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  min-height: 0;
+  max-height: none;
+}
+
+.chat-info-media-grid .chat-attachment-tile img {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: cover;
+}
+
+.chat-info-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.chat-info-toast {
+  position: sticky;
+  bottom: 12px;
+  margin: 8px 16px 0;
+  padding: 10px 14px;
+  border-radius: var(--chat-radius);
+  background: var(--text);
+  color: var(--bg);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  animation: chat-request-accepted-pop 0.2s ease-out;
+}
+
 .chat-messages {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
   overflow-y: auto;
+  /* Unset overflow-x defaults to auto once overflow-y is set, adding a stray horizontal scrollbar. */
+  overflow-x: hidden;
   padding: 18px;
   background: var(--bg);
   scrollbar-width: thin;
@@ -5886,7 +6206,81 @@ body {
   margin-top: 10px;
 }
 
+.chat-typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* This sits directly above the composer now (a grid item of .chat-thread, not a flex item of
+     .chat-messages anymore) - justify-self is the grid equivalent of the align-self it used to
+     need, so it still hugs the left edge instead of stretching full width. */
+  justify-self: flex-start;
+  margin: 6px 12px 10px;
+  padding: 6px 12px;
+  border-radius: var(--chat-radius);
+  background: var(--panel2);
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+
+.chat-typing-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.chat-typing-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--muted-strong);
+  animation: chat-typing-bounce 1.2s infinite ease-in-out;
+}
+
+.chat-typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.chat-typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes chat-typing-bounce {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
 .chat-message-row.grouped {
+  margin-top: -8px;
+}
+
+/*
+ * Full-width band around one message, wrapping .chat-message-row (which stays only as wide as
+ * its bubble). It's the actual .chat-messages flex child - the row inside it just sits left or
+ * right via justify-content - so hovering anywhere at this message's height reveals its
+ * .message-actions, not only a hover directly over the bubble. No line is drawn; the band is
+ * invisible and only exists to widen the hover target.
+ */
+.chat-message-hover-zone {
+  display: flex;
+  width: 100%;
+}
+
+.chat-message-hover-zone.mine {
+  justify-content: flex-end;
+}
+
+.chat-message-hover-zone.gap-before {
+  margin-top: 10px;
+}
+
+.chat-message-hover-zone.grouped {
   margin-top: -8px;
 }
 
@@ -5966,9 +6360,9 @@ body {
 }
 
 .chat-message.mine {
-  border-color: color-mix(in srgb, var(--purple), transparent 30%);
+  border-color: color-mix(in srgb, var(--chat-bubble-mine), transparent 30%);
   border-radius: var(--chat-bubble-radius);
-  background: var(--purple);
+  background: var(--chat-bubble-mine);
 }
 
 .chat-message.mine p {
@@ -6041,7 +6435,7 @@ body {
 .message-actions {
   position: absolute;
   top: 50%;
-  left: calc(100% + 6px);
+  left: calc(100% + 8px);
   display: flex;
   align-items: center;
   gap: 2px;
@@ -6057,11 +6451,14 @@ body {
 
 .chat-message-row.mine .message-actions {
   left: auto;
-  right: calc(100% + 6px);
+  right: calc(100% + 8px);
 }
 
-.chat-message-time-wrap:hover .message-actions,
-.chat-message-time-wrap:focus-within .message-actions,
+/* The reveal zone is the full-width band beside this message (.chat-message-hover-zone), not
+   just the bubble itself - so hovering the empty space next to a short message at the same
+   height still shows its own toolbar, the way Messenger's row hover works. */
+.chat-message-hover-zone:hover .message-actions,
+.chat-message-hover-zone:focus-within .message-actions,
 .message-actions.open {
   opacity: 1;
   pointer-events: auto;
@@ -6091,10 +6488,8 @@ body {
 }
 
 .message-actions-picker {
-  position: absolute;
+  /* top/left come from useFloatingPosition's inline style, not from here. */
   z-index: 40;
-  top: calc(100% + 6px);
-  left: 0;
   display: flex;
   gap: 2px;
   padding: 4px;
@@ -6105,9 +6500,25 @@ body {
 }
 
 .message-actions-picker button {
+  /* Self-contained on purpose: this popup is portaled to document.body (see
+     useFloatingPosition's floatingPortal), so it's no longer a descendant of
+     .message-actions and can't rely on that rule's button reset anymore. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 30px;
   height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-strong);
   font-size: 16px;
+  line-height: 1;
+}
+
+.message-actions-picker button:hover {
+  background: var(--panel2);
 }
 
 .message-actions-more {
@@ -6119,21 +6530,42 @@ body {
   font-size: 14px;
 }
 
-.chat-reply-quote {
+.chat-reply-label {
   display: flex;
   align-items: center;
-  gap: 5px;
-  max-width: 240px;
-  margin: 0;
-  padding: 6px 10px;
-  border: 0;
-  /* Flat where it meets the bubble right below, so the two read as one connected shape. */
-  border-radius: var(--chat-bubble-radius) var(--chat-bubble-radius) 4px 4px;
-  background: color-mix(in srgb, var(--muted), transparent 88%);
-  color: var(--muted);
-  font: inherit;
+  gap: 4px;
+  padding: 0 2px;
+  margin-bottom: 3px;
+  max-width: 260px;
+  color: var(--muted-strong);
   font-size: 11px;
+}
+
+/* Quote and the reply's own bubble/tile size independently - each to its own content, not tied to the other. */
+.chat-reply-and-bubble {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.chat-message-row.mine .chat-reply-and-bubble {
+  align-items: flex-end;
+}
+
+.chat-reply-quote {
+  display: block;
+  position: relative;
+  margin: 0;
+  /* Extra room at the bottom for the reply's own bubble to overlap into, Messenger-style. */
+  padding: 8px 10px 28px;
+  border: 0;
+  border-radius: var(--chat-bubble-radius);
+  background: color-mix(in srgb, var(--muted), transparent 85%);
+  color: var(--muted-strong);
+  font: inherit;
+  font-size: 12px;
   text-align: left;
+  word-break: break-word;
   cursor: pointer;
 }
 
@@ -6142,39 +6574,33 @@ body {
 }
 
 .chat-message-row.mine .chat-reply-quote {
-  background: rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.85);
 }
 
-/* The bubble/tile right under a reply quote loses its own top rounding, so they sit flush together. */
+/* Pulled up into the quote's own extra bottom padding, so it overlaps the quote like a stacked card. */
 .chat-message-time-wrap:has(.chat-reply-quote) .chat-message,
-.chat-message-time-wrap:has(.chat-reply-quote) .chat-attachment-grid .chat-attachment-tile:first-child {
-  border-top-left-radius: 4px;
-  border-top-right-radius: 4px;
+.chat-message-time-wrap:has(.chat-reply-quote) .chat-attachment-grid:first-child .chat-attachment-tile:first-child {
+  margin-top: -20px;
+  position: relative;
 }
 
-.chat-reply-quote-sender {
-  flex: 0 0 auto;
-  font-weight: 700;
-}
-
-.chat-reply-quote-text,
-.chat-reply-quote-file {
-  min-width: 0;
+.chat-reply-quote-text {
+  display: -webkit-box;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .chat-reply-quote-file {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .chat-reply-quote-thumb {
-  width: 26px;
-  height: 26px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
   border-radius: 4px;
   object-fit: cover;
@@ -6556,18 +6982,46 @@ body {
   align-items: center;
   gap: 8px;
   margin: 0;
-  padding: 10px 16px;
+  padding: 10px 16px 10px 10px;
   border: 0;
   border-top: 1px solid var(--line);
-  /* Matches the panel's own bottom corners, so the focus outline below doesn't get clipped square against them. */
   border-radius: 0 0 var(--chat-radius) var(--chat-radius);
   background: var(--panel2);
-  transition: border-color 0.15s ease;
 }
 
-.chat-composer:focus-within {
-  border-top-color: var(--purple);
-  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--purple), transparent 80%);
+
+.chat-composer-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 16px;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--pink), transparent 60%);
+  background: color-mix(in srgb, var(--pink), transparent 90%);
+  color: var(--pink);
+  font-size: 12px;
+}
+
+.chat-composer-error span {
+  flex: 1;
+}
+
+.chat-composer-error button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--pink);
+}
+
+.chat-composer-error button:hover {
+  opacity: 0.75;
 }
 
 .chat-composer input {
@@ -6603,8 +7057,13 @@ body {
 }
 
 @media (max-width: 900px) {
-  .chat-layout {
+  .chat-layout,
+  .chat-layout.info-open {
     grid-template-columns: 1fr;
+  }
+
+  .chat-conversation-info {
+    display: none;
   }
 
   .chat-thread-head {
@@ -6906,6 +7365,7 @@ body {
   gap: 6px;
   padding: 3px 4px 3px 6px;
   border: 1px solid var(--line);
+  border-radius: var(--chat-radius);
   background: var(--panel2);
   color: var(--text);
   font-size: 12px;
@@ -6918,12 +7378,19 @@ body {
   color: var(--muted);
 }
 
+/* The remove button is auto-focused right after a single pick (UserPicker's focusChipAfterPick),
+   which triggers the global button:focus-visible ring - not wanted on this tiny icon button. */
+.chat-new-form .user-picker button:focus-visible {
+  outline: none;
+}
+
 .user-picker-results {
   margin: 0;
-  padding: 0;
+  padding: 4px;
   max-height: 200px;
   overflow-y: auto;
   border: 1px solid var(--line);
+  border-radius: var(--chat-radius);
   background: var(--panel2);
   list-style: none;
 }
@@ -6933,22 +7400,48 @@ body {
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   color: var(--text);
   font-size: 13px;
   cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 
-.user-picker-results li.active,
+/* Kept separate from :hover on purpose - the first result is always .active (arrow-key
+   pre-selection), so if it shared :hover's background, that row would look permanently
+   "highlighted" and mouse hover on it would never visibly change anything. */
+.user-picker-results li.active {
+  border-color: color-mix(in srgb, var(--purple), transparent 55%);
+}
+
 .user-picker-results li:hover {
-  background: var(--bg);
+  background: color-mix(in srgb, var(--purple), transparent 82%);
 }
 
 .user-picker-status {
   padding: 7px 10px;
   border: 1px solid var(--line);
+  border-radius: var(--chat-radius);
   background: var(--panel2);
   color: var(--muted);
   font-size: 13px;
+}
+
+.user-picker-status.loading {
+  animation: user-picker-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes user-picker-pulse {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .user-picker-status.error,

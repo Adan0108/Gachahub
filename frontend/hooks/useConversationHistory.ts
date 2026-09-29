@@ -32,6 +32,8 @@ export interface ConversationHistory<Message> {
   /** Attach to the scrollable message list. */
   containerRef: RefObject<HTMLDivElement | null>;
   handleScroll: (event: UIEvent<HTMLDivElement>) => void;
+  /** Applies an edit (react/unsend) to the older messages held in this hook's own state, not react-query's cache. Returns the pre-edit array, for rolling back on failure. */
+  patchOlder: (updater: (items: Message[]) => Message[]) => Message[];
 }
 
 /** Browsers with CSS scroll anchoring (overflow-anchor) keep the view steady on their own. */
@@ -64,6 +66,15 @@ export function useConversationHistory<Message extends HistoryMessage>(
   // A response only counts if the conversation is still the one it was requested for.
   const generation = useRef(0);
   const isFetching = useRef(false);
+  // Mirrors olderMessages so patchOlder can read the latest value without a stale closure.
+  const olderMessagesRef = useRef(olderMessages);
+  olderMessagesRef.current = olderMessages;
+
+  const patchOlder = (updater: (items: Message[]) => Message[]): Message[] => {
+    const previous = olderMessagesRef.current;
+    setOlderMessages(updater(previous));
+    return previous;
+  };
 
   useEffect(() => {
     generation.current += 1;
@@ -188,5 +199,6 @@ export function useConversationHistory<Message extends HistoryMessage>(
     retryHistory,
     containerRef,
     handleScroll,
+    patchOlder,
   };
 }

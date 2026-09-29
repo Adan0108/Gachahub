@@ -18,6 +18,10 @@ export const queryKeys = {
   chatArchivedConversations: ["chat", "archived"],
   chatRequests: ["chat", "requests"],
   chatMessages: (conversationId) => ["chat", "messages", conversationId],
+  // Socket-pushed only - nobody ever fetches this over REST, useChatSocket just writes into it.
+  chatTyping: (conversationId) => ["chat", "typing", conversationId],
+  // Same idea: the one-shot "your message request was accepted" event, keyed per conversation.
+  chatRequestAccepted: (conversationId) => ["chat", "request-accepted", conversationId],
 };
 
 export const queries = {

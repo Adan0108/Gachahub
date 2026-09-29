@@ -5,6 +5,8 @@ import {
   membershipEventText,
   messageDividerLabel,
   messageFullTimestamp,
+  readableNeighbors,
+  replyOriginalSenderLabel,
   threadItemKey,
   wasLikelySentDuringAbsence,
   withOptimisticDelete,
@@ -306,11 +308,46 @@ describe('withOptimisticDelete', () => {
   });
 });
 
-describe('wasLikelySentDuringAbsence', () => {
+describe('replyOriginalSenderLabel', () => {
+  it('says "You" when someone else replies to a message the viewer wrote', () => {
+    expect(replyOriginalSenderLabel('bob', 'me', 'me', 'Me')).toBe('You');
+  });
+
+  it('says "yourself" when the viewer replies to their own earlier message', () => {
+    expect(replyOriginalSenderLabel('me', 'me', 'me', 'Me')).toBe('yourself');
+  });
+
+  it('says "themself" when someone else replies to their own earlier message', () => {
+    expect(replyOriginalSenderLabel('bob', 'bob', 'me', 'Bob')).toBe('themself');
+  });
+
+  it('names the original sender when neither the replier nor the viewer wrote it', () => {
+    expect(replyOriginalSenderLabel('bob', 'carol', 'me', 'Carol')).toBe('Carol');
+  });
+
+  it('falls back to a plain label once the sender or name is unknown', () => {
+    expect(replyOriginalSenderLabel('bob', undefined, 'me', undefined)).toBe('a message');
+    expect(replyOriginalSenderLabel('bob', 'carol', 'me', undefined)).toBe('a message');
+  });
+});
+
+describe('readableNeighbors / wasLikelySentDuringAbsence', () => {
   const messages = [message('a', 0), message('b', 1), message('c', 2)];
 
   it('is true only when readable messages sit on both sides', () => {
-    expect(wasLikelySentDuringAbsence(messages, decrypted({ a: 'ok', b: 'unavailable', c: 'ok' }), 1)).toBe(true);
-    expect(wasLikelySentDuringAbsence(messages, decrypted({ a: 'unavailable', b: 'unavailable', c: 'ok' }), 1)).toBe(false);
+    const withBothSidesOk = readableNeighbors(messages, decrypted({ a: 'ok', b: 'unavailable', c: 'ok' }));
+    expect(wasLikelySentDuringAbsence(withBothSidesOk, 1)).toBe(true);
+
+    const withNeitherSideOk = readableNeighbors(
+      messages,
+      decrypted({ a: 'unavailable', b: 'unavailable', c: 'ok' }),
+    );
+    expect(wasLikelySentDuringAbsence(withNeitherSideOk, 1)).toBe(false);
+  });
+
+  it('is false at either end of the thread, with nothing on one side', () => {
+    const neighbors = readableNeighbors(messages, decrypted({ a: 'ok', b: 'ok', c: 'unavailable' }));
+    expect(wasLikelySentDuringAbsence(neighbors, 0)).toBe(false);
+    expect(wasLikelySentDuringAbsence(neighbors, 2)).toBe(false);
   });
 });
