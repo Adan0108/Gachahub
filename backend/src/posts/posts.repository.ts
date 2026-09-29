@@ -658,6 +658,48 @@ export class PostsRepository {
     });
   }
 
+  /**
+   * Hydrates Trending snapshot IDs while reapplying the live feed filters.
+   *
+   * Snapshot order is restored by FeedService because Prisma IN queries do
+   * not preserve the order of the supplied IDs.
+   */
+  async findTrendingManyByIds(
+    ids: string[],
+    where: Prisma.PostWhereInput,
+    userId?: string,
+  ) {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    return this.prisma.post.findMany({
+      where: {
+        AND: [
+          where,
+          {
+            id: {
+              in: ids,
+            },
+          },
+        ],
+      },
+      include: {
+        ...postInclude,
+        postLikes: userId
+          ? {
+              where: {
+                userId,
+              },
+              select: {
+                userId: true,
+              },
+            }
+          : false,
+      },
+    });
+  }
+
   findPostForInteraction(postId: string) {
     return this.prisma.post.findUnique({
       where: {

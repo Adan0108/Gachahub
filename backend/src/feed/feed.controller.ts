@@ -6,6 +6,7 @@ import {
   QueryFeedDto,
   QueryGameFeedDto,
   QueryLatestFeedDto,
+  QueryTrendingFeedDto,
 } from './dto/query-feed.dto';
 import { FeedService } from './feed.service';
 
@@ -43,7 +44,10 @@ export class FeedController {
   @ApiOperation({
     summary: 'Get global trending posts',
   })
-  trending(@Query() query: QueryFeedDto, @Session() session?: UserSession) {
+  trending(
+    @Query() query: QueryTrendingFeedDto,
+    @Session() session?: UserSession,
+  ) {
     return this.feedService.trending(query, session?.user.id);
   }
 }

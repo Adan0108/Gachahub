@@ -8,6 +8,7 @@ import {
   QueryFeedDto,
   QueryGameFeedDto,
   QueryLatestFeedDto,
+  QueryTrendingFeedDto,
 } from './dto/query-feed.dto';
 import { FeedRankerService } from './feed-ranker.service';
 import { FeedRepository } from './feed.repository';
@@ -18,6 +19,15 @@ import {
   decodeLatestFeedCursor,
   encodeLatestFeedCursor,
 } from './utils/feed-cursor.util';
+import {
+  TRENDING_CANDIDATE_POOL,
+  TrendingSnapshotService,
+  type TrendingSnapshotFilters,
+} from './trending/trending-snapshot.service';
+import {
+  decodeTrendingFeedCursor,
+  encodeTrendingFeedCursor,
+} from './utils/trending-cursor.util';
 
 const FOR_YOU_MAX_CANDIDATES = 400;
 
@@ -38,6 +48,8 @@ export class FeedService {
     private readonly feedRanker: FeedRankerService,
 
     private readonly userInterestService: UserInterestService,
+
+    private readonly trendingSnapshots: TrendingSnapshotService,
   ) {}
 
   /**
@@ -65,7 +77,7 @@ export class FeedService {
    * This intentionally stays global instead
    * of using follow relationships.
    */
-  trending(query: QueryFeedDto, userId?: string) {
+  trending(query: QueryTrendingFeedDto, userId?: string) {
     return this.trendingInternal({
       query,
       userId,
@@ -323,28 +335,48 @@ export class FeedService {
     };
   }
 
+  /**
+   * Builds the global/community-ranked Trending feed without follow-based
+   * personalization.
+   *
+   * Flow:
+   * 1. Decode any Trending continuation cursor and build the effective filters.
+   * 2. For a first page, derive the filter-specific snapshot identity and reuse
+   *    the current Redis snapshot when available.
+   * 3. Otherwise fetch up to TRENDING_CANDIDATE_POOL candidates, rank them with
+   *    the existing Trending ranker, and keep at most TRENDING_MAX_RESULTS.
+   * 4. Store the frozen ranking as ordered post IDs in a short-lived Redis
+   *    snapshot; full post objects are never cached.
+   * 5. For continuation, load the exact cursor snapshot without reranking and
+   *    treat its offset as the next raw position in that snapshot.
+   * 6. Hydrate IDs from PostgreSQL with live visibility and post-state filters,
+   *    scanning farther when invalid posts would otherwise shorten the page.
+   * 7. Restore the frozen snapshot order after hydration so ranking stays stable
+   *    while returned post data remains fresh.
+   * 8. Return hasMore and an opaque cursor carrying the same snapshot identity
+   *    and the next raw offset.
+   *
+   * The current-snapshot TTL controls first-page reuse, while the longer snapshot
+   * TTL allows existing cursors to continue after a newer ranking is published.
+   */
   private async trendingInternal(params: {
-    query: QueryFeedDto;
+    query: QueryTrendingFeedDto | QueryGameFeedDto;
     userId?: string;
     gameSlug?: string;
     categorySlug?: string;
   }) {
     const { query, userId, gameSlug, categorySlug } = params;
 
-    const page = query.page ?? 1;
-
     const limit = query.limit ?? 20;
+    const cursor = query.cursor
+      ? decodeTrendingFeedCursor(query.cursor)
+      : undefined;
 
-    /*
-     * We rank a bounded pool rather than
-     * reading every post from the database.
-     */
-    const maxCandidates = 500;
-
-    const candidateLimit = Math.min(
-      maxCandidates,
-      Math.max(100, page * limit * 5),
-    );
+    const filters: TrendingSnapshotFilters = {
+      gameSlug: gameSlug ?? null,
+      categorySlug: categorySlug ?? null,
+      type: query.type ?? null,
+    };
 
     const where: Prisma.PostWhereInput = {
       status: 'PUBLISHED',
@@ -382,38 +414,106 @@ export class FeedService {
         : {}),
     };
 
-    const candidates = await this.feedRepository.findTrendingCandidates(
-      where,
-      candidateLimit,
-    );
+    const snapshot = cursor
+      ? await this.trendingSnapshots.getForContinuation(
+          cursor.snapshotId,
+          filters,
+        )
+      : await this.trendingSnapshots.getOrCreate(filters, async () => {
+          const candidates = await this.feedRepository.findTrendingCandidates(
+            where,
+            TRENDING_CANDIDATE_POOL,
+          );
 
-    const ranked = this.feedRanker.rankTrending(candidates);
+          return this.feedRanker
+            .rankTrending(candidates)
+            .map((candidate) => candidate.id);
+        });
 
-    const start = (page - 1) * limit;
+    const offset = cursor?.offset ?? 0;
 
-    if (start >= maxCandidates) {
-      throw new BadRequestException('Trending feed pagination limit exceeded');
+    if (offset > snapshot.postIds.length) {
+      throw new BadRequestException('Invalid Trending feed cursor');
     }
 
-    const selectedIds = ranked
-      .slice(start, start + limit)
-      .map((candidate) => candidate.id);
-
-    const posts = await this.postsRepository.findManyByIds(selectedIds, userId);
+    const page = await this.hydrateTrendingSnapshotPage({
+      postIds: snapshot.postIds,
+      offset,
+      limit,
+      where,
+      userId,
+    });
 
     return {
-      items: this.orderPostsByIds(posts, selectedIds).map((post) =>
-        formatPost(post),
-      ),
+      items: page.posts.map((post) => formatPost(post)),
 
       meta: {
-        page,
         limit,
-
-        candidateCount: candidates.length,
-
-        hasMore: start + limit < ranked.length,
+        hasMore: page.hasMore,
+        nextCursor:
+          page.hasMore && page.nextOffset !== null
+            ? encodeTrendingFeedCursor({
+                snapshotId: snapshot.id,
+                offset: page.nextOffset,
+              })
+            : null,
       },
+    };
+  }
+
+  /**
+   * Hydrates one Trending page while scanning past snapshot IDs that are no
+   * longer visible. One extra valid post is resolved to calculate hasMore
+   * without exposing stale or unnecessarily short pages.
+   */
+  private async hydrateTrendingSnapshotPage(params: {
+    postIds: string[];
+    offset: number;
+    limit: number;
+    where: Prisma.PostWhereInput;
+    userId?: string;
+  }) {
+    const { postIds, offset, limit, where, userId } = params;
+    const hydrated: Array<{
+      index: number;
+      post: Awaited<
+        ReturnType<PostsRepository['findTrendingManyByIds']>
+      >[number];
+    }> = [];
+    let scanOffset = offset;
+
+    while (scanOffset < postIds.length && hydrated.length <= limit) {
+      const remainingNeeded = limit + 1 - hydrated.length;
+      const chunkSize = Math.max(20, remainingNeeded);
+      const chunkEnd = Math.min(postIds.length, scanOffset + chunkSize);
+      const chunkIds = postIds.slice(scanOffset, chunkEnd);
+      const posts = await this.postsRepository.findTrendingManyByIds(
+        chunkIds,
+        where,
+        userId,
+      );
+      const postMap = new Map(posts.map((post) => [post.id, post] as const));
+
+      for (let index = scanOffset; index < chunkEnd; index += 1) {
+        const postId = postIds[index];
+        const post = postId ? postMap.get(postId) : undefined;
+
+        if (post) {
+          hydrated.push({ index, post });
+        }
+      }
+
+      scanOffset = chunkEnd;
+    }
+
+    const selected = hydrated.slice(0, limit);
+    const last = selected[selected.length - 1];
+    const hasMore = hydrated.length > limit;
+
+    return {
+      posts: selected.map((item) => item.post),
+      hasMore,
+      nextOffset: hasMore && last ? last.index + 1 : null,
     };
   }
 

@@ -130,6 +130,7 @@ describe('FeedService - For You', () => {
       followsService as never,
       feedRanker as never,
       userInterestService as never,
+      {} as never,
     );
 
     feedRepository.findInterestCandidates.mockResolvedValue([]);

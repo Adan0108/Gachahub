@@ -107,4 +107,33 @@ describe('PostsRepository - Latest feed', () => {
       },
     });
   });
+
+  it('rehydrates Trending IDs with the live feed filters and current-user likes', async () => {
+    const where = {
+      status: 'PUBLISHED' as const,
+      visibility: 'PUBLIC' as const,
+      deletedAt: null,
+      type: 'GUIDE' as const,
+    };
+
+    await repository.findTrendingManyByIds(
+      ['post-1', 'post-2'],
+      where,
+      'user-1',
+    );
+
+    const calls = prisma.post.findMany.mock.calls as Array<[unknown]>;
+
+    expect(calls[0]?.[0]).toMatchObject({
+      where: {
+        AND: [where, { id: { in: ['post-1', 'post-2'] } }],
+      },
+      include: {
+        postLikes: {
+          where: { userId: 'user-1' },
+          select: { userId: true },
+        },
+      },
+    });
+  });
 });
