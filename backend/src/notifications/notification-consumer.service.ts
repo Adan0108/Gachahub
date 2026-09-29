@@ -188,7 +188,7 @@ export class NotificationConsumerService
         await this.consumer.connect();
 
         await this.consumer.subscribe({
-          topics: [KAFKA_TOPICS.POSTS, KAFKA_TOPICS.SOCIAL],
+          topics: [KAFKA_TOPICS.POSTS, KAFKA_TOPICS.SOCIAL, KAFKA_TOPICS.CHAT],
         });
 
         await this.consumer.run({

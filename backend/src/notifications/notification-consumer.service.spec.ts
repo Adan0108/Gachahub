@@ -1,5 +1,7 @@
+import type { Consumer } from 'kafkajs';
 import type { DomainEventType } from '../domain-events/domain-event.types';
 import type { Prisma } from '../generated/prisma/client';
+import { KAFKA_TOPICS } from '../kafka/kafka-topics';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationConsumerService } from './notification-consumer.service';
 import { NotificationService } from './notification.service';
@@ -105,6 +107,31 @@ describe('NotificationConsumerService', () => {
     jest.clearAllMocks();
   });
 
+  describe('Kafka subscription', () => {
+    it('subscribes to the posts, social, and chat topics', async () => {
+      const consumer = (
+        service as unknown as {
+          consumer: Consumer;
+        }
+      ).consumer;
+      const connectSpy = jest
+        .spyOn(consumer, 'connect')
+        .mockResolvedValue(undefined);
+      const subscribeSpy = jest
+        .spyOn(consumer, 'subscribe')
+        .mockResolvedValue(undefined);
+      const runSpy = jest.spyOn(consumer, 'run').mockResolvedValue(undefined);
+
+      await service.onModuleInit();
+
+      expect(connectSpy).toHaveBeenCalledTimes(1);
+      expect(subscribeSpy).toHaveBeenCalledWith({
+        topics: [KAFKA_TOPICS.POSTS, KAFKA_TOPICS.SOCIAL, KAFKA_TOPICS.CHAT],
+      });
+      expect(runSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('idempotent event processing', () => {
     /**
      * Verifies that a new event is claimed, converted into a notification,
@@ -196,6 +223,40 @@ describe('NotificationConsumerService', () => {
       expect(publishNotificationMock).not.toHaveBeenCalled();
     });
 
+    it('does not create or emit twice for a duplicate chat event', async () => {
+      claimMock.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+      const notification = {
+        id: 'notification-user-b',
+        recipientId: 'user-b',
+      };
+      createManyNotificationsMock.mockResolvedValue([notification]);
+
+      const event: TestKafkaDomainEvent = {
+        eventId: 'chat-event-duplicate',
+        type: 'chat.message.sent',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateId: 'conversation-1',
+        payload: {
+          messageId: 'message-1',
+          conversationId: 'conversation-1',
+          senderId: 'user-a',
+          replyToMessageId: null,
+          replyToSenderId: null,
+          recipientUserIds: ['user-b'],
+        },
+      };
+
+      await handleEvent(service, event);
+      await handleEvent(service, event);
+
+      expect(claimMock).toHaveBeenCalledTimes(2);
+      expect(createManyNotificationsMock).toHaveBeenCalledTimes(1);
+      expect(publishNotificationMock).toHaveBeenCalledTimes(1);
+      expect(publishNotificationMock).toHaveBeenCalledWith(notification);
+    });
+
     /**
      * Verifies that notification-processing failures propagate upward
      * and that realtime delivery does not happen when the transaction fails.
@@ -226,6 +287,37 @@ describe('NotificationConsumerService', () => {
 
       expect(claimMock).toHaveBeenCalledTimes(1);
       expect(createNotificationMock).toHaveBeenCalledTimes(1);
+      expect(publishNotificationMock).not.toHaveBeenCalled();
+    });
+
+    it('does not emit a chat notification when processing fails', async () => {
+      claimMock.mockResolvedValue(true);
+      createManyNotificationsMock.mockRejectedValue(
+        new Error('chat notification failed'),
+      );
+
+      const event: TestKafkaDomainEvent = {
+        eventId: 'chat-event-fail',
+        type: 'chat.message.sent',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateId: 'conversation-1',
+        payload: {
+          messageId: 'message-1',
+          conversationId: 'conversation-1',
+          senderId: 'user-a',
+          replyToMessageId: null,
+          replyToSenderId: null,
+          recipientUserIds: ['user-b'],
+        },
+      };
+
+      await expect(handleEvent(service, event)).rejects.toThrow(
+        'chat notification failed',
+      );
+
+      expect(claimMock).toHaveBeenCalledTimes(1);
+      expect(createManyNotificationsMock).toHaveBeenCalledTimes(1);
       expect(publishNotificationMock).not.toHaveBeenCalled();
     });
 
