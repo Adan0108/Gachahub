@@ -14,9 +14,10 @@ describe('WebsocketGateway', () => {
 
   const makeSocket = (overrides: Record<string, unknown> = {}) => ({
     id: 'socket-1',
-    data: {} as { userId?: string },
+    data: {} as { userId?: string; authReady?: Promise<void> },
     handshake: { headers: {} },
     join: jest.fn(),
+    emit: jest.fn(),
     disconnect: jest.fn(),
     ...overrides,
   });
@@ -29,32 +30,59 @@ describe('WebsocketGateway', () => {
 
   describe('handleConnection', () => {
     it('joins the user room on a valid session', async () => {
-      getSession.mockResolvedValue({ user: { id: 'user-1' } });
+      getSession.mockResolvedValue({
+        user: { id: 'user-1' },
+        session: { id: 'session-1' },
+      });
       const socket = makeSocket();
 
       await gateway.handleConnection(socket as any);
 
       expect(socket.data.userId).toBe('user-1');
       expect(socket.join).toHaveBeenCalledWith('user:user-1');
+      expect(socket.join).toHaveBeenCalledWith('session:session-1');
       expect(socket.disconnect).not.toHaveBeenCalled();
     });
 
-    it('disconnects when there is no session', async () => {
+    it('sets authReady synchronously, before auth resolves, so a sibling gateway on this socket has something to await instead of reading userId too early', async () => {
+      let resolveSession: (value: unknown) => void = () => {};
+      getSession.mockReturnValue(
+        new Promise((resolve) => {
+          resolveSession = resolve;
+        }),
+      );
+      const socket = makeSocket();
+
+      const connectionPromise = gateway.handleConnection(socket as any);
+
+      expect(socket.data.authReady).toBeInstanceOf(Promise);
+      expect(socket.data.userId).toBeUndefined();
+
+      resolveSession({ user: { id: 'user-1' }, session: { id: 'session-1' } });
+      await connectionPromise;
+      await socket.data.authReady;
+
+      expect(socket.data.userId).toBe('user-1');
+    });
+
+    it('tells the browser it is signed out, then disconnects, when there is no session', async () => {
       getSession.mockResolvedValue(null);
       const socket = makeSocket();
 
       await gateway.handleConnection(socket as any);
 
+      expect(socket.emit).toHaveBeenCalledWith('session:revoked');
       expect(socket.disconnect).toHaveBeenCalledWith(true);
       expect(socket.join).not.toHaveBeenCalled();
     });
 
-    it('disconnects when session lookup throws', async () => {
+    it('disconnects on a backend error WITHOUT any signed-out signal - a hiccup must not log people out', async () => {
       getSession.mockRejectedValue(new Error('boom'));
       const socket = makeSocket();
 
       await gateway.handleConnection(socket as any);
 
+      expect(socket.emit).not.toHaveBeenCalled();
       expect(socket.disconnect).toHaveBeenCalledWith(true);
       expect(socket.join).not.toHaveBeenCalled();
     });

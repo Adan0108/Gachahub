@@ -1,14 +1,8 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { MediaReferenceDto } from './media-reference.dto';
 
-export class PostMediaReferenceDto {
-  @ApiProperty({
-    example: 'media_upload_database_id',
-  })
-  @IsString()
-  mediaUploadId!: string;
-
+export class PostMediaReferenceDto extends MediaReferenceDto {
   @ApiPropertyOptional({
     example: 'Jinhsi build stats',
   })
@@ -16,14 +10,4 @@ export class PostMediaReferenceDto {
   @IsString()
   @MaxLength(300)
   altText?: string;
-
-  @ApiPropertyOptional({
-    example: 0,
-    default: 0,
-  })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  sortOrder?: number;
 }

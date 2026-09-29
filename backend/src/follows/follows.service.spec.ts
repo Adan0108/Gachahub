@@ -104,6 +104,20 @@ describe('FollowsService', () => {
     });
   });
 
+  describe('getFollowStatus', () => {
+    it('reports both directions, checked independently', async () => {
+      repository.find.mockImplementation((followerId: string, followingId: string) =>
+        followerId === 'user-1' && followingId === 'user-2'
+          ? Promise.resolve({ followerId, followingId })
+          : Promise.resolve(null),
+      );
+
+      const result = await service.getFollowStatus('user-1', 'user-2');
+
+      expect(result).toEqual({ following: true, followsMe: false });
+    });
+  });
+
   describe('getFollowingIdsAmong', () => {
     it('returns a Set of the followed ids among the candidates', async () => {
       repository.findFollowingIdsAmong.mockResolvedValue([

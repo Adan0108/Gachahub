@@ -5,7 +5,10 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { FiX } from "react-icons/fi";
 import { useTheme } from "../hooks/useTheme";
+import { useDeviceIdentity } from "../hooks/useDeviceIdentity";
+import { useChatSocket } from "../hooks/useChatSocket";
 import { glyph, navItems } from "./constants";
+import { DevToolsPanel } from "./DevToolsPanel";
 import { Topbar } from "./Topbar";
 
 function Logo() {
@@ -74,12 +77,22 @@ function Sidebar({ open, close, closeButtonRef }) {
 export function AppShell({ children, initialTheme = "dark" }) {
   const [menu, setMenu] = useState(false);
   const { theme, toggleTheme } = useTheme(initialTheme);
+  // Provisions this browser device's MLS identity once signed in - runs
+  // app-wide so it's ready before the user ever opens chat, not just when
+  // they land on it. useDeviceIdentity no-ops until useCurrentUser resolves
+  // an authenticated user, so this is harmless on /login and /register too.
+  useDeviceIdentity();
+  // Live push for new messages app-wide, same reasoning as useDeviceIdentity
+  // above - so a message shows up immediately even on a page other than
+  // /chat, not just once the poll interval there happens to fire.
+  useChatSocket();
   const menuButtonRef = useRef(null);
   const menuCloseButtonRef = useRef(null);
   const wasMenuOpenRef = useRef(false);
   const pathname = usePathname();
   const studio = pathname === "/studio";
   const auth = pathname === "/login" || pathname === "/register";
+  const chat = pathname.startsWith("/chat");
 
   useEffect(() => {
     if (menu) {
@@ -100,7 +113,12 @@ export function AppShell({ children, initialTheme = "dark" }) {
   }, [menu]);
 
   if (auth) {
-    return <div className="auth-shell">{children}</div>;
+    return (
+      <div className="auth-shell">
+        {children}
+        {process.env.NODE_ENV !== "production" && <DevToolsPanel />}
+      </div>
+    );
   }
 
   return (
@@ -113,10 +131,12 @@ export function AppShell({ children, initialTheme = "dark" }) {
             onMenu={() => setMenu(true)}
             theme={theme}
             onToggleTheme={toggleTheme}
+            showGlobalActions={!chat}
           />
         )}
         {children}
       </div>
+      {process.env.NODE_ENV !== "production" && <DevToolsPanel />}
     </div>
   );
 }

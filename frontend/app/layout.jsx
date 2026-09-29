@@ -1,5 +1,6 @@
 import "./globals.css";
 import { cookies } from "next/headers";
+import Script from "next/script";
 import { AppShell } from "../components/AppShell";
 import { Providers } from "../components/Providers";
 
@@ -17,7 +18,9 @@ export default async function RootLayout({ children }) {
   return (
     <html lang="en" data-theme={initialTheme} suppressHydrationWarning>
       <body>
-        <script
+        <Script
+          id="theme-init"
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{
             __html: `
               try {

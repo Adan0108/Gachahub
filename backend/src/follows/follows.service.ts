@@ -53,6 +53,16 @@ export class FollowsService {
     };
   }
 
+  /** Both directions at once, for a "would this become a message request" check. */
+  async getFollowStatus(actorId: string, targetId: string) {
+    const [following, followsMe] = await Promise.all([
+      this.isFollowing(actorId, targetId),
+      this.isFollowing(targetId, actorId),
+    ]);
+
+    return { following: following.following, followsMe: followsMe.following };
+  }
+
   /**
    * Feed helper.
    *

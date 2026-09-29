@@ -1,6 +1,7 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { claimUploadsForAttachment } from '../media/media.repository';
 
 const postInclude = {
   author: {
@@ -266,35 +267,15 @@ export class PostsRepository {
         });
 
         if (params.media?.length) {
-          /*
-           * updateMany ensures the uploads are still UPLOADED at the exact time
-           * they are attached. This protects against two simultaneous Post
-           * requests attempting to reuse the same mediaUploadId.
-           */
           const mediaUploadIds = params.media.map(
             (media) => media.mediaUploadId,
           );
 
-          const claimed = await tx.mediaUpload.updateMany({
-            where: {
-              id: {
-                in: mediaUploadIds,
-              },
-              userId: params.authorId,
-              purpose: 'POST',
-              status: 'UPLOADED',
-            },
-            data: {
-              status: 'ATTACHED',
-              attachedAt: new Date(),
-            },
+          await claimUploadsForAttachment(tx, {
+            ids: mediaUploadIds,
+            userId: params.authorId,
+            purpose: 'POST',
           });
-
-          if (claimed.count !== mediaUploadIds.length) {
-            throw new ConflictException(
-              'One or more media uploads could not be attached',
-            );
-          }
 
           await tx.postMedia.createMany({
             data: params.media.map((media) => ({

@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -243,50 +242,16 @@ export class PostsService {
 
     const mediaReferences = dto.media ?? [];
 
-    const uploads = await this.mediaService.getAttachableUploads({
+    // 0-10 images, or exactly one video, never mixed - enforced in
+    // MediaService.resolveAttachableMedia, shared with ChatService's attach flow.
+    const uploads = await this.mediaService.resolveAttachableMedia({
       ids: mediaReferences.map((item) => item.mediaUploadId),
       userId: authorId,
       purpose: 'POST',
+      maxImages: 10,
+      maxVideos: 1,
+      entityLabel: 'post',
     });
-
-    if (uploads.length !== mediaReferences.length) {
-      const resolved = new Set(uploads.map((upload) => upload.id));
-      const missing = mediaReferences
-        .map((item) => item.mediaUploadId)
-        .filter((id) => !resolved.has(id));
-
-      throw new BadRequestException(
-        `Media uploads cannot be attached: ${missing.join(', ')}`,
-      );
-    }
-
-    /*
-     * MVP policy:
-     * - 0–10 images, or
-     * - exactly one video
-     * - images and video cannot be mixed
-     */
-    const imageCount = uploads.filter(
-      (upload) => upload.resourceType === 'IMAGE',
-    ).length;
-
-    const videoCount = uploads.filter(
-      (upload) => upload.resourceType === 'VIDEO',
-    ).length;
-
-    if (imageCount > 10) {
-      throw new BadRequestException('A post supports at most 10 images');
-    }
-
-    if (videoCount > 1) {
-      throw new BadRequestException('A post supports at most one video');
-    }
-
-    if (imageCount > 0 && videoCount > 0) {
-      throw new BadRequestException(
-        'A post cannot mix images and video in the MVP',
-      );
-    }
 
     const referenceMap = new Map(
       mediaReferences.map((item, index) => [

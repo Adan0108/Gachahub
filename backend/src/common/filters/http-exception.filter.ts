@@ -13,6 +13,8 @@ type ErrorResponse = {
   success: false;
   statusCode: number;
   message: string | string[];
+  /** Present when the exception carries a machine-readable code (e.g. MEMBERSHIP_CHANGE_PENDING). */
+  code?: string;
   path: string;
   timestamp: string;
 };
@@ -43,6 +45,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
           ? exception.message
           : 'Internal server error';
 
+    const code =
+      typeof exceptionResponse === 'object' &&
+      exceptionResponse !== null &&
+      'code' in exceptionResponse &&
+      typeof exceptionResponse.code === 'string'
+        ? exceptionResponse.code
+        : undefined;
+
     if (exception instanceof RateLimitedException) {
       response.setHeader('Retry-After', String(exception.retryAfterSeconds));
     }
@@ -51,6 +61,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       success: false,
       statusCode: status,
       message,
+      ...(code ? { code } : {}),
       path: request.url,
       timestamp: new Date().toISOString(),
     };

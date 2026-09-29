@@ -1,44 +1,51 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import {
   ChatMessageContentType,
   ChatParticipantRole,
   ChatParticipantState,
+  MediaResourceType,
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
+import { pendingSinceChange } from './membership/apply-participant-transitions';
+import { lockConversation } from './membership/lock-conversation';
+import {
+  claimUploadsForAttachment,
+  type PrismaTransaction,
+} from '../media/media.repository';
 
-type PrismaTransaction = Parameters<
-  Parameters<PrismaService['$transaction']>[0]
->[0];
+/** An upload already validated by ChatService, ready to be claimed and attached to a message. */
+export type ChatMessageMediaInput = {
+  mediaUploadId: string;
+  assetId: string;
+  publicId: string;
+  url: string;
+  resourceType: MediaResourceType;
+  sortOrder: number;
+  width: number | null;
+  height: number | null;
+  duration: number | null;
+  bytes: number | null;
+  format: string | null;
+};
 
-/**
- * Repository responsible for chat database queries.
- *
- * This layer should only contain Prisma/database logic. Business decisions,
- * permission checks, and delivery behavior belong in ChatService.
- */
+/** Chat database queries only; business decisions, permissions and delivery belong in ChatService. */
 @Injectable()
 export class ChatRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mlsGroupRosterRepository: MlsGroupRosterRepository,
+  ) {}
 
-  /**
-   * Finds a user by id
-   *
-   * Used before creating a direct convo to ensure the
-   * user/recipient exists and can receive messages
-   */
+  /** Finds a user by id. */
   findUserById(userId: string) {
     return this.prisma.user.findUnique({
       where: { id: userId },
     });
   }
 
-  /**
-   * Finds active users by id list.
-   *
-   * Used before adding group members so inactive or missing accounts are not
-   * inserted as active chat participants.
-   */
+  /** Finds active users by id list, skipping inactive or missing accounts. */
   findActiveUsersByIds(userIds: string[]) {
     return this.prisma.user.findMany({
       where: {
@@ -54,12 +61,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Finds the unique direct-pair record for two users.
-   *
-   * Direct pair ids are normalized before calling this method,
-   * A->B and B->A ==> point to the same conversation.
-   */
+  /** Finds the direct-pair record for two normalized user ids. */
   findDirectPair(userIdA: string, userIdB: string) {
     return this.prisma.chatDirectPair.findUnique({
       where: {
@@ -78,12 +80,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Finds a message by sender and client idempotency key.
-   *
-   * prevents duplicate messages when a client retries after a network
-   * timeout but the original request already succeeded.
-   */
+  /** Finds a message by sender and client idempotency key. */
   findMessageBySenderClientMessageId(
     senderId: string,
     clientMessageId?: string,
@@ -102,15 +99,14 @@ export class ChatRepository {
       include: {
         receipts: true,
         replyTo: true,
+        media: {
+          orderBy: { sortOrder: 'asc' },
+        },
       },
     });
   }
 
-  /**
-   * Finds one participant row in a conversation.
-   *
-   * Participant state is main source of truth for read/send/block/request permissions.
-   */
+  /** Finds one participant row; participant state is the source of truth for permissions. */
   findParticipant(conversationId: string, userId: string) {
     return this.prisma.chatParticipant.findUnique({
       where: {
@@ -122,24 +118,14 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * List all participants in a convo
-   *
-   * Used when creating message receipts and
-   * deciding who should receive delivery events.
-   */
+  /** Lists all participants in a convo. */
   findParticipants(conversationId: string) {
     return this.prisma.chatParticipant.findMany({
       where: { conversationId },
     });
   }
 
-  /**
-   * Creates new direct convo and its first message.
-   *
-   * This uses a transaction so conversation, direct pair, participants, message,
-   * receipts, and lastMessageId stay consistent.
-   */
+  /** Creates a direct convo and its first message in one transaction. */
   async createDirectConversationWithMessage(params: {
     senderId: string;
     recipientUserId: string;
@@ -151,6 +137,7 @@ export class ChatRepository {
     contentType?: ChatMessageContentType;
     clientMessageId?: string;
     replyToId?: string;
+    media?: ChatMessageMediaInput[];
   }) {
     return this.prisma.$transaction(async (tx) => {
       const conversation = await tx.chatConversation.create({
@@ -172,6 +159,7 @@ export class ChatRepository {
               {
                 userId: params.recipientUserId,
                 state: params.recipientState,
+                ...pendingSinceChange(null, params.recipientState, new Date()),
               },
             ],
           },
@@ -192,6 +180,7 @@ export class ChatRepository {
         contentType: params.contentType,
         clientMessageId: params.clientMessageId,
         replyToId: params.replyToId,
+        media: params.media,
       });
 
       await tx.chatConversation.update({
@@ -208,20 +197,15 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Creates a group conversation and participant rows.
-   *
-   * The creator becomes OWNER and is always ACTIVE. Other
-   * member's state is resolved by the called (ChatService)
-   * based on mutual follow-mutual followers start ACTIVE,
-   * everyone else starts PENDING pending their accept.
-   */
+  /** Creates a group and participant rows; the creator is OWNER and ACTIVE, others get the state ChatService resolved. */
   createGroupConversation(params: {
     creatorId: string;
     title: string;
     photoUrl?: string;
     members: Array<{ userId: string; state: 'ACTIVE' | 'PENDING' }>;
   }) {
+    const now = new Date();
+
     return this.prisma.chatConversation.create({
       data: {
         type: 'GROUP',
@@ -239,6 +223,7 @@ export class ChatRepository {
               userId: member.userId,
               role: 'MEMBER' as const,
               state: member.state,
+              ...pendingSinceChange(null, member.state, now),
             })),
           ],
         },
@@ -249,11 +234,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Updates group conversation metadata.
-   *
-   * Permission checks stay in ChatService.
-   */
+  /** Updates group conversation metadata. */
   updateGroupConversation(params: {
     conversationId: string;
     title?: string;
@@ -273,110 +254,35 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Add or reactivates member rows for a group.
-   *
-   * skip BLOCKED rows, clears deletedAt/archivedAt and resets role to MEMBER when reactivating.
-   */
-  async addGroupMembers(
-    conversationId: string,
-    members: Array<{ userId: string; state: 'ACTIVE' | 'PENDING' }>,
-  ) {
-    const memberIdsByState = new Map<'ACTIVE' | 'PENDING', string[]>();
-
-    for (const member of members) {
-      const userIds = memberIdsByState.get(member.state) ?? [];
-      userIds.push(member.userId);
-      memberIdsByState.set(member.state, userIds);
-    }
-
-    return this.prisma.$transaction(async (tx) => {
-      for (const [state, userIds] of memberIdsByState) {
-        await tx.chatParticipant.updateMany({
-          where: {
-            conversationId,
-            userId: { in: userIds },
-            role: {
-              not: 'OWNER',
-            },
-            state: {
-              not: 'BLOCKED',
-            },
-          },
-          data: {
-            state,
-            role: 'MEMBER',
-            deletedAt: null,
-            archivedAt: null,
-          },
-        });
-      }
-
-      return tx.chatParticipant.createMany({
-        data: members.map((member) => ({
-          conversationId,
-          userId: member.userId,
-          role: 'MEMBER',
-          state: member.state,
-        })),
-        skipDuplicates: true,
-      });
-    });
-  }
-
-  /**
-   * Marks group members as declined/removed.
-   *
-   * OWNER participants are excluded so a group cannot lose ownership here.
-   */
-  removeGroupMembers(conversationId: string, userIds: string[]) {
-    return this.prisma.chatParticipant.updateMany({
-      where: {
-        conversationId,
-        userId: {
-          in: userIds,
-        },
-        role: {
-          not: 'OWNER',
-        },
-      },
-      data: {
-        state: 'DECLINED',
-      },
-    });
-  }
-
-  /**
-   * Swaps OWNER between two participants in one transaction.
-   *
-   * Both updates happen together so the group is never
-   * briefly ownerless or briefly has two owner
-   */
+  /** Swaps OWNER between two participants under the conversation lock; each write only matches the state the caller checked. */
   transferGroupOwnership(
     conversationId: string,
     currentOwnerUserId: string,
     newOwnerUserId: string,
   ) {
-    return this.prisma.$transaction([
-      this.prisma.chatParticipant.update({
-        where: {
-          conversationId_userId: {
-            conversationId,
-            userId: currentOwnerUserId,
-          },
-        },
-        data: { role: 'ADMIN' },
-      }),
-      this.prisma.chatParticipant.update({
-        where: {
-          conversationId_userId: {
-            conversationId,
-            userId: newOwnerUserId,
-          },
-        },
+    return this.prisma.$transaction(async (tx) => {
+      await lockConversation(tx, conversationId);
+
+      const promoted = await tx.chatParticipant.updateMany({
+        where: { conversationId, userId: newOwnerUserId, state: 'ACTIVE' },
         data: { role: 'OWNER' },
-      }),
-    ]);
+      });
+      const demoted = await tx.chatParticipant.updateMany({
+        where: { conversationId, userId: currentOwnerUserId, role: 'OWNER' },
+        data: { role: 'ADMIN' },
+      });
+
+      if (promoted.count !== 1 || demoted.count !== 1) {
+        throw new ConflictException('Group membership changed, try again');
+      }
+
+      // A $transaction callback resolving to undefined sends an empty body, which makes fetch's response.json() throw.
+      return tx.chatParticipant.findUniqueOrThrow({
+        where: {
+          conversationId_userId: { conversationId, userId: newOwnerUserId },
+        },
+      });
+    });
   }
 
   updateParticipantRole(
@@ -395,9 +301,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Finds a conversation with participants for group permission checks.
-   */
+  /** Finds a conversation with participants for group permission checks. */
   findConversationWithParticipants(conversationId: string) {
     return this.prisma.chatConversation.findUnique({
       where: {
@@ -409,23 +313,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Finds a conversation's type only.
-   *
-   * Used to gate group invite previews away from full message history.
-   */
-  findConversationType(conversationId: string) {
-    return this.prisma.chatConversation.findUnique({
-      where: { id: conversationId },
-      select: { type: true },
-    });
-  }
-
-  /**
-   * Creates an encrypted message inside an existing conversation.
-   *
-   * The transaction keeps the message and conversation lastMessageId update in sync.
-   */
+  /** Creates an encrypted message in an existing conversation and updates lastMessageId. */
   async createMessage(params: {
     conversationId: string;
     senderId: string;
@@ -435,6 +323,7 @@ export class ChatRepository {
     contentType?: ChatMessageContentType;
     clientMessageId?: string;
     replyToId?: string;
+    media?: ChatMessageMediaInput[];
   }) {
     return this.prisma.$transaction(async (tx) => {
       const message = await this.createMessageInTransaction(tx, params);
@@ -450,13 +339,8 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Shared transaction helper for inserting chat msg.
-   *
-   * Sender receipts are marked delivered/read immediately bc the sender's
-   * client created the message. Other participants start undelivered/unread.
-   */
-  private createMessageInTransaction(
+  /** Inserts a message in a transaction; sender receipts start delivered/read, others unread, and media is claimed here too. */
+  private async createMessageInTransaction(
     tx: PrismaTransaction,
     params: {
       conversationId: string;
@@ -467,11 +351,12 @@ export class ChatRepository {
       contentType?: ChatMessageContentType;
       clientMessageId?: string;
       replyToId?: string;
+      media?: ChatMessageMediaInput[];
     },
   ) {
     const now = new Date();
 
-    return tx.chatMessage.create({
+    const message = await tx.chatMessage.create({
       data: {
         conversationId: params.conversationId,
         senderId: params.senderId,
@@ -493,14 +378,58 @@ export class ChatRepository {
         replyTo: true,
       },
     });
+
+    const media = params.media?.length
+      ? await this.attachMediaInTransaction(
+          tx,
+          message.id,
+          params.senderId,
+          params.media,
+        )
+      : [];
+
+    return { ...message, media };
   }
 
-  /**
-   * Finds convos for one inbox state.
-   *
-   * ACTIVE powers the normal inbox. PENDING powers the stranger request inbox.
-   * The latest encrypted message is included for client-side preview.
-   */
+  /** Claims each upload (UPLOADED, owned by senderId, purpose CHAT) and creates its ChatMessageMedia row; throws if any was already claimed. */
+  private async attachMediaInTransaction(
+    tx: PrismaTransaction,
+    messageId: string,
+    senderId: string,
+    media: ChatMessageMediaInput[],
+  ) {
+    const mediaUploadIds = media.map((item) => item.mediaUploadId);
+
+    await claimUploadsForAttachment(tx, {
+      ids: mediaUploadIds,
+      userId: senderId,
+      purpose: 'CHAT',
+    });
+
+    await tx.chatMessageMedia.createMany({
+      data: media.map((item) => ({
+        messageId,
+        mediaUploadId: item.mediaUploadId,
+        assetId: item.assetId,
+        publicId: item.publicId,
+        url: item.url,
+        resourceType: item.resourceType,
+        sortOrder: item.sortOrder,
+        width: item.width,
+        height: item.height,
+        duration: item.duration,
+        bytes: item.bytes,
+        format: item.format,
+      })),
+    });
+
+    return tx.chatMessageMedia.findMany({
+      where: { messageId },
+      orderBy: { sortOrder: 'asc' },
+    });
+  }
+
+  /** Finds convos for one inbox state, including the latest encrypted message. */
   findInboxConversations(userId: string, state: ChatParticipantState) {
     return this.prisma.chatConversation.findMany({
       where: {
@@ -544,9 +473,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Counts unread messages across many conversations in one query.
-   */
+  /** Counts unread messages across many conversations in one query. */
   async countUnreadMessagesForConversations(
     conversationIds: string[],
     userId: string,
@@ -574,13 +501,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Counts all unread messages for one user's accepted inbox.
-   *
-   * Sender messages are excluded, and pending stranger requests +
-   * archived conversation that still getting messages are ignored so
-   * the normal chat badge only counts accepted conversations.
-   */
+  /** Counts unread messages in the accepted inbox, excluding own messages, pending requests and archived chats. */
   countUnreadMessagesForUser(userId: string) {
     return this.prisma.chatMessageReceipt.count({
       where: {
@@ -605,12 +526,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Counts convos in main inbox only with at least one unread message.
-   *
-   * This lets the frontend show "how many chats are unread" without loading
-   * the full inbox list.
-   */
+  /** Counts main-inbox convos with at least one unread message. */
   countUnreadConversationsForUser(userId: string) {
     return this.prisma.chatConversation.count({
       where: {
@@ -639,12 +555,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Finds encrypted messages with cursor pagination.
-   *
-   * Results are queried newest-first for efficient pagination.
-   * ChatService reverses them before returning to the client.
-   */
+  /** Finds encrypted messages newest-first with cursor pagination. */
   findMessages(params: {
     conversationId: string;
     beforeMessageId?: string;
@@ -673,6 +584,9 @@ export class ChatRepository {
           },
         },
         replyTo: true,
+        media: {
+          orderBy: { sortOrder: 'asc' },
+        },
       },
     });
   }
@@ -687,12 +601,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Updates a user's participant state in a conversation.
-   *
-   * State-specific timestamps are stored here so future safety/audit features-
-   * can tell when a user blocked or archived a chat.
-   */
+  /** Updates a user's participant state in a conversation, stamping state-specific timestamps. */
   updateParticipantState(
     conversationId: string,
     userId: string,
@@ -709,17 +618,46 @@ export class ChatRepository {
       },
       data: {
         state,
+        pendingSince: state === 'PENDING' ? now : null,
         blockedAt: state === 'BLOCKED' ? now : undefined,
         archivedAt: state === 'ARCHIVED' ? now : undefined,
       },
     });
   }
 
-  /**
-   * Marks selected message receipts as delivered for a user.
-   *
-   * Only empty deliveredAt values are updated so repeated sync calls are safe
-   */
+  /** Closes a group whose owner leaves as sole active member: marks the owner DECLINED and retires their device leaves in one transaction, with no Commit. */
+  async closeSoleOwnerGroup(
+    conversationId: string,
+    userId: string,
+    currentEpoch: number,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const participant = await tx.chatParticipant.update({
+        where: {
+          conversationId_userId: { conversationId, userId },
+        },
+        data: { state: 'DECLINED' },
+      });
+
+      const activeLeaves = await this.mlsGroupRosterRepository.findActiveLeaves(
+        conversationId,
+        tx,
+      );
+      const ownDeviceIds = activeLeaves
+        .filter((leaf) => leaf.userId === userId)
+        .map((leaf) => leaf.deviceId);
+      await this.mlsGroupRosterRepository.removeLeaves(
+        conversationId,
+        ownDeviceIds,
+        currentEpoch,
+        tx,
+      );
+
+      return participant;
+    });
+  }
+
+  /** Marks selected receipts delivered for a user; only empty deliveredAt is updated. */
   markMessagesDelivered(userId: string, messageIds: string[]) {
     return this.prisma.chatMessageReceipt.updateMany({
       where: {
@@ -735,12 +673,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Marks all messages up to a point as read for a user
-   *
-   * If lastReadMessageId is omitted, the latest current message is used
-   * The participant lastReadAt timestamp is updated in the same transaction
-   */
+  /** Marks messages up to lastReadMessageId (default: latest) read and updates lastReadAt in the same transaction. */
   markConversationRead(params: {
     conversationId: string;
     userId: string;
@@ -805,12 +738,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Find message and its conversation participants
-   *
-   * Used by reaction logic because message-level actions still need
-   * conversation-level permission checks.
-   */
+  /** Finds a message and its conversation participants. */
   findMessageWithParticipants(messageId: string) {
     return this.prisma.chatMessage.findUnique({
       where: { id: messageId },
@@ -820,16 +748,35 @@ export class ChatRepository {
             participants: true,
           },
         },
+        media: true,
       },
     });
   }
 
-  /**
-   * Updates an existing encrypted message payload.
-   *
-   * Used for message edit. The service checks ownership and permissions before
-   * calling this database method.
-   */
+  /** Removes a message's attachment link; deleteMany keeps it safe to repeat. */
+  deleteMessageMediaByUploadId(mediaUploadId: string) {
+    return this.prisma.chatMessageMedia.deleteMany({
+      where: { mediaUploadId },
+    });
+  }
+
+  /** Marks an upload DELETED and drops its link row in one transaction, after the Cloudinary asset is destroyed. */
+  finalizeReleasedMedia(mediaUploadId: string) {
+    return this.prisma.$transaction([
+      this.prisma.mediaUpload.updateMany({
+        where: {
+          id: mediaUploadId,
+          status: { in: ['ATTACHED', 'RELEASE_FAILED'] },
+        },
+        data: { status: 'DELETED', deletedAt: new Date() },
+      }),
+      this.prisma.chatMessageMedia.deleteMany({
+        where: { mediaUploadId },
+      }),
+    ]);
+  }
+
+  /** Updates an existing encrypted message payload; the service checks permissions first. */
   updateMessage(params: {
     messageId: string;
     ciphertext: string;
@@ -853,16 +800,14 @@ export class ChatRepository {
             emote: true,
           },
         },
+        media: {
+          orderBy: { sortOrder: 'asc' },
+        },
       },
     });
   }
 
-  /**
-   * Soft deletes a message.
-   *
-   * The row is kept for audit/reply/history consistency, but ciphertext is
-   * cleared so deleted encrypted content is no longer retained.
-   */
+  /** Soft deletes a message, keeping the row but clearing its ciphertext. */
   softDeleteMessage(messageId: string) {
     return this.prisma.chatMessage.update({
       where: {
@@ -877,12 +822,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Creates a custom emote for a game community.
-   *
-   * Upload/crop/edit happens before this call; this stores the final asset
-   * metadata so the upload provider can be replaced later.
-   */
+  /** Stores a custom game-community emote's final asset metadata. */
   createGameChatEmote(params: {
     gameId: string;
     createdById: string;
@@ -912,12 +852,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Finds an emote the user is allowed to use.
-   *
-   * Global emotes are available to everyone. Game emotes require membership in
-   * the owning game community.
-   */
+  /** Finds an emote the user may use: global, or from a game community they belong to. */
   findUsableChatEmote(emoteId: string, userId: string) {
     return this.prisma.chatEmote.findFirst({
       where: {
@@ -940,12 +875,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Creates or replaces a user's reaction on a message.
-   *
-   * Unicode emoji reactions store raw emoji text. Custom image/gif emotes point
-   * to ChatEmote through emoteId. Updating one clears the other.
-   */
+  /** Creates or replaces a user's reaction; unicode stores emoji text, custom emotes use emoteId, and updating clears the other. */
   upsertMessageReaction(params: {
     messageId: string;
     userId: string;
@@ -975,12 +905,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Remove current user's reaction from a message.
-   *
-   * deleteMany keeps the operation idempotent: removing a missing reaction
-   * simply returns count 0 instead of throwing
-   */
+  /** Removes a user's reaction; deleteMany makes a missing one a count-0 no-op. */
   deleteMessageReaction(messageId: string, userId: string) {
     return this.prisma.chatMessageReaction.deleteMany({
       where: {
@@ -990,9 +915,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Updates notification level and mute expiry for one participant
-   */
+  /** Updates notification level and mute expiry for one participant. */
   updateParticipantNotificationLevel(
     conversationId: string,
     userId: string,
@@ -1013,12 +936,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Updates pinnedAt for one user's participant row.
-   *
-   * Pinning is per-user inbox state. One user pinning a conversation does not
-   * change the other participant's inbox.
-   */
+  /** Updates pinnedAt for one user's participant row. */
   updateParticipantPinnedAt(
     conversationId: string,
     userId: string,
@@ -1037,23 +955,13 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Archives or unarchives one user's participant row.
-   *
-   * Archive is per-user. It hides the convo for this user without deleting
-   * messages or affecting the other participant.
-   */
+  /** Archives or unarchives one user's participant row. */
   async updateParticipantArchivedState(
     conversationId: string,
     userId: string,
     archived: boolean,
   ) {
-    // Both directions are scoped to the state they are allowed to leave: only ACTIVE
-    // rows archive, only ARCHIVED rows unarchive. That keeps PENDING out of the archive
-    // cycle entirely, so a pending message request cannot be laundered into ACTIVE by
-    // archiving and then unarchiving. Accepting a request stays a separate transition.
-    // Scoping the write rather than filtering in the caller keeps a rejected or repeated
-    // call a harmless no-op instead of an error.
+    // Each direction only leaves its own state (ACTIVE to archive, ARCHIVED to unarchive) so a PENDING request cannot be archived into ACTIVE.
     await this.prisma.chatParticipant.updateMany({
       where: {
         conversationId,
@@ -1076,13 +984,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Soft deletes a conversation for one participant only.
-   *
-   * "Delete for me": clears this participant's row from every inbox query,
-   * but leaves the other participant's copy and the underlying messages and
-   * receipts untouched.
-   */
+  /** Soft deletes a conversation for one participant only. */
   softDeleteConversationForParticipant(conversationId: string, userId: string) {
     return this.prisma.chatParticipant.update({
       where: {
@@ -1097,12 +999,7 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Clears deletedAt for the given participants.
-   *
-   * Resurface trigger: called whenever a new message is delivered to someone
-   * (sender or recipient) who had previously deleted the conversation for themselves.
-   */
+  /** Clears deletedAt for the given participants when a new message reaches them. */
   restoreDeletedParticipants(conversationId: string, userIds: string[]) {
     return this.prisma.chatParticipant.updateMany({
       where: {

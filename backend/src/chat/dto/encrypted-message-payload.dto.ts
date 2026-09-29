@@ -1,20 +1,45 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsEnum,
   IsObject,
   IsOptional,
   IsString,
   MaxLength,
   MinLength,
+  Validate,
+  ValidateNested,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
 } from 'class-validator';
 import { ChatMessageContentType } from '../../generated/prisma/client';
+import { ChatMediaReferenceDto } from './chat-media-reference.dto';
 
-/**
- * Opaque encrypted message payload.
- *
- * Backend never receive plaintext message content.
- * Clients encrypt before sending and decrypt after reading from the API.
- */
+// Matches ciphertext's MaxLength(20000); encryptionMeta has no per-field cap of its own.
+const ENCRYPTION_META_MAX_JSON_LENGTH = 20000;
+
+@ValidatorConstraint({ name: 'BoundedJsonSize', async: false })
+class BoundedJsonSizeConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    if (value === undefined) {
+      return true;
+    }
+    try {
+      return JSON.stringify(value).length <= ENCRYPTION_META_MAX_JSON_LENGTH;
+    } catch {
+      // Circular/unserializable objects pass @IsObject() but cannot be stored as JSON.
+      return false;
+    }
+  }
+
+  defaultMessage(): string {
+    return `encryptionMeta must serialize to at most ${ENCRYPTION_META_MAX_JSON_LENGTH} characters of JSON`;
+  }
+}
+
+/** Opaque encrypted message payload; the backend never sees plaintext. */
 export class EncryptedMessagePayloadDto {
   @ApiProperty({
     example: 'base64-or-armored-ciphertext',
@@ -37,6 +62,7 @@ export class EncryptedMessagePayloadDto {
   })
   @IsOptional()
   @IsObject()
+  @Validate(BoundedJsonSizeConstraint)
   encryptionMeta?: Record<string, unknown>;
 
   @ApiPropertyOptional({
@@ -65,4 +91,17 @@ export class EncryptedMessagePayloadDto {
   @IsString()
   @MaxLength(120)
   replyToId?: string;
+
+  @ApiPropertyOptional({
+    type: [ChatMediaReferenceDto],
+    maxItems: 20,
+    description:
+      'Already-uploaded media to attach: up to four images or one video, or up to 10 encrypted blobs plus their thumbnails.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => ChatMediaReferenceDto)
+  media?: ChatMediaReferenceDto[];
 }

@@ -45,7 +45,17 @@ model User {
   blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
   blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
 
+  receivedNotifications Notification[] @relation("NotificationRecipient")
+  actedNotifications    Notification[] @relation("NotificationActor")
+
+  chatDevices ChatDevice[]
+
+  chatBackupKey   ChatBackupKey?
+  chatBackupBlobs ChatBackupBlob[]
+
   @@unique([email])
+  // Trigram index for the picker's ILIKE (needs the pg_trgm extension); see migration 20260925150200.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "user_name_trgm_idx")
   @@map("user")
 }
 
@@ -59,9 +69,12 @@ model Session {
   userAgent String?
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The chat device this login belongs to, set when the browser links them; revoking that device ends this session.
+  chatDeviceId String?
 
   @@unique([token])
   @@index([userId])
+  @@index([chatDeviceId])
   @@map("session")
 }
 
@@ -260,6 +273,10 @@ enum ChatParticipantState {
   DECLINED
   BLOCKED
   ARCHIVED
+  /// Authorized to join an MLS conversation; becomes ACTIVE when the Commit adding their device is accepted.
+  JOINING
+  /// Being removed from an MLS conversation: cut off server-side at once, DECLINED when the Remove Commit is accepted; final immediately if no device is in the group.
+  LEAVING
 }
 
 enum ChatNotificationLevel {
@@ -296,19 +313,45 @@ model ChatConversation {
   createdBy     String?
   lastMessageId String?
 
+  /// MLS group epoch; advanced only by an atomic compare-and-set so one Commit wins each epoch.
+  mlsEpoch Int @default(0)
+
+  /// Which device is currently finishing this conversation's membership changes, and until when; clears on an accepted Commit or expiry.
+  mlsWorkLeaseDeviceId String?
+  mlsWorkLeaseUntil    DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  creator      User?             @relation("ChatConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
-  participants ChatParticipant[]
-  directPair   ChatDirectPair?
-  messages     ChatMessage[]
+  creator         User?             @relation("ChatConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  participants    ChatParticipant[]
+  directPair      ChatDirectPair?
+  messages        ChatMessage[]
+  mlsHandshakes   MlsHandshake[]
+  mlsWelcomes     MlsWelcome[]
+  mlsMembers      MlsGroupMember[]
+  mlsCommitFaults MlsCommitFault[]
 
   @@index([type])
   @@index([status])
   @@index([updatedAt])
   @@index([createdBy])
+  mlsGroupInfo MlsGroupInfo?
+
   @@map("chat_conversations")
+}
+
+/// The newest public GroupInfo snapshot of a conversation's MLS group; kept only while it matches the current epoch.
+model MlsGroupInfo {
+  conversationId String   @id
+  /// The epoch this snapshot describes; only ever moves forward.
+  epoch          Int
+  payload        Bytes
+  updatedAt      DateTime @updatedAt
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("mls_group_infos")
 }
 
 model ChatParticipant {
@@ -324,6 +367,8 @@ model ChatParticipant {
   mutedUntil        DateTime?
   blockedAt         DateTime?
   deletedAt         DateTime?
+  /// When the row last entered PENDING; null otherwise. Invite expiry keys off this, not updatedAt.
+  pendingSince      DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -334,6 +379,7 @@ model ChatParticipant {
   @@unique([conversationId, userId])
   @@index([userId, state])
   @@index([conversationId, state])
+  // Partial index on pendingSince WHERE state = 'PENDING' lives only in migration 20260925140100 (Prisma can't express it).
   @@map("chat_participants")
 }
 
@@ -376,6 +422,7 @@ model ChatMessage {
   replies      ChatMessage[]         @relation("ChatMessageReplies")
   receipts     ChatMessageReceipt[]
   reactions    ChatMessageReaction[]
+  media        ChatMessageMedia[]
 
   @@unique([senderId, clientMessageId])
   @@index([conversationId, createdAt])
@@ -383,6 +430,33 @@ model ChatMessage {
   @@index([senderId])
   @@index([replyToId])
   @@map("chat_messages")
+}
+
+model ChatMessageMedia {
+  id            String @id @default(cuid())
+  messageId     String
+  mediaUploadId String @unique
+
+  assetId      String
+  publicId     String
+  url          String
+  resourceType MediaResourceType
+
+  sortOrder Int @default(0)
+
+  width    Int?
+  height   Int?
+  duration Float?
+  bytes    Int?
+  format   String?
+
+  createdAt DateTime @default(now())
+
+  message     ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  mediaUpload MediaUpload @relation(fields: [mediaUploadId], references: [id], onDelete: Restrict)
+
+  @@index([messageId, sortOrder])
+  @@map("chat_message_media")
 }
 
 model ChatMessageReceipt {
@@ -416,12 +490,7 @@ model ChatMessageReaction {
 
   message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
   user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // Cascade, not Restrict: deleting a Game cascades to its ChatEmotes, and a Restrict here
-  // would abort that whole delete with an opaque FK violation. Not SetNull either, because
-  // a reaction must carry exactly one of `emoji` / `emoteId` (see ChatService.reactToMessage)
-  // and nulling `emoteId` would leave a reaction with no content. Routine emote removal is
-  // the soft delete via ChatEmote.deletedAt; a hard delete means the emote is really gone,
-  // so its reactions should go with it.
+  // Cascade: a reaction must carry exactly one of emoji/emoteId, so a hard-deleted emote takes its reactions.
   emote   ChatEmote?  @relation(fields: [emoteId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId])
@@ -456,12 +525,7 @@ model ChatEmote {
 
   reactions ChatMessageReaction[]
 
-  // Only constrains game-scoped emotes: global emotes have a NULL `gameId`, and PostgreSQL
-  // treats NULLs as distinct, so this never fires for scope = GLOBAL. Global shortcode
-  // uniqueness is enforced by the partial unique index "chat_emotes_global_shortcode_key"
-  // (chat_emotes(shortcode) WHERE "gameId" IS NULL), added by hand in migration
-  // 20260805093000_add_global_emote_shortcode_unique because Prisma cannot express
-  // partial indexes. Keep that migration when regenerating this model.
+  // Only game-scoped emotes; global shortcode uniqueness is a hand-added partial index in migration 20260805093000.
   @@unique([scope, gameId, shortcode])
   @@index([gameId])
   @@index([createdById])
@@ -647,6 +711,12 @@ enum MediaResourceType {
   VIDEO
 }
 
+/// Encrypted chat blob flavour; null on a MediaUpload means plain media.
+enum MediaOpaqueKind {
+  BLOB
+  THUMB
+}
+
 enum MediaUploadStatus {
   INITIATED
   UPLOADED
@@ -654,6 +724,8 @@ enum MediaUploadStatus {
   ATTACHED
   DELETED
   FAILED
+  /// An ATTACHED upload whose Cloudinary release failed; retried on a backoff by ChatMediaReleaseRetryService.
+  RELEASE_FAILED
 }
 
 model MediaUpload {
@@ -664,12 +736,13 @@ model MediaUpload {
   resourceType MediaResourceType
   status       MediaUploadStatus @default(INITIATED)
 
+  /// Set for encrypted chat blobs (stored raw); resourceType is then unused.
+  opaqueKind MediaOpaqueKind?
+
   /// Cloudinary immutable asset identifier.
-  /// Useful for ownership checks and future asset management.
   assetId String? @unique
 
-  /// Cloudinary public ID generated by the backend.
-  /// The frontend must never choose this value.
+  /// Cloudinary public ID generated by the backend, never chosen by the frontend.
   publicId String @unique
 
   secureUrl String?
@@ -681,8 +754,7 @@ model MediaUpload {
   height   Int?
   duration Float?
 
-  /// Signature returned in Cloudinary's successful upload response.
-  /// Retaining it is optional but useful for auditing and debugging.
+  /// Signature from Cloudinary's upload response; optional.
   responseSignature String?
 
   createdAt  DateTime  @default(now())
@@ -691,8 +763,9 @@ model MediaUpload {
   attachedAt DateTime?
   deletedAt  DateTime?
 
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  postMedia PostMedia?
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postMedia        PostMedia?
+  chatMessageMedia ChatMessageMedia?
 
   @@index([userId, status, createdAt])
   @@index([status, createdAt])
@@ -736,4 +809,233 @@ model Comment {
   @@index([authorId])
   @@index([parentId, createdAt])
   @@map("comments")
+}
+
+enum NotificationType {
+  POST_LIKED
+  POST_COMMENTED
+  COMMENT_REPLIED
+
+  USER_FOLLOWED
+  USER_MENTIONED
+
+  MESSAGE_RECEIVED
+  MESSAGE_REPLIED
+
+  GROUP_ADDED
+  GROUP_INVITE_PENDING
+}
+
+enum NotificationEntityType {
+  POST
+  COMMENT
+  MESSAGE
+  CONVERSATION
+  USER
+}
+
+model Notification {
+  id String @id @default(cuid())
+
+  recipientId String
+  actorId     String?
+
+  type NotificationType
+
+  entityType NotificationEntityType
+  entityId   String
+
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recipient User @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  actor User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([recipientId, createdAt])
+  @@index([recipientId, readAt])
+  @@index([actorId])
+  @@map("notifications")
+}
+
+// MLS devices and key packages: an MLS member is a device, not a user.
+model ChatDevice {
+  /// Client-supplied id, embedded in the MLS credential of every key package; the server must use the same value.
+  id                 String @id
+  userId             String
+  signaturePublicKey Bytes
+  /// Pinned MLS ciphersuite name this device's key packages use.
+  ciphersuite        String
+
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  /// Set by explicit revocation, the 60-day dormancy sweep, or cap eviction; never by an ordinary logout.
+  revokedAt  DateTime?
+
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  keyPackages      MlsKeyPackage[]
+  sentHandshakes   MlsHandshake[]
+  receivedWelcomes MlsWelcome[]
+
+  @@index([userId, revokedAt])
+  @@map("chat_devices")
+}
+
+enum MlsKeyPackageKind {
+  /// Claimed exactly once, never reusable.
+  SINGLE_USE
+  /// Never consumed by a claim; the fallback when no SINGLE_USE packages remain.
+  LAST_RESORT
+}
+
+model MlsKeyPackage {
+  id       String            @id @default(cuid())
+  deviceId String
+  kind     MlsKeyPackageKind @default(SINGLE_USE)
+
+  /// The encoded MLS KeyPackage wire bytes, verified at upload time.
+  payload Bytes
+
+  createdAt       DateTime  @default(now())
+  expiresAt       DateTime
+  /// Only set for SINGLE_USE packages; LAST_RESORT is read without being claimed.
+  claimedAt       DateTime?
+  claimedByUserId String?
+
+  device ChatDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, kind, claimedAt])
+  /// Serves the hourly deleteExpiredKeyPackages filter on expiresAt alone.
+  @@index([expiresAt])
+  @@map("mls_key_packages")
+}
+
+// Handshake log: a Commit is the only thing that advances mlsEpoch, one per epoch. Never pruned, since members replay every Commit.
+model MlsHandshake {
+  id             String  @id @default(cuid())
+  conversationId String
+  /// The epoch this Commit was built FROM; applying it moves the group to epoch+1, and @@unique allows one Commit per epoch.
+  epoch          Int
+  /// Nullable, SetNull on delete: the Commit is shared group state members still need, so it must outlive the sender's device.
+  senderDeviceId String?
+
+  /// Opaque encoded MLS Commit bytes; the server only routes and orders them.
+  payload       Bytes
+  /// SHA-256 of payload, to recognise retried duplicate submissions.
+  payloadSha256 String
+
+  /// Declared and server-attested device changes: addedDevices = [{ deviceId, userId, signaturePublicKey (base64) }], removedDevices = [{ deviceId, userId }]; other members verify against them. False (arrays empty) for Commits accepted before tracking.
+  membershipDeclared Boolean @default(false)
+  addedDevices       Json    @default("[]")
+  removedDevices     Json    @default("[]")
+
+  createdAt DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderDevice ChatDevice?      @relation(fields: [senderDeviceId], references: [id], onDelete: SetNull)
+
+  @@unique([conversationId, epoch])
+  @@map("mls_handshakes")
+}
+
+/// Per-recipient-device Welcome, delivered once then marked consumed.
+model MlsWelcome {
+  id                String @id @default(cuid())
+  conversationId    String
+  recipientDeviceId String
+
+  payload Bytes
+
+  createdAt  DateTime  @default(now())
+  consumedAt DateTime?
+
+  conversation    ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  recipientDevice ChatDevice       @relation(fields: [recipientDeviceId], references: [id], onDelete: Cascade)
+
+  @@index([recipientDeviceId, consumedAt])
+  /// Conversation deletes cascade here; without this each one scans the table.
+  @@index([conversationId])
+  @@map("mls_welcomes")
+}
+
+/// Which devices are leaves in a conversation's MLS ratchet tree, kept in sync with accepted Commits. deviceId/userId are plain strings so a leaf outlives its device; a row is history once removedEpoch is set. The one-active-row-per-device partial unique index and epochs CHECK live in migration 20260921100000_add_mls_group_membership.
+model MlsGroupMember {
+  id             String @id @default(cuid())
+  conversationId String
+  deviceId       String
+  userId         String
+
+  addedEpoch   Int
+  removedEpoch Int?
+
+  createdAt DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, removedEpoch])
+  @@index([conversationId, userId])
+  /// The poll's "is this device in the group" probes filter on both columns.
+  @@index([deviceId, removedEpoch])
+  @@map("mls_group_members")
+}
+
+/// A member's client refused a Commit; recorded so an admin can see which sender and Commit froze the group. Device ids are plain strings so the record outlives the devices.
+model MlsCommitFault {
+  id               String  @id @default(cuid())
+  conversationId   String
+  /// The epoch the refused Commit was built from - identifies the handshake row.
+  epoch            Int
+  /// Who sent the refused Commit; null if that handshake row is gone.
+  senderDeviceId   String?
+  reporterDeviceId String
+  reason           String
+
+  createdAt DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, epoch, reporterDeviceId])
+  @@index([conversationId, epoch])
+  @@map("mls_commit_faults")
+}
+
+/// Turns on encrypted history backup for a user. keyCheck is the client's encryption of a fixed string under the
+/// backup key; the key itself never reaches the server.
+model ChatBackupKey {
+  userId    String   @id
+  keyCheck  Bytes
+  createdAt DateTime @default(now())
+  /// Secret derived from the backup key by the client; verifies the proof that authorises replacing the key. Null on rows made before proofs existed.
+  replaceSecret      Bytes?
+  /// Single-use challenge for a key replacement; cleared when consumed.
+  challengeNonce     Bytes?
+  challengeExpiresAt DateTime?
+  /// When a proof-less delete request takes effect; the backup stays usable until then. Null when none is scheduled.
+  deletionScheduledAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("chat_backup_keys")
+}
+
+/// One message's decrypted envelope, encrypted client-side under the backup key. conversationId and messageId are
+/// plain strings, not relations, so a backup outlives a deleted message or conversation.
+model ChatBackupBlob {
+  id             String   @id @default(cuid())
+  userId         String
+  conversationId String
+  messageId      String
+  ciphertext     Bytes
+  /// ciphertext length in bytes, kept so the quota is a cheap SUM.
+  size           Int
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+  /// Paging on restore walks a user's blobs in (createdAt, id) order.
+  @@index([userId, createdAt, id])
+  @@map("chat_backup_blobs")
 }

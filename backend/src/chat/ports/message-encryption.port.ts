@@ -16,12 +16,15 @@ export interface PreparedEncryptedMessage {
 /**
  * Port for validating/preparing encrypted message payloads.
  *
- * current implementation passes ciphertext through unchanged. Future
- * protocol validation can be added behind this interface without touching the
- * chat business rules.
+ * current implementation passes ciphertext through unchanged, aside from
+ * framing validation. conversationId is optional: a brand-new direct
+ * message is prepared before its conversation exists yet, so there's
+ * nothing to cross-check the ciphertext's embedded group_id against there
+ * - every other call site knows it and must pass it.
  */
 export interface MessageEncryptionPort {
   preparePayload(
     payload: EncryptedMessagePayloadDto,
+    conversationId?: string,
   ): Promise<PreparedEncryptedMessage>;
 }
