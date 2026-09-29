@@ -71,6 +71,71 @@ export class PostsRepository {
     });
   }
 
+  /**
+   * Loads one chronological Latest page strictly after the compound cursor.
+   *
+   * Both createdAt and id participate in the boundary so posts sharing the
+   * same timestamp are neither skipped nor repeated between pages.
+   */
+  findLatestPage(params: {
+    where: Prisma.PostWhereInput;
+    cursor?: {
+      createdAt: Date;
+      id: string;
+    };
+    take: number;
+    userId?: string;
+  }) {
+    const { where, cursor, take, userId } = params;
+
+    return this.prisma.post.findMany({
+      where: cursor
+        ? {
+            AND: [
+              where,
+              {
+                OR: [
+                  {
+                    createdAt: {
+                      lt: cursor.createdAt,
+                    },
+                  },
+                  {
+                    createdAt: cursor.createdAt,
+                    id: {
+                      lt: cursor.id,
+                    },
+                  },
+                ],
+              },
+            ],
+          }
+        : where,
+      orderBy: [
+        {
+          createdAt: 'desc',
+        },
+        {
+          id: 'desc',
+        },
+      ],
+      take,
+      include: {
+        ...postInclude,
+        postLikes: userId
+          ? {
+              where: {
+                userId,
+              },
+              select: {
+                userId: true,
+              },
+            }
+          : false,
+      },
+    });
+  }
+
   async findByAuthorId(
     authorId: string,
     params: {

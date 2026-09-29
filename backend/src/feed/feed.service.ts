@@ -7,12 +7,17 @@ import {
   GameFeedSortDto,
   QueryFeedDto,
   QueryGameFeedDto,
+  QueryLatestFeedDto,
 } from './dto/query-feed.dto';
 import { FeedRankerService } from './feed-ranker.service';
 import { FeedRepository } from './feed.repository';
 import { UserInterestService } from '../recommendation/user-interest.service';
 import type { ForYouFeedCandidate } from './feed.types';
 import type { UserInterestProfile } from '../recommendation/recommendation.types';
+import {
+  decodeLatestFeedCursor,
+  encodeLatestFeedCursor,
+} from './utils/feed-cursor.util';
 
 const FOR_YOU_MAX_CANDIDATES = 400;
 
@@ -47,7 +52,7 @@ export class FeedService {
    *
    * Followed authors receive a small ranking boost.
    */
-  latest(query: QueryFeedDto, userId?: string) {
+  latest(query: QueryLatestFeedDto, userId?: string) {
     return this.latestInternal({
       query,
       userId,
@@ -227,19 +232,23 @@ export class FeedService {
     });
   }
 
+  /**
+   * Loads a chronological Latest page and preserves the existing social boost
+   * inside that selected page. The continuation key is taken before ranking so
+   * page boundaries always follow createdAt DESC, id DESC.
+   */
   private async latestInternal(params: {
-    query: QueryFeedDto;
+    query: QueryLatestFeedDto | QueryGameFeedDto;
     userId?: string;
     gameSlug?: string;
     categorySlug?: string;
   }) {
     const { query, userId, gameSlug, categorySlug } = params;
 
-    const page = query.page ?? 1;
-
     const limit = query.limit ?? 20;
-
-    const skip = (page - 1) * limit;
+    const cursor = query.cursor
+      ? decodeLatestFeedCursor(query.cursor)
+      : undefined;
 
     const where: Prisma.PostWhereInput = {
       status: 'PUBLISHED',
@@ -272,25 +281,16 @@ export class FeedService {
         : {}),
     };
 
-    const [posts, total] = await Promise.all([
-      this.postsRepository.findMany({
-        where,
-        skip,
-        take: limit,
+    const rows = await this.postsRepository.findLatestPage({
+      where,
+      cursor,
+      take: limit + 1,
+      userId,
+    });
 
-        orderBy: [
-          {
-            createdAt: 'desc',
-          },
-          {
-            id: 'desc',
-          },
-        ],
-        userId,
-      }),
-
-      this.postsRepository.count(where),
-    ]);
+    const hasMore = rows.length > limit;
+    const posts = hasMore ? rows.slice(0, limit) : rows;
+    const lastPost = posts[posts.length - 1];
 
     let followedAuthorIds = new Set<string>();
 
@@ -310,11 +310,15 @@ export class FeedService {
       items: rankedPosts.map((post) => formatPost(post)),
 
       meta: {
-        page,
         limit,
-        total,
-
-        totalPages: Math.ceil(total / limit),
+        hasMore,
+        nextCursor:
+          hasMore && lastPost
+            ? encodeLatestFeedCursor({
+                createdAt: lastPost.createdAt,
+                id: lastPost.id,
+              })
+            : null,
       },
     };
   }

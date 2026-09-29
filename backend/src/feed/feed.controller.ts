@@ -2,7 +2,11 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags, ApiCookieAuth } from '@nestjs/swagger';
 import { OptionalAuth, Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
-import { QueryFeedDto, QueryGameFeedDto } from './dto/query-feed.dto';
+import {
+  QueryFeedDto,
+  QueryGameFeedDto,
+  QueryLatestFeedDto,
+} from './dto/query-feed.dto';
 import { FeedService } from './feed.service';
 
 @ApiTags('Feed')
@@ -26,7 +30,7 @@ export class FeedController {
   })
   latest(
     @Query()
-    query: QueryFeedDto,
+    query: QueryLatestFeedDto,
 
     @Session()
     session?: UserSession,
