@@ -1,13 +1,24 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { decryptAttachment } from './attachmentCrypto';
 import { buildAttachmentEnvelope, isAttachmentEnvelope } from './attachmentEnvelope';
-import { MAX_ATTACHMENT_BYTES, MAX_FILES_PER_MESSAGE, MAX_TOTAL_ATTACHMENT_BYTES } from './limits';
+import {
+  MAX_ATTACHMENT_BYTES,
+  MAX_FILES_PER_MESSAGE,
+  MAX_TOTAL_ATTACHMENT_BYTES,
+  THUMBNAIL_MAX_EDGE_GROUPED,
+  THUMBNAIL_MAX_EDGE_SOLO,
+} from './limits';
 import {
   assertSendable,
   prepareAttachments,
   type OpaqueBlob,
   type PreparedFiles,
 } from './prepareAttachments';
+import { generateThumbnail } from './thumbnail';
+
+vi.mock('./thumbnail', () => ({ generateThumbnail: vi.fn(async () => null) }));
+
+beforeEach(() => vi.clearAllMocks());
 
 const fakeUpload = () => {
   let next = 0;
@@ -99,5 +110,39 @@ describe('prepareAttachments', () => {
     await expect(prepareAttachments([new File(['a'], 'a')], upload)).rejects.toMatchObject({
       code: 'malformed',
     });
+  });
+});
+
+describe('prepareAttachments thumbnail sizing', () => {
+  it('asks for the solo (large) thumbnail edge when exactly one visual file is sent', async () => {
+    const upload = fakeUpload();
+    const image = new File(['a'], 'a.png', { type: 'image/png' });
+
+    await prepareAttachments([image], upload);
+
+    expect(generateThumbnail).toHaveBeenCalledWith(image, THUMBNAIL_MAX_EDGE_SOLO);
+  });
+
+  it('asks for the grouped (small) thumbnail edge when multiple visual files share a message', async () => {
+    const upload = fakeUpload();
+    const images = [
+      new File(['a'], 'a.png', { type: 'image/png' }),
+      new File(['b'], 'b.png', { type: 'image/png' }),
+    ];
+
+    await prepareAttachments(images, upload);
+
+    expect(generateThumbnail).toHaveBeenCalledWith(images[0], THUMBNAIL_MAX_EDGE_GROUPED);
+    expect(generateThumbnail).toHaveBeenCalledWith(images[1], THUMBNAIL_MAX_EDGE_GROUPED);
+  });
+
+  it('counts only visual files toward solo/grouped - a lone image plus a PDF still counts as solo', async () => {
+    const upload = fakeUpload();
+    const image = new File(['a'], 'a.png', { type: 'image/png' });
+    const pdf = new File(['b'], 'b.pdf', { type: 'application/pdf' });
+
+    await prepareAttachments([image, pdf], upload);
+
+    expect(generateThumbnail).toHaveBeenCalledWith(image, THUMBNAIL_MAX_EDGE_SOLO);
   });
 });

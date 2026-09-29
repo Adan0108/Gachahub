@@ -1,11 +1,14 @@
 import type { AttachmentFile } from '../contract/types';
 import { AttachmentError, encryptAttachment } from './attachmentCrypto';
+import { attachmentKind } from './attachmentView';
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_FILES_PER_MESSAGE,
   MAX_FILE_NAME_LENGTH,
   MAX_THUMBNAIL_BYTES,
   MAX_TOTAL_ATTACHMENT_BYTES,
+  THUMBNAIL_MAX_EDGE_GROUPED,
+  THUMBNAIL_MAX_EDGE_SOLO,
 } from './limits';
 import { generateThumbnail } from './thumbnail';
 
@@ -39,10 +42,11 @@ async function prepareOne(
   file: File,
   upload: BlobUploader,
   onStage: (stage: AttachmentStage) => void,
+  thumbnailMaxEdge: number,
 ): Promise<AttachmentFile> {
   onStage('encrypting');
   const encrypted = await encryptAttachment(new Uint8Array(await file.arrayBuffer()));
-  const preview = await generateThumbnail(file);
+  const preview = await generateThumbnail(file, thumbnailMaxEdge);
   const thumb = preview
     ? { ...(await encryptAttachment(preview.bytes, MAX_THUMBNAIL_BYTES)), preview }
     : undefined;
@@ -88,9 +92,15 @@ export async function prepareAttachments(
 ): Promise<AttachmentFile[]> {
   assertSendable(files);
 
+  // A message with exactly one image/video renders it large (the full-width, count-1 layout in
+  // ChatAttachments.css) - worth a sharper thumbnail than when it's sharing the message with
+  // others and rendering small, as one tile in a grid.
+  const visualCount = files.filter((file) => attachmentKind(file.type) !== 'file').length;
+  const thumbnailMaxEdge = visualCount === 1 ? THUMBNAIL_MAX_EDGE_SOLO : THUMBNAIL_MAX_EDGE_GROUPED;
+
   for (const [index, file] of files.entries()) {
     if (done.has(index)) continue;
-    done.set(index, await prepareOne(file, upload, onStage));
+    done.set(index, await prepareOne(file, upload, onStage, thumbnailMaxEdge));
   }
   return files.map((_, index) => done.get(index)!);
 }

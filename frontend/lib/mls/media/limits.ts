@@ -13,5 +13,11 @@ export const MAX_FILES_PER_MESSAGE = 10;
 // Client-side only: keeps a 10-file send from holding gigabytes of plaintext and ciphertext at once
 export const MAX_TOTAL_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 
-export const THUMBNAIL_MAX_EDGE = 320;
+// A solo image renders large (the full-width, count-1 case), so its thumbnail is worth more
+// pixels; one sharing a message with other images renders small, as one grid tile, so it isn't.
+export const THUMBNAIL_MAX_EDGE_GROUPED = 320;
+export const THUMBNAIL_MAX_EDGE_SOLO = 640;
+// Validation ceiling (attachmentEnvelope.ts) - the larger of the two modes above, since either
+// can occur.
+export const THUMBNAIL_MAX_EDGE = THUMBNAIL_MAX_EDGE_SOLO;
 export const MAX_FILE_NAME_LENGTH = 120;

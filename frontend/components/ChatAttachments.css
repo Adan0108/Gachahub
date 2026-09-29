@@ -4,23 +4,84 @@
   width: 320px;
   max-width: 100%;
   min-width: 0;
+  /* Media-only messages (an attachment with no caption) render .chat-attachments directly, with
+     no article.chat-message wrapper at all - without its own rounding, a solo image had square
+     corners while everything else in the thread was rounded, and a clicked tile's focus outline
+     (unclipped, since there was no overflow:hidden anywhere) stayed visible around it. */
+  border-radius: var(--chat-bubble-radius);
+  overflow: hidden;
 }
 
-.chat-message:has(.chat-attachments) {
+/*
+ * The image/video grid goes flush to the bubble's own edges (overflow: hidden clips it to the
+ * bubble's rounded corners) - only the caption and file chips below it keep their own inset, via
+ * .chat-attachments > p / > .chat-attachment-chip further down, not padding on the bubble itself.
+ *
+ * The `article.chat-message` form (not just `.chat-message`) is deliberate: .chat-message.mine's
+ * border-color rule (globals.css) has the same 0-1-2-0 specificity as a plain `.chat-message:has`
+ * rule, so which one wins would depend on the two stylesheets' load order. Adding the element type
+ * bumps this rule's specificity just enough to always win, regardless of that order.
+ */
+article.chat-message:has(.chat-attachments) {
   flex-direction: column;
   align-items: stretch;
-  gap: 6px;
-  padding: 6px 6px 8px;
+  gap: 0;
+  padding: 0;
+  /* No visible frame around the image itself - only the caption strip below it should read as
+     "bubble". border-color: transparent alone isn't enough: background paints all the way to the
+     border's outer edge by default (background-clip: border-box), so a merely-transparent border
+     still let a 1px ring of the bubble's own background show around the flush image. Dropping the
+     border's width, not just its color, removes that ring instead of just recoloring it. */
+  border: 0;
+  overflow: hidden;
 }
 
-.chat-message:has(.chat-attachments) > small {
-  padding: 0 4px;
+/*
+ * The pending/uploading status line (page.jsx) sits as a sibling of PendingContent's own
+ * .chat-attachments, one level below the article (inside a plain wrapper div), so it can't be
+ * targeted as a direct child of .chat-message - a plain descendant match instead. Flush and
+ * padding-less by default, it read as glued straight onto the image with no breathing room.
+ */
+.chat-message.pending:has(.chat-attachments) small {
+  display: block;
+  padding: 4px 10px 8px;
+}
+
+.chat-attachments > p {
+  margin: 0;
+  padding: 2px 10px 8px;
+}
+
+.chat-attachments > .chat-attachment-chip {
+  margin: 0 10px;
+}
+
+.chat-attachments > .chat-attachment-chip:last-child {
+  margin-bottom: 8px;
+}
+
+/*
+ * Wraps every .chat-attachment-grid section (see ChatAttachments.jsx / PendingContent) so the gap
+ * *between* sections (a 7+ image message has more than one) shows this neutral background too -
+ * .chat-attachments itself stays transparent so the caption/file-chip area below still reads as
+ * bubble-colored, so that background can't just live there instead.
+ */
+.chat-attachment-media {
+  display: grid;
+  gap: 4px;
+  background: var(--bg);
 }
 
 .chat-attachment-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 4px;
+  /* The gap between tiles is empty space showing this element's own background - without one of
+     its own, it showed whatever the bubble's background was (blue for "mine"), as thin colored
+     lines threading through a multi-image grid. Matching the page's own background (not a flat
+     black) makes the gap read the way Discord's does: not an actual line, just its background
+     showing through, identical on either side of the "seam". */
+  background: var(--bg);
 }
 
 .chat-attachment-grid > div {

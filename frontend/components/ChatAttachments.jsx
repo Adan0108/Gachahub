@@ -26,22 +26,30 @@ export function ChatAttachments({ messageId, envelope, media }) {
 
   return (
     <div className="chat-attachments">
-      {visualGroups.map((group, groupIndex) => (
-        <div className={`chat-attachment-grid count-${group.length}`} key={groupIndex}>
-          {group.map(({ file, index, source, thumbSource }) => {
-            const Tile = attachmentKind(file.mime) === "video" ? VideoTile : ImageTile;
-            return (
-              <Tile
-                file={file}
-                key={index}
-                source={source}
-                thumbSource={thumbSource}
-                uniform={group.length > 1}
-              />
-            );
-          })}
+      {visualGroups.length > 0 && (
+        // Its own wrapper, not just letting .chat-attachments's own gap separate multiple
+        // sections: the gap between two grids needs the same neutral background each grid's own
+        // inter-tile gap has (see ChatAttachments.css), which .chat-attachments itself is not
+        // given - it stays transparent so the caption below still reads as bubble-colored.
+        <div className="chat-attachment-media">
+          {visualGroups.map((group, groupIndex) => (
+            <div className={`chat-attachment-grid count-${group.length}`} key={groupIndex}>
+              {group.map(({ file, index, source, thumbSource }) => {
+                const Tile = attachmentKind(file.mime) === "video" ? VideoTile : ImageTile;
+                return (
+                  <Tile
+                    file={file}
+                    key={index}
+                    source={source}
+                    thumbSource={thumbSource}
+                    uniform={group.length > 1}
+                  />
+                );
+              })}
+            </div>
+          ))}
         </div>
-      ))}
+      )}
       {others.map(({ file, index, source }) => (
         <AttachmentFileChip file={file} key={index} source={source} />
       ))}

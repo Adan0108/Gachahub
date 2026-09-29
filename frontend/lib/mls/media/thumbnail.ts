@@ -1,4 +1,4 @@
-import { MAX_THUMBNAIL_BYTES, THUMBNAIL_MAX_EDGE } from './limits';
+import { MAX_THUMBNAIL_BYTES, THUMBNAIL_MAX_EDGE_GROUPED } from './limits';
 
 export interface Thumbnail {
   bytes: Uint8Array;
@@ -10,7 +10,7 @@ export interface Thumbnail {
 export function fitWithin(
   width: number,
   height: number,
-  maxEdge: number = THUMBNAIL_MAX_EDGE,
+  maxEdge: number = THUMBNAIL_MAX_EDGE_GROUPED,
 ): { width: number; height: number } {
   const scale = Math.min(1, maxEdge / Math.max(width, height));
   return {
@@ -41,17 +41,17 @@ async function encodeUnderCap(source: CanvasImageSource, width: number, height: 
   return null;
 }
 
-async function imageThumbnail(file: Blob): Promise<Thumbnail | null> {
+async function imageThumbnail(file: Blob, maxEdge: number): Promise<Thumbnail | null> {
   const bitmap = await createImageBitmap(file);
   try {
-    const size = fitWithin(bitmap.width, bitmap.height);
+    const size = fitWithin(bitmap.width, bitmap.height, maxEdge);
     return await encodeUnderCap(bitmap, size.width, size.height);
   } finally {
     bitmap.close();
   }
 }
 
-function videoThumbnail(file: Blob): Promise<Thumbnail | null> {
+function videoThumbnail(file: Blob, maxEdge: number): Promise<Thumbnail | null> {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const video = document.createElement('video');
@@ -65,19 +65,23 @@ function videoThumbnail(file: Blob): Promise<Thumbnail | null> {
     video.preload = 'auto';
     video.onerror = () => finish(null);
     video.onloadeddata = () => {
-      const size = fitWithin(video.videoWidth, video.videoHeight);
+      const size = fitWithin(video.videoWidth, video.videoHeight, maxEdge);
       encodeUnderCap(video, size.width, size.height).then(finish, () => finish(null));
     };
     video.src = url;
   });
 }
 
-export async function generateThumbnail(file: File): Promise<Thumbnail | null> {
+/** `maxEdge` defaults to the grouped (small grid tile) size - pass THUMBNAIL_MAX_EDGE_SOLO for a message that's just this one image/video, rendered large. */
+export async function generateThumbnail(
+  file: File,
+  maxEdge: number = THUMBNAIL_MAX_EDGE_GROUPED,
+): Promise<Thumbnail | null> {
   try {
     if (file.type.startsWith('image/') && file.type !== 'image/svg+xml') {
-      return await imageThumbnail(file);
+      return await imageThumbnail(file, maxEdge);
     }
-    if (file.type.startsWith('video/')) return await videoThumbnail(file);
+    if (file.type.startsWith('video/')) return await videoThumbnail(file, maxEdge);
   } catch {
     return null;
   }
