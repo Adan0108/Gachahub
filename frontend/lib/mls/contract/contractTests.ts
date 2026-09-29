@@ -142,6 +142,39 @@ export function runMlsClientContractTests(candidate: MlsClientCandidate) {
       await expect(bobGroup.process(wireAfterRemoval)).rejects.toThrow();
     });
 
+    it('decrypts a message from a past epoch after already applying a later commit', async () => {
+      // A straggler: alice's message goes out at one epoch, but by the time bob actually gets
+      // around to processing it, he has already applied a later commit and moved past that epoch -
+      // the message must still decrypt using that older epoch's key material, not bob's current one.
+      const alice = await setUpDevice(candidate, 'user-alice');
+      const bob = await setUpDevice(candidate, 'user-bob');
+      const carol = await setUpDevice(candidate, 'user-carol');
+
+      const aliceGroup = await alice.factory.create(conversationId);
+      const bobGroup = await addDevice(aliceGroup, bob, conversationId);
+
+      const staleWire = await aliceGroup.encrypt({
+        v: 1,
+        type: 'text',
+        body: 'sent before the commit bob will apply first',
+      });
+
+      const { wireBytes: addCarolWire } = await aliceGroup.stageCommit({
+        added: [await offerKeyPackage(carol)],
+        removed: [],
+      });
+      await aliceGroup.commitAccepted();
+
+      const bobCommitResult = await bobGroup.process(addCarolWire);
+      expect(bobCommitResult.kind).toBe('commit');
+
+      const bobStaleResult = await bobGroup.process(staleWire);
+      expect(bobStaleResult.kind).toBe('application');
+      if (bobStaleResult.kind === 'application') {
+        expect(bobStaleResult.envelope.body).toBe('sent before the commit bob will apply first');
+      }
+    });
+
     describe("membershipChange on a processed commit", () => {
       it("reports the devices a commit added", async () => {
         const alice = await setUpDevice(candidate, "user-alice");

@@ -247,12 +247,20 @@ export default function ChatPage() {
         prev.filter((pending) => pending.clientId !== variables.clientId),
       );
       // Merge the sent message into the cache instead of refetching.
+      const hadCachedMessages = Boolean(
+        queryClient.getQueryData(queryKeys.chatMessages(activeId)),
+      );
       queryClient.setQueryData(queryKeys.chatMessages(activeId), (old) => {
         if (!old || old.items.some((item) => item.id === response.message.id)) {
           return old;
         }
         return { ...old, items: [...old.items, response.message] };
       });
+      if (!hadCachedMessages) {
+        // A brand-new conversation (this group's first-ever message) has no cached page to merge
+        // into, so the write above was a silent no-op - fetch it instead of losing the message.
+        queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(activeId) });
+      }
       queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
     },
     onError: (error, variables) => {
@@ -762,6 +770,7 @@ export default function ChatPage() {
               </div>
               <label htmlFor="new-chat-recipient">Recipient</label>
               <UserPicker
+                currentUser={user}
                 disabled={startNewChat.isPending}
                 id="new-chat-recipient"
                 onChange={setNewChatRecipients}
@@ -806,6 +815,7 @@ export default function ChatPage() {
               />
               <label htmlFor="new-group-members">Members</label>
               <UserPicker
+                currentUser={user}
                 disabled={createGroup.isPending}
                 id="new-group-members"
                 multiple
@@ -914,16 +924,6 @@ export default function ChatPage() {
                   </span>
                 </div>
                 <div className="chat-thread-actions">
-                  {activeConversation.type === "GROUP" && (
-                    <button
-                      aria-label="Group settings"
-                      onClick={() => setIsGroupSettingsOpen(true)}
-                      ref={groupSettingsButtonRef}
-                      type="button"
-                    >
-                      <FiUsers /> Manage
-                    </button>
-                  )}
                   {view === "requests" && (
                     <>
                       <button
@@ -1095,16 +1095,18 @@ export default function ChatPage() {
               )}
               {typingNames.length > 0 && (
                 <div className="chat-typing-indicator">
-                  <span className="chat-typing-dots">
-                    <span />
-                    <span />
-                    <span />
+                  <span className="chat-typing-pill">
+                    <span className="chat-typing-dots">
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                    {typingNames.length === 1
+                      ? `${typingNames[0]} is typing...`
+                      : typingNames.length === 2
+                        ? `${typingNames[0]} and ${typingNames[1]} are typing...`
+                        : `${typingNames[0]} and ${typingNames.length - 1} others are typing...`}
                   </span>
-                  {typingNames.length === 1
-                    ? `${typingNames[0]} is typing...`
-                    : typingNames.length === 2
-                      ? `${typingNames[0]} and ${typingNames[1]} are typing...`
-                      : `${typingNames[0]} and ${typingNames.length - 1} others are typing...`}
                 </div>
               )}
               {shownError && shownError.message !== dismissedErrorMessage && (
@@ -1259,10 +1261,13 @@ export default function ChatPage() {
           encryptionStatus={encryptionStatus}
           fileAttachments={flatOtherAttachments}
           isBlockPending={blockConversation.isPending}
+          isGroup={activeConversation?.type === "GROUP"}
           isOpen={isConversationInfoOpen && Boolean(activeConversation)}
           key={activeId || "no-conversation"}
+          manageButtonRef={groupSettingsButtonRef}
           onBlock={() => blockConversation.mutate()}
           onClose={() => setIsConversationInfoOpen(false)}
+          onManageGroup={() => setIsGroupSettingsOpen(true)}
           onOpenAttachment={setLightboxKey}
           onVerify={() => setVerifyPeerId(verifyPeerCandidate)}
           verifyLabel={verifyLabel}

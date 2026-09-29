@@ -16,6 +16,12 @@ const TYPING_STOP_AFTER_IDLE_MS = 3000;
 // arrives (a dropped event, a crash) - the backend's own disconnect handling clears its side,
 // but doesn't broadcast a stop, so without this a stuck "typing..." would never go away.
 const TYPING_EXPIRE_MS = 6000;
+// While someone keeps typing past this long, re-announce typing:start rather than relying on the
+// single one sent when they started - otherwise a peer's defensive TYPING_EXPIRE_MS above fires
+// and hides "is typing..." after 6s even though nothing ever told it to stop. Must stay above the
+// backend's own throttle floor (2s between repeats of the same event) or the re-announce gets
+// silently dropped server-side.
+const TYPING_REFRESH_MS = 2500;
 
 /**
  * Live push for new chat messages, so one shows up as soon as it's sent
@@ -121,26 +127,27 @@ export function useChatSocket() {
     // Outgoing: the composer (mounted separately, in app/chat/page.jsx) pings typingSignal while
     // the user types; turn that into throttled typing:start/typing:stop on this one socket.
     const typingStopTimers = new Map();
-    const typingStarted = new Set();
+    const typingLastStartedAt = new Map();
     const unsubscribeTyping = typingSignal.subscribe((conversationId, active) => {
       clearTimeout(typingStopTimers.get(conversationId));
       typingStopTimers.delete(conversationId);
       if (active) {
-        if (!typingStarted.has(conversationId)) {
-          typingStarted.add(conversationId);
+        const lastStartedAt = typingLastStartedAt.get(conversationId) ?? 0;
+        if (Date.now() - lastStartedAt >= TYPING_REFRESH_MS) {
+          typingLastStartedAt.set(conversationId, Date.now());
           socket.emit('typing:start', { conversationId });
         }
         typingStopTimers.set(
           conversationId,
           setTimeout(() => {
-            typingStarted.delete(conversationId);
+            typingLastStartedAt.delete(conversationId);
             typingStopTimers.delete(conversationId);
             socket.emit('typing:stop', { conversationId });
           }, TYPING_STOP_AFTER_IDLE_MS),
         );
         return;
       }
-      if (typingStarted.delete(conversationId)) {
+      if (typingLastStartedAt.delete(conversationId)) {
         socket.emit('typing:stop', { conversationId });
       }
     });

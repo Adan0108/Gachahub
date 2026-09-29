@@ -127,14 +127,39 @@ export class TsMlsGroupSession implements GroupSession {
     let proposalCredentialMismatch = false;
     const treeBeforeCommit = this.state.ratchetTree;
 
+    // A straggler from an epoch this device has already moved past (a peer's message landing
+    // after this device applied a commit theirs raced with) still needs to decrypt - ts-mls itself
+    // keeps a few old epochs' worth of key material for exactly this (historicalReceiverData) - but
+    // its secret/tree belong to that epoch, not the current one. Using the current senderDataSecret
+    // against an old-epoch message is a guaranteed AEAD failure (CryptoError: OperationError), not a
+    // real rejection - the message just needed the right epoch's key, which is right here.
+    //
+    // A message from an epoch AHEAD of this device's own is deliberately left alone below (no
+    // historical-style lookup exists for the future): a device that's merely behind will just
+    // catch up on its next sync, and a member who was removed and can never catch up must keep
+    // failing the same way it always has (a thrown crypto error), not resolve as a soft rejection.
+    const messageEpoch = decoded.privateMessage.epoch;
+    const currentEpoch = this.state.groupContext.epoch;
+    let senderDataSecret = this.state.keySchedule.senderDataSecret;
+    let senderLookupTree = treeBeforeCommit;
+    if (messageEpoch < currentEpoch) {
+      const historical = this.state.historicalReceiverData.get(messageEpoch);
+      if (historical) {
+        senderDataSecret = historical.senderDataSecret;
+        senderLookupTree = historical.ratchetTree;
+      }
+      // No stored entry: genuinely outside retention - fall through with the current epoch's
+      // secret/tree, same as before this fix, so the AEAD check below fails as it always did.
+    }
+
     // SenderData is encrypted separately from the actual message content (a lighter, non-ratchet-consuming layer meant for exactly this kind of metadata lookup), so peeking at it here doesn't touch the per-generation keys processPrivateMessage still needs to consume right after - safe to decrypt both without double-consuming anything
     const senderData = await decryptSenderData(
       decoded.privateMessage,
-      this.state.keySchedule.senderDataSecret,
+      senderDataSecret,
       impl,
     );
     const senderNode =
-      senderData !== undefined ? treeBeforeCommit[senderData.leafIndex * 2] : undefined;
+      senderData !== undefined ? senderLookupTree[senderData.leafIndex * 2] : undefined;
     const senderIdentity =
       senderNode?.nodeType === 'leaf' && senderNode.leaf.credential.credentialType === 'basic'
         ? decodeIdentity(senderNode.leaf.credential.identity)

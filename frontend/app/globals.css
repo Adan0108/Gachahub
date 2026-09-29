@@ -6209,14 +6209,28 @@ body {
 .chat-typing-indicator {
   display: flex;
   align-items: center;
+  /* This is its own grid row of .chat-thread, sized to content (auto) same as the header/composer
+     rows above and below it - but unlike them it has no background of its own, so the leftover
+     space beside the pill (everything to the right of it, the whole row is full width) showed
+     .chat-thread's own panel background through, a third color sandwiched between .chat-messages
+     above and .chat-composer below, i.e. exactly the "wide rectangle" this was reported as. Filling
+     the full row with .chat-messages's own background instead makes it read as part of that same
+     surface, with only the actual pill (.chat-typing-pill) visible as a distinct bubble. */
+  background: var(--bg);
+  padding: 6px 12px 10px;
+}
+
+.chat-typing-pill {
+  display: flex;
+  align-items: center;
   gap: 8px;
-  /* This sits directly above the composer now (a grid item of .chat-thread, not a flex item of
-     .chat-messages anymore) - justify-self is the grid equivalent of the align-self it used to
-     need, so it still hugs the left edge instead of stretching full width. */
-  justify-self: flex-start;
-  margin: 6px 12px 10px;
   padding: 6px 12px;
+  border: 1px solid var(--line);
   border-radius: var(--chat-radius);
+  /* Same fill as .chat-composer right below it (both var(--panel2)) - a received .chat-message
+     bubble gets its edge from this same border against the darker .chat-messages background, and
+     without it here the pill had no edge of its own, so it read as fused onto the full-width
+     composer bar into one big rectangle instead of a distinct floating bubble. */
   background: var(--panel2);
   color: var(--muted-strong);
   font-size: 12px;

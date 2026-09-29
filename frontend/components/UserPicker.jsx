@@ -18,6 +18,7 @@ export function UserPicker({
   excludeIds = [],
   placeholder = "Search by name...",
   label = "Search people",
+  currentUser,
 }) {
   const listId = useId();
   const [query, setQuery] = useState("");
@@ -31,6 +32,15 @@ export function UserPicker({
   const isOpen = showInput && search.isActive && !disabled;
   const hasResults = isOpen && options.length > 0;
   const activeOption = options[Math.min(activeIndex, options.length - 1)];
+  // The backend's own search already excludes the caller, so searching yourself (by name or by
+  // pasting your own id) always comes back empty - without this, that reads as a plain "nobody
+  // matches" instead of the actual reason.
+  const trimmedQuery = query.trim();
+  const isSelfQuery =
+    Boolean(currentUser) &&
+    trimmedQuery.length > 0 &&
+    (trimmedQuery === currentUser.id ||
+      currentUser.name?.toLowerCase().includes(trimmedQuery.toLowerCase()));
 
   const pick = (user) => {
     const picked = { id: user.id, name: user.name };
@@ -125,7 +135,7 @@ export function UserPicker({
       )}
       {isOpen && !search.isLoading && !search.error && options.length === 0 && (
         <div className="user-picker-status" role="status">
-          No people found.
+          {isSelfQuery ? "You can't add yourself." : "No people found."}
         </div>
       )}
       {hasResults && (

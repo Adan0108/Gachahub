@@ -11,6 +11,7 @@ import {
   FiSearch,
   FiShield,
   FiUser,
+  FiUsers,
   FiUserX,
   FiX,
 } from "react-icons/fi";
@@ -40,6 +41,9 @@ export function ConversationInfoPanel({
   onVerify,
   onBlock,
   isBlockPending,
+  isGroup,
+  onManageGroup,
+  manageButtonRef,
 }) {
   const [view, setView] = useState("main");
   const [toast, setToast] = useState(null);
@@ -114,6 +118,16 @@ export function ConversationInfoPanel({
             </div>
 
             <div className="chat-info-section">
+              {isGroup && (
+                <button
+                  className="chat-info-row"
+                  onClick={onManageGroup}
+                  ref={manageButtonRef}
+                  type="button"
+                >
+                  <FiUsers /> Manage group
+                </button>
+              )}
               <button
                 className="chat-info-row"
                 onClick={() => notImplemented("Muting notifications")}
@@ -126,14 +140,20 @@ export function ConversationInfoPanel({
                   <FiShield /> {verifyLabel}
                 </button>
               )}
-              <button
-                className="chat-info-row danger"
-                disabled={isBlockPending}
-                onClick={onBlock}
-                type="button"
-              >
-                <FiUserX /> Block
-              </button>
+              {/* Block is a per-conversation lockout with no way to undo it (chat-inbox.service.ts) -
+                  fine for leaving a DM behind for good, but on a group it would just cut this user
+                  off from the whole group instead of the person they actually want gone. Leaving is
+                  the group-appropriate equivalent, already inside Manage group. */}
+              {!isGroup && (
+                <button
+                  className="chat-info-row danger"
+                  disabled={isBlockPending}
+                  onClick={onBlock}
+                  type="button"
+                >
+                  <FiUserX /> Block
+                </button>
+              )}
               <button
                 className="chat-info-row danger"
                 onClick={() => notImplemented("Reporting")}

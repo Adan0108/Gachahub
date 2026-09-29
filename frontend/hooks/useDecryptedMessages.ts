@@ -15,7 +15,10 @@ import {
   recoveryRetryDelayMs,
   shouldRetryDecrypt,
 } from '../lib/mls/messaging/decryptRetry';
-import { EncryptedIndexedDbMessagePlaintextStore } from '../lib/mls/storage/messagePlaintextStore';
+import {
+  EncryptedIndexedDbMessagePlaintextStore,
+  onMessageSaved,
+} from '../lib/mls/storage/messagePlaintextStore';
 import type { SyncEngine } from '../lib/mls/sync/syncEngine';
 import type { ConversationId, PlaintextEnvelope } from '../lib/mls/contract/types';
 
@@ -128,6 +131,23 @@ export function useDecryptedMessages(
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
   }, []);
+
+  // A message can finish saving to plaintextStore after this hook already scanned it and settled
+  // it as 'unavailable' - notably a just-sent message from this device, whose cache write only
+  // happens once the send's HTTP response comes back (sendEncryptedMessage.ts), racing against a
+  // poll/refetch that lands the row in `messages` first. The scan above only reruns when the id
+  // list itself changes, so without this that message would stay hidden until a reload. This
+  // subscription heals it the moment the save actually happens, whichever order they land in.
+  useEffect(() => {
+    return onMessageSaved((message) => {
+      if (message.conversationId !== conversationId) return;
+      setDecrypted((prev) =>
+        prev[message.messageId]?.status === 'ok'
+          ? prev
+          : { ...prev, [message.messageId]: { status: 'ok', envelope: message.envelope } },
+      );
+    });
+  }, [conversationId]);
 
   useEffect(() => {
     if (!syncEngine || !conversationId || messages.length === 0) {

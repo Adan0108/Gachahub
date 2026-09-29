@@ -16,6 +16,7 @@ vi.mock('../lib/mls/storage/messagePlaintextStore', () => ({
   EncryptedIndexedDbMessagePlaintextStore: vi.fn().mockImplementation(function FakeStore() {
     return { get: plaintextGet, save: plaintextSave, remove: plaintextRemove };
   }),
+  onMessageSaved: vi.fn().mockReturnValue(() => undefined),
 }));
 
 vi.mock('./useSyncEngine', () => ({ useSyncEngine: vi.fn() }));
