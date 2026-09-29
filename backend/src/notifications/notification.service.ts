@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   Injectable,
@@ -131,6 +132,70 @@ export class NotificationService {
       },
       transaction,
     );
+  }
+
+  /** Batch counterpart to createNotification for a fan-out (same actor/type/entity, many recipients) - skips the per-recipient dedupe check since entityId is unique per event. */
+  async createManyNotifications(
+    input: {
+      recipientIds: readonly string[];
+      actorId: string;
+      type: NotificationType;
+      entityType: NotificationEntityType;
+      entityId: string;
+    },
+    transaction: Prisma.TransactionClient,
+  ): Promise<
+    Array<{
+      id: string;
+      recipientId: string;
+      actorId: string | null;
+      type: NotificationType;
+      entityType: NotificationEntityType;
+      entityId: string;
+      readAt: Date | null;
+      createdAt: Date;
+      updatedAt: Date;
+    }>
+  > {
+    this.validateActor(input.type, input.actorId);
+    this.validateEntityForType(input.type, input.entityType);
+
+    const candidateIds = input.recipientIds.filter(
+      (recipientId) => recipientId !== input.actorId,
+    );
+
+    if (candidateIds.length === 0) {
+      return [];
+    }
+
+    const notifiableIds =
+      await this.notificationRepository.findNotifiableRecipientIds(
+        candidateIds,
+        transaction,
+      );
+
+    if (notifiableIds.length === 0) {
+      return [];
+    }
+
+    const now = new Date();
+    // Ids are generated here (not left to the DB default) so the rows below can be returned
+    // directly - no read-back needed, and nothing to accidentally over-match on.
+    const rows = notifiableIds.map((recipientId) => ({
+      id: randomUUID(),
+      recipientId,
+      actorId: input.actorId,
+      type: input.type,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      readAt: null,
+      createdAt: now,
+      updatedAt: now,
+    }));
+
+    await this.notificationRepository.createMany(rows, transaction);
+
+    return rows;
   }
 
   /**

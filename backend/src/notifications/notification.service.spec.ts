@@ -15,6 +15,10 @@ type NotificationRepositoryMock = {
   findRecipientById: jest.MockedFunction<
     NotificationRepository['findRecipientById']
   >;
+  findNotifiableRecipientIds: jest.MockedFunction<
+    NotificationRepository['findNotifiableRecipientIds']
+  >;
+  createMany: jest.MockedFunction<NotificationRepository['createMany']>;
   findByRecipient: jest.MockedFunction<
     NotificationRepository['findByRecipient']
   >;
@@ -33,6 +37,8 @@ describe('NotificationService', () => {
   const repositoryMock: NotificationRepositoryMock = {
     create: jest.fn(),
     findRecipientById: jest.fn(),
+    findNotifiableRecipientIds: jest.fn(),
+    createMany: jest.fn(),
     findByRecipient: jest.fn(),
     findByIdForRecipient: jest.fn(),
     countUnread: jest.fn(),
@@ -105,6 +111,7 @@ describe('NotificationService', () => {
 
       expect(repositoryMock.findRecipientById).toHaveBeenCalledWith(
         recipientId,
+        undefined,
       );
 
       expect(repositoryMock.findExisting).toHaveBeenCalledTimes(1);
@@ -123,13 +130,16 @@ describe('NotificationService', () => {
 
       expect(findExistingParams.since).toBeInstanceOf(Date);
 
-      expect(repositoryMock.create).toHaveBeenCalledWith({
-        recipientId,
-        actorId,
-        type: NotificationType.POST_LIKED,
-        entityType: NotificationEntityType.POST,
-        entityId,
-      });
+      expect(repositoryMock.create).toHaveBeenCalledWith(
+        {
+          recipientId,
+          actorId,
+          type: NotificationType.POST_LIKED,
+          entityType: NotificationEntityType.POST,
+          entityId,
+        },
+        undefined,
+      );
     });
 
     it('should return null for self notification', async () => {
@@ -418,6 +428,121 @@ describe('NotificationService', () => {
           'GROUP_INVITE_PENDING must target a CONVERSATION',
         ),
       );
+    });
+  });
+
+  describe('createManyNotifications', () => {
+    const transaction = {} as never;
+
+    it('rejects an incompatible type/entity pairing before touching any recipient', async () => {
+      await expect(
+        service.createManyNotifications(
+          {
+            recipientIds: ['user-b'],
+            actorId,
+            type: NotificationType.MESSAGE_RECEIVED,
+            entityType: NotificationEntityType.POST,
+            entityId: 'message-1',
+          },
+          transaction,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(repositoryMock.findNotifiableRecipientIds).not.toHaveBeenCalled();
+    });
+
+    it('drops the actor from recipientIds before checking anyone (defensive self-notification guard)', async () => {
+      repositoryMock.findNotifiableRecipientIds.mockResolvedValue(['user-b']);
+      repositoryMock.createMany.mockResolvedValue({ count: 1 });
+
+      await service.createManyNotifications(
+        {
+          recipientIds: ['user-b', actorId],
+          actorId,
+          type: NotificationType.MESSAGE_RECEIVED,
+          entityType: NotificationEntityType.MESSAGE,
+          entityId: 'message-1',
+        },
+        transaction,
+      );
+
+      expect(repositoryMock.findNotifiableRecipientIds).toHaveBeenCalledWith(
+        ['user-b'],
+        transaction,
+      );
+    });
+
+    it('returns [] without querying anything when every recipient was the actor', async () => {
+      const result = await service.createManyNotifications(
+        {
+          recipientIds: [actorId],
+          actorId,
+          type: NotificationType.MESSAGE_RECEIVED,
+          entityType: NotificationEntityType.MESSAGE,
+          entityId: 'message-1',
+        },
+        transaction,
+      );
+
+      expect(result).toEqual([]);
+      expect(repositoryMock.findNotifiableRecipientIds).not.toHaveBeenCalled();
+      expect(repositoryMock.createMany).not.toHaveBeenCalled();
+    });
+
+    it('drops a deleted/banned recipient before creating anything, and returns [] if that empties the list', async () => {
+      repositoryMock.findNotifiableRecipientIds.mockResolvedValue([]);
+
+      const result = await service.createManyNotifications(
+        {
+          recipientIds: ['user-deleted'],
+          actorId,
+          type: NotificationType.MESSAGE_RECEIVED,
+          entityType: NotificationEntityType.MESSAGE,
+          entityId: 'message-1',
+        },
+        transaction,
+      );
+
+      expect(result).toEqual([]);
+      expect(repositoryMock.createMany).not.toHaveBeenCalled();
+    });
+
+    it('creates one row per notifiable recipient with a pre-generated id, and returns those rows without reading anything back', async () => {
+      repositoryMock.findNotifiableRecipientIds.mockResolvedValue([
+        'user-b',
+        'user-c',
+      ]);
+      repositoryMock.createMany.mockResolvedValue({ count: 2 });
+
+      const result = await service.createManyNotifications(
+        {
+          recipientIds: ['user-b', 'user-c'],
+          actorId,
+          type: NotificationType.MESSAGE_RECEIVED,
+          entityType: NotificationEntityType.MESSAGE,
+          entityId: 'message-1',
+        },
+        transaction,
+      );
+
+      expect(repositoryMock.createMany).toHaveBeenCalledTimes(1);
+      const [rows, calledTransaction] = repositoryMock.createMany.mock.calls[0];
+      expect(calledTransaction).toBe(transaction);
+      expect(rows).toHaveLength(2);
+      expect(rows.map((row) => row.recipientId)).toEqual(['user-b', 'user-c']);
+      for (const row of rows) {
+        expect(typeof row.id).toBe('string');
+        expect(row.id.length).toBeGreaterThan(0);
+        expect(row).toMatchObject({
+          actorId,
+          type: NotificationType.MESSAGE_RECEIVED,
+          entityType: NotificationEntityType.MESSAGE,
+          entityId: 'message-1',
+          readAt: null,
+        });
+      }
+      // No read-back: what was passed to createMany is exactly what's returned.
+      expect(result).toEqual(rows);
     });
   });
 

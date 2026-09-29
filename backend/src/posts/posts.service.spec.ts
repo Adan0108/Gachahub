@@ -79,6 +79,7 @@ describe('PostsService', () => {
 
   const eventPublisherPort = {
     publish: jest.fn(),
+    publishMany: jest.fn(),
   };
 
   const transaction = {} as Prisma.TransactionClient;

@@ -45,6 +45,41 @@ export class NotificationRepository {
     });
   }
 
+  /** Batch counterpart to findRecipientById: which of these ids belong to a live, notifiable account. */
+  findNotifiableRecipientIds(
+    recipientIds: readonly string[],
+    transaction?: Prisma.TransactionClient,
+  ): Promise<string[]> {
+    const db = transaction ?? this.prisma;
+
+    return db.user
+      .findMany({
+        where: {
+          id: { in: [...recipientIds] },
+          status: { notIn: ['DELETED', 'BANNED'] },
+        },
+        select: { id: true },
+      })
+      .then((rows) => rows.map((row) => row.id));
+  }
+
+  /** Batch counterpart to create: one insert for many notifications sharing actor/type/entity, one recipient each. Caller supplies `id` so it can return the rows itself, no read-back. */
+  createMany(
+    data: Array<{
+      id: string;
+      recipientId: string;
+      actorId?: string | null;
+      type: NotificationType;
+      entityType: NotificationEntityType;
+      entityId: string;
+    }>,
+    transaction?: Prisma.TransactionClient,
+  ) {
+    const db = transaction ?? this.prisma;
+
+    return db.notification.createMany({ data, skipDuplicates: true });
+  }
+
   findByRecipient(params: {
     recipientId: string;
     limit: number;

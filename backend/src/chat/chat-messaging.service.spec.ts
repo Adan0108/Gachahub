@@ -25,6 +25,9 @@ jest.mock('../media/media.service', () => ({
 jest.mock('../chat-devices/chat-devices.service', () => ({
   ChatDevicesService: class {},
 }));
+jest.mock('../prisma/prisma.service', () => ({
+  PrismaService: class {},
+}));
 // Real Prisma namespace: the code under test checks instanceof PrismaClientKnownRequestError.
 function loadActualPrisma() {
   const actual: { Prisma: typeof import('../generated/prisma/client').Prisma } =
@@ -128,11 +131,25 @@ describe('ChatMessagingService', () => {
     publishReactionRemoved: jest.fn(),
   };
 
+  const eventPublisher = {
+    publish: jest.fn(),
+    publishMany: jest.fn(),
+  };
+
+  const prisma = {
+    $transaction: jest.fn((callback: (tx: unknown) => Promise<unknown>) =>
+      callback('fake-tx'),
+    ),
+  };
+
   let chatAccessService: ChatAccessService;
   let service: ChatMessagingService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.$transaction.mockImplementation(
+      (callback: (tx: unknown) => Promise<unknown>) => callback('fake-tx'),
+    );
     chatAccessService = new ChatAccessService(
       repository as any,
       followsService as any,
@@ -147,6 +164,8 @@ describe('ChatMessagingService', () => {
       chatDelivery,
       chatMessageRateLimiter as any,
       chatDevicesService as any,
+      eventPublisher,
+      prisma as any,
     );
     blocksService.getBlockedIdsAmong.mockResolvedValue(new Set());
     blocksService.isBlocked.mockResolvedValue(false);
@@ -373,6 +392,7 @@ describe('ChatMessagingService', () => {
       expect(
         repository.createDirectConversationWithMessage,
       ).toHaveBeenCalledWith(
+        'fake-tx',
         expect.objectContaining({
           senderId: 'user-1',
           recipientUserId: 'user-2',
@@ -446,6 +466,7 @@ describe('ChatMessagingService', () => {
         expect(
           repository.createDirectConversationWithMessage,
         ).toHaveBeenCalledWith(
+          'fake-tx',
           expect.objectContaining({
             media: [
               {
@@ -504,7 +525,10 @@ describe('ChatMessagingService', () => {
         expect(mediaService.resolveAttachableMedia).not.toHaveBeenCalled();
         expect(
           repository.createDirectConversationWithMessage,
-        ).toHaveBeenCalledWith(expect.objectContaining({ media: [] }));
+        ).toHaveBeenCalledWith(
+          'fake-tx',
+          expect.objectContaining({ media: [] }),
+        );
       });
     });
 
@@ -584,6 +608,7 @@ describe('ChatMessagingService', () => {
       expect(
         repository.createDirectConversationWithMessage,
       ).toHaveBeenCalledWith(
+        'fake-tx',
         expect.objectContaining({ recipientState: 'PENDING' }),
       );
     });
@@ -620,6 +645,7 @@ describe('ChatMessagingService', () => {
       expect(
         repository.createDirectConversationWithMessage,
       ).toHaveBeenCalledWith(
+        'fake-tx',
         expect.objectContaining({ recipientState: 'ACTIVE' }),
       );
     });
@@ -646,6 +672,7 @@ describe('ChatMessagingService', () => {
       expect(
         repository.createDirectConversationWithMessage,
       ).toHaveBeenCalledWith(
+        'fake-tx',
         expect.objectContaining({
           recipientState: 'ACTIVE',
         }),
@@ -686,6 +713,7 @@ describe('ChatMessagingService', () => {
       expect(
         repository.createDirectConversationWithMessage,
       ).toHaveBeenCalledWith(
+        'fake-tx',
         expect.objectContaining({
           recipientState: 'ACTIVE',
         }),
@@ -1080,6 +1108,7 @@ describe('ChatMessagingService', () => {
       } as any);
 
       expect(repository.createMessage).toHaveBeenCalledWith(
+        'fake-tx',
         expect.objectContaining({ replyToId: 'message-x' }),
       );
     });
@@ -1105,6 +1134,7 @@ describe('ChatMessagingService', () => {
       } as any);
 
       expect(repository.createMessage).toHaveBeenCalledWith(
+        'fake-tx',
         expect.objectContaining({
           participantUserIds: ['user-1', 'user-2'],
         }),
@@ -1373,6 +1403,7 @@ describe('ChatMessagingService', () => {
         ['user-2'],
       );
       expect(repository.createMessage).toHaveBeenCalledWith(
+        'fake-tx',
         expect.objectContaining({
           participantUserIds: ['user-1', 'user-2'],
         }),
@@ -1419,6 +1450,7 @@ describe('ChatMessagingService', () => {
         entityLabel: 'chat message',
       });
       expect(repository.createMessage).toHaveBeenCalledWith(
+        'fake-tx',
         expect.objectContaining({
           media: [
             {

@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { Kafka, type Consumer, type EachMessagePayload } from 'kafkajs';
 
-import type { DomainEventType } from '../domain-events/domain-event.types';
+import type {
+  DomainEventPayloadMap,
+  DomainEventType,
+} from '../domain-events/domain-event.types';
 import type {
   Notification as NotificationRecord,
   Prisma,
@@ -24,6 +27,89 @@ interface KafkaDomainEvent {
   occurredAt: string;
   aggregateId: string;
   payload: unknown;
+}
+
+type ChatMessageSentPayload = DomainEventPayloadMap['chat.message.sent'];
+type ChatParticipantAddedPayload =
+  DomainEventPayloadMap['chat.participant.added'];
+
+/** Group member cap (CreateGroupChatDto/UpdateGroupMembersDto: 99) plus one, so recipientUserIds can never legitimately exceed it. */
+const MAX_CHAT_RECIPIENTS = 100;
+
+/** An event that can never succeed, no matter how many times Kafka redelivers it - handleMessage logs and drops it instead of retrying. */
+export class PermanentEventError extends Error {}
+
+/** Validates the payload shape; the thrown message names only the bad field, never its values. */
+function asChatMessageSentPayload(
+  payload: unknown,
+  eventId: string,
+): ChatMessageSentPayload {
+  const candidate = payload as Partial<ChatMessageSentPayload> | null;
+
+  const problem = !candidate
+    ? 'payload is not an object'
+    : typeof candidate.messageId !== 'string'
+      ? 'messageId is not a string'
+      : typeof candidate.conversationId !== 'string'
+        ? 'conversationId is not a string'
+        : typeof candidate.senderId !== 'string'
+          ? 'senderId is not a string'
+          : !(
+                candidate.replyToMessageId === null ||
+                typeof candidate.replyToMessageId === 'string'
+              )
+            ? 'replyToMessageId is neither null nor a string'
+            : !(
+                  candidate.replyToSenderId === null ||
+                  typeof candidate.replyToSenderId === 'string'
+                )
+              ? 'replyToSenderId is neither null nor a string'
+              : !Array.isArray(candidate.recipientUserIds) ||
+                  !candidate.recipientUserIds.every(
+                    (id) => typeof id === 'string',
+                  )
+                ? 'recipientUserIds is not an array of strings'
+                : candidate.recipientUserIds.length > MAX_CHAT_RECIPIENTS
+                  ? `recipientUserIds has ${candidate.recipientUserIds.length} entries`
+                  : undefined;
+
+  if (problem) {
+    throw new PermanentEventError(
+      `Malformed chat.message.sent payload for event ${eventId}: ${problem}`,
+    );
+  }
+
+  return candidate as ChatMessageSentPayload;
+}
+
+/** Validates the payload shape; the thrown message names only the bad field, never its values. */
+function asChatParticipantAddedPayload(
+  payload: unknown,
+  eventId: string,
+): ChatParticipantAddedPayload {
+  const candidate = payload as Partial<ChatParticipantAddedPayload> | null;
+
+  const problem = !candidate
+    ? 'payload is not an object'
+    : typeof candidate.conversationId !== 'string'
+      ? 'conversationId is not a string'
+      : typeof candidate.addedUserId !== 'string'
+        ? 'addedUserId is not a string'
+        : typeof candidate.actorId !== 'string'
+          ? 'actorId is not a string'
+          : candidate.state !== 'ACTIVE' &&
+              candidate.state !== 'JOINING' &&
+              candidate.state !== 'PENDING'
+            ? 'state is not one of ACTIVE, JOINING, PENDING'
+            : undefined;
+
+  if (problem) {
+    throw new PermanentEventError(
+      `Malformed chat.participant.added payload for event ${eventId}: ${problem}`,
+    );
+  }
+
+  return candidate as ChatParticipantAddedPayload;
 }
 
 const STARTUP_MAX_ATTEMPTS = 5;
@@ -141,13 +227,7 @@ export class NotificationConsumerService
     }
   }
 
-  /**
-   * Parses a Kafka message into a domain event and passes it through
-   * the notification-processing pipeline.
-   *
-   * Processing errors are rethrown so Kafka does not silently treat
-   * a failed event as successfully consumed.
-   */
+  /** Parses and processes one Kafka message; permanent failures are logged and skipped, transient ones rethrown so Kafka retries. */
   private async handleMessage({
     topic,
     partition,
@@ -157,15 +237,35 @@ export class NotificationConsumerService
       return;
     }
 
-    try {
-      const event = JSON.parse(message.value.toString()) as KafkaDomainEvent;
+    let event: KafkaDomainEvent;
 
+    try {
+      event = JSON.parse(message.value.toString()) as KafkaDomainEvent;
+    } catch (error) {
+      this.logger.error(
+        `Skipping unparseable message from ${topic}[${partition}]: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+
+      return;
+    }
+
+    try {
       await this.handleEvent(event);
 
       this.logger.debug(
         `Consumed ${event.type} event ${event.eventId} from ${topic}[${partition}]`,
       );
     } catch (error) {
+      if (error instanceof PermanentEventError) {
+        this.logger.error(
+          `Skipping unusable ${event.type} event ${event.eventId}: ${error.message}`,
+        );
+
+        return;
+      }
+
       this.logger.error(
         'Failed to process Kafka notification event',
         error instanceof Error ? error.stack : String(error),
@@ -187,8 +287,8 @@ export class NotificationConsumerService
    * rolled back in the database.
    */
   private async handleEvent(event: KafkaDomainEvent): Promise<void> {
-    const notification = await this.prisma.$transaction(
-      async (transaction): Promise<NotificationRecord | null> => {
+    const notifications = await this.prisma.$transaction(
+      async (transaction): Promise<NotificationRecord[]> => {
         const claimed = await this.processedEventRepository.claim(
           transaction,
           event.eventId,
@@ -200,7 +300,7 @@ export class NotificationConsumerService
             `Skipping already processed event ${event.eventId}`,
           );
 
-          return null;
+          return [];
         }
 
         return this.processEvent(event, transaction);
@@ -211,7 +311,7 @@ export class NotificationConsumerService
      * The database transaction has successfully committed at this point.
      * Socket delivery is intentionally kept outside the transaction.
      */
-    if (notification) {
+    for (const notification of notifications) {
       this.socketNotificationDeliveryService.publish(notification);
     }
   }
@@ -219,35 +319,52 @@ export class NotificationConsumerService
   /**
    * Routes a domain event to the appropriate notification handler.
    *
-   * Supported events return the created notification so it can be
+   * Supported events return the notifications created so each can be
    * delivered through Socket.IO after the database transaction commits.
-   * Unsupported or irrelevant events return null.
+   * A chat message sent to a group, or added to several members at once,
+   * can produce more than one. Unsupported or irrelevant events return [].
    */
   private async processEvent(
     event: KafkaDomainEvent,
     transaction: Prisma.TransactionClient,
-  ): Promise<NotificationRecord | null> {
+  ): Promise<NotificationRecord[]> {
     switch (event.type) {
-      case 'post.liked':
-        return this.handlePostLiked(event, transaction);
+      case 'post.liked': {
+        const notification = await this.handlePostLiked(event, transaction);
+        return notification ? [notification] : [];
+      }
 
-      case 'comment.created':
-        return this.handleCommentCreated(event, transaction);
+      case 'comment.created': {
+        const notification = await this.handleCommentCreated(
+          event,
+          transaction,
+        );
+        return notification ? [notification] : [];
+      }
 
-      case 'user.followed':
-        return this.handleUserFollowed(event, transaction);
+      case 'user.followed': {
+        const notification = await this.handleUserFollowed(event, transaction);
+        return notification ? [notification] : [];
+      }
 
       case 'user.mentioned':
         this.logger.debug(`Ignoring unsupported event ${event.type}`);
-        return null;
+        return [];
 
       case 'chat.message.sent':
-      case 'chat.participant.added':
-        return null;
+        return this.handleChatMessageSent(event, transaction);
+
+      case 'chat.participant.added': {
+        const notification = await this.handleChatParticipantAdded(
+          event,
+          transaction,
+        );
+        return notification ? [notification] : [];
+      }
 
       default:
         this.logger.warn(`Unknown domain event type: ${String(event.type)}`);
-        return null;
+        return [];
     }
   }
 
@@ -341,6 +458,76 @@ export class NotificationConsumerService
         type: 'USER_FOLLOWED',
         entityType: 'USER',
         entityId: payload.actorId,
+      },
+      transaction,
+    );
+  }
+
+  /** chat.message.sent -> MESSAGE_REPLIED for the reply target, MESSAGE_RECEIVED for the rest of recipientUserIds (both pre-resolved by ChatMessagingService). */
+  private async handleChatMessageSent(
+    event: KafkaDomainEvent,
+    transaction: Prisma.TransactionClient,
+  ): Promise<NotificationRecord[]> {
+    const payload = asChatMessageSentPayload(event.payload, event.eventId);
+
+    // Reply target must be a different, notifiable recipient.
+    const repliedToUserId =
+      payload.replyToSenderId &&
+      payload.replyToSenderId !== payload.senderId &&
+      payload.recipientUserIds.includes(payload.replyToSenderId)
+        ? payload.replyToSenderId
+        : null;
+
+    const replyNotification = repliedToUserId
+      ? await this.notificationService.createNotification(
+          {
+            recipientId: repliedToUserId,
+            actorId: payload.senderId,
+            type: 'MESSAGE_REPLIED',
+            entityType: 'MESSAGE',
+            entityId: payload.messageId,
+          },
+          transaction,
+        )
+      : null;
+
+    // Exclude the reply target so they don't get both notification types.
+    const receivedRecipientIds = payload.recipientUserIds.filter(
+      (id) => id !== repliedToUserId,
+    );
+
+    const receivedNotifications =
+      await this.notificationService.createManyNotifications(
+        {
+          recipientIds: receivedRecipientIds,
+          actorId: payload.senderId,
+          type: 'MESSAGE_RECEIVED',
+          entityType: 'MESSAGE',
+          entityId: payload.messageId,
+        },
+        transaction,
+      );
+
+    return replyNotification
+      ? [replyNotification, ...receivedNotifications]
+      : receivedNotifications;
+  }
+
+  /** chat.participant.added -> GROUP_ADDED (ACTIVE/JOINING) or GROUP_INVITE_PENDING (PENDING). */
+  private async handleChatParticipantAdded(
+    event: KafkaDomainEvent,
+    transaction: Prisma.TransactionClient,
+  ): Promise<NotificationRecord | null> {
+    const payload = asChatParticipantAddedPayload(event.payload, event.eventId);
+
+    return this.notificationService.createNotification(
+      {
+        recipientId: payload.addedUserId,
+        actorId: payload.actorId,
+        type:
+          payload.state === 'PENDING' ? 'GROUP_INVITE_PENDING' : 'GROUP_ADDED',
+        entityType: 'CONVERSATION',
+        entityId: payload.conversationId,
       },
       transaction,
     );
