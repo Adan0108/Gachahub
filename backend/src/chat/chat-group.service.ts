@@ -5,6 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { MessageRequestSetting } from '../generated/prisma/client';
+import { EventPublisherPort } from '../domain-events/event-publisher.port';
+import { PrismaService } from '../prisma/prisma.service';
 import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
 import { ChatMembershipService } from './membership/chat-membership.service';
@@ -27,6 +29,8 @@ export class ChatGroupService {
     private readonly chatRepository: ChatRepository,
     private readonly chatAccessService: ChatAccessService,
     private readonly chatMembershipService: ChatMembershipService,
+    private readonly eventPublisher: EventPublisherPort,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -53,11 +57,32 @@ export class ChatGroupService {
 
     const members = await this.resolveGroupMemberStates(userId, users);
 
-    return this.chatRepository.createGroupConversation({
-      creatorId: userId,
-      title: dto.title,
-      photoUrl: dto.photoUrl,
-      members,
+    return this.prisma.$transaction(async (tx) => {
+      const conversation = await this.chatRepository.createGroupConversation(
+        tx,
+        {
+          creatorId: userId,
+          title: dto.title,
+          photoUrl: dto.photoUrl,
+          members,
+        },
+      );
+
+      await this.eventPublisher.publishMany(
+        members.map((member) => ({
+          type: 'chat.participant.added' as const,
+          aggregateId: conversation.id,
+          payload: {
+            conversationId: conversation.id,
+            addedUserId: member.userId,
+            actorId: userId,
+            state: member.state,
+          },
+        })),
+        tx,
+      );
+
+      return conversation;
     });
   }
 
@@ -116,6 +141,7 @@ export class ChatGroupService {
         userId: member.userId,
         entitlement: member.state === 'ACTIVE' ? 'DIRECT' : 'INVITE',
       })),
+      userId,
     );
   }
 

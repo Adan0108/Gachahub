@@ -283,14 +283,13 @@ export class ChatAccessService {
     return !recipientBlockedSender;
   }
 
-  /**
-   * Verifies a reply target message belongs to this conversation.
-   *
-   * No-op when replyToId isn't set, replies are optional.
-   */
-  async assertValidReplyTarget(conversationId: string, replyToId?: string) {
+  /** Verifies the reply target exists, is still SENT, and belongs to this conversation; returns its sender. Undefined when replyToId isn't set. */
+  async assertValidReplyTarget(
+    conversationId: string,
+    replyToId?: string,
+  ): Promise<{ senderId: string } | undefined> {
     if (!replyToId) {
-      return;
+      return undefined;
     }
 
     const replyTarget = await this.chatRepository.findSentMessageInConversation(
@@ -301,6 +300,8 @@ export class ChatAccessService {
     if (!replyTarget) {
       throw new BadRequestException('Reply target message was not found');
     }
+
+    return { senderId: replyTarget.senderId };
   }
 
   /**

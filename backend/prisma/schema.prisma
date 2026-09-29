@@ -60,15 +60,15 @@ model User {
 }
 
 model Session {
-  id        String   @id
-  expiresAt DateTime
-  token     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  ipAddress String?
-  userAgent String?
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String   @id
+  expiresAt    DateTime
+  token        String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  ipAddress    String?
+  userAgent    String?
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// The chat device this login belongs to, set when the browser links them; revoking that device ends this session.
   chatDeviceId String?
 
@@ -331,13 +331,12 @@ model ChatConversation {
   mlsWelcomes     MlsWelcome[]
   mlsMembers      MlsGroupMember[]
   mlsCommitFaults MlsCommitFault[]
+  mlsGroupInfo    MlsGroupInfo?
 
   @@index([type])
   @@index([status])
   @@index([updatedAt])
   @@index([createdBy])
-  mlsGroupInfo MlsGroupInfo?
-
   @@map("chat_conversations")
 }
 
@@ -960,7 +959,57 @@ model MlsWelcome {
   @@map("mls_welcomes")
 }
 
-/// Which devices are leaves in a conversation's MLS ratchet tree, kept in sync with accepted Commits. deviceId/userId are plain strings so a leaf outlives its device; a row is history once removedEpoch is set. The one-active-row-per-device partial unique index and epochs CHECK live in migration 20260921100000_add_mls_group_membership.
+enum OutboxEventStatus {
+  PENDING
+  PROCESSING
+  PUBLISHED
+  FAILED
+}
+
+model OutboxEvent {
+  id String @id
+
+  type        String
+  version     Int
+  aggregateId String
+
+  payload Json
+
+  occurredAt DateTime
+
+  status OutboxEventStatus @default(PENDING)
+
+  attemptCount Int       @default(0)
+  availableAt  DateTime  @default(now())
+  processingAt DateTime?
+  publishedAt  DateTime?
+  lastError    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, availableAt, createdAt])
+  @@index([aggregateId, createdAt])
+  @@map("outbox_events")
+}
+
+/// The server's record of which devices are leaves in a conversation's MLS ratchet tree. The tree
+/// itself is opaque to the server; this is kept in sync with accepted Commits in the same
+/// transaction (MlsHandshakesRepository.acceptHandshake) so the server always knows who still
+/// holds group secrets.
+///
+/// deviceId and userId are deliberately plain strings, not relations: a leaf outlives its device
+/// row (deleting an account cascades ChatDevice away, but the leaf keeps holding group secrets
+/// until a Remove Commit lands), and the row must still say whose leaf it was to queue that removal.
+///
+/// A row is history once removedEpoch is set - a device removed and later re-added gets a new row.
+/// Epochs are the group's epoch AFTER the Commit (the founder device joins at 0).
+///
+/// No @@unique here: at most one ACTIVE row (removedEpoch IS NULL) may exist per device, which
+/// Prisma cannot express as a WHERE-scoped unique index, so the real constraint is a hand-written
+/// partial unique index in migration 20260921100000_add_mls_group_membership
+/// ("mls_group_members_active_device_key"), alongside a CHECK on the epochs
+/// ("mls_group_members_epochs_check"). Keep both migration lines when regenerating.
 model MlsGroupMember {
   id             String @id @default(cuid())
   conversationId String
@@ -1004,14 +1053,14 @@ model MlsCommitFault {
 /// Turns on encrypted history backup for a user. keyCheck is the client's encryption of a fixed string under the
 /// backup key; the key itself never reaches the server.
 model ChatBackupKey {
-  userId    String   @id
-  keyCheck  Bytes
-  createdAt DateTime @default(now())
+  userId              String    @id
+  keyCheck            Bytes
+  createdAt           DateTime  @default(now())
   /// Secret derived from the backup key by the client; verifies the proof that authorises replacing the key. Null on rows made before proofs existed.
-  replaceSecret      Bytes?
+  replaceSecret       Bytes?
   /// Single-use challenge for a key replacement; cleared when consumed.
-  challengeNonce     Bytes?
-  challengeExpiresAt DateTime?
+  challengeNonce      Bytes?
+  challengeExpiresAt  DateTime?
   /// When a proof-less delete request takes effect; the backup stays usable until then. Null when none is scheduled.
   deletionScheduledAt DateTime?
 
@@ -1038,4 +1087,14 @@ model ChatBackupBlob {
   /// Paging on restore walks a user's blobs in (createdAt, id) order.
   @@index([userId, createdAt, id])
   @@map("chat_backup_blobs")
+}
+
+model ProcessedEvent {
+  eventId     String
+  consumer    String
+  processedAt DateTime @default(now())
+
+  @@id([eventId, consumer])
+  @@index([consumer, processedAt])
+  @@map("processed_events")
 }

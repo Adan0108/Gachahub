@@ -24,6 +24,9 @@ jest.mock('../blocks/blocks.service', () => ({
 jest.mock('../media/media.service', () => ({
   MediaService: class {},
 }));
+jest.mock('../prisma/prisma.service', () => ({
+  PrismaService: class {},
+}));
 // real Prisma namespace, not a stub - the code under test checks `instanceof`
 // Prisma.PrismaClientKnownRequestError, which only works against the same class
 function loadActualPrisma() {

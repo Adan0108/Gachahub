@@ -28,6 +28,7 @@ import { ChatDevicesModule } from '../chat-devices/chat-devices.module';
 import { ChatMembershipRepository } from './membership/chat-membership.repository';
 import { ChatMembershipService } from './membership/chat-membership.service';
 import { ChatInviteExpiryService } from './membership/chat-invite-expiry.service';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
 
 /**
  * Chat feature module.
@@ -49,6 +50,7 @@ import { ChatInviteExpiryService } from './membership/chat-invite-expiry.service
     MediaModule,
     MlsGroupRosterModule,
     ChatDevicesModule,
+    DomainEventsModule,
   ],
   controllers: [ChatController],
   providers: [

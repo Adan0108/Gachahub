@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '../../generated/prisma/client';
 import { MlsGroupRosterRepository } from '../../mls-group-roster/mls-group-roster.repository';
 import { PrismaService } from '../../prisma/prisma.service';
-import { applyParticipantTransitions } from './apply-participant-transitions';
+import {
+  applyParticipantTransitions,
+  type ParticipantTransition,
+} from './apply-participant-transitions';
 import { lockConversation } from './lock-conversation';
 import {
   planMembershipChanges,
@@ -17,42 +21,58 @@ export class ChatMembershipRepository {
     private readonly mlsGroupRosterRepository: MlsGroupRosterRepository,
   ) {}
 
-  /** Returns how many participants changed. */
+  /** Applies membership changes and returns the transitions actually applied (no-ops excluded), against the caller's own transaction. */
+  async changeMembershipInTransaction(
+    tx: Prisma.TransactionClient,
+    conversationId: string,
+    requests: readonly MembershipRequest[],
+    onIllegal: OnIllegalMembershipChange = 'throw',
+  ): Promise<ParticipantTransition[]> {
+    await lockConversation(tx, conversationId);
+
+    const mlsActive = await this.mlsGroupRosterRepository.hasRoster(
+      conversationId,
+      tx,
+    );
+    const leaves = mlsActive
+      ? await this.mlsGroupRosterRepository.findActiveLeaves(conversationId, tx)
+      : [];
+    const participants = await tx.chatParticipant.findMany({
+      where: {
+        conversationId,
+        userId: { in: requests.map((request) => request.userId) },
+      },
+      select: { userId: true, state: true, role: true },
+    });
+
+    const changes = planMembershipChanges({
+      requests,
+      participants,
+      mlsActive,
+      userIdsWithLeaves: new Set(leaves.map((leaf) => leaf.userId)),
+      onIllegal,
+    });
+
+    await applyParticipantTransitions(tx, conversationId, changes);
+
+    return changes;
+  }
+
+  /** Returns how many participants changed. Opens its own transaction - use changeMembershipInTransaction directly when the caller needs to publish a domain event alongside this write. */
   changeMembership(
     conversationId: string,
     requests: readonly MembershipRequest[],
     onIllegal: OnIllegalMembershipChange = 'throw',
   ): Promise<number> {
     return this.prisma.$transaction(async (tx) => {
-      await lockConversation(tx, conversationId);
-
-      const mlsActive = await this.mlsGroupRosterRepository.hasRoster(
-        conversationId,
+      const changes = await this.changeMembershipInTransaction(
         tx,
-      );
-      const leaves = mlsActive
-        ? await this.mlsGroupRosterRepository.findActiveLeaves(
-            conversationId,
-            tx,
-          )
-        : [];
-      const participants = await tx.chatParticipant.findMany({
-        where: {
-          conversationId,
-          userId: { in: requests.map((request) => request.userId) },
-        },
-        select: { userId: true, state: true, role: true },
-      });
-
-      const changes = planMembershipChanges({
+        conversationId,
         requests,
-        participants,
-        mlsActive,
-        userIdsWithLeaves: new Set(leaves.map((leaf) => leaf.userId)),
         onIllegal,
-      });
+      );
 
-      return applyParticipantTransitions(tx, conversationId, changes);
+      return changes.length;
     });
   }
 

@@ -288,7 +288,17 @@ export class MediaService {
     }
   }
 
-  /** Destroys the Cloudinary asset for an ATTACHED or RELEASE_FAILED upload without touching its row; false if missing or already released. */
+  /**
+   * Destroys the Cloudinary asset for an upload that still needs releasing
+   * (ATTACHED, or RELEASE_FAILED from a previous failed attempt) without
+   * touching its row. Returns false (no-op) if the upload is missing or
+   * already released.
+   *
+   * For a caller that must also drop its own link row (e.g. ChatMessageMedia)
+   * atomically with marking the upload DELETED - so a crash between the two
+   * writes can never leave a link row pointing at a dead upload - call this
+   * first, then do both DB writes together in one transaction.
+   */
   async destroyAttachedCloudinaryAsset(
     mediaUploadId: string,
   ): Promise<boolean> {

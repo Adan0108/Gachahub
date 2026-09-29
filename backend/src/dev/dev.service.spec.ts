@@ -104,9 +104,9 @@ describe('DevService', () => {
       expect(prisma.postMedia.deleteMany).toHaveBeenCalledWith({
         where: { mediaUpload: { userId: { in: ['u1'] } } },
       });
-      expect(prisma.chatMessageMedia.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
-        prisma.user.delete.mock.invocationCallOrder[0],
-      );
+      expect(
+        prisma.chatMessageMedia.deleteMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(prisma.user.delete.mock.invocationCallOrder[0]);
     });
   });
 });

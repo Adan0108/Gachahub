@@ -14,6 +14,8 @@ import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { formatPost } from './post.mapper';
 import { FollowsService } from '../follows/follows.service';
 import { UserInterestService } from '../recommendation/user-interest.service';
+import { EventPublisherPort } from '../domain-events/event-publisher.port';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class PostsService {
@@ -22,6 +24,8 @@ export class PostsService {
     private readonly mediaService: MediaService,
     private readonly followsService: FollowsService,
     private readonly userInterestService: UserInterestService,
+    private readonly eventPublisher: EventPublisherPort,
+    private readonly prisma: PrismaService,
   ) {}
 
   async findAll(query: QueryPostsDto, userId?: string) {
@@ -413,15 +417,34 @@ export class PostsService {
   }
 
   async like(postId: string, userId: string) {
-    await this.ensurePostCanBeInteractedWith(postId, userId);
+    const post = await this.ensurePostCanBeInteractedWith(postId, userId);
 
-    const result = await this.postsRepository.like(postId, userId);
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const likeResult = await this.postsRepository.like(
+        transaction,
+        postId,
+        userId,
+      );
+
+      if (likeResult.changed) {
+        await this.eventPublisher.publish(
+          {
+            type: 'post.liked',
+            aggregateId: postId,
+            payload: {
+              postId,
+              postAuthorId: post.authorId,
+              actorId: userId,
+            },
+          },
+          transaction,
+        );
+      }
+
+      return likeResult;
+    });
 
     if (result.changed) {
-      /**
-       * Recommendation updates are best-effort and should not block
-       * the core like interaction.
-       */
       void this.userInterestService.recordPostInteraction(
         userId,
         postId,
