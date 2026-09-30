@@ -4,8 +4,20 @@ import { GlobalSearch } from "../components/GlobalSearch";
 
 const mocks = vi.hoisted(() => ({
   push: vi.fn(),
-  useQuery: vi.fn(() => ({
-    data: { items: [] },
+  useQuery: vi.fn((options) => ({
+    data:
+      options.queryKey?.[0] === "posts"
+        ? {
+            items: [
+              {
+                id: "post-1",
+                title: "Rover build guide",
+                gameName: "Wuthering Waves",
+                author: "RoverTide",
+              },
+            ],
+          }
+        : { items: [] },
     isLoading: false,
     isFetching: false,
     isError: false,
@@ -20,7 +32,10 @@ vi.mock("../lib/api", () => ({
   fallbackPosts: () => [],
 }));
 vi.mock("../lib/queries", () => ({
-  queries: { games: (search) => ({ queryKey: ["games", search] }) },
+  queries: {
+    games: (search) => ({ queryKey: ["games", search] }),
+    posts: (search) => ({ queryKey: ["posts", search] }),
+  },
 }));
 
 describe("GlobalSearch", () => {
@@ -35,15 +50,28 @@ describe("GlobalSearch", () => {
     fireEvent.change(input, { target: { value: "a" } });
 
     expect(screen.queryByText(/enter at least/i)).not.toBeInTheDocument();
-    expect(mocks.useQuery.mock.calls.at(-1)[0].enabled).toBe(false);
+    expect(mocks.useQuery.mock.calls.slice(-2).every(([options]) => !options.enabled)).toBe(true);
 
     fireEvent.change(input, { target: { value: "ab" } });
-    expect(mocks.useQuery.mock.calls.at(-1)[0].enabled).toBe(false);
+    expect(mocks.useQuery.mock.calls.slice(-2).every(([options]) => !options.enabled)).toBe(true);
     expect(screen.getByRole("status", { name: /searching/i })).toBeInTheDocument();
 
     act(() => vi.advanceTimersByTime(350));
-    expect(mocks.useQuery.mock.calls.at(-1)[0].enabled).toBe(true);
+    expect(mocks.useQuery.mock.calls.slice(-2).every(([options]) => options.enabled)).toBe(true);
     expect(screen.queryByRole("status", { name: /searching/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/no matches found/i)).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Posts" })).toBeInTheDocument();
+  });
+
+  it("opens a selected post directly", () => {
+    mocks.push.mockClear();
+    render(<GlobalSearch />);
+    const input = screen.getByRole("combobox");
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "rover" } });
+    act(() => vi.advanceTimersByTime(350));
+    fireEvent.click(screen.getByRole("option", { name: /rover build guide/i }));
+
+    expect(mocks.push).toHaveBeenCalledWith("/post/post-1");
   });
 });

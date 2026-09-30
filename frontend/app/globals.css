@@ -7524,3 +7524,28 @@ body {
     justify-self: start;
   }
 }
+
+.search-result-group {
+  display: grid;
+}
+
+.search-result-group + .search-result-group {
+  border-top: 1px solid var(--line);
+}
+
+.search-result-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px 5px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.search-result-label svg {
+  color: var(--purple-soft);
+  font-size: 13px;
+}
