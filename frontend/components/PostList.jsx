@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FiCornerUpLeft,
@@ -11,6 +12,7 @@ import {
   FiMessageCircle,
   FiSend,
   FiUserPlus,
+  FiX,
 } from "react-icons/fi";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { api } from "../lib/api";
@@ -125,7 +127,7 @@ function CommentItem({ comment }) {
   );
 }
 
-function PostMedia({ media, title }) {
+function PostMedia({ media, title, onOpenImage }) {
   if (!media.length) return null;
 
   return (
@@ -137,21 +139,28 @@ function PostMedia({ media, title }) {
             Your browser does not support this video.
           </video>
         ) : (
-          <img
-            alt={item.altText || `${title} attachment`}
-            height={item.height || undefined}
+          <button
+            aria-label={`Enlarge ${item.altText || `${title} attachment`}`}
+            className="post-image-button"
             key={item.id || item.url}
-            loading="lazy"
-            src={item.url}
-            width={item.width || undefined}
-          />
+            onClick={() => onOpenImage(item)}
+            type="button"
+          >
+            <img
+              alt={item.altText || `${title} attachment`}
+              height={item.height || undefined}
+              loading="lazy"
+              src={item.url}
+              width={item.width || undefined}
+            />
+          </button>
         ),
       )}
     </div>
   );
 }
 
-export function PostItem({ post, index = 0, detail = false }) {
+export function PostItem({ post, index = 0, detail = false, variant = "compact" }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, isAuthenticated } = useCurrentUser();
@@ -159,7 +168,9 @@ export function PostItem({ post, index = 0, detail = false }) {
   const [comment, setComment] = useState("");
   const [likeOverride, setLikeOverride] = useState(null);
   const [spoilerRevealed, setSpoilerRevealed] = useState(false);
+  const [expandedImage, setExpandedImage] = useState(null);
   const media = Array.isArray(post.media) ? post.media : [];
+  const isFeed = variant === "feed";
   const liked = likeOverride?.liked ?? Boolean(post.likedByCurrentUser);
   const likeCount = likeOverride?.likeCount ?? Number(post.likeCount || 0);
   const canFollow = Boolean(post.authorId && post.authorId !== user?.id);
@@ -214,10 +225,28 @@ export function PostItem({ post, index = 0, detail = false }) {
     },
   });
 
+  useEffect(() => {
+    if (!expandedImage) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setExpandedImage(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [expandedImage]);
+
   return (
-    <article className={`post ${detail ? "post-detail-card" : ""}`}>
-      {!detail && <span className="rank">{index + 1}</span>}
-      <div className={`post-thumb art-${artTones[index % artTones.length]}`}>{glyph.sparkle}</div>
+    <article
+      className={`post ${detail ? "post-detail-card" : ""} ${isFeed ? "post-feed-card" : ""}`}
+    >
+      {!detail && !isFeed && <span className="rank">{index + 1}</span>}
+      <div className={`post-thumb art-${artTones[index % artTones.length]}`}>
+        {isFeed ? (post.author || "G").charAt(0).toUpperCase() : glyph.sparkle}
+      </div>
       <Link className="post-content-link" href={`/post/${encodeURIComponent(post.id)}`}>
         <b>{post.title}</b>
         <small>
@@ -226,14 +255,18 @@ export function PostItem({ post, index = 0, detail = false }) {
         </small>
       </Link>
       <span className="tag">{post.tag}</span>
-      {(post.content || media.length > 0) && (
+      {(detail || isFeed) && (post.content || media.length > 0) && (
         <div className={`post-body ${detail ? "full" : ""}`}>
           {post.content && <p>{post.content}</p>}
           {media.length > 0 && (
             <div
               className={`post-media-wrap ${post.isSpoiler && !spoilerRevealed ? "hidden" : ""}`}
             >
-              <PostMedia media={detail ? media : media.slice(0, 4)} title={post.title} />
+              <PostMedia
+                media={detail || isFeed ? media : media.slice(0, 4)}
+                onOpenImage={setExpandedImage}
+                title={post.title}
+              />
               {post.isSpoiler && !spoilerRevealed && (
                 <button
                   className="post-spoiler-cover"
@@ -244,11 +277,6 @@ export function PostItem({ post, index = 0, detail = false }) {
                 </button>
               )}
             </div>
-          )}
-          {!detail && (
-            <Link className="post-read-more" href={`/post/${encodeURIComponent(post.id)}`}>
-              Open post
-            </Link>
           )}
         </div>
       )}
@@ -325,15 +353,40 @@ export function PostItem({ post, index = 0, detail = false }) {
           )}
         </section>
       )}
+      {expandedImage &&
+        createPortal(
+          <div
+            aria-label={`${post.title} image preview`}
+            aria-modal="true"
+            className="post-lightbox"
+            onClick={() => setExpandedImage(null)}
+            role="dialog"
+          >
+            <button
+              aria-label="Close image preview"
+              className="post-lightbox-close"
+              onClick={() => setExpandedImage(null)}
+              type="button"
+            >
+              <FiX />
+            </button>
+            <img
+              alt={expandedImage.altText || `${post.title} attachment`}
+              onClick={(event) => event.stopPropagation()}
+              src={expandedImage.url}
+            />
+          </div>,
+          document.body,
+        )}
     </article>
   );
 }
 
-export function PostList({ posts }) {
+export function PostList({ posts, variant = "compact" }) {
   return (
-    <div className="post-list">
+    <div className={`post-list post-list-${variant}`}>
       {posts.map((post, index) => (
-        <PostItem index={index} key={post.id} post={post} />
+        <PostItem index={index} key={post.id} post={post} variant={variant} />
       ))}
     </div>
   );

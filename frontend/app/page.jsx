@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FiChevronRight, FiCompass, FiSettings, FiX } from "react-icons/fi";
+import { FiChevronRight, FiCompass, FiEdit3, FiSettings, FiX } from "react-icons/fi";
 import { CommunityGrid } from "../components/CommunityGrid";
 import { PostList } from "../components/PostList";
 import { QueryNotice } from "../components/QueryNotice";
@@ -17,7 +17,6 @@ import { defaultFeedPreferences, FEED_PREFERENCES_KEY, readStoredJson } from "..
 const feedCategories = ["Guide", "Build", "Lore", "Teams", "Strategy"];
 
 export default function HomePage() {
-  const [tab, setTab] = useState("Hot");
   const { notice, showNotice } = useToast();
   const [customizing, setCustomizing] = useState(false);
   const [preferences, setPreferences] = useState(defaultFeedPreferences);
@@ -42,12 +41,6 @@ export default function HomePage() {
     const matchesCategory = !selectedCategories.size || selectedCategories.has(post.tag);
     return matchesGame && matchesCategory;
   });
-  const trendingPosts =
-    tab === "New"
-      ? allForYouPosts
-      : tab === "Top"
-        ? [...data.posts].sort((a, b) => Number(b.likeCount || 0) - Number(a.likeCount || 0))
-        : data.posts;
 
   const openCustomizer = () => {
     setDraftPreferences(preferences);
@@ -135,61 +128,48 @@ export default function HomePage() {
         </button>
       </section>
 
-      <SectionTitle action="View All" actionHref="/explore">
-        Game Communities
-      </SectionTitle>
-      <QueryNotice
-        isLoading={home.isLoading}
-        isError={home.isError}
-        isEmpty={!visibleCommunities.length}
-        emptyText="No communities match your feed yet."
-      />
-      <CommunityGrid communities={visibleCommunities} />
+      <div className="home-feed-layout">
+        <main className="home-feed-column">
+          <section className="panel home-create-card">
+            <div className="home-create-avatar">R</div>
+            <Link href="/create">Share a build, theory, or discovery...</Link>
+            <Link aria-label="Create a post" className="home-create-action" href="/create">
+              <FiEdit3 />
+            </Link>
+          </section>
 
-      <section className="panel for-you-panel">
-        <div className="panel-head">
-          <div>
-            <span className="eyebrow">For You</span>
-            <h3>Across your games</h3>
-          </div>
-          <button className="text-btn" onClick={openCustomizer} type="button">
-            Tune Feed <FiChevronRight />
-          </button>
-        </div>
-        <p className="feed-copy">Latest posts across your selected games and topics.</p>
-        <QueryNotice
-          isEmpty={!forYouPosts.length}
-          emptyText="No For You posts are available yet."
-        />
-        <PostList posts={forYouPosts} />
-      </section>
-
-      <div className="dashboard-grid">
-        <section className="panel trending">
-          <div className="panel-head">
-            <h3>Trending Posts</h3>
-            <div aria-label="Trending post order" className="tabs small" role="tablist">
-              {["Hot", "New", "Top"].map((item) => (
-                <button
-                  type="button"
-                  onClick={() => setTab(item)}
-                  className={tab === item ? "active" : ""}
-                  key={item}
-                  aria-selected={tab === item}
-                  role="tab"
-                >
-                  {item}
-                </button>
-              ))}
+          <section className="home-feed-section">
+            <div className="home-feed-heading">
+              <div>
+                <span className="eyebrow">Your feed</span>
+                <h2>Latest from your communities</h2>
+              </div>
+              <button className="text-btn" onClick={openCustomizer} type="button">
+                Tune Feed <FiChevronRight />
+              </button>
             </div>
-          </div>
-          <PostList posts={trendingPosts} />
-          <Link className="text-btn" href="/explore">
-            View All Trending <FiChevronRight />
-          </Link>
-        </section>
+            <QueryNotice
+              isLoading={home.isLoading}
+              isError={home.isError}
+              isEmpty={!forYouPosts.length}
+              emptyText="No posts match your feed yet."
+            />
+            <PostList posts={forYouPosts} variant="feed" />
+          </section>
+        </main>
 
-        <div className="stack">
+        <aside className="home-feed-rail">
+          <section className="panel home-community-panel">
+            <SectionTitle action="View All" actionHref="/community">
+              Your communities
+            </SectionTitle>
+            <QueryNotice
+              isEmpty={!visibleCommunities.length}
+              emptyText="No communities match your feed yet."
+            />
+            <CommunityGrid communities={visibleCommunities.slice(0, 3)} />
+          </section>
+
           <section className="panel ai-panel">
             <div className="panel-head">
               <h3>AI Summary</h3>
@@ -197,16 +177,14 @@ export default function HomePage() {
             </div>
             <p>Here&apos;s what&apos;s happening across your communities.</p>
             <ul>
-              <li>
-                Version 2.2 introduces a new region, <b>&quot;Tethys System&quot;</b>.
-              </li>
+              <li>Version 2.2 introduces the Tethys System.</li>
               <li>Sanhua and Cantarella headline the new banner phase.</li>
-              <li>Players discovered hidden Rover interactions.</li>
             </ul>
             <Link className="panel-button" href="/summaries">
               Open summaries
             </Link>
           </section>
+
           <section className="panel lore">
             <div className="panel-head">
               <h3>Popular Lore Tags</h3>
@@ -219,7 +197,7 @@ export default function HomePage() {
               <span>#Sentinels</span>
             </div>
           </section>
-        </div>
+        </aside>
       </div>
       {customizing && (
         <div className="modal-backdrop" onClick={() => setCustomizing(false)}>

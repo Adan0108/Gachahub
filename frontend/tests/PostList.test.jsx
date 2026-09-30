@@ -81,6 +81,7 @@ describe("PostList", () => {
             ],
           },
         ]}
+        variant="feed"
       />,
     );
 
@@ -134,5 +135,60 @@ describe("PostList", () => {
     fireEvent.click(likeButton);
     expect(likeButton).toHaveTextContent("2");
     expect(mocks.getFollowStatus).not.toHaveBeenCalled();
+  });
+
+  it("renders the Home feed layout and enlarges post images", () => {
+    const { container } = render(
+      <PostList
+        posts={[
+          {
+            id: "post-image",
+            title: "Screenshot showcase",
+            author: "Rover",
+            time: "Now",
+            tag: "Fan Art",
+            media: [{ id: "image-1", mediaType: "IMAGE", url: "https://example.com/art.jpg" }],
+          },
+        ]}
+        variant="feed"
+      />,
+    );
+
+    expect(container.querySelector(".post-feed-card")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /screenshot showcase/i })).toHaveAttribute(
+      "href",
+      "/post/post-image",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /enlarge screenshot showcase/i }));
+    expect(
+      screen.getByRole("dialog", { name: /screenshot showcase image preview/i }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /close image preview/i }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("keeps compact lists text-only", () => {
+    render(
+      <PostList
+        posts={[
+          {
+            id: "compact-post",
+            title: "Compact result",
+            author: "Rover",
+            content: "This belongs on the detail page.",
+            media: [{ id: "image-1", mediaType: "IMAGE", url: "/mock-feed-art.svg" }],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /compact result/i })).toHaveAttribute(
+      "href",
+      "/post/compact-post",
+    );
+    expect(screen.queryByText("This belongs on the detail page.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /enlarge/i })).not.toBeInTheDocument();
   });
 });

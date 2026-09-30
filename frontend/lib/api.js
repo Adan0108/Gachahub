@@ -80,6 +80,7 @@ export function formatCount(value) {
 }
 
 export function normalizeGame(game) {
+  if (game.raw) return game;
   return {
     id: game.id || game.slug,
     slug: game.slug,
@@ -169,6 +170,7 @@ export function fallbackPosts({ gameSlug, search = "" } = {}) {
         ...post,
         gameName: game?.name || post.gameSlug,
         gameSymbol: game ? communitySymbol(game.name) : communitySymbol(post.gameSlug),
+        raw: post,
       };
     });
 }
