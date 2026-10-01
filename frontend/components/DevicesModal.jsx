@@ -5,7 +5,7 @@ import { FiMonitor, FiX } from "react-icons/fi";
 import { useChatDevices } from "../hooks/useChatDevices";
 import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 import { removableDevices, sortDevices } from "../lib/mls/device/deviceList";
-import { relativeTime } from "../lib/chatDisplay";
+import { relativeTime } from "../lib/time";
 
 const ALL = "all";
 

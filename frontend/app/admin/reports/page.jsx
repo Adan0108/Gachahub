@@ -5,6 +5,7 @@ import { useState } from "react";
 import { FiCheckCircle, FiEye, FiFlag } from "react-icons/fi";
 import { AdminActionDialog } from "../../../components/admin/AdminActionDialog";
 import { AdminPagination } from "../../../components/admin/AdminPagination";
+import { AdminQueryBoundary } from "../../../components/admin/AdminQueryBoundary";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
 import { useAdminList } from "../../../hooks/useAdminList";
@@ -94,28 +95,24 @@ export default function AdminReportsPage() {
         </select>
         <span>{items.length} shown</span>
       </section>
-      {query.isLoading ? (
-        <AdminState
-          kind="loading"
-          title="Loading reports"
-          message="Retrieving the moderation queue."
-        />
-      ) : query.isError ? (
-        <AdminState
-          kind="error"
-          title="Reports unavailable"
-          message={query.error?.message || "The report queue could not be loaded."}
-          onRetry={() => query.refetch()}
-        />
-      ) : !items.length ? (
-        <AdminState
-          kind="empty"
-          title="No reports found"
-          message={
-            filters.status ? "No reports match this status." : "The moderation queue is clear."
-          }
-        />
-      ) : (
+      <AdminQueryBoundary
+        query={query}
+        loading={{ title: "Loading reports", message: "Retrieving the moderation queue." }}
+        error={{
+          title: "Reports unavailable",
+          message: query.error?.message || "The report queue could not be loaded.",
+        }}
+        empty={
+          !items.length
+            ? {
+                title: "No reports found",
+                message: filters.status
+                  ? "No reports match this status."
+                  : "The moderation queue is clear.",
+              }
+            : null
+        }
+      >
         <section className="admin-panel">
           <div className="admin-table-wrap">
             <table className="admin-table admin-report-table">
@@ -196,7 +193,7 @@ export default function AdminReportsPage() {
           </div>
           <AdminPagination page={page} totalPages={meta?.totalPages ?? 1} onChange={setPage} />
         </section>
-      )}
+      </AdminQueryBoundary>
       {selected ? (
         <AdminActionDialog
           title={`Close out ${selected.id}`}

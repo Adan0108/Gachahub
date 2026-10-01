@@ -2,7 +2,6 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AdminState } from "../components/admin/AdminState";
-import { api } from "../lib/api";
 
 describe("admin foundation", () => {
   it("renders loading and empty states", () => {
@@ -20,13 +19,5 @@ describe("admin foundation", () => {
     render(<AdminState kind="error" title="Dashboard unavailable" onRetry={onRetry} />);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(onRetry).toHaveBeenCalledOnce();
-  });
-
-  it("exposes a stable mock contract for the unsupported overview endpoint", async () => {
-    const overview = await api.getAdminOverview();
-
-    expect(overview).toEqual(
-      expect.objectContaining({ metrics: expect.any(Array), communities: expect.any(Array) }),
-    );
   });
 });

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { FiEyeOff, FiRotateCcw, FiSearch } from "react-icons/fi";
 import { AdminActionDialog } from "../../../components/admin/AdminActionDialog";
 import { AdminPagination } from "../../../components/admin/AdminPagination";
+import { AdminQueryBoundary } from "../../../components/admin/AdminQueryBoundary";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
 import { useAdminList } from "../../../hooks/useAdminList";
@@ -104,30 +105,25 @@ export default function AdminContentPage() {
         </select>
         <span>{visibleItems.length} shown</span>
       </section>
-      {query.isLoading ? (
-        <AdminState
-          kind="loading"
-          title="Loading content"
-          message="Retrieving moderation records."
-        />
-      ) : query.isError ? (
-        <AdminState
-          kind="error"
-          title="Content unavailable"
-          message={query.error?.message || "Content records could not be loaded."}
-          onRetry={() => query.refetch()}
-        />
-      ) : !visibleItems.length ? (
-        <AdminState
-          kind="empty"
-          title="No content found"
-          message={
-            search || filters.type
-              ? "Try changing the current filters."
-              : "No reported content is waiting on review."
-          }
-        />
-      ) : (
+      <AdminQueryBoundary
+        query={query}
+        loading={{ title: "Loading content", message: "Retrieving moderation records." }}
+        error={{
+          title: "Content unavailable",
+          message: query.error?.message || "Content records could not be loaded.",
+        }}
+        empty={
+          !visibleItems.length
+            ? {
+                title: "No content found",
+                message:
+                  search || filters.type
+                    ? "Try changing the current filters."
+                    : "No reported content is waiting on review.",
+              }
+            : null
+        }
+      >
         <section className="admin-panel">
           <div className="admin-table-wrap">
             <table className="admin-table">
@@ -189,8 +185,8 @@ export default function AdminContentPage() {
             </table>
           </div>
         </section>
-      )}
-      {/* Rendered outside the empty-state branch above: a client-side search filter can empty
+      </AdminQueryBoundary>
+      {/* Rendered outside the boundary above: a client-side search filter can empty
           the current page without that being the last page, and the only way back to a page
           that still has matches is the pager - it must never disappear along with the table. */}
       {!query.isLoading && !query.isError && meta ? (

@@ -18,7 +18,7 @@ export const queryKeys = {
   followStatus: (userId) => ["follow-status", userId],
   comments: (postId) => ["comments", postId],
   replies: (commentId) => ["comment-replies", commentId],
-  adminOverview: ["admin", "overview"],
+  adminOverview: { all: ["admin", "overview"] },
   adminReports: {
     all: ["admin", "reports"],
     list: (status, page) => ["admin", "reports", { status, page }],
@@ -149,8 +149,8 @@ export const queries = {
     staleTime: 15_000,
   }),
   adminOverview: () => ({
-    queryKey: queryKeys.adminOverview,
-    queryFn: api.getAdminOverview,
+    queryKey: queryKeys.adminOverview.all,
+    queryFn: ({ signal }) => api.getAdminOverview({ signal }),
     retry: 1,
     staleTime: 30_000,
   }),

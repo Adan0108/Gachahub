@@ -33,7 +33,10 @@ export interface ReportableTargetInfo {
   authorId: string;
 }
 
-const OPEN_REPORT_STATUSES: ReportStatus[] = ['PENDING', 'IN_REVIEW'];
+const OPEN_REPORT_STATUSES = [
+  'PENDING',
+  'IN_REVIEW',
+] as const satisfies ReportStatus[];
 
 @Injectable()
 export class ReportsRepository {
@@ -182,6 +185,36 @@ export class ReportsRepository {
     return groups.map((group) => ({
       targetType: group.targetType,
       targetId: group.targetId,
+      count: group._count._all,
+    }));
+  }
+
+  /** Total open (PENDING/IN_REVIEW) reports across every game - the admin dashboard's metric. */
+  countOpen() {
+    return this.prisma.report.count({
+      where: { status: { in: OPEN_REPORT_STATUSES } },
+    });
+  }
+
+  /**
+   * Open report count per game, scoped to the given game ids - used by the
+   * admin dashboard to annotate its communities snapshot. Takes the ids the
+   * caller already needs the count for, rather than every game, so this
+   * stays cheap regardless of how many games exist.
+   */
+  async countOpenByGameIds(gameIds: string[]) {
+    if (gameIds.length === 0) {
+      return [];
+    }
+
+    const groups = await this.prisma.report.groupBy({
+      by: ['gameId'],
+      where: { status: { in: OPEN_REPORT_STATUSES }, gameId: { in: gameIds } },
+      _count: { _all: true },
+    });
+
+    return groups.map((group) => ({
+      gameId: group.gameId,
       count: group._count._all,
     }));
   }

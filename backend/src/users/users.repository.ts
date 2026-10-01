@@ -57,6 +57,28 @@ export class UsersRepository {
     });
   }
 
+  /** Total ACTIVE accounts - the admin dashboard's "Total members" metric. */
+  countActive() {
+    return this.prisma.user.count({ where: { status: 'ACTIVE' } });
+  }
+
+  /**
+   * Names for a batch of user ids, for annotating audit log entries whose
+   * target is a user (bans, moderator assignments) with a readable name
+   * instead of a bare id. A missing id (account hard-deleted via cascade)
+   * just won't appear in the result - the caller decides the fallback.
+   */
+  async findManyNamesByIds(ids: string[]) {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    return this.prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true },
+    });
+  }
+
   async findManyForAdmin(params: {
     status?: UserStatus;
     role?: UserRole;

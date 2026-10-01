@@ -1485,22 +1485,6 @@ button {
   font-weight: 800;
 }
 
-.admin-metric-card small {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.admin-metric-card .positive {
-  color: #66d6ad;
-}
-
-.admin-metric-card .negative {
-  color: #ff8b9b;
-}
-
 .admin-overview-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.8fr);

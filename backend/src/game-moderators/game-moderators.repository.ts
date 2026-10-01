@@ -123,6 +123,11 @@ export class GameModeratorsRepository {
     });
   }
 
+  /** Total moderator assignments across every game - the admin dashboard's metric. */
+  count() {
+    return this.prisma.gameModerator.count();
+  }
+
   /**
    * Creates a moderator assignment.
    *

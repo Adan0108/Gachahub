@@ -1,5 +1,4 @@
 import { mockCategories, mockGames, posts } from "./mockData";
-import { adminOverviewMock } from "./adminMockData";
 
 export const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000"
@@ -15,6 +14,7 @@ export const backendRoutes = {
   gameModerators: (gameSlug) => `/games/${encodePathParam(gameSlug)}/moderators`,
   gameModerator: (gameSlug, userId) =>
     `/games/${encodePathParam(gameSlug)}/moderators/${encodePathParam(userId)}`,
+  adminOverview: "/admin/overview",
   adminReports: "/admin/reports",
   reportClaim: (gameSlug, reportId) =>
     `/games/${encodePathParam(gameSlug)}/reports/${encodePathParam(reportId)}/claim`,
@@ -497,10 +497,6 @@ function encryptedMessagePayload({
   };
 }
 
-function cloneAdminMock(value) {
-  return JSON.parse(JSON.stringify(value));
-}
-
 const MEDIA_BATCH_SIZE = 10;
 
 function chunked(items) {
@@ -688,7 +684,7 @@ export const api = {
       meta: games.meta,
     };
   },
-  getAdminOverview: async () => cloneAdminMock(adminOverviewMock),
+  getAdminOverview: (options = {}) => request(backendRoutes.adminOverview, options),
   listReports: (query = {}, options = {}) =>
     request(withQuery(backendRoutes.adminReports, query), options),
   claimReport: (gameSlug, reportId) =>

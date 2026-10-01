@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { relativeTime } from "./chatDisplay";
+import { relativeTime } from "./time";
 
 describe("relativeTime", () => {
   beforeEach(() => {

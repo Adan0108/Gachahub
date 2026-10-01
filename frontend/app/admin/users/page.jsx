@@ -5,6 +5,7 @@ import { useState } from "react";
 import { FiRotateCcw, FiSearch, FiSlash } from "react-icons/fi";
 import { AdminActionDialog } from "../../../components/admin/AdminActionDialog";
 import { AdminPagination } from "../../../components/admin/AdminPagination";
+import { AdminQueryBoundary } from "../../../components/admin/AdminQueryBoundary";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
 import { useAdminList } from "../../../hooks/useAdminList";
@@ -114,26 +115,25 @@ export default function AdminUsersPage() {
         </select>
         <span>{items.length} shown</span>
       </section>
-      {query.isLoading ? (
-        <AdminState kind="loading" title="Loading users" message="Retrieving member records." />
-      ) : query.isError ? (
-        <AdminState
-          kind="error"
-          title="Users unavailable"
-          message={query.error?.message || "Member records could not be loaded."}
-          onRetry={() => query.refetch()}
-        />
-      ) : !items.length ? (
-        <AdminState
-          kind="empty"
-          title="No users found"
-          message={
-            filters.search || filters.status
-              ? "Try changing the current filters."
-              : "No member records are available."
-          }
-        />
-      ) : (
+      <AdminQueryBoundary
+        query={query}
+        loading={{ title: "Loading users", message: "Retrieving member records." }}
+        error={{
+          title: "Users unavailable",
+          message: query.error?.message || "Member records could not be loaded.",
+        }}
+        empty={
+          !items.length
+            ? {
+                title: "No users found",
+                message:
+                  filters.search || filters.status
+                    ? "Try changing the current filters."
+                    : "No member records are available.",
+              }
+            : null
+        }
+      >
         <section className="admin-panel">
           <div className="admin-table-wrap">
             <table className="admin-table">
@@ -202,7 +202,7 @@ export default function AdminUsersPage() {
           </div>
           <AdminPagination page={page} totalPages={meta?.totalPages ?? 1} onChange={setPage} />
         </section>
-      )}
+      </AdminQueryBoundary>
       {target ? (
         <AdminActionDialog
           title={mode.title(target.user)}

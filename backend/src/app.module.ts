@@ -21,6 +21,7 @@ import { HealthModule } from './health/health.module';
 import { MediaModule } from './media/media.module';
 import { MlsHandshakesModule } from './mls-handshakes/mls-handshakes.module';
 import { NotificationModule } from './notifications/notification.module';
+import { OverviewModule } from './overview/overview.module';
 import { PostsModule } from './posts/posts.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
@@ -68,6 +69,7 @@ import { MlsRetentionModule } from './mls-retention/mls-retention.module';
     ReportsModule,
     ContentModerationModule,
     AuditLogQueryModule,
+    OverviewModule,
 
     NotificationModule,
 

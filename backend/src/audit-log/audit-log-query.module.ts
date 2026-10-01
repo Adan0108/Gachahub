@@ -12,5 +12,6 @@ import { GameAuditLogController } from './game-audit-log.controller';
   controllers: [GameAuditLogController, AdminAuditLogController],
   // Own repository instance: AuditLogModule deliberately exports only the write-side service.
   providers: [AuditLogQueryService, AuditLogRepository],
+  exports: [AuditLogQueryService],
 })
 export class AuditLogQueryModule {}

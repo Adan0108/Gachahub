@@ -19,5 +19,6 @@ import { SessionTerminatorModule } from '../auth/session-terminator.module';
     UsersRepository,
     UserSearchRateLimiterService,
   ],
+  exports: [UsersRepository],
 })
 export class UsersModule {}
