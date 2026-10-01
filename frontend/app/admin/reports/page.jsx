@@ -1,44 +1,74 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { FiCheckCircle, FiEye } from "react-icons/fi";
+import { useMutation } from "@tanstack/react-query";
+import { useState } from "react";
+import { FiCheckCircle, FiEye, FiFlag } from "react-icons/fi";
 import { AdminActionDialog } from "../../../components/admin/AdminActionDialog";
+import { AdminPagination } from "../../../components/admin/AdminPagination";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
-import { useRequireAdmin } from "../../../hooks/useRequireAdmin";
+import { useAdminList } from "../../../hooks/useAdminList";
 import { useToast } from "../../../hooks/useToast";
 import { api } from "../../../lib/api";
 import { queries, queryKeys } from "../../../lib/queries";
 
+const REPORT_STATUS_CLASS = {
+  PENDING: "admin-status-pending",
+  IN_REVIEW: "admin-status-in-review",
+  RESOLVED: "admin-status-resolved",
+  DISMISSED: "admin-status-dismissed",
+};
+
+const DECISIONS = {
+  RESOLVE: {
+    call: api.resolveReport,
+    notice: "Report resolved",
+    confirmLabel: "Resolve report",
+    pendingLabel: "Resolving...",
+  },
+  DISMISS: {
+    call: api.dismissReport,
+    notice: "Report dismissed",
+    confirmLabel: "Dismiss report",
+    pendingLabel: "Dismissing...",
+  },
+};
+
 export default function AdminReportsPage() {
-  const session = useRequireAdmin();
-  const queryClient = useQueryClient();
   const { notice, showNotice } = useToast(2400);
-  const [status, setStatus] = useState("");
+  const { session, page, setPage, filters, setFilter, items, meta, invalidate, query } =
+    useAdminList((filters, page) => queries.adminReports(filters.status, page), {
+      prefix: queryKeys.adminReports.all,
+    });
   const [selected, setSelected] = useState(null);
-  const [resolution, setResolution] = useState("NO_VIOLATION");
+  const [decisionKey, setDecisionKey] = useState("RESOLVE");
   const [note, setNote] = useState("");
-  const reports = useQuery({ ...queries.adminReports(), enabled: session.isAdmin });
-  const mutation = useMutation({
-    mutationFn: () => api.resolveReport(selected.id, { resolution, note: note.trim() }),
-    onSuccess: (result) => {
-      queryClient.setQueryData(queryKeys.adminReports, (current) => ({
-        ...current,
-        items: current.items.map((item) => (item.id === result.id ? { ...item, ...result } : item)),
-      }));
+
+  const claimMutation = useMutation({
+    mutationFn: (report) => api.claimReport(report.game.slug, report.id),
+    onSuccess: invalidate,
+    onError: (error) => showNotice(error.message || "Could not claim report"),
+  });
+  const decision = DECISIONS[decisionKey];
+  const decisionMutation = useMutation({
+    mutationFn: () =>
+      decision.call(selected.game.slug, selected.id, { resolutionNote: note.trim() }),
+    onSuccess: () => {
+      invalidate();
       setSelected(null);
       setNote("");
-      showNotice("Report resolved");
+      showNotice(decision.notice);
     },
   });
-  const items = useMemo(
-    () => (reports.data?.items || []).filter((report) => !status || report.status === status),
-    [reports.data, status],
-  );
 
   if (session.isLoading || !session.isAdmin)
     return <AdminState kind="loading" title="Checking admin access" />;
+
+  const openDecision = (report) => {
+    setSelected(report);
+    setDecisionKey("RESOLVE");
+    setNote("");
+  };
 
   return (
     <AdminShell user={session.user}>
@@ -48,39 +78,42 @@ export default function AdminReportsPage() {
           <h1>Reports</h1>
           <p>Review reported posts and comments and record a moderation decision.</p>
         </div>
-        <span className="admin-page-count">{reports.data?.meta?.total ?? 0} total</span>
+        <span className="admin-page-count">{meta?.total ?? 0} total</span>
       </div>
       <section className="admin-toolbar admin-toolbar-compact" aria-label="Report filters">
         <select
           aria-label="Filter report status"
-          onChange={(event) => setStatus(event.target.value)}
-          value={status}
+          onChange={(event) => setFilter("status", event.target.value)}
+          value={filters.status || ""}
         >
           <option value="">All statuses</option>
-          <option value="OPEN">Open</option>
+          <option value="PENDING">Pending</option>
           <option value="IN_REVIEW">In review</option>
           <option value="RESOLVED">Resolved</option>
+          <option value="DISMISSED">Dismissed</option>
         </select>
         <span>{items.length} shown</span>
       </section>
-      {reports.isLoading ? (
+      {query.isLoading ? (
         <AdminState
           kind="loading"
           title="Loading reports"
           message="Retrieving the moderation queue."
         />
-      ) : reports.isError ? (
+      ) : query.isError ? (
         <AdminState
           kind="error"
           title="Reports unavailable"
-          message={reports.error?.message || "The report queue could not be loaded."}
-          onRetry={() => reports.refetch()}
+          message={query.error?.message || "The report queue could not be loaded."}
+          onRetry={() => query.refetch()}
         />
       ) : !items.length ? (
         <AdminState
           kind="empty"
           title="No reports found"
-          message={status ? "No reports match this status." : "The moderation queue is clear."}
+          message={
+            filters.status ? "No reports match this status." : "The moderation queue is clear."
+          }
         />
       ) : (
         <section className="admin-panel">
@@ -89,9 +122,9 @@ export default function AdminReportsPage() {
               <thead>
                 <tr>
                   <th>Report ID</th>
+                  <th>Game</th>
                   <th>Target</th>
                   <th>Reason</th>
-                  <th>Priority</th>
                   <th>Status</th>
                   <th>Submitted</th>
                   <th className="admin-actions-heading">Actions</th>
@@ -106,6 +139,7 @@ export default function AdminReportsPage() {
                         <code>{report.id}</code>
                       </div>
                     </td>
+                    <td>{report.game?.name || report.gameId}</td>
                     <td>
                       <div className="admin-target-cell">
                         <span className="admin-type-badge">{report.targetType}</span>
@@ -113,17 +147,12 @@ export default function AdminReportsPage() {
                       </div>
                     </td>
                     <td>
-                      <strong className="admin-reason-text">{report.reason}</strong>
+                      <strong className="admin-reason-text">{report.reasonCode}</strong>
                     </td>
                     <td>
                       <span
-                        className={`admin-priority admin-priority-${report.priority.toLowerCase()}`}
+                        className={`admin-status ${REPORT_STATUS_CLASS[report.status] || ""}`}
                       >
-                        {report.priority}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`admin-status admin-status-${report.status.toLowerCase()}`}>
                         {report.status.replace("_", " ")}
                       </span>
                     </td>
@@ -133,51 +162,63 @@ export default function AdminReportsPage() {
                       )}
                     </td>
                     <td>
-                      <button
-                        aria-label={`Review ${report.id}`}
-                        className="admin-icon-button"
-                        disabled={report.status === "RESOLVED"}
-                        onClick={() => {
-                          setSelected(report);
-                          setResolution("NO_VIOLATION");
-                          setNote("");
-                        }}
-                        type="button"
-                      >
-                        {report.status === "RESOLVED" ? <FiCheckCircle /> : <FiEye />}
-                      </button>
+                      {report.status === "PENDING" ? (
+                        <button
+                          aria-label={`Claim ${report.id}`}
+                          className="admin-icon-button"
+                          disabled={
+                            claimMutation.isPending && claimMutation.variables?.id === report.id
+                          }
+                          onClick={() => claimMutation.mutate(report)}
+                          type="button"
+                        >
+                          <FiFlag />
+                        </button>
+                      ) : report.status === "IN_REVIEW" ? (
+                        <button
+                          aria-label={`Review ${report.id}`}
+                          className="admin-icon-button"
+                          onClick={() => openDecision(report)}
+                          type="button"
+                        >
+                          <FiEye />
+                        </button>
+                      ) : (
+                        <span className="admin-icon-button" aria-hidden="true">
+                          <FiCheckCircle />
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          <AdminPagination page={page} totalPages={meta?.totalPages ?? 1} onChange={setPage} />
         </section>
       )}
       {selected ? (
         <AdminActionDialog
-          title={`Resolve ${selected.id}`}
-          description={`${selected.reason} report against ${selected.targetType.toLowerCase()} ${selected.targetId}.`}
-          error={mutation.error?.message}
-          pending={mutation.isPending}
-          confirmLabel="Resolve report"
-          pendingLabel="Resolving..."
+          title={`Close out ${selected.id}`}
+          description={`${selected.reasonCode} report against ${selected.targetType.toLowerCase()} ${selected.targetId}.`}
+          error={decisionMutation.error?.message}
+          pending={decisionMutation.isPending}
+          confirmLabel={decision.confirmLabel}
+          pendingLabel={decision.pendingLabel}
           tone="primary"
           onClose={() => setSelected(null)}
-          onConfirm={() => mutation.mutate()}
+          onConfirm={() => decisionMutation.mutate()}
         >
           <div className="admin-dialog-fields">
             <label>
               <span>Decision</span>
-              <select onChange={(event) => setResolution(event.target.value)} value={resolution}>
-                <option value="NO_VIOLATION">No violation</option>
-                <option value="CONTENT_HIDDEN">Content hidden</option>
-                <option value="USER_WARNED">User warned</option>
-                <option value="ESCALATED">Escalated</option>
+              <select onChange={(event) => setDecisionKey(event.target.value)} value={decisionKey}>
+                <option value="RESOLVE">Resolve (action taken)</option>
+                <option value="DISMISS">Dismiss (no action)</option>
               </select>
             </label>
             <label>
-              <span>Internal note</span>
+              <span>Note</span>
               <textarea
                 maxLength={1000}
                 onChange={(event) => setNote(event.target.value)}

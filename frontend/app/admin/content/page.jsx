@@ -1,40 +1,21 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { FiEyeOff, FiSearch } from "react-icons/fi";
-import { AdminActionDialog } from "../../../components/admin/AdminActionDialog";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
 import { useRequireAdmin } from "../../../hooks/useRequireAdmin";
-import { useToast } from "../../../hooks/useToast";
-import { api } from "../../../lib/api";
-import { queries, queryKeys } from "../../../lib/queries";
+import { queries } from "../../../lib/queries";
 
+// Mock-backed, read-only for now. The real API only has per-game hidden-post listing + post
+// hide/restore (no comment moderation, no cross-game listing, no report count), so there's
+// nothing real to wire the Hide action to yet - see BACKLOG.md "Content page" for the real scope.
 export default function AdminContentPage() {
   const session = useRequireAdmin();
-  const queryClient = useQueryClient();
-  const { notice, showNotice } = useToast(2400);
   const [search, setSearch] = useState("");
   const [type, setType] = useState("");
-  const [selected, setSelected] = useState(null);
-  const [reason, setReason] = useState("");
   const content = useQuery({ ...queries.adminContent(), enabled: session.isAdmin });
-  const mutation = useMutation({
-    mutationFn: () =>
-      selected.type === "POST"
-        ? api.hidePost(selected.id, { reason: reason.trim() })
-        : api.hideComment(selected.id, { reason: reason.trim() }),
-    onSuccess: (result) => {
-      queryClient.setQueryData(queryKeys.adminContent, (current) => ({
-        ...current,
-        items: current.items.map((item) => (item.id === result.id ? { ...item, ...result } : item)),
-      }));
-      setSelected(null);
-      setReason("");
-      showNotice("Content hidden");
-    },
-  });
   const items = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return (content.data?.items || []).filter(
@@ -140,11 +121,8 @@ export default function AdminContentPage() {
                       <button
                         aria-label={`Hide ${item.type.toLowerCase()} ${item.id}`}
                         className="admin-icon-button admin-icon-danger"
-                        disabled={item.status === "HIDDEN"}
-                        onClick={() => {
-                          setSelected(item);
-                          setReason("");
-                        }}
+                        disabled
+                        title="Not wired to the real backend yet - see BACKLOG.md"
                         type="button"
                       >
                         <FiEyeOff />
@@ -157,37 +135,6 @@ export default function AdminContentPage() {
           </div>
         </section>
       )}
-      {selected ? (
-        <AdminActionDialog
-          title={`Hide this ${selected.type.toLowerCase()}?`}
-          description="The content will no longer be visible to members. Record a clear reason for the moderation history."
-          error={mutation.error?.message}
-          pending={mutation.isPending}
-          confirmDisabled={!reason.trim()}
-          confirmLabel="Hide content"
-          pendingLabel="Hiding..."
-          onClose={() => setSelected(null)}
-          onConfirm={() => mutation.mutate()}
-        >
-          <div className="admin-dialog-fields">
-            <label>
-              <span>Moderation reason *</span>
-              <textarea
-                maxLength={500}
-                onChange={(event) => setReason(event.target.value)}
-                placeholder="Reason recorded in the moderation audit"
-                rows={3}
-                value={reason}
-              />
-            </label>
-          </div>
-        </AdminActionDialog>
-      ) : null}
-      {notice ? (
-        <div className="toast admin-toast" role="status">
-          {notice}
-        </div>
-      ) : null}
     </AdminShell>
   );
 }

@@ -4,6 +4,10 @@ export type ReportAuditAction =
   | 'REPORT_RESOLVED'
   | 'REPORT_DISMISSED';
 export type ModeratorAuditAction = 'MODERATOR_ASSIGNED' | 'MODERATOR_REMOVED';
+export type UserModerationAuditAction =
+  | 'USER_BANNED'
+  | 'USER_SUSPENDED'
+  | 'USER_REACTIVATED';
 
 /** Stored shape of `metadata` for post entries. Rows are permanent - change by adding optional keys only. */
 export type PostAuditMetadata = { authorId: string; postTitle: string };
@@ -13,6 +17,12 @@ export type ReportAuditMetadata = {
   reportedTargetType: string;
   reportedTargetId: string;
   resolutionNote?: string;
+};
+
+/** Stored shape of `metadata` for user moderation entries. Rows are permanent - change by adding optional keys only. */
+export type UserModerationAuditMetadata = {
+  previousStatus: string;
+  reason?: string;
 };
 
 interface AuditEntryBase {
@@ -45,5 +55,10 @@ export type AuditEntry = AuditEntryBase &
         action: ModeratorAuditAction;
         targetType: 'USER';
         metadata?: undefined;
+      }
+    | {
+        action: UserModerationAuditAction;
+        targetType: 'USER';
+        metadata: UserModerationAuditMetadata;
       }
   );

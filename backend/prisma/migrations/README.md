@@ -60,3 +60,8 @@ Apply with `prisma migrate deploy` only. Never rename, edit or squash an applied
 ## User search
 - `20260925150100_pg_trgm_extension`: pg_trgm extension
 - `20260925150200_user_name_trgm_idx`: trigram index on user name
+
+## Reports and moderation
+- `20260918160000_add_reports`: reports table
+- `20260919090000_add_audit_logs`: audit log table
+- `20261001000000_add_user_moderation_audit_actions`: ban/suspend/reactivate audit actions

@@ -1,10 +1,5 @@
 import { mockCategories, mockGames, posts } from "./mockData";
-import {
-  adminContentMock,
-  adminOverviewMock,
-  adminReportsMock,
-  adminUsersMock,
-} from "./adminMockData";
+import { adminContentMock, adminOverviewMock } from "./adminMockData";
 
 export const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000"
@@ -20,6 +15,15 @@ export const backendRoutes = {
   gameModerators: (gameSlug) => `/games/${encodePathParam(gameSlug)}/moderators`,
   gameModerator: (gameSlug, userId) =>
     `/games/${encodePathParam(gameSlug)}/moderators/${encodePathParam(userId)}`,
+  adminReports: "/admin/reports",
+  reportClaim: (gameSlug, reportId) =>
+    `/games/${encodePathParam(gameSlug)}/reports/${encodePathParam(reportId)}/claim`,
+  reportResolve: (gameSlug, reportId) =>
+    `/games/${encodePathParam(gameSlug)}/reports/${encodePathParam(reportId)}/resolve`,
+  reportDismiss: (gameSlug, reportId) =>
+    `/games/${encodePathParam(gameSlug)}/reports/${encodePathParam(reportId)}/dismiss`,
+  adminUsers: "/admin/users",
+  adminUserStatus: (userId) => `/admin/users/${encodePathParam(userId)}/status`,
   currentUser: "/users/me",
   userSearch: "/users/search",
   signInEmail: "/api/auth/sign-in/email",
@@ -676,24 +680,18 @@ export const api = {
     };
   },
   getAdminOverview: async () => cloneAdminMock(adminOverviewMock),
-  listReports: async () => cloneAdminMock(adminReportsMock),
-  resolveReport: async (reportId, { resolution, note = "" }) => ({
-    id: reportId,
-    status: "RESOLVED",
-    resolution,
-    note,
-    resolvedAt: new Date().toISOString(),
-  }),
-  hidePost: async (postId, { reason }) => ({ id: postId, status: "HIDDEN", reason }),
-  hideComment: async (commentId, { reason }) => ({ id: commentId, status: "HIDDEN", reason }),
-  listAdminUsers: async () => cloneAdminMock(adminUsersMock),
-  banUser: async (userId, { reason, durationDays = null }) => ({
-    id: userId,
-    status: "BANNED",
-    reason,
-    durationDays,
-    bannedAt: new Date().toISOString(),
-  }),
+  listReports: (query = {}, options = {}) =>
+    request(withQuery(backendRoutes.adminReports, query), options),
+  claimReport: (gameSlug, reportId) =>
+    mutation(backendRoutes.reportClaim(gameSlug, reportId), undefined, { method: "PATCH" }),
+  resolveReport: (gameSlug, reportId, { resolutionNote } = {}) =>
+    mutation(backendRoutes.reportResolve(gameSlug, reportId), { resolutionNote }, { method: "PATCH" }),
+  dismissReport: (gameSlug, reportId, { resolutionNote } = {}) =>
+    mutation(backendRoutes.reportDismiss(gameSlug, reportId), { resolutionNote }, { method: "PATCH" }),
+  listAdminUsers: (query = {}, options = {}) =>
+    request(withQuery(backendRoutes.adminUsers, query), options),
+  setUserStatus: (userId, { status, reason }) =>
+    mutation(backendRoutes.adminUserStatus(userId), { status, reason }, { method: "PATCH" }),
   listAdminContent: async () => cloneAdminMock(adminContentMock),
   getChatConversations: () => request(backendRoutes.chatConversations),
   getArchivedChatConversations: () => request(backendRoutes.chatArchivedConversations),

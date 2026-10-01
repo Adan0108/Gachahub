@@ -60,14 +60,18 @@ describe("chat requests", () => {
 
   it("accepts a pending request", async () => {
     renderChat();
-    fireEvent.click(await screen.findByRole("tab", { name: /requests/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /more/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /requests/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /sender/i }));
     fireEvent.click(await screen.findByRole("button", { name: /accept/i }));
     await waitFor(() => expect(mocks.accept).toHaveBeenCalledWith("conversation-1"));
   });
 
   it("declines a pending request", async () => {
     renderChat();
-    fireEvent.click(await screen.findByRole("tab", { name: /requests/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /more/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /requests/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /sender/i }));
     fireEvent.click(await screen.findByRole("button", { name: /decline/i }));
     await waitFor(() => expect(mocks.decline).toHaveBeenCalledWith("conversation-1"));
   });

@@ -33,52 +33,6 @@ export const adminOverviewMock = {
   ],
 };
 
-export const adminReportsMock = {
-  items: [
-    {
-      id: "report-1842",
-      targetType: "POST",
-      targetId: "post-8421",
-      reason: "Harassment",
-      status: "OPEN",
-      priority: "HIGH",
-      createdAt: "2026-09-24T13:10:00.000Z",
-    },
-    {
-      id: "report-1841",
-      targetType: "COMMENT",
-      targetId: "comment-601",
-      reason: "Spam",
-      status: "IN_REVIEW",
-      priority: "MEDIUM",
-      createdAt: "2026-09-24T12:42:00.000Z",
-    },
-  ],
-  meta: { page: 1, limit: 20, total: 2 },
-};
-
-export const adminUsersMock = {
-  items: [
-    {
-      id: "user-101",
-      name: "Rover",
-      email: "rover@example.com",
-      role: "USER",
-      status: "ACTIVE",
-      joinedAt: "2026-07-12T09:30:00.000Z",
-    },
-    {
-      id: "user-102",
-      name: "Trailblazer",
-      email: "trailblazer@example.com",
-      role: "USER",
-      status: "ACTIVE",
-      joinedAt: "2026-07-16T15:18:00.000Z",
-    },
-  ],
-  meta: { page: 1, limit: 20, total: 2 },
-};
-
 export const adminContentMock = {
   items: [
     {

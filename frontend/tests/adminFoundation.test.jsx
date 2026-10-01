@@ -22,22 +22,11 @@ describe("admin foundation", () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
-  it("exposes stable mock contracts for unsupported admin endpoints", async () => {
+  it("exposes a stable mock contract for the unsupported overview endpoint", async () => {
     const overview = await api.getAdminOverview();
-    const reports = await api.listReports();
-    const resolution = await api.resolveReport("report-1", {
-      resolution: "NO_VIOLATION",
-      note: "Reviewed",
-    });
-    const ban = await api.banUser("user-1", { reason: "Repeated abuse", durationDays: 7 });
 
     expect(overview).toEqual(
       expect.objectContaining({ metrics: expect.any(Array), communities: expect.any(Array) }),
     );
-    expect(reports).toEqual(
-      expect.objectContaining({ items: expect.any(Array), meta: expect.any(Object) }),
-    );
-    expect(resolution).toMatchObject({ id: "report-1", status: "RESOLVED" });
-    expect(ban).toMatchObject({ id: "user-1", status: "BANNED", durationDays: 7 });
   });
 });

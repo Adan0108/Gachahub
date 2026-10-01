@@ -1988,6 +1988,35 @@ button {
   margin-left: 7px;
 }
 
+.admin-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--admin-line);
+  font-size: 13px;
+  color: var(--admin-muted);
+}
+
+.admin-pagination button {
+  padding: 7px 14px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: var(--admin-panel-raised);
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.admin-pagination button:not(:disabled):hover {
+  border-color: var(--purple-soft, #8b7cf6);
+}
+
+.admin-pagination button:disabled {
+  opacity: 0.45;
+}
+
 .admin-form textarea {
   resize: vertical;
   padding: 10px 11px;
@@ -2201,8 +2230,9 @@ button {
   color: #e2c56f;
 }
 
-.admin-status-open,
-.admin-status-in_review {
+.admin-status-pending,
+.admin-status-in-review,
+.admin-status-suspended {
   border-color: #6c4e2c;
   background: #2e2318;
   color: #e5b56c;
@@ -2212,6 +2242,13 @@ button {
   border-color: #315167;
   background: #172934;
   color: #7bc7ef;
+}
+
+.admin-status-dismissed,
+.admin-status-deleted {
+  border-color: #444b59;
+  background: #232833;
+  color: #8891a3;
 }
 
 .admin-status-banned {
@@ -5437,8 +5474,7 @@ body {
   clip-path: polygon(0 34%, 34% 20%, 68% 34%, 100% 18%, 100% 100%, 0 100%);
 }
 
-.main-column,
-.sidebar {
+.main-column {
   position: relative;
   z-index: 1;
 }
@@ -9171,6 +9207,8 @@ body {
 .search-result-label svg {
   color: var(--purple-soft);
   font-size: 13px;
+}
+
 /* Dev tools panel - bottom-left, so it never overlaps Next.js's own dev
    overlay bubble (bottom-right). Flat colors throughout, no gradients. */
 .dev-tools {

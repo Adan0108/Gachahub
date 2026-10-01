@@ -9,29 +9,15 @@ describe("mock-backed admin workflows", () => {
     vi.unstubAllGlobals();
   });
 
-  it("returns documented list and mutation shapes without backend requests", async () => {
+  it("returns documented list shapes without backend requests", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const [users, content, reports] = await Promise.all([
-      api.listAdminUsers(),
-      api.listAdminContent(),
-      api.listReports(),
-    ]);
-    const hidden = await api.hideComment("comment-1", { reason: "Spam" });
-    const banned = await api.banUser("user-1", { reason: "Abuse", durationDays: 30 });
+    const content = await api.listAdminContent();
 
-    expect(users).toEqual(
-      expect.objectContaining({ items: expect.any(Array), meta: expect.any(Object) }),
-    );
     expect(content).toEqual(
       expect.objectContaining({ items: expect.any(Array), meta: expect.any(Object) }),
     );
-    expect(reports).toEqual(
-      expect.objectContaining({ items: expect.any(Array), meta: expect.any(Object) }),
-    );
-    expect(hidden).toMatchObject({ id: "comment-1", status: "HIDDEN", reason: "Spam" });
-    expect(banned).toMatchObject({ id: "user-1", status: "BANNED", durationDays: 30 });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

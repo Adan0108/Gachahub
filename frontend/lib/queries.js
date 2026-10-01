@@ -1,3 +1,4 @@
+import { keepPreviousData } from "@tanstack/react-query";
 import { api, fallbackCategories, fallbackGame, fallbackGames, fallbackPosts } from "./api";
 
 export const queryKeys = {
@@ -18,8 +19,14 @@ export const queryKeys = {
   comments: (postId) => ["comments", postId],
   replies: (commentId) => ["comment-replies", commentId],
   adminOverview: ["admin", "overview"],
-  adminReports: ["admin", "reports"],
-  adminUsers: ["admin", "users"],
+  adminReports: {
+    all: ["admin", "reports"],
+    list: (status, page) => ["admin", "reports", { status, page }],
+  },
+  adminUsers: {
+    all: ["admin", "users"],
+    list: (status, search, page) => ["admin", "users", { status, search, page }],
+  },
   adminContent: ["admin", "content"],
   chatConversations: ["chat", "conversations"],
   chatArchivedConversations: ["chat", "archived"],
@@ -144,15 +151,17 @@ export const queries = {
     retry: 1,
     staleTime: 30_000,
   }),
-  adminReports: () => ({
-    queryKey: queryKeys.adminReports,
-    queryFn: api.listReports,
+  adminReports: (status = "", page = 1) => ({
+    queryKey: queryKeys.adminReports.list(status, page),
+    queryFn: ({ signal }) => api.listReports({ status, page, limit: 20 }, { signal }),
+    placeholderData: keepPreviousData,
     retry: 1,
     staleTime: 15_000,
   }),
-  adminUsers: () => ({
-    queryKey: queryKeys.adminUsers,
-    queryFn: api.listAdminUsers,
+  adminUsers: (status = "", search = "", page = 1) => ({
+    queryKey: queryKeys.adminUsers.list(status, search, page),
+    queryFn: ({ signal }) => api.listAdminUsers({ status, search, page, limit: 20 }, { signal }),
+    placeholderData: keepPreviousData,
     retry: 1,
     staleTime: 15_000,
   }),

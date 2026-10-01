@@ -19,6 +19,10 @@ const reportInclude = {
   resolvedBy: {
     select: { id: true, name: true, image: true },
   },
+  // The admin cross-game queue needs a game to scope claim/resolve/dismiss calls against.
+  game: {
+    select: { id: true, name: true, slug: true },
+  },
 } satisfies Prisma.ReportInclude;
 
 export interface ReportableTargetInfo {
