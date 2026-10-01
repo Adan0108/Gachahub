@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '../generated/prisma/client';
 
 const commentInclude = {
   author: {
@@ -169,36 +170,37 @@ export class CommentsRepository {
    * Comment creation and Post.commentCoutn update must succed
    * together so the cached counter cannot become out of sync
    */
-  create(params: {
-    postId: string;
-    authorId: string;
-    content: string;
-    parentId?: string;
-  }) {
-    return this.prisma.$transaction(async (tx) => {
-      const comment = await tx.comment.create({
-        data: {
-          postId: params.postId,
-          authorId: params.authorId,
-          content: params.content,
-          parentId: params.parentId,
-        },
-        include: commentInclude,
-      });
-
-      await tx.post.update({
-        where: {
-          id: params.postId,
-        },
-        data: {
-          commentCount: {
-            increment: 1,
-          },
-        },
-      });
-
-      return comment;
+  async create(
+    transaction: Prisma.TransactionClient,
+    params: {
+      postId: string;
+      authorId: string;
+      content: string;
+      parentId?: string;
+    },
+  ) {
+    const comment = await transaction.comment.create({
+      data: {
+        postId: params.postId,
+        authorId: params.authorId,
+        content: params.content,
+        parentId: params.parentId,
+      },
+      include: commentInclude,
     });
+
+    await transaction.post.update({
+      where: {
+        id: params.postId,
+      },
+      data: {
+        commentCount: {
+          increment: 1,
+        },
+      },
+    });
+
+    return comment;
   }
 
   update(id: string, content: string) {

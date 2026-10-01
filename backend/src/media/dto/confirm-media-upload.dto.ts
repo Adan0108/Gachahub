@@ -54,12 +54,14 @@ export class ConfirmMediaUploadDto {
   @IsString()
   signature!: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'webp',
+    description: 'Omitted by Cloudinary for raw (opaque) uploads.',
   })
+  @IsOptional()
   @IsString()
   @MaxLength(20)
-  format!: string;
+  format?: string;
 
   @ApiProperty({
     example: 350000,

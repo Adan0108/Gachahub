@@ -5,6 +5,7 @@ import {
   ChatDeliveryPort,
   ChatMessageCreatedEvent,
   ChatMessageActionEvent,
+  ChatRequestAcceptedEvent,
 } from '../ports/chat-delivery.port';
 
 type ChatSocketEventName =
@@ -12,7 +13,8 @@ type ChatSocketEventName =
   | 'message:edited'
   | 'message:deleted'
   | 'reaction:added'
-  | 'reaction:removed';
+  | 'reaction:removed'
+  | 'request:accepted';
 
 // real ChatDeliveryPort now, was noop before, ChatService untouched either way
 @Injectable()
@@ -20,20 +22,19 @@ export class SocketChatDeliveryService implements ChatDeliveryPort {
   constructor(private readonly socketRegistry: SocketRegistry) {}
 
   publishMessageCreated(event: ChatMessageCreatedEvent): Promise<void> {
-    if (!event.shouldNotify) {
-      return Promise.resolve();
-    }
     // recipientUserIds stay out, it leaks who else got this batch
     return this.emitToRecipients('message:created', event.recipientUserIds, {
       conversationId: event.conversationId,
       messageId: event.messageId,
       senderId: event.senderId,
+      shouldNotify: event.shouldNotify,
       ciphertext: event.ciphertext,
       encryptionMeta: event.encryptionMeta,
       contentType: event.contentType,
       createdAt: event.createdAt,
       clientMessageId: event.clientMessageId,
       replyToId: event.replyToId,
+      media: event.media,
     });
   }
 
@@ -51,6 +52,13 @@ export class SocketChatDeliveryService implements ChatDeliveryPort {
 
   publishReactionRemoved(event: ChatMessageActionEvent): Promise<void> {
     return this.emitActionEvent('reaction:removed', event);
+  }
+
+  publishRequestAccepted(event: ChatRequestAcceptedEvent): Promise<void> {
+    return this.emitToRecipients('request:accepted', event.recipientUserIds, {
+      conversationId: event.conversationId,
+      userId: event.userId,
+    });
   }
 
   // shared by edit/delete/reaction events, only the event name differs

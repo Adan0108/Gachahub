@@ -9,6 +9,7 @@ import { MediaModule } from '../media/media.module';
 import { PostVisibilityModule } from '../post-visibility/post-visibility.module';
 import { RecommendationModule } from '../recommendation/recommendation.module';
 import { GameModeratorsModule } from '../game-moderators/game-moderators.module';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { GameModeratorsModule } from '../game-moderators/game-moderators.module'
     RecommendationModule,
     GameModeratorsModule,
     AuditLogModule,
+    DomainEventsModule,
   ],
   controllers: [PostsController, PostModerationController],
   providers: [PostsService, PostsRepository, PostModerationService],
