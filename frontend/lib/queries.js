@@ -27,7 +27,10 @@ export const queryKeys = {
     all: ["admin", "users"],
     list: (status, search, page) => ["admin", "users", { status, search, page }],
   },
-  adminContent: ["admin", "content"],
+  adminContent: {
+    all: ["admin", "content"],
+    list: (type, page) => ["admin", "content", { type, page }],
+  },
   chatConversations: ["chat", "conversations"],
   chatArchivedConversations: ["chat", "archived"],
   chatRequests: ["chat", "requests"],
@@ -165,9 +168,10 @@ export const queries = {
     retry: 1,
     staleTime: 15_000,
   }),
-  adminContent: () => ({
-    queryKey: queryKeys.adminContent,
-    queryFn: api.listAdminContent,
+  adminContent: (type = "", page = 1) => ({
+    queryKey: queryKeys.adminContent.list(type, page),
+    queryFn: ({ signal }) => api.listAdminContent({ type, page, limit: 20 }, { signal }),
+    placeholderData: keepPreviousData,
     retry: 1,
     staleTime: 15_000,
   }),

@@ -41,9 +41,12 @@ export class ReportsRepository {
 
   /**
    * Resolves a report target down to the post-level fields ReportsService
-   * needs to decide whether the reporter could actually see it - a comment
-   * target folds in through its parent post, since a comment's visibility is
-   * entirely inherited from the post it's on. This is a pure data lookup;
+   * needs to decide whether the reporter could actually see it. A comment
+   * target folds in its parent post's fields - a comment inherits the
+   * post's PUBLIC/FOLLOWERS_ONLY/PRIVATE visibility - but a comment also
+   * carries its own moderation status now, so a HIDDEN comment is treated
+   * as not found here the same way a deleted one is, independent of
+   * whatever its post's status says. This is a pure data lookup;
    * ReportsService owns the actual viewability decision.
    */
   async findTargetPostInfo(
@@ -67,6 +70,7 @@ export class ReportsRepository {
       where: { id: targetId },
       select: {
         deletedAt: true,
+        status: true,
         post: {
           select: {
             gameId: true,
@@ -79,7 +83,7 @@ export class ReportsRepository {
       },
     });
 
-    if (!comment || comment.deletedAt) {
+    if (!comment || comment.deletedAt || comment.status === 'HIDDEN') {
       return null;
     }
 
@@ -153,6 +157,33 @@ export class ReportsRepository {
       where: { id },
       include: reportInclude,
     });
+  }
+
+  /**
+   * Open report count per target, across every game - scoped to
+   * PENDING/IN_REVIEW so a target stops showing up once its reports are all
+   * resolved or dismissed, the same way it drops out of the per-game report
+   * queue. Without this the aggregate grows with all report history ever
+   * filed instead of staying bounded by what's actually outstanding, which
+   * is also what keeps this query small enough for ContentModerationService
+   * to page through in memory (see its own docblock).
+   *
+   * Prisma can't join a polymorphic targetId against Post/Comment directly,
+   * so ContentModerationService hydrates these ids against those tables
+   * itself once it knows which page of targets it needs.
+   */
+  async countAllByTarget() {
+    const groups = await this.prisma.report.groupBy({
+      by: ['targetType', 'targetId'],
+      where: { status: { in: OPEN_REPORT_STATUSES } },
+      _count: { _all: true },
+    });
+
+    return groups.map((group) => ({
+      targetType: group.targetType,
+      targetId: group.targetId,
+      count: group._count._all,
+    }));
   }
 
   async findMany(params: {

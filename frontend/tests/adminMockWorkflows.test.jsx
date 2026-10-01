@@ -9,14 +9,14 @@ describe("mock-backed admin workflows", () => {
     vi.unstubAllGlobals();
   });
 
-  it("returns documented list shapes without backend requests", async () => {
+  it("returns the documented overview shape without backend requests", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const content = await api.listAdminContent();
+    const overview = await api.getAdminOverview();
 
-    expect(content).toEqual(
-      expect.objectContaining({ items: expect.any(Array), meta: expect.any(Object) }),
+    expect(overview).toEqual(
+      expect.objectContaining({ metrics: expect.any(Array), communities: expect.any(Array) }),
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });

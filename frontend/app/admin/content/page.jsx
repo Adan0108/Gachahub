@@ -1,29 +1,74 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { FiEyeOff, FiSearch } from "react-icons/fi";
+import { FiEyeOff, FiRotateCcw, FiSearch } from "react-icons/fi";
+import { AdminActionDialog } from "../../../components/admin/AdminActionDialog";
+import { AdminPagination } from "../../../components/admin/AdminPagination";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
-import { useRequireAdmin } from "../../../hooks/useRequireAdmin";
-import { queries } from "../../../lib/queries";
+import { useAdminList } from "../../../hooks/useAdminList";
+import { useToast } from "../../../hooks/useToast";
+import { api } from "../../../lib/api";
+import { queries, queryKeys } from "../../../lib/queries";
 
-// Mock-backed, read-only for now. The real API only has per-game hidden-post listing + post
-// hide/restore (no comment moderation, no cross-game listing, no report count), so there's
-// nothing real to wire the Hide action to yet - see BACKLOG.md "Content page" for the real scope.
+const CONTENT_STATUS_CLASS = {
+  PUBLISHED: "",
+  HIDDEN: "admin-status-hidden",
+};
+
+const MODES = {
+  hide: {
+    title: (item) => `Hide this ${item.type.toLowerCase()}?`,
+    description: "It's removed from public view immediately. Moderators can restore it later.",
+    confirmLabel: "Hide",
+    pendingLabel: "Hiding...",
+    tone: "danger",
+    notice: "Content hidden",
+  },
+  restore: {
+    title: (item) => `Restore this ${item.type.toLowerCase()}?`,
+    description: "It becomes visible to everyone again immediately.",
+    confirmLabel: "Restore",
+    pendingLabel: "Restoring...",
+    tone: "primary",
+    notice: "Content restored",
+  },
+};
+
 export default function AdminContentPage() {
-  const session = useRequireAdmin();
+  const { notice, showNotice } = useToast(2400);
+  const { session, page, setPage, filters, setFilter, items, meta, invalidate, query } =
+    useAdminList((filters, page) => queries.adminContent(filters.type, page), {
+      prefix: queryKeys.adminContent.all,
+    });
   const [search, setSearch] = useState("");
-  const [type, setType] = useState("");
-  const content = useQuery({ ...queries.adminContent(), enabled: session.isAdmin });
-  const items = useMemo(() => {
+  // { item, action: "hide" | "restore" } - one target for both actions, since both are just
+  // api.hideContent/restoreContent routed by the item's own type and gameSlug.
+  const [target, setTarget] = useState(null);
+
+  // `type` is filtered server-side (it's a groupBy filter, nearly free - see
+  // ContentModerationService); `search` stays client-side over the fetched
+  // page only, since title/content live on two different polymorphic tables
+  // with no shared search query.
+  const visibleItems = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return (content.data?.items || []).filter(
+    return items.filter(
       (item) =>
-        (!type || item.type === type) &&
-        (!needle || `${item.title} ${item.authorName} ${item.id}`.toLowerCase().includes(needle)),
+        !needle || `${item.title} ${item.authorName} ${item.id}`.toLowerCase().includes(needle),
     );
-  }, [content.data, search, type]);
+  }, [items, search]);
+
+  const mode = target ? MODES[target.action] : null;
+  const actionMutation = useMutation({
+    mutationFn: () =>
+      target.action === "hide" ? api.hideContent(target.item) : api.restoreContent(target.item),
+    onSuccess: () => {
+      invalidate();
+      showNotice(mode.notice);
+      setTarget(null);
+    },
+  });
 
   if (session.isLoading || !session.isAdmin)
     return <AdminState kind="loading" title="Checking admin access" />;
@@ -36,7 +81,7 @@ export default function AdminContentPage() {
           <h1>Content management</h1>
           <p>Review reported posts and comments before applying visibility actions.</p>
         </div>
-        <span className="admin-page-count">{content.data?.meta?.total ?? 0} records</span>
+        <span className="admin-page-count">{meta?.total ?? 0} records</span>
       </div>
       <section className="admin-toolbar" aria-label="Content filters">
         <label className="admin-search">
@@ -50,36 +95,36 @@ export default function AdminContentPage() {
         </label>
         <select
           aria-label="Filter content type"
-          onChange={(event) => setType(event.target.value)}
-          value={type}
+          onChange={(event) => setFilter("type", event.target.value)}
+          value={filters.type || ""}
         >
           <option value="">All content</option>
           <option value="POST">Posts</option>
           <option value="COMMENT">Comments</option>
         </select>
-        <span>{items.length} shown</span>
+        <span>{visibleItems.length} shown</span>
       </section>
-      {content.isLoading ? (
+      {query.isLoading ? (
         <AdminState
           kind="loading"
           title="Loading content"
           message="Retrieving moderation records."
         />
-      ) : content.isError ? (
+      ) : query.isError ? (
         <AdminState
           kind="error"
           title="Content unavailable"
-          message={content.error?.message || "Content records could not be loaded."}
-          onRetry={() => content.refetch()}
+          message={query.error?.message || "Content records could not be loaded."}
+          onRetry={() => query.refetch()}
         />
-      ) : !items.length ? (
+      ) : !visibleItems.length ? (
         <AdminState
           kind="empty"
           title="No content found"
           message={
-            search || type
+            search || filters.type
               ? "Try changing the current filters."
-              : "No content records are available."
+              : "No reported content is waiting on review."
           }
         />
       ) : (
@@ -97,7 +142,7 @@ export default function AdminContentPage() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {visibleItems.map((item) => (
                   <tr key={item.id}>
                     <td>
                       <div className="admin-content-cell">
@@ -112,21 +157,31 @@ export default function AdminContentPage() {
                     <td>{item.reportCount}</td>
                     <td>
                       <span
-                        className={`admin-status ${item.status === "HIDDEN" ? "admin-status-hidden" : ""}`}
+                        className={`admin-status ${CONTENT_STATUS_CLASS[item.status] || ""}`}
                       >
                         {item.status}
                       </span>
                     </td>
                     <td>
-                      <button
-                        aria-label={`Hide ${item.type.toLowerCase()} ${item.id}`}
-                        className="admin-icon-button admin-icon-danger"
-                        disabled
-                        title="Not wired to the real backend yet - see BACKLOG.md"
-                        type="button"
-                      >
-                        <FiEyeOff />
-                      </button>
+                      {item.status === "HIDDEN" ? (
+                        <button
+                          aria-label={`Restore ${item.type.toLowerCase()} ${item.id}`}
+                          className="admin-icon-button"
+                          onClick={() => setTarget({ item, action: "restore" })}
+                          type="button"
+                        >
+                          <FiRotateCcw />
+                        </button>
+                      ) : (
+                        <button
+                          aria-label={`Hide ${item.type.toLowerCase()} ${item.id}`}
+                          className="admin-icon-button admin-icon-danger"
+                          onClick={() => setTarget({ item, action: "hide" })}
+                          type="button"
+                        >
+                          <FiEyeOff />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -135,6 +190,30 @@ export default function AdminContentPage() {
           </div>
         </section>
       )}
+      {/* Rendered outside the empty-state branch above: a client-side search filter can empty
+          the current page without that being the last page, and the only way back to a page
+          that still has matches is the pager - it must never disappear along with the table. */}
+      {!query.isLoading && !query.isError && meta ? (
+        <AdminPagination page={page} totalPages={meta.totalPages ?? 1} onChange={setPage} />
+      ) : null}
+      {target ? (
+        <AdminActionDialog
+          title={mode.title(target.item)}
+          description={mode.description}
+          error={actionMutation.error?.message}
+          pending={actionMutation.isPending}
+          confirmLabel={mode.confirmLabel}
+          pendingLabel={mode.pendingLabel}
+          tone={mode.tone}
+          onClose={() => setTarget(null)}
+          onConfirm={() => actionMutation.mutate()}
+        />
+      ) : null}
+      {notice ? (
+        <div className="toast admin-toast" role="status">
+          {notice}
+        </div>
+      ) : null}
     </AdminShell>
   );
 }

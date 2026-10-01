@@ -112,7 +112,7 @@ export class CommentsService {
   async reply(commentId: string, dto: CreateCommentDto, userId: string) {
     const parent = await this.commentsRepository.findById(commentId);
 
-    if (!parent || parent.deletedAt) {
+    if (!parent || parent.deletedAt || parent.status === 'HIDDEN') {
       throw new NotFoundException('Comment thread not found');
     }
 
@@ -167,6 +167,10 @@ export class CommentsService {
 
     if (comment.authorId !== userId) {
       throw new ForbiddenException('You can only update your own comment');
+    }
+
+    if (comment.status === 'HIDDEN') {
+      throw new ForbiddenException('This comment was hidden by a moderator');
     }
 
     const updatedComment = await this.commentsRepository.update(
@@ -248,6 +252,7 @@ export class CommentsService {
       authorId: string;
       parentId: string | null;
       content: string;
+      status: string;
       createdAt: Date;
       updatedAt: Date;
       deletedAt: Date | null;
@@ -266,9 +271,12 @@ export class CommentsService {
     return {
       ...rest,
 
-      // Preserve the thread when a parent comment is deleted,
+      // Preserve the thread when a parent comment is deleted or hidden,
       // but do not expose its old content.
-      content: comment.deletedAt ? null : comment.content,
+      content:
+        comment.deletedAt || comment.status === 'HIDDEN'
+          ? null
+          : comment.content,
 
       replyCount: _count?.replies ?? 0,
     };

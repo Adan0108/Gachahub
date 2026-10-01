@@ -696,6 +696,42 @@ export class PostsRepository {
     });
   }
 
+  /**
+   * Hydrates the post side of the cross-game flagged-content listing -
+   * ContentModerationService already knows which ids it needs from the
+   * report counts, so this is a plain batch fetch, not a search. Unlike
+   * findManyByIds, this is not restricted to PUBLISHED - a moderator needs
+   * to see hidden posts too.
+   */
+  async findManyByIdsForModeration(ids: string[]) {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    return this.prisma.post.findMany({
+      where: {
+        id: {
+          in: ids,
+        },
+      },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        author: {
+          select: {
+            name: true,
+          },
+        },
+        game: {
+          select: {
+            slug: true,
+          },
+        },
+      },
+    });
+  }
+
   findPostForInteraction(postId: string) {
     return this.prisma.post.findUnique({
       where: {

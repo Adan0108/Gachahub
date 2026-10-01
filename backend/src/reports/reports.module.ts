@@ -23,5 +23,6 @@ import { ReportsService } from './reports.service';
     ReportsRepository,
     ReportRateLimiterService,
   ],
+  exports: [ReportsRepository],
 })
 export class ReportsModule {}

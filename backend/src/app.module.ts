@@ -10,6 +10,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { CommonModule } from './common/common.module';
 import { env } from './config/env';
 import { CommentsModule } from './comments/comments.module';
+import { ContentModerationModule } from './content-moderation/content-moderation.module';
 import { DevModule } from './dev/dev.module';
 import { FeedModule } from './feed/feed.module';
 import { FollowsModule } from './follows/follows.module';
@@ -65,6 +66,7 @@ import { MlsRetentionModule } from './mls-retention/mls-retention.module';
     FollowsModule,
     FeedModule,
     ReportsModule,
+    ContentModerationModule,
     AuditLogQueryModule,
 
     NotificationModule,

@@ -793,6 +793,11 @@ model ChatUserBlock {
   @@map("chat_user_blocks")
 }
 
+enum CommentStatus {
+  PUBLISHED
+  HIDDEN
+}
+
 model Comment {
   id       String  @id @default(cuid())
   postId   String
@@ -800,6 +805,7 @@ model Comment {
   parentId String?
 
   content String
+  status  CommentStatus @default(PUBLISHED)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -885,6 +891,8 @@ model Report {
 enum AuditAction {
   POST_HIDDEN
   POST_RESTORED
+  COMMENT_HIDDEN
+  COMMENT_RESTORED
   REPORT_CLAIMED
   REPORT_RESOLVED
   REPORT_DISMISSED
@@ -897,6 +905,7 @@ enum AuditAction {
 
 enum AuditTargetType {
   POST
+  COMMENT
   REPORT
   USER
 }

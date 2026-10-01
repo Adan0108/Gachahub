@@ -32,25 +32,3 @@ export const adminOverviewMock = {
     },
   ],
 };
-
-export const adminContentMock = {
-  items: [
-    {
-      id: "post-8421",
-      type: "POST",
-      title: "Version guide discussion",
-      authorName: "Rover",
-      status: "PUBLISHED",
-      reportCount: 4,
-    },
-    {
-      id: "comment-601",
-      type: "COMMENT",
-      title: "Comment on team building guide",
-      authorName: "Trailblazer",
-      status: "PUBLISHED",
-      reportCount: 2,
-    },
-  ],
-  meta: { page: 1, limit: 20, total: 2 },
-};

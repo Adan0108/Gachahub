@@ -1,4 +1,5 @@
 export type PostAuditAction = 'POST_HIDDEN' | 'POST_RESTORED';
+export type CommentAuditAction = 'COMMENT_HIDDEN' | 'COMMENT_RESTORED';
 export type ReportAuditAction =
   | 'REPORT_CLAIMED'
   | 'REPORT_RESOLVED'
@@ -11,6 +12,9 @@ export type UserModerationAuditAction =
 
 /** Stored shape of `metadata` for post entries. Rows are permanent - change by adding optional keys only. */
 export type PostAuditMetadata = { authorId: string; postTitle: string };
+
+/** Stored shape of `metadata` for comment entries. Rows are permanent - change by adding optional keys only. */
+export type CommentAuditMetadata = { authorId: string; postId: string };
 
 /** Stored shape of `metadata` for report entries. Rows are permanent - change by adding optional keys only. */
 export type ReportAuditMetadata = {
@@ -45,6 +49,11 @@ export type AuditEntry = AuditEntryBase &
         action: PostAuditAction;
         targetType: 'POST';
         metadata: PostAuditMetadata;
+      }
+    | {
+        action: CommentAuditAction;
+        targetType: 'COMMENT';
+        metadata: CommentAuditMetadata;
       }
     | {
         action: ReportAuditAction;

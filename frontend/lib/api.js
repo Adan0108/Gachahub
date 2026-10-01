@@ -1,5 +1,5 @@
 import { mockCategories, mockGames, posts } from "./mockData";
-import { adminContentMock, adminOverviewMock } from "./adminMockData";
+import { adminOverviewMock } from "./adminMockData";
 
 export const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000"
@@ -24,6 +24,15 @@ export const backendRoutes = {
     `/games/${encodePathParam(gameSlug)}/reports/${encodePathParam(reportId)}/dismiss`,
   adminUsers: "/admin/users",
   adminUserStatus: (userId) => `/admin/users/${encodePathParam(userId)}/status`,
+  adminContent: "/admin/content",
+  postHide: (gameSlug, postId) =>
+    `/games/${encodePathParam(gameSlug)}/posts/${encodePathParam(postId)}/hide`,
+  postRestore: (gameSlug, postId) =>
+    `/games/${encodePathParam(gameSlug)}/posts/${encodePathParam(postId)}/restore`,
+  commentHide: (gameSlug, commentId) =>
+    `/games/${encodePathParam(gameSlug)}/comments/${encodePathParam(commentId)}/hide`,
+  commentRestore: (gameSlug, commentId) =>
+    `/games/${encodePathParam(gameSlug)}/comments/${encodePathParam(commentId)}/restore`,
   currentUser: "/users/me",
   userSearch: "/users/search",
   signInEmail: "/api/auth/sign-in/email",
@@ -692,7 +701,24 @@ export const api = {
     request(withQuery(backendRoutes.adminUsers, query), options),
   setUserStatus: (userId, { status, reason }) =>
     mutation(backendRoutes.adminUserStatus(userId), { status, reason }, { method: "PATCH" }),
-  listAdminContent: async () => cloneAdminMock(adminContentMock),
+  listAdminContent: (query = {}, options = {}) =>
+    request(withQuery(backendRoutes.adminContent, query), options),
+  hideContent: (item) =>
+    mutation(
+      item.type === "POST"
+        ? backendRoutes.postHide(item.gameSlug, item.id)
+        : backendRoutes.commentHide(item.gameSlug, item.id),
+      undefined,
+      { method: "PATCH" },
+    ),
+  restoreContent: (item) =>
+    mutation(
+      item.type === "POST"
+        ? backendRoutes.postRestore(item.gameSlug, item.id)
+        : backendRoutes.commentRestore(item.gameSlug, item.id),
+      undefined,
+      { method: "PATCH" },
+    ),
   getChatConversations: () => request(backendRoutes.chatConversations),
   getArchivedChatConversations: () => request(backendRoutes.chatArchivedConversations),
   getChatRequests: () => request(backendRoutes.chatRequests),
