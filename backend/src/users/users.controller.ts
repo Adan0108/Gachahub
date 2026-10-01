@@ -5,6 +5,7 @@ import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { PostsService } from '../posts/posts.service';
 import { UsersService } from './users.service';
+import { SearchUsersQueryDto } from './dto/search-users-query.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @ApiTags('Users')
@@ -29,6 +30,14 @@ export class UsersController {
     return this.usersService.updateProfile(session.user.id, dto);
   }
 
+  // Must stay above ':userId' or it is read as a user id.
+  @Get('search')
+  @ApiCookieAuth('better-auth.session_token')
+  @ApiOperation({ summary: 'Search active users by display name' })
+  search(@Session() session: UserSession, @Query() query: SearchUsersQueryDto) {
+    return this.usersService.searchForPicker(session.user.id, query);
+  }
+
   @Get(':userId/posts')
   @OptionalAuth()
   @ApiOperation({ summary: 'Get public posts from this user' })
@@ -42,5 +51,15 @@ export class UsersController {
       userId,
       session?.user.id,
     );
+  }
+
+  @Get(':userId')
+  @OptionalAuth()
+  @ApiOperation({ summary: "Get a user's public profile" })
+  getUserProfile(
+    @Param('userId') userId: string,
+    @Session() session?: UserSession,
+  ) {
+    return this.usersService.getPublicProfile(userId, session?.user.id);
   }
 }

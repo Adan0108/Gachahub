@@ -10,7 +10,6 @@ export const queryKeys = {
   adminCategories: (slug, active) => ["admin", "categories", slug, { active }],
   adminModerators: (slug) => ["admin", "moderators", slug],
   currentUser: ["current-user"],
-  profile: ["current-user"],
   myPosts: ["posts", "mine"],
   posts: (search) => ["posts", { search }],
   post: (postId) => ["posts", "detail", postId],
@@ -23,8 +22,13 @@ export const queryKeys = {
   adminUsers: ["admin", "users"],
   adminContent: ["admin", "content"],
   chatConversations: ["chat", "conversations"],
+  chatArchivedConversations: ["chat", "archived"],
   chatRequests: ["chat", "requests"],
   chatMessages: (conversationId) => ["chat", "messages", conversationId],
+  // Socket-pushed only - nobody ever fetches this over REST, useChatSocket just writes into it.
+  chatTyping: (conversationId) => ["chat", "typing", conversationId],
+  // Same idea: the one-shot "your message request was accepted" event, keyed per conversation.
+  chatRequestAccepted: (conversationId) => ["chat", "request-accepted", conversationId],
 };
 
 export const queries = {
@@ -85,7 +89,6 @@ export const queries = {
     retry: false,
     staleTime: 30_000,
   }),
-  profile: () => queries.currentUser(),
   myPosts: () => ({
     queryKey: queryKeys.myPosts,
     queryFn: ({ signal }) => api.getMyPosts({ page: 1, limit: 20 }, { signal }),
@@ -159,9 +162,22 @@ export const queries = {
     retry: 1,
     staleTime: 15_000,
   }),
+  // These three poll: refetchOnWindowFocus is off app-wide (Providers.jsx).
+  // useChatSocket now delivers new messages live (backend already emits
+  // "message:created"), so this is a reliability fallback, not the primary
+  // delivery path - a longer interval than before since the socket push
+  // handles the common case, and the backend's own delivery has no
+  // retry/queue if a socket was briefly disconnected.
   chatConversations: () => ({
     queryKey: queryKeys.chatConversations,
     queryFn: api.getChatConversations,
+    retry: 1,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  }),
+  chatArchivedConversations: () => ({
+    queryKey: queryKeys.chatArchivedConversations,
+    queryFn: api.getArchivedChatConversations,
     retry: 1,
     staleTime: 10_000,
   }),
@@ -170,13 +186,15 @@ export const queries = {
     queryFn: api.getChatRequests,
     retry: 1,
     staleTime: 10_000,
+    refetchInterval: 15_000,
   }),
   chatMessages: (conversationId) => ({
     queryKey: queryKeys.chatMessages(conversationId),
     queryFn: () => api.getChatMessages(conversationId, { limit: 50 }),
     enabled: Boolean(conversationId),
     retry: 1,
-    staleTime: 5_000,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
   }),
 };
 

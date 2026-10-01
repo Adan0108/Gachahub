@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 interface FollowingIdRow {
@@ -32,12 +33,19 @@ export class FollowsRepository {
     });
   }
 
-  create(followerId: string, followingId: string) {
-    return this.prisma.userFollow.create({
-      data: {
-        followerId,
-        followingId,
-      },
+  create(
+    transaction: Prisma.TransactionClient,
+    followerId: string,
+    followingId: string,
+  ) {
+    return transaction.userFollow.createMany({
+      data: [
+        {
+          followerId,
+          followingId,
+        },
+      ],
+      skipDuplicates: true,
     });
   }
 
@@ -61,12 +69,10 @@ export class FollowsRepository {
     return this.prisma.userFollow.findMany({
       where: {
         followerId,
-
         followingId: {
           in: followingIds,
         },
       },
-
       select: {
         followingId: true,
       },

@@ -1,6 +1,7 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { claimUploadsForAttachment } from '../media/media.repository';
 
 const postInclude = {
   author: {
@@ -266,35 +267,15 @@ export class PostsRepository {
         });
 
         if (params.media?.length) {
-          /*
-           * updateMany ensures the uploads are still UPLOADED at the exact time
-           * they are attached. This protects against two simultaneous Post
-           * requests attempting to reuse the same mediaUploadId.
-           */
           const mediaUploadIds = params.media.map(
             (media) => media.mediaUploadId,
           );
 
-          const claimed = await tx.mediaUpload.updateMany({
-            where: {
-              id: {
-                in: mediaUploadIds,
-              },
-              userId: params.authorId,
-              purpose: 'POST',
-              status: 'UPLOADED',
-            },
-            data: {
-              status: 'ATTACHED',
-              attachedAt: new Date(),
-            },
+          await claimUploadsForAttachment(tx, {
+            ids: mediaUploadIds,
+            userId: params.authorId,
+            purpose: 'POST',
           });
-
-          if (claimed.count !== mediaUploadIds.length) {
-            throw new ConflictException(
-              'One or more media uploads could not be attached',
-            );
-          }
 
           await tx.postMedia.createMany({
             data: params.media.map((media) => ({
@@ -482,43 +463,30 @@ export class PostsRepository {
     });
   }
 
-  async like(postId: string, userId: string) {
-    return this.prisma.$transaction(async (tx) => {
-      const created = await tx.postLike.createMany({
-        data: [
-          {
-            postId,
-            userId,
-          },
-        ],
-        skipDuplicates: true,
-      });
+  async like(
+    transaction: Prisma.TransactionClient,
+    postId: string,
+    userId: string,
+  ) {
+    const created = await transaction.postLike.createMany({
+      data: [
+        {
+          postId,
+          userId,
+        },
+      ],
+      skipDuplicates: true,
+    });
 
-      if (created.count > 0) {
-        const post = await tx.post.update({
-          where: {
-            id: postId,
-          },
-          data: {
-            reactionCount: {
-              increment: 1,
-            },
-          },
-          select: {
-            reactionCount: true,
-          },
-        });
-
-        return {
-          liked: true,
-          likeCount: post.reactionCount,
-          changed: true,
-        };
-      }
-
-      const post = await tx.post.findUniqueOrThrow({
+    if (created.count > 0) {
+      const post = await transaction.post.update({
         where: {
           id: postId,
+        },
+        data: {
+          reactionCount: {
+            increment: 1,
+          },
         },
         select: {
           reactionCount: true,
@@ -528,11 +496,25 @@ export class PostsRepository {
       return {
         liked: true,
         likeCount: post.reactionCount,
-        changed: false,
+        changed: true,
       };
-    });
-  }
+    }
 
+    const post = await transaction.post.findUniqueOrThrow({
+      where: {
+        id: postId,
+      },
+      select: {
+        reactionCount: true,
+      },
+    });
+
+    return {
+      liked: true,
+      likeCount: post.reactionCount,
+      changed: false,
+    };
+  }
   async unlike(postId: string, userId: string) {
     return this.prisma.$transaction(async (tx) => {
       const deleted = await tx.postLike.deleteMany({

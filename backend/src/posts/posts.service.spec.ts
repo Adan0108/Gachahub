@@ -32,13 +32,24 @@ jest.mock('../recommendation/user-interest.service', () => ({
   UserInterestService: class {},
 }));
 
+jest.mock('../domain-events/event-publisher.port', () => ({
+  EventPublisherPort: class {},
+}));
+
+jest.mock('../prisma/prisma.service', () => ({
+  PrismaService: class {},
+}));
+
 import { PostsService } from './posts.service';
+import type { EventPublisherPort } from '../domain-events/event-publisher.port';
+import type { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '../generated/prisma/client';
 
 describe('PostsService', () => {
   const postsRepository = {
     findMany: jest.fn(),
     count: jest.fn(),
-    findPublishedById: jest.fn(),
+    findViewableById: jest.fn(),
     findByAuthorId: jest.fn(),
 
     findGameById: jest.fn(),
@@ -55,7 +66,7 @@ describe('PostsService', () => {
   };
 
   const mediaService = {
-    getAttachableUploads: jest.fn(),
+    resolveAttachableMedia: jest.fn(),
   };
 
   const followsService = {
@@ -64,6 +75,17 @@ describe('PostsService', () => {
 
   const userInterestService = {
     recordPostInteraction: jest.fn(),
+  };
+
+  const eventPublisherPort = {
+    publish: jest.fn(),
+    publishMany: jest.fn(),
+  };
+
+  const transaction = {} as Prisma.TransactionClient;
+
+  const prisma = {
+    $transaction: jest.fn(),
   };
 
   let service: PostsService;
@@ -123,11 +145,19 @@ describe('PostsService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
+    prisma.$transaction.mockImplementation(
+      async (
+        work: (transaction: Prisma.TransactionClient) => Promise<unknown>,
+      ) => work(transaction),
+    );
+
     service = new PostsService(
       postsRepository as unknown as PostsRepository,
       mediaService as unknown as MediaService,
       followsService as unknown as FollowsService,
       userInterestService as unknown as UserInterestService,
+      eventPublisherPort as EventPublisherPort,
+      prisma as unknown as PrismaService,
     );
   });
 
@@ -229,11 +259,11 @@ describe('PostsService', () => {
 
   describe('findOne', () => {
     it('returns published post', async () => {
-      postsRepository.findPublishedById.mockResolvedValue(basePost);
+      postsRepository.findViewableById.mockResolvedValue(basePost);
 
       const result = await service.findOne('post-1', 'user-1');
 
-      expect(postsRepository.findPublishedById).toHaveBeenCalledWith(
+      expect(postsRepository.findViewableById).toHaveBeenCalledWith(
         'post-1',
         'user-1',
       );
@@ -247,7 +277,7 @@ describe('PostsService', () => {
     });
 
     it('throws when post does not exist', async () => {
-      postsRepository.findPublishedById.mockResolvedValue(null);
+      postsRepository.findViewableById.mockResolvedValue(null);
 
       await expect(service.findOne('missing-post', 'user-1')).rejects.toThrow(
         NotFoundException,
@@ -304,7 +334,7 @@ describe('PostsService', () => {
         isActive: true,
       });
 
-      mediaService.getAttachableUploads.mockResolvedValue([]);
+      mediaService.resolveAttachableMedia.mockResolvedValue([]);
 
       postsRepository.create.mockResolvedValue(basePost);
 
@@ -318,6 +348,17 @@ describe('PostsService', () => {
         },
         'author-1',
       );
+
+      // pinning these catches a copy-paste of chat's limits (4 images/1
+      // video/'CHAT') into the post path, which no other test would notice
+      expect(mediaService.resolveAttachableMedia).toHaveBeenCalledWith({
+        ids: [],
+        userId: 'author-1',
+        purpose: 'POST',
+        maxImages: 10,
+        maxVideos: 1,
+        entityLabel: 'post',
+      });
 
       expect(postsRepository.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -399,22 +440,17 @@ describe('PostsService', () => {
       expect(postsRepository.create).not.toHaveBeenCalled();
     });
 
-    it('rejects more than 10 images', async () => {
+    // Image/video count and mixing limits are enforced by, and tested
+    // directly against, MediaService.resolveAttachableMedia. This just
+    // checks create() propagates a rejection instead of swallowing it.
+    it('propagates a media policy rejection and never creates the post', async () => {
       postsRepository.findGameById.mockResolvedValue({
         id: 'game-1',
         status: 'ACTIVE',
       });
 
-      mediaService.getAttachableUploads.mockResolvedValue(
-        Array.from(
-          {
-            length: 11,
-          },
-          (_, index) => ({
-            id: `upload-${index}`,
-            resourceType: 'IMAGE',
-          }),
-        ),
+      mediaService.resolveAttachableMedia.mockRejectedValue(
+        new BadRequestException('A post supports at most 10 images'),
       );
 
       await expect(
@@ -423,95 +459,7 @@ describe('PostsService', () => {
             gameId: 'game-1',
             title: 'Title',
             content: 'Content',
-
-            media: Array.from(
-              {
-                length: 11,
-              },
-              (_, index) => ({
-                mediaUploadId: `upload-${index}`,
-              }),
-            ),
-          },
-          'author-1',
-        ),
-      ).rejects.toThrow(BadRequestException);
-
-      expect(postsRepository.create).not.toHaveBeenCalled();
-    });
-
-    it('rejects more than one video', async () => {
-      postsRepository.findGameById.mockResolvedValue({
-        id: 'game-1',
-        status: 'ACTIVE',
-      });
-
-      mediaService.getAttachableUploads.mockResolvedValue([
-        {
-          id: 'video-1',
-          resourceType: 'VIDEO',
-        },
-        {
-          id: 'video-2',
-          resourceType: 'VIDEO',
-        },
-      ]);
-
-      await expect(
-        service.create(
-          {
-            gameId: 'game-1',
-            title: 'Title',
-            content: 'Content',
-
-            media: [
-              {
-                mediaUploadId: 'video-1',
-              },
-              {
-                mediaUploadId: 'video-2',
-              },
-            ],
-          },
-          'author-1',
-        ),
-      ).rejects.toThrow(BadRequestException);
-
-      expect(postsRepository.create).not.toHaveBeenCalled();
-    });
-
-    it('rejects mixing image and video', async () => {
-      postsRepository.findGameById.mockResolvedValue({
-        id: 'game-1',
-        status: 'ACTIVE',
-      });
-
-      mediaService.getAttachableUploads.mockResolvedValue([
-        {
-          id: 'image-1',
-          resourceType: 'IMAGE',
-        },
-        {
-          id: 'video-1',
-          resourceType: 'VIDEO',
-        },
-      ]);
-
-      await expect(
-        service.create(
-          {
-            gameId: 'game-1',
-            title: 'Title',
-            content: 'Content',
-
-            media: [
-              {
-                mediaUploadId: 'image-1',
-              },
-              {
-                mediaUploadId: 'video-1',
-              },
-            ],
+            media: [{ mediaUploadId: 'upload-1' }],
           },
           'author-1',
         ),
@@ -648,7 +596,24 @@ describe('PostsService', () => {
 
       const result = await service.like('post-1', 'user-1');
 
-      expect(postsRepository.like).toHaveBeenCalledWith('post-1', 'user-1');
+      expect(postsRepository.like).toHaveBeenCalledWith(
+        transaction,
+        'post-1',
+        'user-1',
+      );
+
+      expect(eventPublisherPort.publish).toHaveBeenCalledWith(
+        {
+          type: 'post.liked',
+          aggregateId: 'post-1',
+          payload: {
+            postId: 'post-1',
+            postAuthorId: 'author-1',
+            actorId: 'user-1',
+          },
+        },
+        transaction,
+      );
 
       expect(userInterestService.recordPostInteraction).toHaveBeenCalledWith(
         'user-1',
@@ -679,6 +644,7 @@ describe('PostsService', () => {
 
       await service.like('post-1', 'user-1');
 
+      expect(eventPublisherPort.publish).not.toHaveBeenCalled();
       expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
     });
 
@@ -708,7 +674,11 @@ describe('PostsService', () => {
         'author-1',
       );
 
-      expect(postsRepository.like).toHaveBeenCalledWith('post-1', 'user-1');
+      expect(postsRepository.like).toHaveBeenCalledWith(
+        transaction,
+        'post-1',
+        'user-1',
+      );
     });
 
     it('allows author to like own FOLLOWERS_ONLY post without follow lookup', async () => {
@@ -730,7 +700,11 @@ describe('PostsService', () => {
 
       expect(followsService.isFollowing).not.toHaveBeenCalled();
 
-      expect(postsRepository.like).toHaveBeenCalledWith('post-1', 'author-1');
+      expect(postsRepository.like).toHaveBeenCalledWith(
+        transaction,
+        'post-1',
+        'author-1',
+      );
     });
 
     it('rejects non-follower from liking FOLLOWERS_ONLY post', async () => {

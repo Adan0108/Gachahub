@@ -9,6 +9,9 @@ import { useCurrentUser } from "../hooks/useCurrentUser";
 import { useDismiss } from "../hooks/useDismiss";
 import { useToast } from "../hooks/useToast";
 import { api } from "../lib/api";
+import { CHAT_BACKUP_QUERY_ROOT } from "../lib/backup/backupQueryKeys";
+import "../lib/backup/backupSessionCleanup";
+import { runSessionCleanups } from "../lib/sessionCleanup";
 import { queries, queryKeys } from "../lib/queries";
 import { glyph } from "./constants";
 import { GlobalSearch } from "./GlobalSearch";
@@ -37,7 +40,7 @@ const notifications = [
   },
 ];
 
-export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
+export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobalActions = true }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -60,8 +63,10 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
     .toUpperCase();
   const logout = useMutation({
     mutationFn: api.signOut,
-    onSuccess: () => {
+    onSuccess: async () => {
+      await runSessionCleanups();
       queryClient.setQueryData(queryKeys.currentUser, null);
+      queryClient.removeQueries({ queryKey: CHAT_BACKUP_QUERY_ROOT });
       setAccountOpen(false);
       showNotice("Logged out successfully");
       router.push("/");
@@ -104,7 +109,7 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
       >
         <FiMenu />
       </button>
-      <GlobalSearch />
+      {showGlobalActions && <GlobalSearch />}
       <div className="top-actions">
         <span className={`api-status ${apiStatus}`} title={`Backend: ${api.baseUrl}`}>
           <i />{" "}
@@ -114,9 +119,11 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme }) {
               ? "Offline mode"
               : "Checking API"}
         </span>
-        <button className="outline-btn" onClick={() => router.push("/create")} type="button">
-          <FiPlus /> <span>Create</span>
-        </button>
+        {showGlobalActions && (
+          <button className="outline-btn" onClick={() => router.push("/create")} type="button">
+            <FiPlus /> <span>Create</span>
+          </button>
+        )}
         <button
           className="icon-btn theme-toggle"
           aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
