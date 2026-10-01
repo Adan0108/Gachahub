@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FiSearch } from "react-icons/fi";
+import { FiFileText, FiSearch, FiUsers } from "react-icons/fi";
 import { api, fallbackGames, fallbackPosts } from "../lib/api";
 import { queries } from "../lib/queries";
 
@@ -32,6 +32,10 @@ export function GlobalSearch() {
     ...queries.games(debouncedSearch),
     enabled: focused && canSearch,
   });
+  const postSuggestions = useQuery({
+    ...queries.posts(debouncedSearch),
+    enabled: focused && canSearch,
+  });
   const canUseLocalSearch = api.usingMocks;
   const suggestedGames = canSearch
     ? (
@@ -39,13 +43,21 @@ export function GlobalSearch() {
         (canUseLocalSearch ? fallbackGames(debouncedSearch).items : [])
       ).slice(0, 3)
     : [];
-  const suggestedPosts =
-    canSearch && canUseLocalSearch ? fallbackPosts({ search: debouncedSearch }).slice(0, 2) : [];
+  const suggestedPosts = canSearch
+    ? (
+        postSuggestions.data?.items ||
+        (canUseLocalSearch ? fallbackPosts({ search: debouncedSearch }) : [])
+      ).slice(0, 3)
+    : [];
   const suggestions = [
     ...suggestedGames.map((game) => ({ type: "community", value: game })),
     ...suggestedPosts.map((post) => ({ type: "post", value: post })),
   ];
-  const suggestionsOpen = focused && Boolean(search);
+  const suggestionsOpen = focused && search.length >= 2;
+  const searchPending =
+    suggestionsOpen &&
+    (search !== debouncedSearch ||
+      (canSearch && (gameSuggestions.isFetching || postSuggestions.isFetching)));
   const activeSuggestionId = suggestions[activeSuggestion]
     ? `search-suggestion-${suggestions[activeSuggestion].type}-${suggestions[activeSuggestion].value.id}`
     : undefined;
@@ -67,15 +79,15 @@ export function GlobalSearch() {
     router.push(`/community/${encodeURIComponent(slug)}`);
   };
 
-  const openPostSearch = (title) => {
+  const openPost = (postId) => {
     setFocused(false);
     setActiveSuggestion(-1);
-    router.push(`/explore?q=${encodeURIComponent(title)}`);
+    router.push(`/post/${encodeURIComponent(postId)}`);
   };
 
   const openSuggestion = (suggestion) => {
     if (suggestion.type === "community") openCommunity(suggestion.value.slug);
-    else openPostSearch(suggestion.value.title);
+    else openPost(suggestion.value.id);
   };
 
   const submit = (event) => {
@@ -146,7 +158,7 @@ export function GlobalSearch() {
           onFocus={focusSearch}
           onBlur={delayCloseSuggestions}
           onKeyDown={handleSearchKeyDown}
-          placeholder="Search communities..."
+          placeholder="Search posts and communities..."
         />
       </form>
       {suggestionsOpen && (
@@ -156,61 +168,83 @@ export function GlobalSearch() {
           id="global-search-suggestions"
           role="listbox"
         >
-          {!canSearch && <div className="search-empty">Enter at least 2 characters.</div>}
-          {canSearch && gameSuggestions.isLoading && (
-            <div className="search-empty">Searching communities...</div>
-          )}
-          {canSearch && gameSuggestions.isError && !canUseLocalSearch && (
-            <div className="search-empty">
-              Search needs the backend. Try again when the API is connected.
+          {searchPending && (
+            <div className="search-loading" role="status" aria-label="Searching">
+              <span className="search-spinner" aria-hidden="true" />
             </div>
           )}
-          {suggestedGames.map((game, index) => (
-            <button
-              aria-selected={activeSuggestion === index}
-              className={activeSuggestion === index ? "active" : ""}
-              id={`search-suggestion-community-${game.id}`}
-              key={game.slug}
-              role="option"
-              tabIndex={-1}
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onMouseEnter={() => setActiveSuggestion(index)}
-              onClick={() => openCommunity(game.slug)}
-            >
-              <span>{game.symbol}</span>
-              <div>
-                <b>{game.name}</b>
-                <small>{game.members} members</small>
+          {!searchPending &&
+            canSearch &&
+            gameSuggestions.isError &&
+            postSuggestions.isError &&
+            !canUseLocalSearch && (
+              <div className="search-empty">
+                Search needs the backend. Try again when the API is connected.
               </div>
-            </button>
-          ))}
-          {suggestedPosts.map((post, index) => {
-            const resultIndex = suggestedGames.length + index;
-            return (
-              <button
-                aria-selected={activeSuggestion === resultIndex}
-                className={activeSuggestion === resultIndex ? "active" : ""}
-                id={`search-suggestion-post-${post.id}`}
-                key={post.id}
-                role="option"
-                tabIndex={-1}
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onMouseEnter={() => setActiveSuggestion(resultIndex)}
-                onClick={() => openPostSearch(post.title)}
-              >
-                <span>#</span>
-                <div>
-                  <b>{post.title}</b>
-                  <small>{post.gameName}</small>
-                </div>
-              </button>
-            );
-          })}
+            )}
+          {!searchPending && suggestedGames.length > 0 && (
+            <div className="search-result-group" role="group" aria-label="Communities">
+              <div className="search-result-label">
+                <FiUsers /> Communities
+              </div>
+              {suggestedGames.map((game, index) => (
+                <button
+                  aria-selected={activeSuggestion === index}
+                  className={activeSuggestion === index ? "active" : ""}
+                  id={`search-suggestion-community-${game.id}`}
+                  key={game.slug}
+                  role="option"
+                  tabIndex={-1}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setActiveSuggestion(index)}
+                  onClick={() => openCommunity(game.slug)}
+                >
+                  <span>{game.symbol}</span>
+                  <div>
+                    <b>{game.name}</b>
+                    <small>{game.members} members</small>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          {!searchPending && suggestedPosts.length > 0 && (
+            <div className="search-result-group" role="group" aria-label="Posts">
+              <div className="search-result-label">
+                <FiFileText /> Posts
+              </div>
+              {suggestedPosts.map((post, index) => {
+                const resultIndex = suggestedGames.length + index;
+                return (
+                  <button
+                    aria-selected={activeSuggestion === resultIndex}
+                    className={activeSuggestion === resultIndex ? "active" : ""}
+                    id={`search-suggestion-post-${post.id}`}
+                    key={post.id}
+                    role="option"
+                    tabIndex={-1}
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setActiveSuggestion(resultIndex)}
+                    onClick={() => openPost(post.id)}
+                  >
+                    <span>{post.gameSymbol || "#"}</span>
+                    <div>
+                      <b>{post.title}</b>
+                      <small>
+                        {post.gameName || "Post"}
+                        {post.author ? ` · ${post.author}` : ""}
+                      </small>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {canSearch &&
-            !gameSuggestions.isLoading &&
-            !gameSuggestions.isError &&
+            !searchPending &&
+            !(gameSuggestions.isError && postSuggestions.isError) &&
             !suggestedGames.length &&
             !suggestedPosts.length && (
               <div className="search-empty">No matches found. Press Enter to search.</div>

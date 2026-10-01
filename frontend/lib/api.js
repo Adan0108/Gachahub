@@ -1,24 +1,35 @@
-import { mockCategories, mockGames, posts } from './mockData';
+import { mockCategories, mockGames, posts } from "./mockData";
+import {
+  adminContentMock,
+  adminOverviewMock,
+  adminReportsMock,
+  adminUsersMock,
+} from "./adminMockData";
 
 export const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'
-).replace(/\/$/, '');
-export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === 'true';
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000"
+).replace(/\/$/, "");
+export const ADMIN_PREVIEW = process.env.NEXT_PUBLIC_ADMIN_PREVIEW === "true";
+export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true" || ADMIN_PREVIEW;
 
 export const backendRoutes = {
   health: '/health',
   games: '/games',
   game: (slug) => `/games/${encodePathParam(slug)}`,
   gameCategories: (gameSlug) => `/games/${encodePathParam(gameSlug)}/categories`,
-  currentUser: '/users/me',
-  userSearch: '/users/search',
-  signInEmail: '/api/auth/sign-in/email',
-  signUpEmail: '/api/auth/sign-up/email',
-  signOut: '/api/auth/sign-out',
-  myPosts: '/posts/mine',
-  posts: '/posts',
-  latestFeed: '/feed/latest',
-  trendingFeed: '/feed/trending',
+  gameModerators: (gameSlug) => `/games/${encodePathParam(gameSlug)}/moderators`,
+  gameModerator: (gameSlug, userId) =>
+    `/games/${encodePathParam(gameSlug)}/moderators/${encodePathParam(userId)}`,
+  currentUser: "/users/me",
+  userSearch: "/users/search",
+  signInEmail: "/api/auth/sign-in/email",
+  signUpEmail: "/api/auth/sign-up/email",
+  signOut: "/api/auth/sign-out",
+  myPosts: "/posts/mine",
+  posts: "/posts",
+  post: (postId) => `/posts/${encodePathParam(postId)}`,
+  latestFeed: "/feed/latest",
+  trendingFeed: "/feed/trending",
   gameFeed: (gameSlug) => `/games/${encodePathParam(gameSlug)}/feed`,
   postLike: (postId) => `/posts/${encodePathParam(postId)}/like`,
   userFollow: (userId) => `/users/${encodePathParam(userId)}/follow`,
@@ -122,6 +133,7 @@ export function formatCount(value) {
 }
 
 export function normalizeGame(game) {
+  if (game.raw) return game;
   return {
     id: game.id || game.slug,
     slug: game.slug,
@@ -152,10 +164,16 @@ export function normalizePost(post) {
     title: post.title,
     author: post.author?.name || 'Unknown user',
     authorId: post.author?.id || post.authorId,
+    authorImage: post.author?.image || null,
     time,
     tag: post.category?.name || post.tags?.[0]?.name || 'Discussion',
     gameName: post.game?.name,
     gameSlug: post.game?.slug,
+    content: post.content || "",
+    media: Array.isArray(post.media) ? post.media : [],
+    visibility: post.visibility || "PUBLIC",
+    isSpoiler: Boolean(post.isSpoiler),
+    type: post.type || "GENERAL",
     likeCount: post.reactionCount ?? post.likeCount ?? 0,
     commentCount: post.commentCount ?? 0,
     likedByCurrentUser: Boolean(post.likedByCurrentUser),
@@ -163,7 +181,11 @@ export function normalizePost(post) {
   };
 }
 
-export function fallbackGames(search = '') {
+function normalizePostResponse(post) {
+  return post.raw ? post : normalizePost(post);
+}
+
+export function fallbackGames(search = "") {
   const query = search.trim().toLowerCase();
   const items = query
     ? mockGames.filter((game) =>
@@ -201,6 +223,7 @@ export function fallbackPosts({ gameSlug, search = '' } = {}) {
         ...post,
         gameName: game?.name || post.gameSlug,
         gameSymbol: game ? communitySymbol(game.name) : communitySymbol(post.gameSlug),
+        raw: post,
       };
     });
 }
@@ -314,8 +337,17 @@ async function mockResponse(path, options = {}) {
   const [pathname, queryString] = path.split('?');
   const params = new URLSearchParams(queryString || '');
 
-  if (pathname === backendRoutes.health) return { status: 'ok' };
-  if (pathname === backendRoutes.currentUser) return null;
+  if (pathname === backendRoutes.health) return { status: "ok" };
+  if (pathname === backendRoutes.currentUser)
+    return ADMIN_PREVIEW
+      ? {
+          id: "admin-preview",
+          name: "Admin Preview",
+          email: "preview@localhost",
+          role: "ADMIN",
+          status: "ACTIVE",
+        }
+      : null;
   if (pathname === backendRoutes.userSearch) return { items: [] };
   if (pathname === backendRoutes.signInEmail || pathname === backendRoutes.signUpEmail)
     return { ok: true };
@@ -334,6 +366,12 @@ async function mockResponse(path, options = {}) {
     const items = fallbackPosts({ search: params.get('search') || '' });
     return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
   }
+  if (/^\/posts\/[^/]+$/.test(pathname)) {
+    const postId = decodePathParam(pathname.split("/")[2]);
+    const post = fallbackPosts().find((item) => item.id === postId);
+    if (!post) throw new Error("Post not found");
+    return post;
+  }
   if (/^\/posts\/[^/]+\/comments$/.test(pathname)) {
     return { items: [], meta: { page: 1, limit: 20, total: 0, totalPages: 0 } };
   }
@@ -341,8 +379,25 @@ async function mockResponse(path, options = {}) {
     return { items: [], meta: { page: 1, limit: 20, total: 0, totalPages: 0 } };
   }
   if (/^\/users\/[^/]+\/follow-status$/.test(pathname)) return { following: false };
-  if (pathname === backendRoutes.games) return fallbackGames(params.get('search') || '');
-  if (pathname.startsWith('/games/') && pathname.endsWith('/categories'))
+  if (pathname === backendRoutes.games) return fallbackGames(params.get("search") || "");
+  if (/^\/games\/[^/]+\/moderators\/[^/]+$/.test(pathname) && options.method === "DELETE")
+    return { message: "Moderator removed successfully" };
+  if (/^\/games\/[^/]+\/moderators$/.test(pathname)) {
+    if (options.method === "POST") {
+      const target = JSON.parse(options.body || "{}");
+      return {
+        id: `mock-moderator-${Date.now()}`,
+        user: {
+          id: target.userId || "mock-user",
+          name: "Preview Moderator",
+          email: target.email || "moderator@example.com",
+          status: "ACTIVE",
+        },
+      };
+    }
+    return [];
+  }
+  if (pathname.startsWith("/games/") && pathname.endsWith("/categories"))
     return fallbackCategories();
   if (pathname.startsWith('/games/') && pathname.endsWith('/feed')) {
     const slug = decodePathParam(pathname.split('/')[2]);
@@ -429,6 +484,10 @@ function encryptedMessagePayload({
   };
 }
 
+function cloneAdminMock(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 const MEDIA_BATCH_SIZE = 10;
 
 function chunked(items) {
@@ -452,7 +511,21 @@ export const api = {
     };
   },
   getCommunity: async (slug) => normalizeGame(await request(backendRoutes.game(slug))),
-  getCategories: (gameSlug) => request(backendRoutes.gameCategories(gameSlug)),
+  getCategories: (gameSlug, query = {}, options = {}) =>
+    request(withQuery(backendRoutes.gameCategories(gameSlug), query), options),
+  createCategory: (gameSlug, category) =>
+    mutation(backendRoutes.gameCategories(gameSlug), category),
+  updateCategory: (categoryId, updates) =>
+    mutation(`/game-categories/${encodePathParam(categoryId)}`, updates, { method: "PATCH" }),
+  getGameModerators: (gameSlug, options = {}) =>
+    request(backendRoutes.gameModerators(gameSlug), options),
+  assignGameModerator: (gameSlug, target) =>
+    mutation(backendRoutes.gameModerators(gameSlug), target),
+  removeGameModerator: (gameSlug, userId) =>
+    mutation(backendRoutes.gameModerator(gameSlug, userId), undefined, { method: "DELETE" }),
+  createGame: (game) => mutation(backendRoutes.games, game),
+  updateGame: (gameId, updates) =>
+    mutation(backendRoutes.game(gameId), updates, { method: "PATCH" }),
   getCurrentUser: (options = {}) =>
     request(backendRoutes.currentUser, { ...options, allowUnauthorized: true }),
   getProfile: (options = {}) => api.getCurrentUser(options),
@@ -477,7 +550,7 @@ export const api = {
     const response = await request(withQuery(backendRoutes.myPosts, query), options);
     const items = Array.isArray(response) ? response : response.items || [];
     return {
-      items: items.map((post) => (post.raw ? post : normalizePost(post))),
+      items: items.map(normalizePostResponse),
       meta: response.meta || { total: items.length },
     };
   },
@@ -487,6 +560,10 @@ export const api = {
     api.getPostCollection(backendRoutes.trendingFeed, query, options),
   getPosts: (query = {}, options = {}) =>
     api.getPostCollection(backendRoutes.posts, query, options),
+  getPost: async (postId, options = {}) => {
+    const post = await request(backendRoutes.post(postId), options);
+    return normalizePostResponse(post);
+  },
   getGameFeed: (gameSlug, query = {}, options = {}) =>
     api.getPostCollection(backendRoutes.gameFeed(gameSlug), query, options),
   likePost: (postId) => mutation(backendRoutes.postLike(postId)),
@@ -512,16 +589,45 @@ export const api = {
     }),
   confirmMediaUploads: (items) => mutation(backendRoutes.mediaConfirm, { items }),
   uploadPostMedia: async (files) => {
-    if (!files.length) return [];
+    if (!files.length) return { successful: [], failed: [] };
     const authorizations = await api.createUploadSignatures(files);
-    const uploaded = await Promise.all(
+    const settled = await Promise.allSettled(
       files.map((file, index) => uploadToCloudinary(file, authorizations.items[index])),
     );
-    const confirmed = await api.confirmMediaUploads(uploaded);
-    if (confirmed.failedCount) {
-      throw new Error(confirmed.failed?.[0]?.error || 'Media confirmation failed');
-    }
-    return confirmed.successful.map(({ result }) => result);
+    const uploaded = settled.flatMap((result, index) =>
+      result.status === "fulfilled" ? [{ file: files[index], payload: result.value }] : [],
+    );
+    const failed = settled.flatMap((result, index) =>
+      result.status === "rejected"
+        ? [{ file: files[index], error: result.reason?.message || "Upload failed" }]
+        : [],
+    );
+
+    if (!uploaded.length) return { successful: [], failed };
+
+    const confirmed = await api.confirmMediaUploads(uploaded.map(({ payload }) => payload));
+    const confirmedById = new Map(
+      confirmed.successful.map(({ uploadId, result }) => [uploadId, result]),
+    );
+    const uploadedFileById = new Map(uploaded.map(({ file, payload }) => [payload.uploadId, file]));
+    const confirmationErrors = new Map(
+      confirmed.failed.map(({ uploadId, error }) => [uploadId, error]),
+    );
+
+    return {
+      successful: uploaded.flatMap(({ payload }) => {
+        const result = confirmedById.get(payload.uploadId);
+        const file = uploadedFileById.get(payload.uploadId);
+        return result ? [{ ...result, fileName: file?.name || "Uploaded media" }] : [];
+      }),
+      failed: [
+        ...failed,
+        ...uploaded.flatMap(({ file, payload }) => {
+          const error = confirmationErrors.get(payload.uploadId);
+          return error ? [{ file, error }] : [];
+        }),
+      ],
+    };
   },
   /**
    * Uploads already-encrypted bytes as opaque raw blobs, returning upload ids in input order.
@@ -552,7 +658,7 @@ export const api = {
     const response = await request(withQuery(path, query), options);
     const items = Array.isArray(response) ? response : response.items || [];
     return {
-      items: items.map((post) => (post.raw ? post : normalizePost(post))),
+      items: items.map(normalizePostResponse),
       meta: response.meta || { total: items.length },
     };
   },
@@ -569,6 +675,26 @@ export const api = {
       meta: games.meta,
     };
   },
+  getAdminOverview: async () => cloneAdminMock(adminOverviewMock),
+  listReports: async () => cloneAdminMock(adminReportsMock),
+  resolveReport: async (reportId, { resolution, note = "" }) => ({
+    id: reportId,
+    status: "RESOLVED",
+    resolution,
+    note,
+    resolvedAt: new Date().toISOString(),
+  }),
+  hidePost: async (postId, { reason }) => ({ id: postId, status: "HIDDEN", reason }),
+  hideComment: async (commentId, { reason }) => ({ id: commentId, status: "HIDDEN", reason }),
+  listAdminUsers: async () => cloneAdminMock(adminUsersMock),
+  banUser: async (userId, { reason, durationDays = null }) => ({
+    id: userId,
+    status: "BANNED",
+    reason,
+    durationDays,
+    bannedAt: new Date().toISOString(),
+  }),
+  listAdminContent: async () => cloneAdminMock(adminContentMock),
   getChatConversations: () => request(backendRoutes.chatConversations),
   getArchivedChatConversations: () => request(backendRoutes.chatArchivedConversations),
   getChatRequests: () => request(backendRoutes.chatRequests),

@@ -85,6 +85,18 @@ export const posts = [
     author: "RoverTide",
     time: "5h ago",
     tag: "Guide",
+    content:
+      "A quick route through Tide of the Past, including the hidden entrance and the dialogue choice that unlocks the final chest.",
+    likeCount: 128,
+    commentCount: 24,
+    media: [
+      {
+        id: "mock-wuwa-guide-cover",
+        mediaType: "IMAGE",
+        url: "/mock-feed-art.svg",
+        altText: "Tide of the Past guide preview",
+      },
+    ],
   },
   {
     id: "post-lament-theory",
@@ -93,6 +105,10 @@ export const posts = [
     author: "LoreSeeker",
     time: "8h ago",
     tag: "Lore",
+    content:
+      "The latest archive entries change how the Lament timeline fits together. Here are the details that stood out.",
+    likeCount: 76,
+    commentCount: 11,
   },
   {
     id: "post-sanhua-build",
@@ -101,6 +117,9 @@ export const posts = [
     author: "SnowFrost",
     time: "12h ago",
     tag: "Build",
+    content: "Rotation notes, echo choices, and the damage results from a week of testing Sanhua.",
+    likeCount: 54,
+    commentCount: 9,
   },
   {
     id: "post-hsr-team",

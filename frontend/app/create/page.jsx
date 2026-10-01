@@ -1,11 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FiFileText, FiImage, FiSend, FiTrash2 } from "react-icons/fi";
-import { useCurrentUser } from "../../hooks/useCurrentUser";
+import { useRequireAuth } from "../../hooks/useRequireAuth";
 import { api } from "../../lib/api";
+import {
+  buildPostPayload,
+  getPostMediaError,
+  getPostTagError,
+  parsePostTags,
+} from "../../lib/postComposer";
 import { queries } from "../../lib/queries";
 import { QueryNotice } from "../../components/QueryNotice";
 
@@ -24,7 +30,7 @@ const postTypes = [
 export default function CreatePostPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
+  const { isAuthenticated, isLoading: isSessionLoading } = useRequireAuth();
   const games = useQuery(queries.games(""));
   const [form, setForm] = useState({
     gameId: "",
@@ -38,56 +44,79 @@ export default function CreatePostPage() {
     tags: "",
   });
   const [files, setFiles] = useState([]);
+  const [confirmedUploads, setConfirmedUploads] = useState([]);
   const [fileError, setFileError] = useState("");
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const selectedGame = games.data?.items.find((game) => game.id === form.gameId);
   const categories = useQuery({
     ...queries.categories(selectedGame?.slug),
     enabled: Boolean(selectedGame?.slug),
   });
-  const parsedTags = useMemo(
-    () =>
-      form.tags
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean)
-        .slice(0, 10),
-    [form.tags],
-  );
+  const parsedTags = useMemo(() => parsePostTags(form.tags), [form.tags]);
+  const tagError = getPostTagError(parsedTags);
+  const gameError = submitAttempted && !form.gameId ? "Choose a game before publishing." : "";
+  const titleError =
+    submitAttempted && form.title.trim().length < 3
+      ? "Title must contain at least 3 characters."
+      : "";
+  const contentError =
+    submitAttempted && !form.content.trim() ? "Write some content before publishing." : "";
   const canSubmit =
-    Boolean(form.gameId) && form.title.trim().length >= 3 && form.content.trim().length > 0;
-
-  useEffect(() => {
-    if (!isSessionLoading && !isAuthenticated) router.replace("/login");
-  }, [isAuthenticated, isSessionLoading, router]);
-
+    Boolean(form.gameId) &&
+    form.title.trim().length >= 3 &&
+    form.content.trim().length > 0 &&
+    !tagError &&
+    !fileError;
   const publish = useMutation({
     mutationFn: async () => {
-      const uploads = await api.uploadPostMedia(files);
-      return api.createPost({
-        gameId: form.gameId,
-        ...(form.categoryId ? { categoryId: form.categoryId } : {}),
-        title: form.title.trim(),
-        content: form.content.trim(),
-        type: form.type,
-        status: form.status,
-        visibility: form.visibility,
-        isSpoiler: form.isSpoiler,
-        ...(parsedTags.length ? { tags: parsedTags } : {}),
-        ...(uploads.length
-          ? {
-              media: uploads.map((upload, index) => ({
-                mediaUploadId: upload.mediaUploadId,
-                sortOrder: index,
-              })),
-            }
-          : {}),
-      });
+      let uploadResult;
+      try {
+        uploadResult = await api.uploadPostMedia(files);
+      } catch (error) {
+        return {
+          ok: false,
+          error,
+          failedFiles: files,
+          successfulUploads: confirmedUploads,
+        };
+      }
+      const uploads = [...confirmedUploads, ...uploadResult.successful];
+
+      if (uploadResult.failed.length) {
+        return {
+          ok: false,
+          error: new Error(
+            `${uploadResult.failed.length} file${uploadResult.failed.length === 1 ? "" : "s"} failed. Retry the remaining upload${uploadResult.failed.length === 1 ? "" : "s"}.`,
+          ),
+          failedFiles: uploadResult.failed.map(({ file }) => file),
+          successfulUploads: uploads,
+        };
+      }
+
+      try {
+        const post = await api.createPost(buildPostPayload(form, parsedTags, uploads));
+        return { ok: true, post };
+      } catch (error) {
+        return {
+          ok: false,
+          error,
+          failedFiles: [],
+          successfulUploads: uploads,
+        };
+      }
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
+      if (!result.ok) {
+        setConfirmedUploads(result.successfulUploads);
+        setFiles(result.failedFiles);
+        return;
+      }
       await queryClient.invalidateQueries({ queryKey: ["posts"] });
       router.push("/profile");
     },
   });
+  const publishError =
+    publish.data?.ok === false ? publish.data.error : publish.isError ? publish.error : null;
 
   const updateField = (field) => (event) => {
     const value = event.target.type === "checkbox" ? event.target.checked : event.target.value;
@@ -100,16 +129,10 @@ export default function CreatePostPage() {
 
   const selectFiles = (event) => {
     const selected = Array.from(event.target.files || []);
-    const next = [...files, ...selected].slice(0, 10);
-    const videoCount = next.filter((file) => file.type.startsWith("video/")).length;
-    const oversized = next.find((file) => {
-      const limit = file.type.startsWith("video/") ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
-      return file.size > limit;
-    });
+    const next = [...files, ...selected];
+    const nextError = getPostMediaError(next, confirmedUploads);
 
-    if (selected.length + files.length > 10) setFileError("A post supports up to 10 files.");
-    else if (videoCount > 1) setFileError("A post supports one video at most.");
-    else if (oversized) setFileError(`${oversized.name} exceeds the upload size limit.`);
+    if (nextError) setFileError(nextError);
     else {
       setFileError("");
       setFiles(next);
@@ -140,13 +163,18 @@ export default function CreatePostPage() {
         className="panel create-post-form"
         onSubmit={(event) => {
           event.preventDefault();
+          setSubmitAttempted(true);
           if (canSubmit && !publish.isPending) publish.mutate();
         }}
       >
         <div className="create-post-grid">
-          <label>
+          <label className={gameError ? "field-invalid" : ""}>
             Game
-            <select required value={form.gameId} onChange={updateField("gameId")}>
+            <select
+              aria-describedby={gameError ? "game-error" : undefined}
+              value={form.gameId}
+              onChange={updateField("gameId")}
+            >
               <option value="">Select a community</option>
               {(games.data?.items || []).map((game) => (
                 <option key={game.id} value={game.id}>
@@ -154,9 +182,14 @@ export default function CreatePostPage() {
                 </option>
               ))}
             </select>
+            {gameError && (
+              <small className="field-error" id="game-error">
+                {gameError}
+              </small>
+            )}
           </label>
           <label>
-            Category
+            Category <small>(optional)</small>
             <select
               value={form.categoryId}
               onChange={updateField("categoryId")}
@@ -190,9 +223,15 @@ export default function CreatePostPage() {
           </label>
         </div>
 
-        <label>
-          Title
+        <label className={titleError ? "field-invalid" : ""}>
+          <span className="field-label-row">
+            <span>Title</span>
+            <small className={form.title.length === 255 ? "limit-reached" : ""}>
+              {form.title.length}/255
+            </small>
+          </span>
           <input
+            aria-describedby="title-limit"
             maxLength={255}
             minLength={3}
             onChange={updateField("title")}
@@ -200,8 +239,23 @@ export default function CreatePostPage() {
             required
             value={form.title}
           />
+          <small
+            id="title-limit"
+            className={
+              titleError
+                ? "field-error"
+                : form.title.length === 255
+                  ? "field-warning"
+                  : "field-hint"
+            }
+          >
+            {titleError ||
+              (form.title.length === 255
+                ? "Maximum title length reached."
+                : "Keep it clear and specific.")}
+          </small>
         </label>
-        <label>
+        <label className={contentError ? "field-invalid" : ""}>
           Content
           <textarea
             maxLength={30000}
@@ -211,15 +265,18 @@ export default function CreatePostPage() {
             rows={10}
             value={form.content}
           />
+          {contentError && <small className="field-error">{contentError}</small>}
         </label>
-        <label>
+        <label className={tagError ? "field-invalid" : ""}>
           Tags
           <input
             onChange={updateField("tags")}
             placeholder="Jinhsi, Beginner, Build"
             value={form.tags}
           />
-          <small>Separate up to 10 tags with commas.</small>
+          <small className={tagError ? "field-error" : ""}>
+            {tagError || "Separate up to 10 tags with commas; 80 characters maximum per tag."}
+          </small>
         </label>
 
         <div className="create-post-options">
@@ -257,9 +314,10 @@ export default function CreatePostPage() {
                   <span>{file.name}</span>
                   <button
                     aria-label={`Remove ${file.name}`}
-                    onClick={() =>
-                      setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))
-                    }
+                    onClick={() => {
+                      setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index));
+                      setFileError("");
+                    }}
                     type="button"
                   >
                     <FiTrash2 />
@@ -268,6 +326,35 @@ export default function CreatePostPage() {
               ))}
             </ul>
           )}
+          {confirmedUploads.length > 0 && (
+            <>
+              <small className="upload-progress">
+                {confirmedUploads.length} file{confirmedUploads.length === 1 ? "" : "s"} uploaded
+                and ready.
+              </small>
+              <ul className="create-post-files confirmed-upload-list">
+                {confirmedUploads.map((upload, index) => (
+                  <li key={upload.mediaUploadId}>
+                    <span>
+                      {upload.fileName || `Uploaded ${upload.resourceType.toLowerCase()}`}
+                    </span>
+                    <button
+                      aria-label={`Remove ${upload.fileName || `uploaded ${upload.resourceType.toLowerCase()}`}`}
+                      onClick={() => {
+                        setConfirmedUploads((current) =>
+                          current.filter((_, itemIndex) => itemIndex !== index),
+                        );
+                        setFileError("");
+                      }}
+                      type="button"
+                    >
+                      <FiTrash2 />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           {fileError && <small className="post-action-error">{fileError}</small>}
         </section>
 
@@ -275,12 +362,10 @@ export default function CreatePostPage() {
           isLoading={games.isLoading || categories.isLoading}
           isError={games.isError || categories.isError}
         />
-        {publish.isError && <div className="auth-message error">{publish.error.message}</div>}
-        <button
-          className="primary create-post-submit"
-          disabled={!canSubmit || publish.isPending || Boolean(fileError)}
-          type="submit"
-        >
+        {!publish.isPending && publishError && (
+          <div className="auth-message error">{publishError.message}</div>
+        )}
+        <button className="primary create-post-submit" disabled={publish.isPending} type="submit">
           <FiSend />{" "}
           {publish.isPending
             ? "Publishing..."

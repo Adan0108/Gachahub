@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FiBell, FiLogOut, FiMenu, FiMoon, FiPlus, FiSun, FiUser } from "react-icons/fi";
 import { useCurrentUser } from "../hooks/useCurrentUser";
+import { useDismiss } from "../hooks/useDismiss";
+import { useToast } from "../hooks/useToast";
 import { api } from "../lib/api";
 import { CHAT_BACKUP_QUERY_ROOT } from "../lib/backup/backupQueryKeys";
 import "../lib/backup/backupSessionCleanup";
@@ -44,9 +46,9 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [readNotifications, setReadNotifications] = useState([]);
+  const { notice, showNotice } = useToast(2200);
   const notificationButtonRef = useRef(null);
   const notificationDrawerRef = useRef(null);
-  const wasNotificationsOpenRef = useRef(false);
   const accountButtonRef = useRef(null);
   const accountMenuRef = useRef(null);
   const health = useQuery(queries.health());
@@ -66,6 +68,7 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
       queryClient.setQueryData(queryKeys.currentUser, null);
       queryClient.removeQueries({ queryKey: CHAT_BACKUP_QUERY_ROOT });
       setAccountOpen(false);
+      showNotice("Logged out successfully");
       router.push("/");
     },
   });
@@ -76,51 +79,27 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
     router.push(notification.href);
   };
 
-  useEffect(() => {
-    if (!notificationsOpen) return undefined;
-    wasNotificationsOpenRef.current = true;
-    notificationDrawerRef.current?.querySelector("button")?.focus();
-    const closeOnEscape = (event) => {
-      if (event.key === "Escape") setNotificationsOpen(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [notificationsOpen]);
+  const closeNotifications = useCallback(() => setNotificationsOpen(false), []);
+  const closeAccountMenu = useCallback(() => setAccountOpen(false), []);
 
-  useEffect(() => {
-    if (!accountOpen) return undefined;
-
-    const closeAccountMenu = (event) => {
-      if (event.key === "Escape") {
-        setAccountOpen(false);
-        accountButtonRef.current?.focus();
-      }
-      if (
-        event.type === "mousedown" &&
-        !accountMenuRef.current?.contains(event.target) &&
-        !accountButtonRef.current?.contains(event.target)
-      ) {
-        setAccountOpen(false);
-      }
-    };
-
-    window.addEventListener("keydown", closeAccountMenu);
-    window.addEventListener("mousedown", closeAccountMenu);
-    return () => {
-      window.removeEventListener("keydown", closeAccountMenu);
-      window.removeEventListener("mousedown", closeAccountMenu);
-    };
-  }, [accountOpen]);
-
-  useEffect(() => {
-    if (!notificationsOpen && wasNotificationsOpenRef.current) {
-      notificationButtonRef.current?.focus();
-      wasNotificationsOpenRef.current = false;
-    }
-  }, [notificationsOpen]);
+  useDismiss({
+    isOpen: notificationsOpen,
+    onDismiss: closeNotifications,
+    contentRef: notificationDrawerRef,
+    triggerRef: notificationButtonRef,
+  });
+  useDismiss({
+    isOpen: accountOpen,
+    onDismiss: closeAccountMenu,
+    contentRef: accountMenuRef,
+    triggerRef: accountButtonRef,
+  });
 
   return (
     <header className="topbar">
+      <div className="toast-slot topbar-toast" aria-live="polite">
+        {notice}
+      </div>
       <button
         aria-label="Open menu"
         className="menu-btn"
@@ -166,7 +145,10 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
               aria-haspopup="dialog"
               className="icon-btn notification-btn"
               aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
-              onClick={() => setNotificationsOpen((current) => !current)}
+              onClick={() => {
+                setAccountOpen(false);
+                setNotificationsOpen((current) => !current);
+              }}
               ref={notificationButtonRef}
               type="button"
             >
@@ -221,7 +203,10 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
               aria-haspopup="menu"
               aria-label="Open account menu"
               className="mini-avatar"
-              onClick={() => setAccountOpen((current) => !current)}
+              onClick={() => {
+                setNotificationsOpen(false);
+                setAccountOpen((current) => !current);
+              }}
               ref={accountButtonRef}
               type="button"
             >
