@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
+import { escapeLikePattern } from '../common/utils/like-pattern';
 import { slugify } from '../common/utils/slugify';
 import { CreateGameDto } from './dto/create-game.dto';
 import { QueryGamesDto } from './dto/query-games.dto';
@@ -39,13 +40,13 @@ export class GamesService {
             OR: [
               {
                 name: {
-                  contains: query.search,
+                  contains: escapeLikePattern(query.search),
                   mode: 'insensitive',
                 },
               },
               {
                 slug: {
-                  contains: query.search,
+                  contains: escapeLikePattern(query.search),
                   mode: 'insensitive',
                 },
               },

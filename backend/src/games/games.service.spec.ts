@@ -42,6 +42,24 @@ describe('GamesService', () => {
     });
   });
 
+  it('escapes LIKE wildcards in the search term so they match literally', async () => {
+    repository.findMany.mockResolvedValue([]);
+    repository.count.mockResolvedValue(0);
+
+    await service.findAll({ search: '100%_' });
+
+    expect(repository.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          OR: [
+            { name: { contains: '100\\%\\_', mode: 'insensitive' } },
+            { slug: { contains: '100\\%\\_', mode: 'insensitive' } },
+          ],
+        },
+      }),
+    );
+  });
+
   it('throws when game slug does not exist', async () => {
     repository.findBySlug.mockResolvedValue(null);
 

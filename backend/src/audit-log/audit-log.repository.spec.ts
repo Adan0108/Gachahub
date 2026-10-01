@@ -78,3 +78,35 @@ describe('AuditLogRepository.create', () => {
     });
   });
 });
+
+describe('AuditLogRepository.findMany', () => {
+  it('escapes LIKE wildcards in actorName so they match literally', async () => {
+    const db = {
+      $transaction: jest.fn((queries: Promise<unknown>[]) =>
+        Promise.all(queries),
+      ),
+      auditLog: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
+    };
+    const repository = new AuditLogRepository(db as unknown as PrismaService);
+
+    await repository.findMany({
+      actorName: '100%_',
+      page: 1,
+      limit: 20,
+    });
+
+    expect(db.auditLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          actorName: { contains: '100\\%\\_', mode: 'insensitive' },
+        },
+      }),
+    );
+    expect(db.auditLog.count).toHaveBeenCalledWith({
+      where: { actorName: { contains: '100\\%\\_', mode: 'insensitive' } },
+    });
+  });
+});

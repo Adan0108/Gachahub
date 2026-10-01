@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PostStatus, type Prisma } from '../generated/prisma/client';
+import { escapeLikePattern } from '../common/utils/like-pattern';
 import { slugify } from '../common/utils/slugify';
 
 import { CreatePostDto } from './dto/create-post.dto';
@@ -67,13 +68,13 @@ export class PostsService {
             OR: [
               {
                 title: {
-                  contains: query.search,
+                  contains: escapeLikePattern(query.search),
                   mode: 'insensitive',
                 },
               },
               {
                 content: {
-                  contains: query.search,
+                  contains: escapeLikePattern(query.search),
                   mode: 'insensitive',
                 },
               },
@@ -82,7 +83,7 @@ export class PostsService {
                   some: {
                     tag: {
                       name: {
-                        contains: query.search,
+                        contains: escapeLikePattern(query.search),
                         mode: 'insensitive',
                       },
                     },

@@ -223,6 +223,36 @@ describe('PostsService', () => {
       );
     });
 
+    it('escapes LIKE wildcards in the search term so they match literally', async () => {
+      postsRepository.findMany.mockResolvedValue([]);
+      postsRepository.count.mockResolvedValue(0);
+
+      await service.findAll({ search: '100%_' });
+
+      expect(postsRepository.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            status: 'PUBLISHED',
+            visibility: 'PUBLIC',
+            deletedAt: null,
+            OR: [
+              { title: { contains: '100\\%\\_', mode: 'insensitive' } },
+              { content: { contains: '100\\%\\_', mode: 'insensitive' } },
+              {
+                tags: {
+                  some: {
+                    tag: {
+                      name: { contains: '100\\%\\_', mode: 'insensitive' },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        }),
+      );
+    });
+
     it('uses popular sorting', async () => {
       postsRepository.findMany.mockResolvedValue([]);
 

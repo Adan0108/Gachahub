@@ -5,6 +5,7 @@ import {
   type AuditTargetType,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { escapeLikePattern } from '../common/utils/like-pattern';
 import type { AuditEntry } from './audit-log.types';
 
 const auditLogInclude = {
@@ -74,7 +75,7 @@ export class AuditLogRepository {
       ...(params.actorName
         ? {
             actorName: {
-              contains: params.actorName,
+              contains: escapeLikePattern(params.actorName),
               mode: 'insensitive' as const,
             },
           }
