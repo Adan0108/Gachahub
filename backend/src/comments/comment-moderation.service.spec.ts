@@ -7,6 +7,7 @@ import {
 import type { CommentsRepository } from './comments.repository';
 import type { GameModeratorsService } from '../game-moderators/game-moderators.service';
 import type { AuditLogService } from '../audit-log/audit-log.service';
+import type { PrismaService } from '../prisma/prisma.service';
 
 /*
  * Unit test only mocks service dependencies. Do not load their real
@@ -24,6 +25,10 @@ jest.mock('../game-moderators/game-moderators.service', () => ({
   GameModeratorsService: class {},
 }));
 
+jest.mock('../prisma/prisma.service', () => ({
+  PrismaService: class {},
+}));
+
 import { CommentModerationService } from './comment-moderation.service';
 
 describe('CommentModerationService', () => {
@@ -37,7 +42,16 @@ describe('CommentModerationService', () => {
     resolveModeratableGameId: jest.fn(),
   };
 
-  const auditLogService = { record: jest.fn() };
+  const auditLogService = { recordOrThrow: jest.fn() };
+
+  // Interactive-transaction form only; the repository call inside is mocked,
+  // so the fake tx's identity doesn't matter - same pattern as
+  // UserModerationService's spec.
+  const prisma = {
+    $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
+      callback('fake-tx'),
+    ),
+  };
 
   let service: CommentModerationService;
 
@@ -53,11 +67,16 @@ describe('CommentModerationService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     gameModeratorsService.resolveModeratableGameId.mockResolvedValue('game-1');
+    prisma.$transaction.mockImplementation(
+      (callback: (tx: unknown) => unknown) => callback('fake-tx'),
+    );
+    auditLogService.recordOrThrow.mockResolvedValue(undefined);
 
     service = new CommentModerationService(
       commentsRepository as unknown as CommentsRepository,
       gameModeratorsService as unknown as GameModeratorsService,
       auditLogService as unknown as AuditLogService,
+      prisma as unknown as PrismaService,
     );
   });
 
@@ -78,22 +97,28 @@ describe('CommentModerationService', () => {
       expect(
         gameModeratorsService.resolveModeratableGameId,
       ).toHaveBeenCalledWith('wuthering-waves', 'mod-1');
-      expect(commentsRepository.transitionStatus).toHaveBeenCalledWith({
-        id: 'comment-1',
-        postId: 'post-1',
-        from: 'PUBLISHED',
-        to: 'HIDDEN',
-      });
+      expect(commentsRepository.transitionStatus).toHaveBeenCalledWith(
+        'fake-tx',
+        {
+          id: 'comment-1',
+          postId: 'post-1',
+          from: 'PUBLISHED',
+          to: 'HIDDEN',
+        },
+      );
       expect(result.status).toBe('HIDDEN');
-      expect(auditLogService.record).toHaveBeenCalledWith({
-        action: 'COMMENT_HIDDEN',
-        actorId: 'mod-1',
-        targetType: 'COMMENT',
-        targetId: 'comment-1',
-        gameId: 'game-1',
-        gameSlug: 'wuthering-waves',
-        metadata: { authorId: 'author-1', postId: 'post-1' },
-      });
+      expect(auditLogService.recordOrThrow).toHaveBeenCalledWith(
+        {
+          action: 'COMMENT_HIDDEN',
+          actorId: 'mod-1',
+          targetType: 'COMMENT',
+          targetId: 'comment-1',
+          gameId: 'game-1',
+          gameSlug: 'wuthering-waves',
+          metadata: { authorId: 'author-1', postId: 'post-1' },
+        },
+        'fake-tx',
+      );
     });
 
     it('is idempotent when the comment is already hidden', async () => {
@@ -109,7 +134,7 @@ describe('CommentModerationService', () => {
       );
 
       expect(commentsRepository.transitionStatus).not.toHaveBeenCalled();
-      expect(auditLogService.record).not.toHaveBeenCalled();
+      expect(auditLogService.recordOrThrow).not.toHaveBeenCalled();
       expect(result.status).toBe('HIDDEN');
       expect(result.postId).toBe('post-1');
     });
@@ -177,18 +202,22 @@ describe('CommentModerationService', () => {
         'mod-1',
       );
 
-      expect(commentsRepository.transitionStatus).toHaveBeenCalledWith({
-        id: 'comment-1',
-        postId: 'post-1',
-        from: 'HIDDEN',
-        to: 'PUBLISHED',
-      });
+      expect(commentsRepository.transitionStatus).toHaveBeenCalledWith(
+        'fake-tx',
+        {
+          id: 'comment-1',
+          postId: 'post-1',
+          from: 'HIDDEN',
+          to: 'PUBLISHED',
+        },
+      );
       expect(result.status).toBe('PUBLISHED');
-      expect(auditLogService.record).toHaveBeenCalledWith(
+      expect(auditLogService.recordOrThrow).toHaveBeenCalledWith(
         expect.objectContaining({
           action: 'COMMENT_RESTORED',
           targetId: 'comment-1',
         }),
+        'fake-tx',
       );
     });
 

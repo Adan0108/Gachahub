@@ -9,6 +9,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import type { CommentAuditAction } from '../audit-log/audit-log.types';
 import { GameModeratorsService } from '../game-moderators/game-moderators.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { PrismaService } from '../prisma/prisma.service';
 import { CommentsRepository } from './comments.repository';
 import { resolvePagination, toPaginated } from '../common/utils/paginated';
 
@@ -19,6 +20,11 @@ import { resolvePagination, toPaginated } from '../common/utils/paginated';
  * the authorize-then-load-then-cross-check preamble is written out here
  * instead of reusing GameModeratorsService.loadModeratableResource, which
  * requires the resource to carry gameId directly.
+ *
+ * The status write and the audit entry commit together (recordOrThrow
+ * inside the same $transaction) - same reasoning as
+ * UserModerationService.setStatus: a moderation action can't land with no
+ * record of who did it.
  */
 @Injectable()
 export class CommentModerationService {
@@ -26,6 +32,7 @@ export class CommentModerationService {
     private readonly commentsRepository: CommentsRepository,
     private readonly gameModeratorsService: GameModeratorsService,
     private readonly auditLogService: AuditLogService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async hideAsModerator(
@@ -126,31 +133,36 @@ export class CommentModerationService {
       throw new BadRequestException(rejectionMessage);
     }
 
-    const updated = await this.commentsRepository.transitionStatus({
-      id: commentId,
-      postId: comment.post.id,
-      from,
-      to,
-    });
+    return this.prisma.$transaction(async (tx) => {
+      const result = await this.commentsRepository.transitionStatus(tx, {
+        id: commentId,
+        postId: comment.post.id,
+        from,
+        to,
+      });
 
-    if (!updated) {
-      // The comment moved off `from` between our read above and this write -
-      // another moderator beat us to it.
-      throw new ConflictException(
-        'This comment was changed by someone else - please retry',
+      if (!result) {
+        // The comment moved off `from` between our read above and this
+        // write - another moderator beat us to it.
+        throw new ConflictException(
+          'This comment was changed by someone else - please retry',
+        );
+      }
+
+      await this.auditLogService.recordOrThrow(
+        {
+          action: auditAction,
+          actorId: moderatorId,
+          targetType: 'COMMENT',
+          targetId: commentId,
+          gameId,
+          gameSlug,
+          metadata: { authorId: comment.authorId, postId: comment.post.id },
+        },
+        tx,
       );
-    }
 
-    await this.auditLogService.record({
-      action: auditAction,
-      actorId: moderatorId,
-      targetType: 'COMMENT',
-      targetId: commentId,
-      gameId,
-      gameSlug,
-      metadata: { authorId: comment.authorId, postId: comment.post.id },
+      return result;
     });
-
-    return updated;
   }
 }

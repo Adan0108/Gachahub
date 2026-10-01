@@ -95,53 +95,59 @@ export class CommentsRepository {
    * when the write happens - same race protection as
    * PostsRepository.transitionStatus. Returns null when the row was no
    * longer at `from`.
+   *
+   * Takes the caller's transaction client rather than opening its own, so
+   * CommentModerationService can write the audit entry in the same
+   * transaction (recordOrThrow) - a moderation action can't land with no
+   * trail.
    */
-  transitionStatus(params: {
-    id: string;
-    postId: string;
-    from: Prisma.CommentWhereInput['status'];
-    to: Prisma.CommentUpdateInput['status'];
-  }) {
-    return this.prisma.$transaction(async (tx) => {
-      const result = await tx.comment.updateMany({
+  async transitionStatus(
+    tx: Prisma.TransactionClient,
+    params: {
+      id: string;
+      postId: string;
+      from: Prisma.CommentWhereInput['status'];
+      to: Prisma.CommentUpdateInput['status'];
+    },
+  ) {
+    const result = await tx.comment.updateMany({
+      where: {
+        id: params.id,
+        status: params.from,
+      },
+      data: {
+        status: params.to,
+      },
+    });
+
+    if (result.count === 0) {
+      return null;
+    }
+
+    // Post.commentCount is a denormalized count of visible comments (see
+    // create()/softDelete()) - hiding/restoring has to keep it in step the
+    // same way deleting does, or a hidden comment keeps being counted.
+    const delta =
+      params.to === 'PUBLISHED' ? 1 : params.from === 'PUBLISHED' ? -1 : 0;
+
+    if (delta !== 0) {
+      await tx.post.update({
         where: {
-          id: params.id,
-          status: params.from,
+          id: params.postId,
         },
         data: {
-          status: params.to,
+          commentCount: {
+            increment: delta,
+          },
         },
       });
+    }
 
-      if (result.count === 0) {
-        return null;
-      }
-
-      // Post.commentCount is a denormalized count of visible comments (see
-      // create()/softDelete()) - hiding/restoring has to keep it in step the
-      // same way deleting does, or a hidden comment keeps being counted.
-      const delta =
-        params.to === 'PUBLISHED' ? 1 : params.from === 'PUBLISHED' ? -1 : 0;
-
-      if (delta !== 0) {
-        await tx.post.update({
-          where: {
-            id: params.postId,
-          },
-          data: {
-            commentCount: {
-              increment: delta,
-            },
-          },
-        });
-      }
-
-      return tx.comment.findUniqueOrThrow({
-        where: {
-          id: params.id,
-        },
-        include: commentInclude,
-      });
+    return tx.comment.findUniqueOrThrow({
+      where: {
+        id: params.id,
+      },
+      include: commentInclude,
     });
   }
 

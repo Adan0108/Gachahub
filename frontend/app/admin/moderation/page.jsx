@@ -2,11 +2,18 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { FiAlertTriangle, FiArrowRight, FiFileText, FiShield } from "react-icons/fi";
+import { FiAlertTriangle, FiArrowRight, FiFileText } from "react-icons/fi";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
 import { useRequireAdmin } from "../../../hooks/useRequireAdmin";
 import { queries } from "../../../lib/queries";
+
+const REPORT_STATUS_CLASS = {
+  PENDING: "admin-status-pending",
+  IN_REVIEW: "admin-status-in-review",
+  RESOLVED: "admin-status-resolved",
+  DISMISSED: "admin-status-dismissed",
+};
 
 export default function AdminModerationPage() {
   const session = useRequireAdmin();
@@ -85,17 +92,6 @@ export default function AdminModerationPage() {
                 Review content <FiArrowRight />
               </Link>
             </article>
-            <article>
-              <span>
-                <FiShield />
-              </span>
-              <div>
-                <small>Highest priority</small>
-                <strong>
-                  {openReports.some((item) => item.priority === "HIGH") ? "High" : "Normal"}
-                </strong>
-              </div>
-            </article>
           </section>
           <div className="admin-overview-grid">
             <section className="admin-panel">
@@ -109,18 +105,15 @@ export default function AdminModerationPage() {
               <ul className="admin-review-list">
                 {openReports.slice(0, 4).map((report) => (
                   <li key={report.id}>
-                    <span
-                      className={`admin-priority admin-priority-${report.priority.toLowerCase()}`}
-                    >
-                      {report.priority}
-                    </span>
                     <div>
-                      <b>{report.reason}</b>
+                      <b>{report.reasonCode}</b>
                       <small>
                         {report.targetType} · {report.targetId}
                       </small>
                     </div>
-                    <span className={`admin-status admin-status-${report.status.toLowerCase()}`}>
+                    <span
+                      className={`admin-status ${REPORT_STATUS_CLASS[report.status] || ""}`}
+                    >
                       {report.status.replace("_", " ")}
                     </span>
                   </li>

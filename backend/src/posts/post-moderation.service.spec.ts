@@ -8,6 +8,7 @@ import {
 import type { PostsRepository } from './posts.repository';
 import type { GameModeratorsService } from '../game-moderators/game-moderators.service';
 import type { AuditLogService } from '../audit-log/audit-log.service';
+import type { PrismaService } from '../prisma/prisma.service';
 
 /*
  * Unit test only mocks service dependencies. Do not load their real
@@ -25,6 +26,10 @@ jest.mock('../game-moderators/game-moderators.service', () => ({
   GameModeratorsService: class {},
 }));
 
+jest.mock('../prisma/prisma.service', () => ({
+  PrismaService: class {},
+}));
+
 import { PostModerationService } from './post-moderation.service';
 
 describe('PostModerationService', () => {
@@ -39,7 +44,16 @@ describe('PostModerationService', () => {
     loadModeratableResource: jest.fn(),
   };
 
-  const auditLogService = { record: jest.fn() };
+  const auditLogService = { recordOrThrow: jest.fn() };
+
+  // Interactive-transaction form only; the repository call inside is mocked,
+  // so the fake tx's identity doesn't matter - same pattern as
+  // UserModerationService's spec.
+  const prisma = {
+    $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
+      callback('fake-tx'),
+    ),
+  };
 
   let service: PostModerationService;
 
@@ -75,11 +89,16 @@ describe('PostModerationService', () => {
         return { gameId: 'game-1', resource };
       },
     );
+    prisma.$transaction.mockImplementation(
+      (callback: (tx: unknown) => unknown) => callback('fake-tx'),
+    );
+    auditLogService.recordOrThrow.mockResolvedValue(undefined);
 
     service = new PostModerationService(
       postsRepository as unknown as PostsRepository,
       gameModeratorsService as unknown as GameModeratorsService,
       auditLogService as unknown as AuditLogService,
+      prisma as unknown as PrismaService,
     );
   });
 
@@ -106,22 +125,25 @@ describe('PostModerationService', () => {
           notFoundMessage: 'Post not found',
         }),
       );
-      expect(postsRepository.transitionStatus).toHaveBeenCalledWith({
+      expect(postsRepository.transitionStatus).toHaveBeenCalledWith('fake-tx', {
         id: 'post-1',
         gameId: 'game-1',
         from: 'PUBLISHED',
         to: 'HIDDEN',
       });
       expect(result.status).toBe('HIDDEN');
-      expect(auditLogService.record).toHaveBeenCalledWith({
-        action: 'POST_HIDDEN',
-        actorId: 'mod-1',
-        targetType: 'POST',
-        targetId: 'post-1',
-        gameId: 'game-1',
-        gameSlug: 'wuthering-waves',
-        metadata: { authorId: 'author-1', postTitle: 'A post' },
-      });
+      expect(auditLogService.recordOrThrow).toHaveBeenCalledWith(
+        {
+          action: 'POST_HIDDEN',
+          actorId: 'mod-1',
+          targetType: 'POST',
+          targetId: 'post-1',
+          gameId: 'game-1',
+          gameSlug: 'wuthering-waves',
+          metadata: { authorId: 'author-1', postTitle: 'A post' },
+        },
+        'fake-tx',
+      );
     });
 
     it('is idempotent when the post is already hidden', async () => {
@@ -133,7 +155,7 @@ describe('PostModerationService', () => {
       const result = await service.hideAsModerator('game-1', 'post-1', 'mod-1');
 
       expect(postsRepository.transitionStatus).not.toHaveBeenCalled();
-      expect(auditLogService.record).not.toHaveBeenCalled();
+      expect(auditLogService.recordOrThrow).not.toHaveBeenCalled();
       expect(result.status).toBe('HIDDEN');
     });
 
@@ -225,18 +247,19 @@ describe('PostModerationService', () => {
         'mod-1',
       );
 
-      expect(postsRepository.transitionStatus).toHaveBeenCalledWith({
+      expect(postsRepository.transitionStatus).toHaveBeenCalledWith('fake-tx', {
         id: 'post-1',
         gameId: 'game-1',
         from: 'HIDDEN',
         to: 'PUBLISHED',
       });
       expect(result.status).toBe('PUBLISHED');
-      expect(auditLogService.record).toHaveBeenCalledWith(
+      expect(auditLogService.recordOrThrow).toHaveBeenCalledWith(
         expect.objectContaining({
           action: 'POST_RESTORED',
           targetId: 'post-1',
         }),
+        'fake-tx',
       );
     });
 

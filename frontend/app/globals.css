@@ -2205,8 +2205,7 @@ button {
   letter-spacing: 0.01em;
 }
 
-.admin-type-badge,
-.admin-priority {
+.admin-type-badge {
   display: inline-flex;
   padding: 5px 8px;
   border: 1px solid #444b59;
@@ -2216,18 +2215,6 @@ button {
   font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.04em;
-}
-
-.admin-priority-high {
-  border-color: #783a4a;
-  background: #301921;
-  color: #ff94aa;
-}
-
-.admin-priority-medium {
-  border-color: #6d582d;
-  background: #2d2719;
-  color: #e2c56f;
 }
 
 .admin-status-pending,

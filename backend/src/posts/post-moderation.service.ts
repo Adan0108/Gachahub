@@ -8,6 +8,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import type { PostAuditAction } from '../audit-log/audit-log.types';
 import { GameModeratorsService } from '../game-moderators/game-moderators.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { PrismaService } from '../prisma/prisma.service';
 import { formatPost } from './post.mapper';
 import { PostsRepository } from './posts.repository';
 import { resolvePagination, toPaginated } from '../common/utils/paginated';
@@ -25,6 +26,7 @@ export class PostModerationService {
     private readonly postsRepository: PostsRepository,
     private readonly gameModeratorsService: GameModeratorsService,
     private readonly auditLogService: AuditLogService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async hideAsModerator(gameSlug: string, postId: string, moderatorId: string) {
@@ -93,6 +95,11 @@ export class PostModerationService {
    * they're each other's inverse. Takes a single options object rather than
    * positional args since `from`/`to` are the same type and adjacent -
    * transposing them would silently invert hide into restore.
+   *
+   * The status write and the audit entry commit together (recordOrThrow
+   * inside the same $transaction) - same reasoning as
+   * UserModerationService.setStatus: a moderation action can't land with no
+   * record of who did it.
    */
   private async setModeratedStatus(params: {
     gameSlug: string;
@@ -129,29 +136,36 @@ export class PostModerationService {
       throw new BadRequestException(rejectionMessage);
     }
 
-    const updated = await this.postsRepository.transitionStatus({
-      id: postId,
-      gameId,
-      from,
-      to,
-    });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await this.postsRepository.transitionStatus(tx, {
+        id: postId,
+        gameId,
+        from,
+        to,
+      });
 
-    if (!updated) {
-      // The post moved off `from` between our read above and this write -
-      // another moderator (or the author) beat us to it.
-      throw new ConflictException(
-        'This post was changed by someone else - please retry',
+      if (!result) {
+        // The post moved off `from` between our read above and this write -
+        // another moderator (or the author) beat us to it.
+        throw new ConflictException(
+          'This post was changed by someone else - please retry',
+        );
+      }
+
+      await this.auditLogService.recordOrThrow(
+        {
+          action: auditAction,
+          actorId: moderatorId,
+          targetType: 'POST',
+          targetId: postId,
+          gameId,
+          gameSlug,
+          metadata: { authorId: post.authorId, postTitle: post.title },
+        },
+        tx,
       );
-    }
 
-    await this.auditLogService.record({
-      action: auditAction,
-      actorId: moderatorId,
-      targetType: 'POST',
-      targetId: postId,
-      gameId,
-      gameSlug,
-      metadata: { authorId: post.authorId, postTitle: post.title },
+      return result;
     });
 
     return formatPost(updated);

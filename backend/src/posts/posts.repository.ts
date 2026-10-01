@@ -457,51 +457,56 @@ export class PostsRepository {
    * racing the same post would otherwise silently lose one side's change.
    * Returns null when the row was no longer at `from` (someone else moved
    * it first), instead of throwing, so the caller decides what that means.
+   *
+   * Takes the caller's transaction client rather than opening its own, so
+   * PostModerationService can write the audit entry in the same transaction
+   * (recordOrThrow) - a moderation action can't land with no trail.
    */
-  transitionStatus(params: {
-    id: string;
-    gameId: string;
-    from: Prisma.PostWhereInput['status'];
-    to: Prisma.PostUpdateInput['status'];
-  }) {
-    return this.prisma.$transaction(async (tx) => {
-      const result = await tx.post.updateMany({
+  async transitionStatus(
+    tx: Prisma.TransactionClient,
+    params: {
+      id: string;
+      gameId: string;
+      from: Prisma.PostWhereInput['status'];
+      to: Prisma.PostUpdateInput['status'];
+    },
+  ) {
+    const result = await tx.post.updateMany({
+      where: {
+        id: params.id,
+        gameId: params.gameId,
+        status: params.from,
+      },
+      data: {
+        status: params.to,
+      },
+    });
+
+    if (result.count === 0) {
+      return null;
+    }
+
+    const delta =
+      params.to === 'PUBLISHED' ? 1 : params.from === 'PUBLISHED' ? -1 : 0;
+
+    if (delta !== 0) {
+      await tx.game.update({
         where: {
-          id: params.id,
-          gameId: params.gameId,
-          status: params.from,
+          id: params.gameId,
         },
         data: {
-          status: params.to,
+          postCount: {
+            increment: delta,
+          },
         },
       });
+    }
 
-      if (result.count === 0) {
-        return null;
-      }
-
-      const delta =
-        params.to === 'PUBLISHED' ? 1 : params.from === 'PUBLISHED' ? -1 : 0;
-
-      if (delta !== 0) {
-        await tx.game.update({
-          where: {
-            id: params.gameId,
-          },
-          data: {
-            postCount: {
-              increment: delta,
-            },
-          },
-        });
-      }
-
-      return tx.post.findUniqueOrThrow({
-        where: {
-          id: params.id,
-        },
-        include: postInclude,
-      });
+    return tx.post.findUniqueOrThrow({
+      where: {
+        id: params.id,
+      },
+      include: postInclude,
     });
   }
 
