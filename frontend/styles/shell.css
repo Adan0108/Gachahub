@@ -26,16 +26,9 @@
   padding: 4px 6px 24px;
 }
 
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 29px;
-  height: 29px;
-  color: #fff;
-  background: linear-gradient(135deg, #a878ff, #5b34d6);
-  border: 1px solid #b893ff;
-  border-radius: 9px;
-  box-shadow: 0 0 18px #7e4cff88;
+.brand-logo {
+  display: block;
+  flex: 0 0 auto;
 }
 
 .brand em {
