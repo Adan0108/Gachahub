@@ -7,7 +7,7 @@ import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
 import { useRequireAdmin } from "../../../hooks/useRequireAdmin";
 import { queries } from "../../../lib/queries";
-import { REPORT_STATUS_CLASS } from "../../../lib/statusTone";
+import { REPORT_STATUS_CLASS } from "../../../lib/admin/statusTone";
 
 export default function AdminModerationPage() {
   const session = useRequireAdmin();

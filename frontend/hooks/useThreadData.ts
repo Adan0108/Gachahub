@@ -8,8 +8,8 @@ import { useMembershipEvents } from "./useMembershipEvents";
 import { useNewMessageAnnouncement } from "./useNewMessageAnnouncement";
 import { useNowTick } from "./useNowTick";
 import { useSafetyNumbers } from "./useSafetyNumbers";
-import { otherActiveMemberIds, participantUser } from "../lib/chatDisplay";
-import { buildThreadItems, eventsForDisplay, readableNeighbors } from "../lib/chatThread";
+import { otherActiveMemberIds, participantUser } from "../lib/chat/chatDisplay";
+import { buildThreadItems, eventsForDisplay, readableNeighbors } from "../lib/chat/chatThread";
 
 interface ThreadMessage {
   id: string;

@@ -5,7 +5,7 @@ import { useMutation } from "@tanstack/react-query";
 import { FiLogOut, FiX } from "react-icons/fi";
 import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 import { api } from "../lib/api";
-import { activeMembers, initialOf, myParticipant } from "../lib/chatDisplay";
+import { activeMembers, initialOf, myParticipant } from "../lib/chat/chatDisplay";
 import { SafetyBadge } from "./SafetyStatus";
 import { UserPicker } from "./UserPicker";
 

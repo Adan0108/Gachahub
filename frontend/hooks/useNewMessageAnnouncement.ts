@@ -5,7 +5,7 @@ import {
   nextAnnouncement,
   type AnnouncementState,
   type LastMessage,
-} from "../lib/chatAnnouncement";
+} from "../lib/chat/chatAnnouncement";
 
 /** Text for a polite live region that speaks only when a new message lands at the end of the thread. */
 export function useNewMessageAnnouncement(

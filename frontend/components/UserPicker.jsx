@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { FiX } from "react-icons/fi";
 import { useUserSearch, USER_SEARCH_MIN_CHARS } from "../hooks/useUserSearch";
-import { initialOf } from "../lib/chatDisplay";
+import { initialOf } from "../lib/chat/chatDisplay";
 
 /**
  * Search-as-you-type user picker. `value` is the list of picked `{ id, name }` users; in single

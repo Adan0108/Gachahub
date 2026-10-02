@@ -12,7 +12,7 @@ import { useAdminList } from "../../../hooks/useAdminList";
 import { useToast } from "../../../hooks/useToast";
 import { api } from "../../../lib/api";
 import { queries, queryKeys } from "../../../lib/queries";
-import { REPORT_STATUS_CLASS } from "../../../lib/statusTone";
+import { REPORT_STATUS_CLASS } from "../../../lib/admin/statusTone";
 
 const DECISIONS = {
   RESOLVE: {

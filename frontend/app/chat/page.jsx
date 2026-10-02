@@ -52,7 +52,7 @@ import {
 import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightboxContext";
 import { api } from "../../lib/api";
 import { queries, queryKeys } from "../../lib/queries";
-import { typingSignal } from "../../lib/chatTypingSignal";
+import { typingSignal } from "../../lib/chat/chatTypingSignal";
 import {
   activeMembers,
   conversationDisplayName,
@@ -61,11 +61,11 @@ import {
   myParticipant,
   otherActiveMemberIds,
   participantUser,
-} from "../../lib/chatDisplay";
+} from "../../lib/chat/chatDisplay";
 import { relativeTime } from "../../lib/time";
-import { threadItemKey, withOptimisticDelete } from "../../lib/chatThread";
-import { withOptimisticReaction } from "../../lib/chatReactions";
-import { getHiddenMessageIds, hideMessageForMe, unhideMessageForMe } from "../../lib/chatHiddenMessages";
+import { threadItemKey, withOptimisticDelete } from "../../lib/chat/chatThread";
+import { withOptimisticReaction } from "../../lib/chat/chatReactions";
+import { getHiddenMessageIds, hideMessageForMe, unhideMessageForMe } from "../../lib/chat/chatHiddenMessages";
 
 function ChatSkeletonRow() {
   return (

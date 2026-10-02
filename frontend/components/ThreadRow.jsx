@@ -3,8 +3,8 @@ import { EnvelopeContent } from "./EnvelopeContent";
 import { MessageActions } from "./MessageActions";
 import { HistoryBanner, MembershipEventLine, TimestampDivider } from "./ThreadNotices";
 import { useAttachmentBlobUrl } from "../hooks/useAttachmentBlobUrl";
-import { groupReactions } from "../lib/chatReactions";
-import { initialOf, participantUser } from "../lib/chatDisplay";
+import { groupReactions } from "../lib/chat/chatReactions";
+import { initialOf, participantUser } from "../lib/chat/chatDisplay";
 import {
   attachmentKind,
   envelopeView,
@@ -17,7 +17,7 @@ import {
   messageFullTimestamp,
   replyOriginalSenderLabel,
   wasLikelySentDuringAbsence,
-} from "../lib/chatThread";
+} from "../lib/chat/chatThread";
 
 /** The small preview inside a reply quote: the file's own thumbnail (dimmed), or a plain file icon for anything else. */
 function ReplyQuoteMedia({ replyToId, file, media }) {

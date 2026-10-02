@@ -11,7 +11,7 @@ import {
   wasLikelySentDuringAbsence,
   withOptimisticDelete,
 } from './chatThread';
-import type { MembershipEvent } from './mls/sync/membershipEvents';
+import type { MembershipEvent } from '../mls/sync/membershipEvents';
 
 type Status = 'ok' | 'unavailable' | 'pending';
 const at = (minute: number) => new Date(Date.UTC(2026, 0, 1, 0, minute)).toISOString();

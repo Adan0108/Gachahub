@@ -1,4 +1,4 @@
-import type { MembershipEvent } from './mls/sync/membershipEvents';
+import type { MembershipEvent } from '../mls/sync/membershipEvents';
 
 interface ThreadMessage {
   id: string;

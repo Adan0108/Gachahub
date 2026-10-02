@@ -6,8 +6,8 @@ import { io } from 'socket.io-client';
 import { useCurrentUser } from './useCurrentUser';
 import { API_BASE_URL } from '../lib/api';
 import { queryKeys } from '../lib/queries';
-import { MAX_RECONNECT_ATTEMPTS, reconnectDelayMs } from '../lib/socketReconnect';
-import { typingSignal } from '../lib/chatTypingSignal';
+import { MAX_RECONNECT_ATTEMPTS, reconnectDelayMs } from '../lib/chat/socketReconnect';
+import { typingSignal } from '../lib/chat/chatTypingSignal';
 
 // How long a typing:start this tab sent stays valid without a fresh ping before it emits
 // typing:stop on its own - matches the usual "stopped typing" idle window other chat apps use.

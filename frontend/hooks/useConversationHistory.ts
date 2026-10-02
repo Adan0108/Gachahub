@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject, UIEvent } from "react";
 import { api } from "../lib/api";
-import { messagesFallenOutOfWindow, type HistoryMessage } from "../lib/chatHistory";
+import { messagesFallenOutOfWindow, type HistoryMessage } from "../lib/chat/chatHistory";
 
 const PAGE_SIZE = 50;
 const NEAR_TOP_PX = 80;

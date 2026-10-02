@@ -19,7 +19,7 @@ import { AttachmentFileChip } from "./AttachmentFileChip";
 import { ImageTile, VideoTile } from "./AttachmentTiles";
 import { AttachmentLightboxContext } from "../lib/mls/media/attachmentLightboxContext";
 import { attachmentKind } from "../lib/mls/media/attachmentView";
-import { initialOf } from "../lib/chatDisplay";
+import { initialOf } from "../lib/chat/chatDisplay";
 
 const NOT_IMPLEMENTED_TOAST_MS = 1800;
 

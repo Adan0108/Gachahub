@@ -1,4 +1,4 @@
-import { readStoredJson } from './preferences';
+import { readStoredJson } from '../preferences';
 
 const KEY_PREFIX = 'gachahub-hidden-messages:';
 
