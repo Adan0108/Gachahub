@@ -20,6 +20,10 @@ model User {
   role                  UserRole              @default(USER)
   status                UserStatus            @default(ACTIVE)
   messageRequestSetting MessageRequestSetting @default(EVERYONE)
+  // Claimed once during onboarding; case-insensitive (citext) so "Bob" and "bob" collide,
+  // original casing kept for display. Null until the user completes onboarding.
+  username  String?  @unique @db.Citext
+  onboarded Boolean  @default(false)
 
   sessions     Session[]
   accounts     Account[]

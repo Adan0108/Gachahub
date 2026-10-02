@@ -7,6 +7,8 @@ import { PostsService } from '../posts/posts.service';
 import { UsersService } from './users.service';
 import { SearchUsersQueryDto } from './dto/search-users-query.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { CompleteOnboardingDto } from './dto/complete-onboarding.dto';
+import { CheckUsernameQueryDto } from './dto/check-username-query.dto';
 
 @ApiTags('Users')
 @Controller('users')
@@ -20,7 +22,7 @@ export class UsersController {
   @ApiCookieAuth('better-auth.session_token')
   @ApiOperation({ summary: 'Get current authenticated user' })
   getMe(@Session() session: UserSession) {
-    return session.user;
+    return this.usersService.getMe(session.user.id);
   }
 
   @Patch('me')
@@ -28,6 +30,28 @@ export class UsersController {
   @ApiOperation({ summary: 'Update current authenticated user profile' })
   updateMe(@Session() session: UserSession, @Body() dto: UpdateProfileDto) {
     return this.usersService.updateProfile(session.user.id, dto);
+  }
+
+  @Patch('me/onboarding')
+  @ApiCookieAuth('better-auth.session_token')
+  @ApiOperation({
+    summary: 'One-time claim: set display name and username, mark onboarded',
+  })
+  completeOnboarding(
+    @Session() session: UserSession,
+    @Body() dto: CompleteOnboardingDto,
+  ) {
+    return this.usersService.completeOnboarding(session.user.id, dto);
+  }
+
+  // Must stay above ':userId' or it is read as a user id.
+  @Get('username-available')
+  @ApiCookieAuth('better-auth.session_token')
+  @ApiOperation({ summary: 'Check whether a handle is free to claim' })
+  async checkUsernameAvailable(@Query() query: CheckUsernameQueryDto) {
+    return {
+      available: await this.usersService.isUsernameAvailable(query.username),
+    };
   }
 
   // Must stay above ':userId' or it is read as a user id.

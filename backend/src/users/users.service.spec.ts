@@ -1,10 +1,12 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
+import { Prisma } from '../generated/prisma/client';
 import { UsersService } from './users.service';
 
 describe('UsersService', () => {
   const prisma = {
     user: {
       findFirst: jest.fn(),
+      findUnique: jest.fn(),
       update: jest.fn(),
     },
   };
@@ -95,6 +97,103 @@ describe('UsersService', () => {
 
       expect(blocksService.isBlocked).not.toHaveBeenCalled();
       expect(result.isBlockedByMe).toBe(false);
+    });
+  });
+
+  describe('getMe', () => {
+    it('throws when the user no longer exists', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.getMe('user-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('reads live from the database instead of trusting a cached session', async () => {
+      const liveRow = { id: 'user-1', onboarded: true, username: 'Mado-123' };
+      prisma.user.findUnique.mockResolvedValue(liveRow);
+
+      await expect(service.getMe('user-1')).resolves.toEqual(liveRow);
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+      });
+    });
+  });
+
+  describe('completeOnboarding', () => {
+    const dto = { name: 'Mado', username: 'Mado-123' };
+
+    it('throws when the user does not exist', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.completeOnboarding('user-1', dto)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses a second claim once already onboarded', async () => {
+      prisma.user.findUnique.mockResolvedValue({ onboarded: true });
+
+      await expect(service.completeOnboarding('user-1', dto)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('sets name, username and onboarded in one update', async () => {
+      prisma.user.findUnique.mockResolvedValue({ onboarded: false });
+      prisma.user.update.mockResolvedValue({ id: 'user-1', ...dto });
+
+      await service.completeOnboarding('user-1', dto);
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { name: dto.name, username: dto.username, onboarded: true },
+      });
+    });
+
+    it('maps a taken handle (P2002) to a 409 instead of leaking the Prisma error', async () => {
+      prisma.user.findUnique.mockResolvedValue({ onboarded: false });
+      prisma.user.update.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+          meta: { target: ['username'] },
+        }),
+      );
+
+      await expect(service.completeOnboarding('user-1', dto)).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('does not swallow an unrelated error', async () => {
+      prisma.user.findUnique.mockResolvedValue({ onboarded: false });
+      const boom = new Error('db down');
+      prisma.user.update.mockRejectedValue(boom);
+
+      await expect(service.completeOnboarding('user-1', dto)).rejects.toBe(
+        boom,
+      );
+    });
+  });
+
+  describe('isUsernameAvailable', () => {
+    it('is true when no user has claimed that handle', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.isUsernameAvailable('Mado-123')).resolves.toBe(true);
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({
+        where: { username: 'Mado-123' },
+        select: { id: true },
+      });
+    });
+
+    it('is false when the handle is already claimed', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'someone-else' });
+
+      await expect(service.isUsernameAvailable('Mado-123')).resolves.toBe(
+        false,
+      );
     });
   });
 
