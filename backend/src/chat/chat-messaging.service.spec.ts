@@ -54,6 +54,7 @@ describe('ChatMessagingService', () => {
     addGroupMembers: jest.fn(),
     removeGroupMembers: jest.fn(),
     findConversationWithParticipants: jest.fn(),
+    lockAndFindParticipants: jest.fn(),
     findParticipant: jest.fn(),
     transferGroupOwnership: jest.fn(),
     updateParticipantRole: jest.fn(),
@@ -175,6 +176,16 @@ describe('ChatMessagingService', () => {
       'device-1',
     );
     repository.countUnreadMessagesForConversations.mockResolvedValue([]);
+    // By default the authoritative re-check under lock sees the same
+    // roster as the earlier unlocked read - tests that want to simulate a
+    // membership change racing the send override this directly.
+    repository.lockAndFindParticipants.mockImplementation(
+      async (_tx: unknown, conversationId: string) => {
+        const conversation =
+          await repository.findConversationWithParticipants(conversationId);
+        return conversation?.participants ?? [];
+      },
+    );
   });
 
   const groupConversation = (
@@ -987,6 +998,55 @@ describe('ChatMessagingService', () => {
       );
 
       await expect(rejection).rejects.toThrow(MembershipChangePendingException);
+      expect(repository.createMessage).not.toHaveBeenCalled();
+    });
+
+    it('rejects the insert when a removal lands between the initial read and the locked re-check', async () => {
+      // The earlier, unlocked read still shows the sender ACTIVE - only the
+      // authoritative re-check under the conversation lock sees the removal
+      // a concurrent membership change committed in between.
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          { userId: 'user-1', role: 'MEMBER', state: 'ACTIVE' },
+          { userId: 'user-2', role: 'OWNER', state: 'ACTIVE' },
+        ]),
+      );
+      repository.lockAndFindParticipants.mockResolvedValue([
+        { userId: 'user-1', role: 'MEMBER', state: 'LEAVING' },
+        { userId: 'user-2', role: 'OWNER', state: 'ACTIVE' },
+      ]);
+
+      await expect(
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(repository.lockAndFindParticipants).toHaveBeenCalledWith(
+        'fake-tx',
+        'conversation-1',
+      );
+      expect(repository.createMessage).not.toHaveBeenCalled();
+    });
+
+    it('rejects the insert when another member starts being removed only under the lock', async () => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          { userId: 'user-1', role: 'MEMBER', state: 'ACTIVE' },
+          { userId: 'user-2', role: 'OWNER', state: 'ACTIVE' },
+        ]),
+      );
+      repository.lockAndFindParticipants.mockResolvedValue([
+        { userId: 'user-1', role: 'MEMBER', state: 'ACTIVE' },
+        { userId: 'user-2', role: 'OWNER', state: 'LEAVING' },
+      ]);
+
+      await expect(
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(MembershipChangePendingException);
+
       expect(repository.createMessage).not.toHaveBeenCalled();
     });
 

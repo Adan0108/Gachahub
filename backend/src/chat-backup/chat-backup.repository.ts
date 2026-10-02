@@ -1,7 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import { ENTITLED_TO_LEAF_STATES } from '../chat/membership/leaf-entitlement';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  computeBackupProof,
+  proofMatches,
+  type ProofAction,
+} from './replace-proof';
 
 export interface BlobRow {
   conversationId: string;
@@ -108,29 +113,6 @@ export class ChatBackupRepository {
     return result.count === 1;
   }
 
-  /** Blobs sealed under the old key are useless, so they go in the same transaction. */
-  async replaceKey(
-    userId: string,
-    keyCheck: Uint8Array,
-    replaceSecret: Uint8Array,
-  ): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      await lockUserBackup(tx, userId);
-      await tx.chatBackupBlob.deleteMany({ where: { userId } });
-      await tx.chatBackupKey.update({
-        where: { userId },
-        data: {
-          keyCheck: keyCheck as PrismaBytes,
-          replaceSecret: replaceSecret as PrismaBytes,
-          createdAt: new Date(),
-          deletionScheduledAt: null,
-          challengeNonce: null,
-          challengeExpiresAt: null,
-        },
-      });
-    });
-  }
-
   /** With `dueBefore`, deletes only if the schedule is still due once the lock is held; false when skipped. */
   async deleteAll(userId: string, dueBefore?: Date): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
@@ -148,6 +130,75 @@ export class ChatBackupRepository {
       await tx.chatBackupKey.deleteMany({ where: { userId } });
 
       return true;
+    });
+  }
+
+  /**
+   * Re-reads the stored secret, consumes the challenge, and verifies the
+   * proof - all under the per-user lock, immediately before `mutate` runs in
+   * the same transaction. Verifying inside the lock (instead of against an
+   * earlier unlocked read, as `putKey`/`disable` used to) means the secret
+   * checked is guaranteed still current when `mutate` executes: two requests
+   * that both read the old secret can no longer each pass verification and
+   * have the second one silently act using proof for a key that is no longer
+   * current (or, for delete, act on a backup created after an earlier
+   * unlocked "no key" read, with no proof at all).
+   */
+  async verifyProofAndMutate<T>(
+    userId: string,
+    params: {
+      action: ProofAction;
+      nonce: string;
+      proof: string;
+      bound?: { keyCheck?: string; replaceSecret?: string };
+      now: Date;
+    },
+    mutate: (
+      tx: Prisma.TransactionClient,
+      currentSecret: Uint8Array,
+    ) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(async (tx) => {
+      await lockUserBackup(tx, userId);
+
+      const current = await tx.chatBackupKey.findUnique({
+        where: { userId },
+        select: { replaceSecret: true },
+      });
+
+      if (!current?.replaceSecret) {
+        throw new ForbiddenException(
+          'This backup has no proof secret: schedule its deletion instead',
+        );
+      }
+
+      const nonceBytes = Buffer.from(params.nonce, 'base64') as PrismaBytes;
+      const consumed = await tx.chatBackupKey.updateMany({
+        where: {
+          userId,
+          challengeNonce: nonceBytes,
+          challengeExpiresAt: { gt: params.now },
+        },
+        data: { challengeNonce: null, challengeExpiresAt: null },
+      });
+
+      if (consumed.count !== 1) {
+        throw new ForbiddenException(
+          'The challenge is missing, used or expired',
+        );
+      }
+
+      const expected = computeBackupProof(
+        current.replaceSecret,
+        params.action,
+        { userId, nonce: params.nonce, ...params.bound },
+      );
+
+      if (!proofMatches(expected, Buffer.from(params.proof, 'base64'))) {
+        throw new ForbiddenException('The proof does not match the current key');
+      }
+
+      return mutate(tx, current.replaceSecret);
     });
   }
 

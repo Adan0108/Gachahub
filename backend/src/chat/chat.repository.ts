@@ -326,6 +326,22 @@ export class ChatRepository {
   }
 
   /**
+   * Locks the conversation row and returns a fresh participant list - the same
+   * lock a membership change takes (see lockConversation), so the two can
+   * never interleave. Call this inside the same transaction that inserts a
+   * message, right before the insert, and re-check sender/participant state
+   * against its result instead of an earlier unlocked read: otherwise a
+   * removal can flip a participant to LEAVING after the caller's own
+   * (unlocked) check but before the message commits, landing ciphertext that
+   * participant's still-present device can read.
+   */
+  async lockAndFindParticipants(tx: PrismaTransaction, conversationId: string) {
+    await lockConversation(tx, conversationId);
+
+    return tx.chatParticipant.findMany({ where: { conversationId } });
+  }
+
+  /**
    * Creates an encrypted message in an existing conversation and updates lastMessageId. Runs
    * against the caller's own transaction - see createDirectConversationWithMessage above for why.
    */
