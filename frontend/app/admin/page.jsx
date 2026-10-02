@@ -5,7 +5,7 @@ import { AdminQueryBoundary } from "../../components/admin/AdminQueryBoundary";
 import { AdminShell } from "../../components/admin/AdminShell";
 import { AdminState } from "../../components/admin/AdminState";
 import { useNowTick } from "../../hooks/useNowTick";
-import { useRequireAdmin } from "../../hooks/useRequireAdmin";
+import { useRequireAdmin } from "../../hooks/admin/useRequireAdmin";
 import { relativeTime } from "../../lib/time";
 import { queries } from "../../lib/queries";
 

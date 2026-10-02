@@ -6,7 +6,7 @@ import { FiFlag } from "react-icons/fi";
 import { AdminActionDialog } from "../../components/admin/AdminActionDialog";
 import { AdminQueryBoundary } from "../../components/admin/AdminQueryBoundary";
 import { GameBrandingUploader } from "../../components/admin/GameBrandingUploader";
-import { useRequireModerator } from "../../hooks/useRequireModerator";
+import { useRequireModerator } from "../../hooks/admin/useRequireModerator";
 import { useToast } from "../../hooks/useToast";
 import { api } from "../../lib/api";
 import { queryKeys } from "../../lib/queries";

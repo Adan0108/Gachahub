@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 
 let moderatorSession;
 
-vi.mock("../hooks/useRequireModerator", () => ({
+vi.mock("../hooks/admin/useRequireModerator", () => ({
   useRequireModerator: () => moderatorSession,
 }));
 
