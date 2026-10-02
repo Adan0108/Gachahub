@@ -50,17 +50,6 @@
   font-weight: 800;
 }
 
-.auth-brand span {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border: 1px solid #b893ff;
-  border-radius: 13px;
-  background: linear-gradient(135deg, #a878ff, #5b34d6);
-  box-shadow: 0 0 24px #8d65ff66;
-}
-
 .auth-back-link {
   display: inline-flex;
   align-items: center;
