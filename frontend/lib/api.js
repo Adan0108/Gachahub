@@ -41,6 +41,8 @@ export const backendRoutes = {
   commentRestore: (gameSlug, commentId) =>
     `/games/${encodePathParam(gameSlug)}/comments/${encodePathParam(commentId)}/restore`,
   currentUser: "/users/me",
+  completeOnboarding: "/users/me/onboarding",
+  usernameAvailable: "/users/username-available",
   userSearch: "/users/search",
   signInEmail: "/api/auth/sign-in/email",
   signUpEmail: "/api/auth/sign-up/email",
@@ -603,6 +605,11 @@ export const api = {
   getCurrentUser: (options = {}) =>
     request(backendRoutes.currentUser, { ...options, allowUnauthorized: true }),
   getProfile: (options = {}) => api.getCurrentUser(options),
+  // One-time claim - the backend 409s if this account already completed onboarding.
+  completeOnboarding: ({ name, username }) =>
+    mutation(backendRoutes.completeOnboarding, { name, username }, { method: "PATCH" }),
+  checkUsernameAvailable: (username, options = {}) =>
+    request(withQuery(backendRoutes.usernameAvailable, { username }), options),
   /** @param {{ limit?: number, signal?: AbortSignal }} [options] */
   searchUsers: (q, /** @type {{ limit?: number, signal?: AbortSignal }} */ options = {}) =>
     request(withQuery(backendRoutes.userSearch, { q, limit: options.limit ?? 8 }), {

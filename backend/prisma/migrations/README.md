@@ -65,3 +65,6 @@ Apply with `prisma migrate deploy` only. Never rename, edit or squash an applied
 - `20260918160000_add_reports`: reports table
 - `20260919090000_add_audit_logs`: audit log table
 - `20261001000000_add_user_moderation_audit_actions`: ban/suspend/reactivate audit actions
+
+## Onboarding
+- `20261002120000_add_user_onboarding_and_username`: `citext` extension, `User.username` (unique, case-insensitive) and `User.onboarded`, existing rows backfilled to `onboarded = true`

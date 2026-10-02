@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { FiX } from "react-icons/fi";
 import { useTheme } from "../hooks/useTheme";
+import { useCurrentUser } from "../hooks/useCurrentUser";
 import { useDeviceIdentity } from "../hooks/chat/useDeviceIdentity";
 import { useChatSocket } from "../hooks/chat/useChatSocket";
 import { glyph, navItems } from "./constants";
@@ -86,14 +87,23 @@ export function AppShell({ children, initialTheme = "dark" }) {
   // above - so a message shows up immediately even on a page other than
   // /chat, not just once the poll interval there happens to fire.
   useChatSocket();
+  const router = useRouter();
   const menuButtonRef = useRef(null);
   const menuCloseButtonRef = useRef(null);
   const wasMenuOpenRef = useRef(false);
   const pathname = usePathname();
   const studio = pathname === "/studio";
-  const auth = pathname === "/login" || pathname === "/register";
+  const onboarding = pathname === "/onboarding";
+  const auth = pathname === "/login" || pathname === "/register" || onboarding;
   const admin = pathname.startsWith("/admin");
   const chat = pathname.startsWith("/chat");
+  const { user, isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
+
+  // Global one-time onboarding gate (mounted once here, so it covers every route); /admin is exempt since AdminShell has its own useRequireAdmin gate, and `=== false` (not `!user?.onboarded`) fails open on a missing/unexpected field instead of trapping every signed-in user here.
+  useEffect(() => {
+    if (isSessionLoading || !isAuthenticated || onboarding || admin) return;
+    if (user?.onboarded === false) router.replace("/onboarding");
+  }, [admin, isAuthenticated, isSessionLoading, onboarding, router, user]);
 
   useEffect(() => {
     if (menu) {
