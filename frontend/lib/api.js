@@ -1,24 +1,55 @@
-import { mockCategories, mockGames, posts } from './mockData';
+import { mockCategories, mockGames, posts } from "./mockData";
 
 export const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'
-).replace(/\/$/, '');
-export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === 'true';
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000"
+).replace(/\/$/, "");
+// Dev-only: a production build must never be able to fake an admin session or the API layer.
+const previewAllowed = process.env.NODE_ENV !== "production";
+export const ADMIN_PREVIEW = previewAllowed && process.env.NEXT_PUBLIC_ADMIN_PREVIEW === "true";
+export const USE_MOCKS = previewAllowed && process.env.NEXT_PUBLIC_USE_MOCKS === "true";
 
 export const backendRoutes = {
   health: '/health',
   games: '/games',
   game: (slug) => `/games/${encodePathParam(slug)}`,
   gameCategories: (gameSlug) => `/games/${encodePathParam(gameSlug)}/categories`,
-  currentUser: '/users/me',
-  userSearch: '/users/search',
-  signInEmail: '/api/auth/sign-in/email',
-  signUpEmail: '/api/auth/sign-up/email',
-  signOut: '/api/auth/sign-out',
-  myPosts: '/posts/mine',
-  posts: '/posts',
-  latestFeed: '/feed/latest',
-  trendingFeed: '/feed/trending',
+  gameModerators: (gameSlug) => `/games/${encodePathParam(gameSlug)}/moderators`,
+  gameModerator: (gameSlug, userId) =>
+    `/games/${encodePathParam(gameSlug)}/moderators/${encodePathParam(userId)}`,
+  gamesModerated: '/games/moderated',
+  gameBranding: (gameSlug) => `/games/${encodePathParam(gameSlug)}/branding`,
+  gameArchive: (gameSlug) => `/games/${encodePathParam(gameSlug)}/archive`,
+  gameRestore: (gameSlug) => `/games/${encodePathParam(gameSlug)}/restore`,
+  gameFlag: (gameSlug) => `/games/${encodePathParam(gameSlug)}/flag`,
+  adminOverview: "/admin/overview",
+  adminReports: "/admin/reports",
+  reportClaim: (gameSlug, reportId) =>
+    `/games/${encodePathParam(gameSlug)}/reports/${encodePathParam(reportId)}/claim`,
+  reportResolve: (gameSlug, reportId) =>
+    `/games/${encodePathParam(gameSlug)}/reports/${encodePathParam(reportId)}/resolve`,
+  reportDismiss: (gameSlug, reportId) =>
+    `/games/${encodePathParam(gameSlug)}/reports/${encodePathParam(reportId)}/dismiss`,
+  adminUsers: "/admin/users",
+  adminUserStatus: (userId) => `/admin/users/${encodePathParam(userId)}/status`,
+  adminContent: "/admin/content",
+  postHide: (gameSlug, postId) =>
+    `/games/${encodePathParam(gameSlug)}/posts/${encodePathParam(postId)}/hide`,
+  postRestore: (gameSlug, postId) =>
+    `/games/${encodePathParam(gameSlug)}/posts/${encodePathParam(postId)}/restore`,
+  commentHide: (gameSlug, commentId) =>
+    `/games/${encodePathParam(gameSlug)}/comments/${encodePathParam(commentId)}/hide`,
+  commentRestore: (gameSlug, commentId) =>
+    `/games/${encodePathParam(gameSlug)}/comments/${encodePathParam(commentId)}/restore`,
+  currentUser: "/users/me",
+  userSearch: "/users/search",
+  signInEmail: "/api/auth/sign-in/email",
+  signUpEmail: "/api/auth/sign-up/email",
+  signOut: "/api/auth/sign-out",
+  myPosts: "/posts/mine",
+  posts: "/posts",
+  post: (postId) => `/posts/${encodePathParam(postId)}`,
+  latestFeed: "/feed/latest",
+  trendingFeed: "/feed/trending",
   gameFeed: (gameSlug) => `/games/${encodePathParam(gameSlug)}/feed`,
   postLike: (postId) => `/posts/${encodePathParam(postId)}/like`,
   userFollow: (userId) => `/users/${encodePathParam(userId)}/follow`,
@@ -122,6 +153,7 @@ export function formatCount(value) {
 }
 
 export function normalizeGame(game) {
+  if (game.raw) return game;
   return {
     id: game.id || game.slug,
     slug: game.slug,
@@ -152,10 +184,16 @@ export function normalizePost(post) {
     title: post.title,
     author: post.author?.name || 'Unknown user',
     authorId: post.author?.id || post.authorId,
+    authorImage: post.author?.image || null,
     time,
     tag: post.category?.name || post.tags?.[0]?.name || 'Discussion',
     gameName: post.game?.name,
     gameSlug: post.game?.slug,
+    content: post.content || "",
+    media: Array.isArray(post.media) ? post.media : [],
+    visibility: post.visibility || "PUBLIC",
+    isSpoiler: Boolean(post.isSpoiler),
+    type: post.type || "GENERAL",
     likeCount: post.reactionCount ?? post.likeCount ?? 0,
     commentCount: post.commentCount ?? 0,
     likedByCurrentUser: Boolean(post.likedByCurrentUser),
@@ -163,7 +201,11 @@ export function normalizePost(post) {
   };
 }
 
-export function fallbackGames(search = '') {
+function normalizePostResponse(post) {
+  return post.raw ? post : normalizePost(post);
+}
+
+export function fallbackGames(search = "") {
   const query = search.trim().toLowerCase();
   const items = query
     ? mockGames.filter((game) =>
@@ -201,6 +243,7 @@ export function fallbackPosts({ gameSlug, search = '' } = {}) {
         ...post,
         gameName: game?.name || post.gameSlug,
         gameSymbol: game ? communitySymbol(game.name) : communitySymbol(post.gameSlug),
+        raw: post,
       };
     });
 }
@@ -314,8 +357,17 @@ async function mockResponse(path, options = {}) {
   const [pathname, queryString] = path.split('?');
   const params = new URLSearchParams(queryString || '');
 
-  if (pathname === backendRoutes.health) return { status: 'ok' };
-  if (pathname === backendRoutes.currentUser) return null;
+  if (pathname === backendRoutes.health) return { status: "ok" };
+  if (pathname === backendRoutes.currentUser)
+    return ADMIN_PREVIEW
+      ? {
+          id: "admin-preview",
+          name: "Admin Preview",
+          email: "preview@localhost",
+          role: "ADMIN",
+          status: "ACTIVE",
+        }
+      : null;
   if (pathname === backendRoutes.userSearch) return { items: [] };
   if (pathname === backendRoutes.signInEmail || pathname === backendRoutes.signUpEmail)
     return { ok: true };
@@ -334,6 +386,12 @@ async function mockResponse(path, options = {}) {
     const items = fallbackPosts({ search: params.get('search') || '' });
     return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
   }
+  if (/^\/posts\/[^/]+$/.test(pathname)) {
+    const postId = decodePathParam(pathname.split("/")[2]);
+    const post = fallbackPosts().find((item) => item.id === postId);
+    if (!post) throw new Error("Post not found");
+    return post;
+  }
   if (/^\/posts\/[^/]+\/comments$/.test(pathname)) {
     return { items: [], meta: { page: 1, limit: 20, total: 0, totalPages: 0 } };
   }
@@ -341,8 +399,25 @@ async function mockResponse(path, options = {}) {
     return { items: [], meta: { page: 1, limit: 20, total: 0, totalPages: 0 } };
   }
   if (/^\/users\/[^/]+\/follow-status$/.test(pathname)) return { following: false };
-  if (pathname === backendRoutes.games) return fallbackGames(params.get('search') || '');
-  if (pathname.startsWith('/games/') && pathname.endsWith('/categories'))
+  if (pathname === backendRoutes.games) return fallbackGames(params.get("search") || "");
+  if (/^\/games\/[^/]+\/moderators\/[^/]+$/.test(pathname) && options.method === "DELETE")
+    return { message: "Moderator removed successfully" };
+  if (/^\/games\/[^/]+\/moderators$/.test(pathname)) {
+    if (options.method === "POST") {
+      const target = JSON.parse(options.body || "{}");
+      return {
+        id: `mock-moderator-${Date.now()}`,
+        user: {
+          id: target.userId || "mock-user",
+          name: "Preview Moderator",
+          email: target.email || "moderator@example.com",
+          status: "ACTIVE",
+        },
+      };
+    }
+    return [];
+  }
+  if (pathname.startsWith("/games/") && pathname.endsWith("/categories"))
     return fallbackCategories();
   if (pathname.startsWith('/games/') && pathname.endsWith('/feed')) {
     const slug = decodePathParam(pathname.split('/')[2]);
@@ -411,6 +486,49 @@ async function uploadToCloudinary(file, authorization) {
   };
 }
 
+// Shared signatures -> Cloudinary -> confirm pipeline behind uploadPostMedia and uploadSingleImage.
+async function uploadAndConfirm(files, purpose) {
+  if (!files.length) return { successful: [], failed: [] };
+  const authorizations = await api.createUploadSignatures(files, purpose);
+  const settled = await Promise.allSettled(
+    files.map((file, index) => uploadToCloudinary(file, authorizations.items[index])),
+  );
+  const uploaded = settled.flatMap((result, index) =>
+    result.status === "fulfilled" ? [{ file: files[index], payload: result.value }] : [],
+  );
+  const failed = settled.flatMap((result, index) =>
+    result.status === "rejected"
+      ? [{ file: files[index], error: result.reason?.message || "Upload failed" }]
+      : [],
+  );
+
+  if (!uploaded.length) return { successful: [], failed };
+
+  const confirmed = await api.confirmMediaUploads(uploaded.map(({ payload }) => payload));
+  const confirmedById = new Map(
+    confirmed.successful.map(({ uploadId, result }) => [uploadId, result]),
+  );
+  const uploadedFileById = new Map(uploaded.map(({ file, payload }) => [payload.uploadId, file]));
+  const confirmationErrors = new Map(
+    confirmed.failed.map(({ uploadId, error }) => [uploadId, error]),
+  );
+
+  return {
+    successful: uploaded.flatMap(({ payload }) => {
+      const result = confirmedById.get(payload.uploadId);
+      const file = uploadedFileById.get(payload.uploadId);
+      return result ? [{ ...result, fileName: file?.name || "Uploaded media" }] : [];
+    }),
+    failed: [
+      ...failed,
+      ...uploaded.flatMap(({ file, payload }) => {
+        const error = confirmationErrors.get(payload.uploadId);
+        return error ? [{ file, error }] : [];
+      }),
+    ],
+  };
+}
+
 function encryptedMessagePayload({
   ciphertext,
   encryptionMeta,
@@ -452,7 +570,36 @@ export const api = {
     };
   },
   getCommunity: async (slug) => normalizeGame(await request(backendRoutes.game(slug))),
-  getCategories: (gameSlug) => request(backendRoutes.gameCategories(gameSlug)),
+  getCategories: (gameSlug, query = {}, options = {}) =>
+    request(withQuery(backendRoutes.gameCategories(gameSlug), query), options),
+  createCategory: (gameSlug, category) =>
+    mutation(backendRoutes.gameCategories(gameSlug), category),
+  updateCategory: (categoryId, updates) =>
+    mutation(`/game-categories/${encodePathParam(categoryId)}`, updates, { method: "PATCH" }),
+  getGameModerators: (gameSlug, options = {}) =>
+    request(backendRoutes.gameModerators(gameSlug), options),
+  assignGameModerator: (gameSlug, target) =>
+    mutation(backendRoutes.gameModerators(gameSlug), target),
+  removeGameModerator: (gameSlug, userId) =>
+    mutation(backendRoutes.gameModerator(gameSlug, userId), undefined, { method: "DELETE" }),
+  createGame: (game) => mutation(backendRoutes.games, game),
+  updateGame: (gameId, updates) =>
+    mutation(backendRoutes.game(gameId), updates, { method: "PATCH" }),
+  // Moderator or admin of this specific game. Requires an already-confirmed
+  // upload id from uploadSingleImage, not a raw URL.
+  updateGameBranding: (gameSlug, { iconMediaUploadId, bannerMediaUploadId } = {}) =>
+    mutation(
+      backendRoutes.gameBranding(gameSlug),
+      { iconMediaUploadId, bannerMediaUploadId },
+      { method: "PATCH" },
+    ),
+  // Admin only - soft-deletes/restores the game community.
+  archiveGame: (gameSlug) => mutation(backendRoutes.gameArchive(gameSlug), undefined, { method: "PATCH" }),
+  restoreGame: (gameSlug) => mutation(backendRoutes.gameRestore(gameSlug), undefined, { method: "PATCH" }),
+  // Moderator or admin - no state change, just an audit entry for an admin to review.
+  flagGameForReview: (gameSlug, reason) => mutation(backendRoutes.gameFlag(gameSlug), { reason }),
+  // The current user's own moderated games - backs the standalone /moderator page.
+  listModeratedGames: (options = {}) => request(backendRoutes.gamesModerated, options),
   getCurrentUser: (options = {}) =>
     request(backendRoutes.currentUser, { ...options, allowUnauthorized: true }),
   getProfile: (options = {}) => api.getCurrentUser(options),
@@ -477,7 +624,7 @@ export const api = {
     const response = await request(withQuery(backendRoutes.myPosts, query), options);
     const items = Array.isArray(response) ? response : response.items || [];
     return {
-      items: items.map((post) => (post.raw ? post : normalizePost(post))),
+      items: items.map(normalizePostResponse),
       meta: response.meta || { total: items.length },
     };
   },
@@ -487,6 +634,10 @@ export const api = {
     api.getPostCollection(backendRoutes.trendingFeed, query, options),
   getPosts: (query = {}, options = {}) =>
     api.getPostCollection(backendRoutes.posts, query, options),
+  getPost: async (postId, options = {}) => {
+    const post = await request(backendRoutes.post(postId), options);
+    return normalizePostResponse(post);
+  },
   getGameFeed: (gameSlug, query = {}, options = {}) =>
     api.getPostCollection(backendRoutes.gameFeed(gameSlug), query, options),
   likePost: (postId) => mutation(backendRoutes.postLike(postId)),
@@ -503,25 +654,22 @@ export const api = {
   createReply: (commentId, content) =>
     mutation(backendRoutes.commentReplies(commentId), { content }),
   createPost: (post) => mutation(backendRoutes.posts, post),
-  createUploadSignatures: (files) =>
+  createUploadSignatures: (files, purpose = 'POST') =>
     mutation(backendRoutes.mediaSignatures, {
-      purpose: 'POST',
+      purpose,
       items: files.map((file) => ({
         resourceType: file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE',
       })),
     }),
   confirmMediaUploads: (items) => mutation(backendRoutes.mediaConfirm, { items }),
-  uploadPostMedia: async (files) => {
-    if (!files.length) return [];
-    const authorizations = await api.createUploadSignatures(files);
-    const uploaded = await Promise.all(
-      files.map((file, index) => uploadToCloudinary(file, authorizations.items[index])),
-    );
-    const confirmed = await api.confirmMediaUploads(uploaded);
-    if (confirmed.failedCount) {
-      throw new Error(confirmed.failed?.[0]?.error || 'Media confirmation failed');
+  uploadPostMedia: (files) => uploadAndConfirm(files, "POST"),
+  // Uploads one image for a non-post purpose (e.g. GAME_ICON, GAME_BANNER), returning its confirmed { mediaUploadId, secureUrl, ... }.
+  uploadSingleImage: async (file, purpose) => {
+    const { successful, failed } = await uploadAndConfirm([file], purpose);
+    if (!successful.length) {
+      throw new Error(failed[0]?.error || "Upload failed");
     }
-    return confirmed.successful.map(({ result }) => result);
+    return successful[0];
   },
   /**
    * Uploads already-encrypted bytes as opaque raw blobs, returning upload ids in input order.
@@ -552,7 +700,7 @@ export const api = {
     const response = await request(withQuery(path, query), options);
     const items = Array.isArray(response) ? response : response.items || [];
     return {
-      items: items.map((post) => (post.raw ? post : normalizePost(post))),
+      items: items.map(normalizePostResponse),
       meta: response.meta || { total: items.length },
     };
   },
@@ -569,6 +717,37 @@ export const api = {
       meta: games.meta,
     };
   },
+  getAdminOverview: (options = {}) => request(backendRoutes.adminOverview, options),
+  listReports: (query = {}, options = {}) =>
+    request(withQuery(backendRoutes.adminReports, query), options),
+  claimReport: (gameSlug, reportId) =>
+    mutation(backendRoutes.reportClaim(gameSlug, reportId), undefined, { method: "PATCH" }),
+  resolveReport: (gameSlug, reportId, { resolutionNote } = {}) =>
+    mutation(backendRoutes.reportResolve(gameSlug, reportId), { resolutionNote }, { method: "PATCH" }),
+  dismissReport: (gameSlug, reportId, { resolutionNote } = {}) =>
+    mutation(backendRoutes.reportDismiss(gameSlug, reportId), { resolutionNote }, { method: "PATCH" }),
+  listAdminUsers: (query = {}, options = {}) =>
+    request(withQuery(backendRoutes.adminUsers, query), options),
+  setUserStatus: (userId, { status, reason }) =>
+    mutation(backendRoutes.adminUserStatus(userId), { status, reason }, { method: "PATCH" }),
+  listAdminContent: (query = {}, options = {}) =>
+    request(withQuery(backendRoutes.adminContent, query), options),
+  hideContent: (item) =>
+    mutation(
+      item.type === "POST"
+        ? backendRoutes.postHide(item.gameSlug, item.id)
+        : backendRoutes.commentHide(item.gameSlug, item.id),
+      undefined,
+      { method: "PATCH" },
+    ),
+  restoreContent: (item) =>
+    mutation(
+      item.type === "POST"
+        ? backendRoutes.postRestore(item.gameSlug, item.id)
+        : backendRoutes.commentRestore(item.gameSlug, item.id),
+      undefined,
+      { method: "PATCH" },
+    ),
   getChatConversations: () => request(backendRoutes.chatConversations),
   getArchivedChatConversations: () => request(backendRoutes.chatArchivedConversations),
   getChatRequests: () => request(backendRoutes.chatRequests),

@@ -7,12 +7,13 @@ const DISCORD_EMBED_FIELD_VALUE_LIMIT = 1024;
 const STACK_FRAME_LIMIT = 5;
 const DEDUP_WINDOW_MS = 60_000;
 
-export type DiscordLogSource = 'http' | 'cron' | 'socket' | 'mls';
+export type DiscordLogSource = 'http' | 'cron' | 'socket' | 'audit' | 'mls';
 
 const BANNER_FILENAMES: Record<DiscordLogSource, string> = {
   http: 'banner-500.png',
   cron: 'banner-cron.png',
   socket: 'banner-socket.png',
+  audit: 'banner-500.png',
   mls: 'banner-500.png',
 };
 

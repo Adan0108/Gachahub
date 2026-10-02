@@ -3,6 +3,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import type { CommentsRepository } from './comments.repository';
 import type { FollowsService } from '../follows/follows.service';
+import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import type { UserInterestService } from '../recommendation/user-interest.service';
 import { EventPublisherPort } from '../domain-events/event-publisher.port';
 import { PrismaService } from '../prisma/prisma.service';
@@ -68,7 +69,7 @@ describe('CommentsService', () => {
 
     service = new CommentsService(
       commentsRepository as unknown as CommentsRepository,
-      followsService as unknown as FollowsService,
+      new PostVisibilityService(followsService as unknown as FollowsService),
       userInterestService as unknown as UserInterestService,
       eventPublisher as EventPublisherPort,
       prisma as unknown as PrismaService,

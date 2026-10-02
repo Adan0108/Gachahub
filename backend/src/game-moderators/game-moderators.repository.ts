@@ -27,6 +27,7 @@ export class GameModeratorsRepository {
         id: true,
         name: true,
         slug: true,
+        status: true,
       },
     });
   }
@@ -88,6 +89,30 @@ export class GameModeratorsRepository {
     });
   }
 
+  // Lists the games a given user moderates - the reverse of findManyByGameId; backs the moderator's own "my games" page.
+  findManyByUserId(userId: string) {
+    return this.prisma.gameModerator.findMany({
+      where: {
+        userId,
+      },
+      select: {
+        game: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            iconUrl: true,
+            bannerUrl: true,
+            status: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
+
   /**
    * Lists all moderators assigned to a specific game.
    *
@@ -123,13 +148,21 @@ export class GameModeratorsRepository {
     });
   }
 
+  /** Total moderator assignments across every game - the admin dashboard's metric. */
+  count() {
+    return this.prisma.gameModerator.count();
+  }
+
   /**
    * Creates a moderator assignment.
    *
    * This means the selected user can moderate content inside the selected game.
    */
-  create(data: Prisma.GameModeratorCreateInput) {
-    return this.prisma.gameModerator.create({
+  create(
+    data: Prisma.GameModeratorCreateInput,
+    db: Prisma.TransactionClient = this.prisma,
+  ) {
+    return db.gameModerator.create({
       data,
       include: {
         user: {
@@ -157,14 +190,13 @@ export class GameModeratorsRepository {
    *
    * This removes game-scoped moderation permission from the user.
    */
-  deleteByGameIdAndUserId(gameId: string, userId: string) {
-    return this.prisma.gameModerator.delete({
-      where: {
-        gameId_userId: {
-          gameId,
-          userId,
-        },
-      },
+  deleteByGameIdAndUserId(
+    gameId: string,
+    userId: string,
+    db: Prisma.TransactionClient = this.prisma,
+  ) {
+    return db.gameModerator.deleteMany({
+      where: { gameId, userId },
     });
   }
 }

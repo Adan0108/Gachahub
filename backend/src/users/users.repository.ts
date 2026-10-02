@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { escapeLikePattern } from '../common/utils/like-pattern';
+import type { Prisma, UserRole, UserStatus } from '../generated/prisma/client';
 
 const PICKER_SELECT = { id: true, name: true, image: true } as const;
 
@@ -10,11 +12,6 @@ const pickableBy = (callerId: string) =>
     blockedUsers: { none: { blockedId: callerId } },
     blockedBy: { none: { blockerId: callerId } },
   }) as const;
-
-/** Prisma passes contains/startsWith values into ILIKE unescaped, so wildcards and the escape character are escaped here. */
-export function escapeLikePattern(text: string): string {
-  return text.replace(/[\\%_]/g, '\\$&');
-}
 
 @Injectable()
 export class UsersRepository {
@@ -50,6 +47,119 @@ export class UsersRepository {
     return this.prisma.user.findFirst({
       where: { id, NOT: { id: callerId }, ...pickableBy(callerId) },
       select: PICKER_SELECT,
+    });
+  }
+
+  findForModeration(id: string) {
+    return this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, name: true, email: true, role: true, status: true },
+    });
+  }
+
+  /** Total ACTIVE accounts - the admin dashboard's "Total members" metric. */
+  countActive() {
+    return this.prisma.user.count({ where: { status: 'ACTIVE' } });
+  }
+
+  /**
+   * Names for a batch of user ids, for annotating audit log entries whose
+   * target is a user (bans, moderator assignments) with a readable name
+   * instead of a bare id. A missing id (account hard-deleted via cascade)
+   * just won't appear in the result - the caller decides the fallback.
+   */
+  async findManyNamesByIds(ids: string[]) {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    return this.prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true },
+    });
+  }
+
+  async findManyForAdmin(params: {
+    status?: UserStatus;
+    role?: UserRole;
+    search?: string;
+    page: number;
+    limit: number;
+  }) {
+    const { status, role, search, page, limit } = params;
+
+    const where: Prisma.UserWhereInput = {
+      ...(status ? { status } : {}),
+      ...(role ? { role } : {}),
+      ...(search
+        ? {
+            OR: [
+              {
+                name: {
+                  contains: escapeLikePattern(search),
+                  mode: 'insensitive',
+                },
+              },
+              {
+                email: {
+                  contains: escapeLikePattern(search),
+                  mode: 'insensitive',
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    const skip = (page - 1) * limit;
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          status: true,
+          createdAt: true,
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return { items, total };
+  }
+
+  /** Conditional on the expected current status, so two concurrent moderation actions on the same account can't silently clobber each other. Returns null if it no longer matches. Runs in the caller's transaction so the audit entry commits or rolls back with it. */
+  async updateStatus(
+    tx: Prisma.TransactionClient,
+    id: string,
+    fromStatus: UserStatus,
+    toStatus: UserStatus,
+  ) {
+    const result = await tx.user.updateMany({
+      where: { id, status: fromStatus },
+      data: { status: toStatus },
+    });
+
+    if (result.count === 0) {
+      return null;
+    }
+
+    return tx.user.findUniqueOrThrow({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        status: true,
+        createdAt: true,
+      },
     });
   }
 }

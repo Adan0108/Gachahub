@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">Tide of the Past guide preview</title>
+  <desc id="desc">A moonlit fantasy landscape with a distant tower and glowing path.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111937"/>
+      <stop offset="0.55" stop-color="#283463"/>
+      <stop offset="1" stop-color="#8b5dd6"/>
+    </linearGradient>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c3151"/>
+      <stop offset="1" stop-color="#090e1c"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#d8ecff" stop-opacity=".95"/>
+      <stop offset="1" stop-color="#8edfff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="675" fill="url(#sky)"/>
+  <circle cx="930" cy="150" r="78" fill="#eef5ff" opacity=".9"/>
+  <circle cx="930" cy="150" r="175" fill="url(#glow)"/>
+  <path d="M0 430 180 330l150 96 190-188 150 158 155-112 180 132 195-102v361H0Z" fill="#151d35" opacity=".86"/>
+  <path d="M0 500c190-70 315-12 450-38 170-34 270-118 430-81 116 27 192 11 320-32v326H0Z" fill="url(#ground)"/>
+  <path d="M520 675c32-129 112-198 251-264 55-26 93-69 120-124-9 91-42 154-103 195-102 68-126 119-142 193Z" fill="#82d9ed" opacity=".48"/>
+  <path d="M739 355h48l-7-141-17-51-17 51Z" fill="#0a1022"/>
+  <path d="M713 355h101v18H713Z" fill="#0a1022"/>
+  <g fill="#d8f6ff">
+    <circle cx="150" cy="150" r="3"/><circle cx="280" cy="92" r="2"/><circle cx="430" cy="168" r="3"/>
+    <circle cx="590" cy="82" r="2"/><circle cx="700" cy="132" r="3"/><circle cx="1080" cy="92" r="2"/>
+  </g>
+  <text x="68" y="540" fill="#fff" font-family="system-ui, sans-serif" font-size="54" font-weight="800">TIDE OF THE PAST</text>
+  <text x="72" y="588" fill="#bdeeff" font-family="system-ui, sans-serif" font-size="24" letter-spacing="6">HIDDEN QUEST GUIDE</text>
+</svg>

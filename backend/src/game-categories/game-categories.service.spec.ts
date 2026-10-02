@@ -1,6 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
-jest.mock('../games/games.repository', () => ({
-  GamesRepository: class {},
+jest.mock('../games/games.service', () => ({
+  GamesService: class {},
 }));
 
 jest.mock('./game-categories.repository', () => ({
@@ -18,7 +18,10 @@ describe('GameCategoriesService', () => {
     update: jest.fn(),
   };
 
-  const gamesRepository = {
+  // GamesService.findBySlug already throws NotFoundException for a missing
+  // OR non-ACTIVE (soft-deleted) game - this service just has to propagate
+  // whatever it does, not re-decide "does this game exist".
+  const gamesService = {
     findBySlug: jest.fn(),
   };
 
@@ -29,12 +32,14 @@ describe('GameCategoriesService', () => {
 
     service = new GameCategoriesService(
       gameCategoriesRepository as any,
-      gamesRepository as any,
+      gamesService as any,
     );
   });
 
-  it('throws when listing categories for a missing game', async () => {
-    gamesRepository.findBySlug.mockResolvedValue(null);
+  it('propagates GamesService.findBySlug rejecting a missing or archived game', async () => {
+    gamesService.findBySlug.mockRejectedValue(
+      new NotFoundException('Game not found'),
+    );
 
     await expect(service.findByGameSlug('missing-game', {})).rejects.toThrow(
       NotFoundException,
@@ -42,7 +47,7 @@ describe('GameCategoriesService', () => {
   });
 
   it('lists categories for an existing game', async () => {
-    gamesRepository.findBySlug.mockResolvedValue({
+    gamesService.findBySlug.mockResolvedValue({
       id: 'game-1',
       slug: 'genshin-impact',
     });
@@ -76,7 +81,7 @@ describe('GameCategoriesService', () => {
   });
 
   it('creates category with generated slug', async () => {
-    gamesRepository.findBySlug.mockResolvedValue({
+    gamesService.findBySlug.mockResolvedValue({
       id: 'game-1',
       slug: 'genshin-impact',
     });
@@ -106,7 +111,7 @@ describe('GameCategoriesService', () => {
   });
 
   it('rejects duplicate category slug inside the same game', async () => {
-    gamesRepository.findBySlug.mockResolvedValue({
+    gamesService.findBySlug.mockResolvedValue({
       id: 'game-1',
       slug: 'genshin-impact',
     });

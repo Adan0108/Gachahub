@@ -5,9 +5,11 @@ import {
 } from '@nestjs/common';
 
 import { PostSortDto } from './dto/query-posts.dto';
+import { CreatePostStatusDto } from './dto/create-post.dto';
 import type { PostsRepository } from './posts.repository';
 import type { MediaService } from '../media/media.service';
 import type { FollowsService } from '../follows/follows.service';
+import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import type { UserInterestService } from '../recommendation/user-interest.service';
 
 /*
@@ -154,7 +156,7 @@ describe('PostsService', () => {
     service = new PostsService(
       postsRepository as unknown as PostsRepository,
       mediaService as unknown as MediaService,
-      followsService as unknown as FollowsService,
+      new PostVisibilityService(followsService as unknown as FollowsService),
       userInterestService as unknown as UserInterestService,
       eventPublisherPort as EventPublisherPort,
       prisma as unknown as PrismaService,
@@ -217,6 +219,36 @@ describe('PostsService', () => {
       expect(postsRepository.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: 'user-1',
+        }),
+      );
+    });
+
+    it('escapes LIKE wildcards in the search term so they match literally', async () => {
+      postsRepository.findMany.mockResolvedValue([]);
+      postsRepository.count.mockResolvedValue(0);
+
+      await service.findAll({ search: '100%_' });
+
+      expect(postsRepository.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            status: 'PUBLISHED',
+            visibility: 'PUBLIC',
+            deletedAt: null,
+            OR: [
+              { title: { contains: '100\\%\\_', mode: 'insensitive' } },
+              { content: { contains: '100\\%\\_', mode: 'insensitive' } },
+              {
+                tags: {
+                  some: {
+                    tag: {
+                      name: { contains: '100\\%\\_', mode: 'insensitive' },
+                    },
+                  },
+                },
+              },
+            ],
+          },
         }),
       );
     });
@@ -297,13 +329,14 @@ describe('PostsService', () => {
       expect(postsRepository.findByAuthorId).toHaveBeenCalledWith('author-1', {
         page: 1,
         limit: 20,
+        audience: 'self',
         userId: 'viewer-1',
       });
     });
   });
 
   describe('findByAuthorPublic', () => {
-    it('only requests public published posts', async () => {
+    it('requests the public audience', async () => {
       postsRepository.findByAuthorId.mockResolvedValue({
         items: [],
         total: 0,
@@ -314,8 +347,7 @@ describe('PostsService', () => {
       expect(postsRepository.findByAuthorId).toHaveBeenCalledWith('author-1', {
         page: 1,
         limit: 20,
-        visibility: 'PUBLIC',
-        status: 'PUBLISHED',
+        audience: 'public',
         userId: 'viewer-1',
       });
     });
@@ -533,6 +565,44 @@ describe('PostsService', () => {
 
       expect(postsRepository.update).not.toHaveBeenCalled();
     });
+
+    it('rejects a post that has deletedAt set even if its status has not caught up', async () => {
+      postsRepository.findById.mockResolvedValue({
+        ...basePost,
+        deletedAt: new Date(),
+      });
+
+      await expect(
+        service.update(
+          'post-1',
+          {
+            title: 'Changed',
+          },
+          'author-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(postsRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects the author editing a moderator-hidden post, including trying to un-hide it', async () => {
+      postsRepository.findById.mockResolvedValue({
+        ...basePost,
+        status: 'HIDDEN',
+      });
+
+      await expect(
+        service.update(
+          'post-1',
+          {
+            status: CreatePostStatusDto.PUBLISHED,
+          },
+          'author-1',
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(postsRepository.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('remove', () => {
@@ -568,6 +638,39 @@ describe('PostsService', () => {
       postsRepository.findById.mockResolvedValue({
         ...basePost,
         status: 'DELETED',
+      });
+
+      await expect(service.remove('post-1', 'author-1')).rejects.toThrow(
+        NotFoundException,
+      );
+
+      expect(postsRepository.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('allows the author to delete a moderator-hidden post - delete does not undo moderation, it goes further', async () => {
+      postsRepository.findById.mockResolvedValue({
+        ...basePost,
+        status: 'HIDDEN',
+      });
+
+      postsRepository.softDelete.mockResolvedValue({
+        ...basePost,
+        status: 'DELETED',
+        deletedAt: new Date(),
+      });
+
+      const result = await service.remove('post-1', 'author-1');
+
+      expect(postsRepository.softDelete).toHaveBeenCalledWith('post-1');
+      expect(result).toEqual({
+        message: 'Post deleted successfully',
+      });
+    });
+
+    it('rejects a post that has deletedAt set even if its status has not caught up', async () => {
+      postsRepository.findById.mockResolvedValue({
+        ...basePost,
+        deletedAt: new Date(),
       });
 
       await expect(service.remove('post-1', 'author-1')).rejects.toThrow(

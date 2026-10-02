@@ -45,6 +45,11 @@ model User {
   blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
   blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
 
+  reportsFiled    Report[]   @relation("ReportsFiled")
+  reportsAssigned Report[]   @relation("ReportsAssigned")
+  reportsResolved Report[]   @relation("ReportsResolved")
+  auditLogsActed  AuditLog[] @relation("AuditLogActor")
+
   receivedNotifications Notification[] @relation("NotificationRecipient")
   actedNotifications    Notification[] @relation("NotificationActor")
 
@@ -167,6 +172,12 @@ model Game {
   publisher   String?
   status      GameStatus @default(ACTIVE)
 
+  /// FK to the MediaUpload row currently backing iconUrl/bannerUrl, so a replace can release the old Cloudinary asset.
+  iconMediaUploadId   String?      @unique
+  bannerMediaUploadId String?      @unique
+  iconMediaUpload     MediaUpload? @relation("GameIconUpload", fields: [iconMediaUploadId], references: [id], onDelete: SetNull)
+  bannerMediaUpload   MediaUpload? @relation("GameBannerUpload", fields: [bannerMediaUploadId], references: [id], onDelete: SetNull)
+
   memberCount Int @default(0)
   postCount   Int @default(0)
 
@@ -179,6 +190,8 @@ model Game {
   posts      Post[]
   members    GameMember[]
   chatEmotes ChatEmote[]
+  reports    Report[]
+  auditLogs  AuditLog[]
 
   @@index([status])
   @@index([createdAt])
@@ -703,6 +716,8 @@ enum MediaPurpose {
   CHAT
   AVATAR
   BANNER
+  GAME_ICON
+  GAME_BANNER
 }
 
 enum MediaResourceType {
@@ -765,6 +780,8 @@ model MediaUpload {
   user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   postMedia        PostMedia?
   chatMessageMedia ChatMessageMedia?
+  gameIconFor      Game?             @relation("GameIconUpload")
+  gameBannerFor    Game?             @relation("GameBannerUpload")
 
   @@index([userId, status, createdAt])
   @@index([status, createdAt])
@@ -786,6 +803,11 @@ model ChatUserBlock {
   @@map("chat_user_blocks")
 }
 
+enum CommentStatus {
+  PUBLISHED
+  HIDDEN
+}
+
 model Comment {
   id       String  @id @default(cuid())
   postId   String
@@ -793,6 +815,7 @@ model Comment {
   parentId String?
 
   content String
+  status  CommentStatus @default(PUBLISHED)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -808,6 +831,123 @@ model Comment {
   @@index([authorId])
   @@index([parentId, createdAt])
   @@map("comments")
+}
+
+enum ReportTargetType {
+  POST
+  COMMENT
+}
+
+enum ReportReason {
+  UNMARKED_SPOILERS
+  HARASSMENT
+  COMMERCIAL_SPAM
+  MISINFORMATION
+  NSFW
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  IN_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+model Report {
+  id         String           @id @default(cuid())
+  gameId     String
+  reporterId String
+  targetType ReportTargetType
+  targetId   String
+  reasonCode ReportReason
+  details    String?
+  status     ReportStatus     @default(PENDING)
+
+  assignedModeratorId String?
+  resolutionNote      String?
+  resolvedById        String?
+  resolvedAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  game              Game  @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  reporter          User  @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  assignedModerator User? @relation("ReportsAssigned", fields: [assignedModeratorId], references: [id], onDelete: SetNull)
+  resolvedBy        User? @relation("ReportsResolved", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  // gameId is denormalized from the target (Post.gameId, or Comment -> Post.gameId) at creation
+  // time. A report's target is polymorphic (POST or COMMENT), and Prisma has no native way to
+  // join "whichever table targetType points at" - without gameId living here directly, listing
+  // "reports for game X" would mean two separate queries merged and paginated in application
+  // code. Denormalizing it once at write time keeps every read a plain indexed query.
+  //
+  // No @@unique here: uniqueness on (reporterId, targetType, targetId) is scoped to open
+  // (PENDING/IN_REVIEW) reports only, so a reporter can re-report the same target after an
+  // earlier report closes. Prisma cannot express a WHERE-scoped unique index, so the real
+  // constraint is a hand-written partial unique index in migration 20260918160000_add_reports
+  // ("reports_open_target_key") - same pattern as ChatEmote's global shortcode uniqueness.
+  // Keep that migration line when regenerating. ReportsService.create also does a plain
+  // pre-check query for a friendly 409 message; the partial index is what actually prevents
+  // the race between two concurrent requests both passing that check.
+  @@index([gameId, status, createdAt])
+  @@index([gameId, createdAt])
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@map("reports")
+}
+
+enum AuditAction {
+  POST_HIDDEN
+  POST_RESTORED
+  COMMENT_HIDDEN
+  COMMENT_RESTORED
+  REPORT_CLAIMED
+  REPORT_RESOLVED
+  REPORT_DISMISSED
+  MODERATOR_ASSIGNED
+  MODERATOR_REMOVED
+  USER_BANNED
+  USER_SUSPENDED
+  USER_REACTIVATED
+  GAME_ARCHIVED
+  GAME_RESTORED
+  GAME_FLAGGED
+}
+
+enum AuditTargetType {
+  POST
+  COMMENT
+  REPORT
+  USER
+  GAME
+}
+
+// Append-only record of moderator/admin actions. actorId and gameId are SetNull so the trail
+// outlives a deleted account or game; actorName/gameSlug are snapshotted at write time so an entry
+// stays readable after that happens. targetId is a plain string (polymorphic, no FK) for the same reason.
+model AuditLog {
+  id         String          @id @default(cuid())
+  gameId     String?
+  actorId    String?
+  actorName  String?
+  gameSlug   String?
+  action     AuditAction
+  targetType AuditTargetType
+  targetId   String
+  metadata   Json?
+
+  createdAt DateTime @default(now())
+
+  game  Game? @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  actor User? @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([gameId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+  @@map("audit_logs")
 }
 
 enum NotificationType {

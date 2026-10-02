@@ -7,7 +7,6 @@ import {
 import {
   ChatParticipantState,
   MessageRequestSetting,
-  UserRole,
 } from '../generated/prisma/client';
 import { MembershipChangePendingException } from '../common/exceptions/membership-change-pending.exception';
 import { ChatRepository } from './chat.repository';
@@ -376,20 +375,7 @@ export class ChatAccessService {
    * assigned game.
    */
   async assertCanManageGameEmotes(userId: string, gameId: string) {
-    const user = await this.chatRepository.findUserById(userId);
-
-    if (user?.role === UserRole.ADMIN) {
-      return;
-    }
-
-    const isModerator = await this.gameModeratorsService.isModerator(
-      gameId,
-      userId,
-    );
-
-    if (!isModerator) {
-      throw new ForbiddenException('You cannot manage emotes for this game');
-    }
+    await this.gameModeratorsService.assertCanModerateGame(gameId, userId);
   }
 
   /**

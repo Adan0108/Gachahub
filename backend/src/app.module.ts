@@ -10,6 +10,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { CommonModule } from './common/common.module';
 import { env } from './config/env';
 import { CommentsModule } from './comments/comments.module';
+import { ContentModerationModule } from './content-moderation/content-moderation.module';
 import { DevModule } from './dev/dev.module';
 import { FeedModule } from './feed/feed.module';
 import { FollowsModule } from './follows/follows.module';
@@ -20,10 +21,13 @@ import { HealthModule } from './health/health.module';
 import { MediaModule } from './media/media.module';
 import { MlsHandshakesModule } from './mls-handshakes/mls-handshakes.module';
 import { NotificationModule } from './notifications/notification.module';
+import { OverviewModule } from './overview/overview.module';
 import { PostsModule } from './posts/posts.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { UsersModule } from './users/users.module';
+import { AuditLogQueryModule } from './audit-log/audit-log-query.module';
+import { ReportsModule } from './reports/reports.module';
 import { ChatBackupModule } from './chat-backup/chat-backup.module';
 import { MlsRetentionModule } from './mls-retention/mls-retention.module';
 /**
@@ -62,6 +66,10 @@ import { MlsRetentionModule } from './mls-retention/mls-retention.module';
     CommentsModule,
     FollowsModule,
     FeedModule,
+    ReportsModule,
+    ContentModerationModule,
+    AuditLogQueryModule,
+    OverviewModule,
 
     NotificationModule,
 

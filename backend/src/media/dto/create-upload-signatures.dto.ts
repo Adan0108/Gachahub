@@ -15,6 +15,8 @@ export enum MediaPurposeDto {
   CHAT = 'CHAT',
   AVATAR = 'AVATAR',
   BANNER = 'BANNER',
+  GAME_ICON = 'GAME_ICON',
+  GAME_BANNER = 'GAME_BANNER',
 }
 
 export enum MediaResourceTypeDto {

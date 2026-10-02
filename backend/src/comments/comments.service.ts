@@ -4,11 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { CommentsRepository } from './comments.repository';
-import { FollowsService } from '../follows/follows.service';
+import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import { UserInterestService } from '../recommendation/user-interest.service';
+import { resolvePagination, toPaginated } from '../common/utils/paginated';
 import { EventPublisherPort } from '../domain-events/event-publisher.port';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -16,7 +18,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export class CommentsService {
   constructor(
     private readonly commentsRepository: CommentsRepository,
-    private readonly followsService: FollowsService,
+    private readonly postVisibility: PostVisibilityService,
     private readonly userInterestService: UserInterestService,
     private readonly eventPublisher: EventPublisherPort,
     private readonly prisma: PrismaService,
@@ -25,23 +27,17 @@ export class CommentsService {
   async findByPost(postId: string, query: PaginationQueryDto, userId?: string) {
     await this.ensurePostCanBeViewed(postId, userId);
 
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const { page, limit } = resolvePagination(query);
 
     const result = await this.commentsRepository.findByPostId(postId, {
       page,
       limit,
     });
 
-    return {
-      items: result.items.map((comment) => this.formatComment(comment)),
-      meta: {
-        page,
-        limit,
-        total: result.total,
-        totalPages: Math.ceil(result.total / limit),
-      },
-    };
+    return toPaginated(
+      result.items.map((comment) => this.formatComment(comment)),
+      { page, limit, total: result.total },
+    );
   }
 
   async findReplies(
@@ -62,23 +58,17 @@ export class CommentsService {
 
     await this.ensurePostCanBeViewed(parent.postId, userId);
 
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const { page, limit } = resolvePagination(query);
 
     const result = await this.commentsRepository.findReplies(commentId, {
       page,
       limit,
     });
 
-    return {
-      items: result.items.map((comment) => this.formatComment(comment)),
-      meta: {
-        page,
-        limit,
-        total: result.total,
-        totalPages: Math.ceil(result.total / limit),
-      },
-    };
+    return toPaginated(
+      result.items.map((comment) => this.formatComment(comment)),
+      { page, limit, total: result.total },
+    );
   }
 
   async create(postId: string, dto: CreateCommentDto, userId: string) {
@@ -122,7 +112,7 @@ export class CommentsService {
   async reply(commentId: string, dto: CreateCommentDto, userId: string) {
     const parent = await this.commentsRepository.findById(commentId);
 
-    if (!parent || parent.deletedAt) {
+    if (!parent || parent.deletedAt || parent.status === 'HIDDEN') {
       throw new NotFoundException('Comment thread not found');
     }
 
@@ -179,6 +169,10 @@ export class CommentsService {
       throw new ForbiddenException('You can only update your own comment');
     }
 
+    if (comment.status === 'HIDDEN') {
+      throw new ForbiddenException('This comment was hidden by a moderator');
+    }
+
     const updatedComment = await this.commentsRepository.update(
       commentId,
       dto.content.trim(),
@@ -229,33 +223,17 @@ export class CommentsService {
   private async ensurePostCanBeViewed(postId: string, userId?: string) {
     const post = await this.commentsRepository.findPostById(postId);
 
-    if (!post || post.deletedAt || post.status !== 'PUBLISHED') {
+    if (!post) {
       throw new NotFoundException('Post not found');
     }
 
-    // Anonymous và logged-in đều đọc PUBLIC được.
-    if (post.visibility === 'PUBLIC') {
-      return post;
+    const viewable = await this.postVisibility.canView(post, userId);
+
+    if (!viewable) {
+      throw new NotFoundException('Post not found');
     }
 
-    // FOLLOWERS_ONLY cần đăng nhập.
-    if (post.visibility === 'FOLLOWERS_ONLY' && userId) {
-      // Author luôn đọc được post của mình.
-      if (post.authorId === userId) {
-        return post;
-      }
-
-      const followStatus = await this.followsService.isFollowing(
-        userId,
-        post.authorId,
-      );
-
-      if (followStatus.following) {
-        return post;
-      }
-    }
-
-    throw new NotFoundException('Post not found');
+    return post;
   }
 
   /**
@@ -274,6 +252,7 @@ export class CommentsService {
       authorId: string;
       parentId: string | null;
       content: string;
+      status: string;
       createdAt: Date;
       updatedAt: Date;
       deletedAt: Date | null;
@@ -292,9 +271,12 @@ export class CommentsService {
     return {
       ...rest,
 
-      // Preserve the thread when a parent comment is deleted,
+      // Preserve the thread when a parent comment is deleted or hidden,
       // but do not expose its old content.
-      content: comment.deletedAt ? null : comment.content,
+      content:
+        comment.deletedAt || comment.status === 'HIDDEN'
+          ? null
+          : comment.content,
 
       replyCount: _count?.replies ?? 0,
     };

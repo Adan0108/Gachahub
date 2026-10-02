@@ -3,6 +3,7 @@ import type { PostType, Prisma } from '../generated/prisma/client';
 import { FollowsService } from '../follows/follows.service';
 import { formatPost } from '../posts/post.mapper';
 import { PostsRepository } from '../posts/posts.repository';
+import { viewablePostWhere } from '../post-visibility/visibility-where';
 import {
   GameFeedSortDto,
   QueryFeedDto,
@@ -13,6 +14,7 @@ import { FeedRepository } from './feed.repository';
 import { UserInterestService } from '../recommendation/user-interest.service';
 import type { ForYouFeedCandidate } from './feed.types';
 import type { UserInterestProfile } from '../recommendation/recommendation.types';
+import { resolvePagination, toPaginated } from '../common/utils/paginated';
 
 const FOR_YOU_MAX_CANDIDATES = 400;
 
@@ -89,10 +91,7 @@ export class FeedService {
    * trending and recent candidates instead of personalized interest candidates.
    */
   async forYou(query: QueryFeedDto, userId: string) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
-
-    const start = (page - 1) * limit;
+    const { page, limit, skip: start } = resolvePagination(query);
 
     if (start >= FOR_YOU_MAX_CANDIDATES) {
       throw new BadRequestException('For You feed pagination limit exceeded');
@@ -235,11 +234,7 @@ export class FeedService {
   }) {
     const { query, userId, gameSlug, categorySlug } = params;
 
-    const page = query.page ?? 1;
-
-    const limit = query.limit ?? 20;
-
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = resolvePagination(query);
 
     const where: Prisma.PostWhereInput = {
       status: 'PUBLISHED',
@@ -306,17 +301,10 @@ export class FeedService {
       followedAuthorIds,
     );
 
-    return {
-      items: rankedPosts.map((post) => formatPost(post)),
-
-      meta: {
-        page,
-        limit,
-        total,
-
-        totalPages: Math.ceil(total / limit),
-      },
-    };
+    return toPaginated(
+      rankedPosts.map((post) => formatPost(post)),
+      { page, limit, total },
+    );
   }
 
   private async trendingInternal(params: {
@@ -327,9 +315,7 @@ export class FeedService {
   }) {
     const { query, userId, gameSlug, categorySlug } = params;
 
-    const page = query.page ?? 1;
-
-    const limit = query.limit ?? 20;
+    const { page, limit, skip: start } = resolvePagination(query);
 
     /*
      * We rank a bounded pool rather than
@@ -385,8 +371,6 @@ export class FeedService {
 
     const ranked = this.feedRanker.rankTrending(candidates);
 
-    const start = (page - 1) * limit;
-
     if (start >= maxCandidates) {
       throw new BadRequestException('Trending feed pagination limit exceeded');
     }
@@ -413,47 +397,9 @@ export class FeedService {
     };
   }
 
-  /**
-   * Visibility policy for Latest.
-   */
+  // Visibility policy for Latest - delegates to the platform's single viewable-post-where definition.
   private buildLatestVisibilityWhere(userId?: string): Prisma.PostWhereInput {
-    if (!userId) {
-      return {
-        visibility: 'PUBLIC',
-      };
-    }
-
-    return {
-      OR: [
-        {
-          visibility: 'PUBLIC',
-        },
-
-        /*
-         * Allow the user's own followers-only posts.
-         */
-        {
-          authorId: userId,
-          visibility: 'FOLLOWERS_ONLY',
-        },
-
-        /*
-         * Allow FOLLOWERS_ONLY content
-         * from authors the current user follows.
-         */
-        {
-          visibility: 'FOLLOWERS_ONLY',
-
-          author: {
-            followers: {
-              some: {
-                followerId: userId,
-              },
-            },
-          },
-        },
-      ],
-    };
+    return viewablePostWhere(userId);
   }
 
   /**

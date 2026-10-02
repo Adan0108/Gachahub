@@ -2,10 +2,22 @@ import type { PrismaService } from '../prisma/prisma.service';
 
 jest.mock('../prisma/prisma.service', () => ({ PrismaService: class {} }));
 
-import { escapeLikePattern, UsersRepository } from './users.repository';
+import { UsersRepository } from './users.repository';
 
 describe('UsersRepository.searchByName', () => {
-  const prisma = { user: { findMany: jest.fn(), findFirst: jest.fn() } };
+  const prisma = {
+    user: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
+      count: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    $transaction: jest.fn((queries: Promise<unknown>[]) =>
+      Promise.all(queries),
+    ),
+  };
   const repository = new UsersRepository(prisma as unknown as PrismaService);
 
   beforeEach(() => jest.clearAllMocks());
@@ -59,15 +71,6 @@ describe('UsersRepository.searchByName', () => {
     expect(args().take).toBe(2);
   });
 
-  it.each([
-    ['50%', '50\\%'],
-    ['a_b', 'a\\_b'],
-    ['c:\\dir', 'c:\\\\dir'],
-    ['plain', 'plain'],
-  ])('escapes LIKE wildcards in %s so they match literally', (q, escaped) => {
-    expect(escapeLikePattern(q)).toBe(escaped);
-  });
-
   it('sends the escaped text to both the prefix and the contains filter', async () => {
     await repository.searchByName('me', '100%_', 'contains', 3);
 
@@ -78,5 +81,95 @@ describe('UsersRepository.searchByName', () => {
     expect(args().where.NOT).toEqual({
       name: { startsWith: '100\\%\\_', mode: 'insensitive' },
     });
+  });
+});
+
+describe('UsersRepository admin moderation', () => {
+  const prisma = {
+    user: {
+      findMany: jest.fn(),
+      count: jest.fn(),
+      updateMany: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
+    },
+    $transaction: jest.fn((queries: Promise<unknown>[]) =>
+      Promise.all(queries),
+    ),
+  };
+  const repository = new UsersRepository(prisma as unknown as PrismaService);
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('filters by status, role, and a case-insensitive name/email search', async () => {
+    prisma.user.findMany.mockResolvedValue([]);
+    prisma.user.count.mockResolvedValue(0);
+
+    await repository.findManyForAdmin({
+      status: 'BANNED',
+      role: 'USER',
+      search: 'ann_',
+      page: 2,
+      limit: 10,
+    });
+
+    expect(prisma.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          status: 'BANNED',
+          role: 'USER',
+          OR: [
+            { name: { contains: 'ann\\_', mode: 'insensitive' } },
+            { email: { contains: 'ann\\_', mode: 'insensitive' } },
+          ],
+        },
+        skip: 10,
+        take: 10,
+      }),
+    );
+    expect(prisma.user.count).toHaveBeenCalledWith({
+      where: {
+        status: 'BANNED',
+        role: 'USER',
+        OR: [
+          { name: { contains: 'ann\\_', mode: 'insensitive' } },
+          { email: { contains: 'ann\\_', mode: 'insensitive' } },
+        ],
+      },
+    });
+  });
+
+  it('updateStatus only writes when the row still matches fromStatus, and returns null otherwise', async () => {
+    prisma.user.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await repository.updateStatus(
+      prisma as never,
+      'user-1',
+      'ACTIVE',
+      'BANNED',
+    );
+
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: { id: 'user-1', status: 'ACTIVE' },
+      data: { status: 'BANNED' },
+    });
+    expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(result).toBeNull();
+  });
+
+  it('updateStatus returns the updated row when the conditional write succeeds', async () => {
+    prisma.user.updateMany.mockResolvedValue({ count: 1 });
+    prisma.user.findUniqueOrThrow.mockResolvedValue({
+      id: 'user-1',
+      status: 'BANNED',
+    });
+
+    const result = await repository.updateStatus(
+      prisma as never,
+      'user-1',
+      'ACTIVE',
+      'BANNED',
+    );
+
+    expect(result).toEqual({ id: 'user-1', status: 'BANNED' });
   });
 });

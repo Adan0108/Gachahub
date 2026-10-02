@@ -61,8 +61,8 @@ import {
   myParticipant,
   otherActiveMemberIds,
   participantUser,
-  relativeTime,
 } from "../../lib/chatDisplay";
+import { relativeTime } from "../../lib/time";
 import { threadItemKey, withOptimisticDelete } from "../../lib/chatThread";
 import { withOptimisticReaction } from "../../lib/chatReactions";
 import { getHiddenMessageIds, hideMessageForMe, unhideMessageForMe } from "../../lib/chatHiddenMessages";

@@ -4,11 +4,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
+import { escapeLikePattern } from '../common/utils/like-pattern';
 import { slugify } from '../common/utils/slugify';
 import { CreateGameDto } from './dto/create-game.dto';
 import { QueryGamesDto } from './dto/query-games.dto';
 import { UpdateGameDto } from './dto/update-game.dto';
 import { GamesRepository } from './games.repository';
+import { formatGame } from './game.mapper';
+import { resolvePagination, toPaginated } from '../common/utils/paginated';
 
 /**
  * Service responsible for game business logic.
@@ -29,9 +32,7 @@ export class GamesService {
    * - Supports basic search by name and slug
    */
   async findAll(query: QueryGamesDto) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = resolvePagination(query);
 
     const where: Prisma.GameWhereInput = {
       ...(query.status ? { status: query.status } : {}),
@@ -40,13 +41,13 @@ export class GamesService {
             OR: [
               {
                 name: {
-                  contains: query.search,
+                  contains: escapeLikePattern(query.search),
                   mode: 'insensitive',
                 },
               },
               {
                 slug: {
-                  contains: query.search,
+                  contains: escapeLikePattern(query.search),
                   mode: 'insensitive',
                 },
               },
@@ -67,33 +68,18 @@ export class GamesService {
       this.gamesRepository.count(where),
     ]);
 
-    return {
-      items,
-      meta: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
+    return toPaginated(items.map(formatGame), { page, limit, total: total });
   }
 
-  /**
-   * Finds one game by slug.
-   *
-   * This is useful for pages like:
-   * /games/wuthering-waves
-   *
-   * Throws NotFoundException if the slug does not exist.
-   */
+  // Finds one game by slug; 404s a missing or ARCHIVED (soft-deleted) game. HIDDEN is unrelated and must stay reachable here.
   async findBySlug(slug: string) {
     const game = await this.gamesRepository.findBySlug(slug);
 
-    if (!game) {
+    if (!game || game.status === 'ARCHIVED') {
       throw new NotFoundException('Game not found');
     }
 
-    return game;
+    return formatGame(game);
   }
 
   /**
@@ -123,7 +109,7 @@ export class GamesService {
       throw new ConflictException('Game slug already exists');
     }
 
-    return this.gamesRepository.create({
+    const game = await this.gamesRepository.create({
       name: dto.name,
       slug,
       description: dto.description,
@@ -133,6 +119,8 @@ export class GamesService {
       publisher: dto.publisher,
       createdBy,
     });
+
+    return formatGame(game);
   }
 
   /**
@@ -144,12 +132,20 @@ export class GamesService {
    * - Keeps update logic centralized in the service
    *
    * Later this route should become admin-only.
+   *
+   * Refuses to touch an ARCHIVED game at all - it must be restored first, or this plain passthrough could silently un-archive it with no audit trail.
    */
   async update(id: string, dto: UpdateGameDto) {
     const game = await this.gamesRepository.findById(id);
 
     if (!game) {
       throw new NotFoundException('Game not found');
+    }
+
+    if (game.status === 'ARCHIVED') {
+      throw new ConflictException(
+        'This game is archived - restore it before making other changes',
+      );
     }
 
     const nextSlug = dto.slug ? slugify(dto.slug) : undefined;
@@ -162,15 +158,15 @@ export class GamesService {
       }
     }
 
-    return this.gamesRepository.update(id, {
+    const updated = await this.gamesRepository.update(id, {
       name: dto.name,
       slug: nextSlug,
       description: dto.description,
-      iconUrl: dto.iconUrl,
-      bannerUrl: dto.bannerUrl,
       developer: dto.developer,
       publisher: dto.publisher,
       status: dto.status,
     });
+
+    return formatGame(updated);
   }
 }

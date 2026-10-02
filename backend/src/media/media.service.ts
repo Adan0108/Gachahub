@@ -39,6 +39,14 @@ const VIDEO_FORMATS = new Set(['mp4', 'webm', 'mov']);
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 
+// Purposes that always mean "exactly one image, no video" - a single-slot profile/branding picture.
+const SINGLE_IMAGE_PURPOSES = new Set([
+  MediaPurposeDto.AVATAR,
+  MediaPurposeDto.BANNER,
+  MediaPurposeDto.GAME_ICON,
+  MediaPurposeDto.GAME_BANNER,
+]);
+
 @Injectable()
 export class MediaService {
   constructor(
@@ -558,11 +566,11 @@ export class MediaService {
     }
 
     if (
-      [MediaPurposeDto.AVATAR, MediaPurposeDto.BANNER].includes(dto.purpose) &&
+      SINGLE_IMAGE_PURPOSES.has(dto.purpose) &&
       (dto.items.length !== 1 || videos > 0)
     ) {
       throw new BadRequestException(
-        'Avatar and banner uploads require exactly one image',
+        `${dto.purpose} uploads require exactly one image`,
       );
     }
   }

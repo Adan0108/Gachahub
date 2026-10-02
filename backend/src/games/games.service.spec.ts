@@ -42,12 +42,73 @@ describe('GamesService', () => {
     });
   });
 
+  it('escapes LIKE wildcards in the search term so they match literally', async () => {
+    repository.findMany.mockResolvedValue([]);
+    repository.count.mockResolvedValue(0);
+
+    await service.findAll({ search: '100%_' });
+
+    expect(repository.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          OR: [
+            { name: { contains: '100\\%\\_', mode: 'insensitive' } },
+            { slug: { contains: '100\\%\\_', mode: 'insensitive' } },
+          ],
+        },
+      }),
+    );
+  });
+
   it('throws when game slug does not exist', async () => {
     repository.findBySlug.mockResolvedValue(null);
 
     await expect(service.findBySlug('missing')).rejects.toThrow(
       NotFoundException,
     );
+  });
+
+  it('throws when the game is archived (soft-deleted)', async () => {
+    repository.findBySlug.mockResolvedValue({
+      id: 'game-1',
+      slug: 'wuthering-waves',
+      status: 'ARCHIVED',
+    });
+
+    await expect(service.findBySlug('wuthering-waves')).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it('still serves a HIDDEN game - that status is unrelated to the archive soft-delete', async () => {
+    repository.findBySlug.mockResolvedValue({
+      id: 'game-1',
+      slug: 'wuthering-waves',
+      status: 'HIDDEN',
+      iconMediaUploadId: 'icon-upload',
+      bannerMediaUploadId: 'banner-upload',
+    });
+
+    const result = await service.findBySlug('wuthering-waves');
+
+    expect(result.status).toBe('HIDDEN');
+    expect(result).not.toHaveProperty('iconMediaUploadId');
+    expect(result).not.toHaveProperty('bannerMediaUploadId');
+  });
+
+  it('strips internal media upload ids from a created game', async () => {
+    repository.findBySlug.mockResolvedValue(null);
+    repository.create.mockResolvedValue({
+      id: 'game-1',
+      slug: 'genshin-impact',
+      iconMediaUploadId: 'icon-upload',
+      bannerMediaUploadId: null,
+    });
+
+    const result = await service.create({ name: 'Genshin Impact' });
+
+    expect(result).not.toHaveProperty('iconMediaUploadId');
+    expect(result).not.toHaveProperty('bannerMediaUploadId');
   });
 
   it('creates game with generated slug', async () => {
@@ -74,5 +135,19 @@ describe('GamesService', () => {
     await expect(service.create({ name: 'Genshin Impact' })).rejects.toThrow(
       ConflictException,
     );
+  });
+
+  it('refuses to update an archived game, including moving it back to ACTIVE', async () => {
+    repository.findById.mockResolvedValue({
+      id: 'game-1',
+      slug: 'wuthering-waves',
+      status: 'ARCHIVED',
+    });
+
+    await expect(
+      service.update('game-1', { status: 'ACTIVE' } as any),
+    ).rejects.toThrow(ConflictException);
+
+    expect(repository.update).not.toHaveBeenCalled();
   });
 });

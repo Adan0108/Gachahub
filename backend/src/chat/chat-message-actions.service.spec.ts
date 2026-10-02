@@ -98,7 +98,7 @@ describe('ChatMessageActionsService', () => {
   };
 
   const gameModeratorsService = {
-    isModerator: jest.fn(),
+    assertCanModerateGame: jest.fn(),
   };
 
   const mediaService = {
@@ -155,8 +155,9 @@ describe('ChatMessageActionsService', () => {
 
     it('rejects a caller who is neither admin nor game moderator', async () => {
       gamesService.findById.mockResolvedValue({ id: 'game-1' });
-      repository.findUserById.mockResolvedValue({ id: 'user-1', role: 'USER' });
-      gameModeratorsService.isModerator.mockResolvedValue(false);
+      gameModeratorsService.assertCanModerateGame.mockRejectedValue(
+        new ForbiddenException('You cannot moderate this game'),
+      );
 
       await expect(
         service.createGameEmote('user-1', 'game-1', {
@@ -166,12 +167,9 @@ describe('ChatMessageActionsService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('allows an app admin regardless of moderator assignment', async () => {
+    it('allows a caller the shared moderator check approves', async () => {
       gamesService.findById.mockResolvedValue({ id: 'game-1' });
-      repository.findUserById.mockResolvedValue({
-        id: 'user-1',
-        role: 'ADMIN',
-      });
+      gameModeratorsService.assertCanModerateGame.mockResolvedValue(undefined);
       repository.createGameChatEmote.mockResolvedValue({ id: 'emote-1' });
 
       await service.createGameEmote('user-1', 'game-1', {
@@ -179,30 +177,16 @@ describe('ChatMessageActionsService', () => {
         unicode: '\\u{1F639}',
       });
 
-      expect(gameModeratorsService.isModerator).not.toHaveBeenCalled();
-      expect(repository.createGameChatEmote).toHaveBeenCalled();
-    });
-
-    it('allows an assigned game moderator', async () => {
-      gamesService.findById.mockResolvedValue({ id: 'game-1' });
-      repository.findUserById.mockResolvedValue({ id: 'user-1', role: 'USER' });
-      gameModeratorsService.isModerator.mockResolvedValue(true);
-      repository.createGameChatEmote.mockResolvedValue({ id: 'emote-1' });
-
-      await service.createGameEmote('user-1', 'game-1', {
-        shortcode: 'catcooking',
-        unicode: '\\u{1F639}',
-      });
-
+      expect(gameModeratorsService.assertCanModerateGame).toHaveBeenCalledWith(
+        'game-1',
+        'user-1',
+      );
       expect(repository.createGameChatEmote).toHaveBeenCalled();
     });
 
     it('rejects an emote with no renderable value', async () => {
       gamesService.findById.mockResolvedValue({ id: 'game-1' });
-      repository.findUserById.mockResolvedValue({
-        id: 'user-1',
-        role: 'ADMIN',
-      });
+      gameModeratorsService.assertCanModerateGame.mockResolvedValue(undefined);
 
       await expect(
         service.createGameEmote('user-1', 'game-1', {
@@ -215,10 +199,7 @@ describe('ChatMessageActionsService', () => {
 
     it('creates the emote with the given fields on success', async () => {
       gamesService.findById.mockResolvedValue({ id: 'game-1' });
-      repository.findUserById.mockResolvedValue({
-        id: 'user-1',
-        role: 'ADMIN',
-      });
+      gameModeratorsService.assertCanModerateGame.mockResolvedValue(undefined);
       repository.createGameChatEmote.mockResolvedValue({ id: 'emote-1' });
 
       await service.createGameEmote('user-1', 'game-1', {

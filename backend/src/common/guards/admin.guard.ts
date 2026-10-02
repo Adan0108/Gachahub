@@ -3,11 +3,11 @@ import {
   ExecutionContext,
   ForbiddenException,
   Injectable,
-  UnauthorizedException,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { USER_ROLES } from '../constants/roles.constants';
+import { UserRole } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { loadActiveUser } from './active-user.util';
 
 type AuthenticatedRequest = Request & {
   user?: {
@@ -42,32 +42,9 @@ export class AdminGuard implements CanActivate {
    */
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    const userId = request.user?.id;
+    const user = await loadActiveUser(this.prisma, request.user?.id);
 
-    if (!userId) {
-      throw new UnauthorizedException('Authentication required');
-    }
-
-    const user = await this.prisma.user.findUnique({
-      where: {
-        id: userId,
-      },
-      select: {
-        id: true,
-        role: true,
-        status: true,
-      },
-    });
-
-    if (!user) {
-      throw new UnauthorizedException('User not found');
-    }
-
-    if (user.status !== 'ACTIVE') {
-      throw new ForbiddenException('User account is not active');
-    }
-
-    if (user.role !== USER_ROLES.ADMIN) {
+    if (user.role !== UserRole.ADMIN) {
       throw new ForbiddenException('Admin permission required');
     }
 

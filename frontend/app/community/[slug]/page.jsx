@@ -10,6 +10,7 @@ import { PostList } from "../../../components/PostList";
 import { QueryNotice } from "../../../components/QueryNotice";
 import { SectionTitle } from "../../../components/SectionTitle";
 import { artTones, builds, glyph } from "../../../components/constants";
+import { api } from "../../../lib/api";
 import { fallbacks, queries } from "../../../lib/queries";
 import { JOINED_COMMUNITIES_KEY, readStoredJson } from "../../../lib/preferences";
 
@@ -41,9 +42,9 @@ function CommunityContent() {
   const communityQuery = useQuery(queries.community(slug));
   const categoriesQuery = useQuery(queries.categories(slug));
   const fallbackCommunity = fallbacks.community(slug);
-  const community = communityQuery.data || fallbackCommunity;
+  const community = communityQuery.data || (api.usingMocks ? fallbackCommunity : null);
   const categories = useMemo(() => {
-    const items = categoriesQuery.data || fallbacks.categories();
+    const items = categoriesQuery.data || (api.usingMocks ? fallbacks.categories() : []);
     return [
       "Overview",
       ...items.filter((category) => category.isActive !== false).map((category) => category.name),
@@ -52,9 +53,9 @@ function CommunityContent() {
     ].filter((item, index, all) => all.indexOf(item) === index);
   }, [categoriesQuery.data]);
   const activeTab = categories.includes(selectedTab) ? selectedTab : "Overview";
-  const selectedCategory = (categoriesQuery.data || fallbacks.categories()).find(
-    (category) => category.name === activeTab,
-  );
+  const selectedCategory = (
+    categoriesQuery.data || (api.usingMocks ? fallbacks.categories() : [])
+  ).find((category) => category.name === activeTab);
   const categorySlug = ["Overview", "Builds", "Teams"].includes(activeTab)
     ? undefined
     : selectedCategory?.slug;
@@ -63,7 +64,7 @@ function CommunityContent() {
     ...queries.gameFeed(slug, categorySlug),
     enabled: Boolean(slug) && shouldLoadFeed,
   });
-  const fallbackCommunityPosts = fallbacks.posts({ gameSlug: slug });
+  const fallbackCommunityPosts = api.usingMocks ? fallbacks.posts({ gameSlug: slug }) : [];
   const fallbackFeedPosts = categorySlug
     ? fallbackCommunityPosts.filter((post) => {
         const tag = post.tag.toLowerCase();
@@ -91,12 +92,29 @@ function CommunityContent() {
     setJoined(nextJoined);
   };
 
+  if (communityQuery.isLoading && !community) {
+    return (
+      <div className="page">
+        <div className="state-card">Loading community...</div>
+      </div>
+    );
+  }
+
   if (!community) {
     return (
       <div className="page">
         <section className="panel state-panel">
-          <h1>Community not found</h1>
-          <p>Try browsing Explore to find an available game community.</p>
+          <h1>{communityQuery.isError ? "Community unavailable" : "Community not found"}</h1>
+          <p>
+            {communityQuery.isError
+              ? "The community could not be loaded from the API."
+              : "Try browsing Explore to find an available game community."}
+          </p>
+          {communityQuery.isError && (
+            <button className="soft-btn" onClick={() => communityQuery.refetch()} type="button">
+              Try again
+            </button>
+          )}
           <Link className="inline-link" href="/explore">
             Go to Explore
           </Link>

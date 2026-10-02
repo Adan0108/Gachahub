@@ -3,8 +3,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { Prisma } from '../generated/prisma/client';
+import { PostStatus, type Prisma } from '../generated/prisma/client';
+import { escapeLikePattern } from '../common/utils/like-pattern';
 import { slugify } from '../common/utils/slugify';
+
 import { CreatePostDto } from './dto/create-post.dto';
 import { PostSortDto, QueryPostsDto } from './dto/query-posts.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
@@ -12,8 +14,9 @@ import { PostsRepository } from './posts.repository';
 import { MediaService } from '../media/media.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { formatPost } from './post.mapper';
-import { FollowsService } from '../follows/follows.service';
+import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import { UserInterestService } from '../recommendation/user-interest.service';
+import { resolvePagination, toPaginated } from '../common/utils/paginated';
 import { EventPublisherPort } from '../domain-events/event-publisher.port';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -22,16 +25,14 @@ export class PostsService {
   constructor(
     private readonly postsRepository: PostsRepository,
     private readonly mediaService: MediaService,
-    private readonly followsService: FollowsService,
+    private readonly postVisibility: PostVisibilityService,
     private readonly userInterestService: UserInterestService,
     private readonly eventPublisher: EventPublisherPort,
     private readonly prisma: PrismaService,
   ) {}
 
   async findAll(query: QueryPostsDto, userId?: string) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = resolvePagination(query);
 
     const where: Prisma.PostWhereInput = {
       status: 'PUBLISHED',
@@ -67,13 +68,13 @@ export class PostsService {
             OR: [
               {
                 title: {
-                  contains: query.search,
+                  contains: escapeLikePattern(query.search),
                   mode: 'insensitive',
                 },
               },
               {
                 content: {
-                  contains: query.search,
+                  contains: escapeLikePattern(query.search),
                   mode: 'insensitive',
                 },
               },
@@ -82,7 +83,7 @@ export class PostsService {
                   some: {
                     tag: {
                       name: {
-                        contains: query.search,
+                        contains: escapeLikePattern(query.search),
                         mode: 'insensitive',
                       },
                     },
@@ -126,15 +127,10 @@ export class PostsService {
       this.postsRepository.count(where),
     ]);
 
-    return {
-      items: items.map((post) => formatPost(post)),
-      meta: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
+    return toPaginated(
+      items.map((post) => formatPost(post)),
+      { page, limit, total: total },
+    );
   }
 
   async findOne(id: string, userId?: string) {
@@ -150,27 +146,14 @@ export class PostsService {
       return formatPost(post);
     }
 
-    // Everyone else can only view published posts.
-    if (post.status !== 'PUBLISHED') {
+    // Everyone else follows the shared visibility rule.
+    const viewable = await this.postVisibility.canView(post, userId);
+
+    if (!viewable) {
       throw new NotFoundException('Post not found');
     }
 
-    if (post.visibility === 'PUBLIC') {
-      return formatPost(post);
-    }
-
-    if (post.visibility === 'FOLLOWERS_ONLY' && userId) {
-      const followStatus = await this.followsService.isFollowing(
-        userId,
-        post.authorId,
-      );
-
-      if (followStatus.following) {
-        return formatPost(post);
-      }
-    }
-
-    throw new NotFoundException('Post not found');
+    return formatPost(post);
   }
 
   async findByAuthor(
@@ -178,24 +161,19 @@ export class PostsService {
     authorId: string,
     userId?: string,
   ) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const { page, limit } = resolvePagination(query);
 
     const result = await this.postsRepository.findByAuthorId(authorId, {
       page,
       limit,
+      audience: 'self',
       userId,
     });
 
-    return {
-      items: result.items.map((post) => formatPost(post)),
-      meta: {
-        page,
-        limit,
-        total: result.total,
-        totalPages: Math.ceil(result.total / limit),
-      },
-    };
+    return toPaginated(
+      result.items.map((post) => formatPost(post)),
+      { page, limit, total: result.total },
+    );
   }
 
   async findByAuthorPublic(
@@ -203,26 +181,19 @@ export class PostsService {
     authorId: string,
     userId?: string,
   ) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const { page, limit } = resolvePagination(query);
 
     const result = await this.postsRepository.findByAuthorId(authorId, {
       page,
       limit,
-      visibility: 'PUBLIC',
-      status: 'PUBLISHED',
+      audience: 'public',
       userId,
     });
 
-    return {
-      items: result.items.map((post) => formatPost(post)),
-      meta: {
-        page,
-        limit,
-        total: result.total,
-        totalPages: Math.ceil(result.total / limit),
-      },
-    };
+    return toPaginated(
+      result.items.map((post) => formatPost(post)),
+      { page, limit, total: result.total },
+    );
   }
 
   async create(dto: CreatePostDto, authorId: string) {
@@ -311,12 +282,20 @@ export class PostsService {
   async update(id: string, dto: UpdatePostDto, userId: string) {
     const existingPost = await this.postsRepository.findById(id);
 
-    if (!existingPost || existingPost.status === 'DELETED') {
+    if (
+      !existingPost ||
+      existingPost.deletedAt ||
+      existingPost.status === PostStatus.DELETED
+    ) {
       throw new NotFoundException('Post not found');
     }
 
     if (existingPost.authorId !== userId) {
       throw new ForbiddenException('You can only update your own post');
+    }
+
+    if (existingPost.status === PostStatus.HIDDEN) {
+      throw new ForbiddenException('This post was hidden by a moderator');
     }
 
     if (dto.categoryId) {
@@ -398,10 +377,17 @@ export class PostsService {
     return formatPost(post);
   }
 
+  /**
+   * Deleting is intentionally allowed even when a moderator hid the post -
+   * unlike update(), delete doesn't undo the moderation decision, it goes
+   * further in the same direction (the content becomes fully inaccessible
+   * instead of just hidden). Blocking it would make hidden content
+   * permanently undeletable through the API.
+   */
   async remove(id: string, userId: string) {
     const post = await this.postsRepository.findById(id);
 
-    if (!post || post.status === 'DELETED') {
+    if (!post || post.deletedAt || post.status === PostStatus.DELETED) {
       throw new NotFoundException('Post not found');
     }
 
@@ -523,29 +509,16 @@ export class PostsService {
   private async ensurePostCanBeInteractedWith(postId: string, userId: string) {
     const post = await this.postsRepository.findPostForInteraction(postId);
 
-    if (!post || post.deletedAt || post.status !== 'PUBLISHED') {
+    if (!post) {
       throw new NotFoundException('Post not found');
     }
 
-    if (post.visibility === 'PUBLIC') {
-      return post;
+    const viewable = await this.postVisibility.canView(post, userId);
+
+    if (!viewable) {
+      throw new NotFoundException('Post not found');
     }
 
-    if (post.visibility === 'FOLLOWERS_ONLY') {
-      if (post.authorId === userId) {
-        return post;
-      }
-
-      const followStatus = await this.followsService.isFollowing(
-        userId,
-        post.authorId,
-      );
-
-      if (followStatus.following) {
-        return post;
-      }
-    }
-
-    throw new NotFoundException('Post not found');
+    return post;
   }
 }
