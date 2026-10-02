@@ -13,7 +13,7 @@ export function AuthForm({ mode }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const isRegister = mode === "register";
-  const { isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
+  const { user, isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -30,13 +30,14 @@ export function AuthForm({ mode }) {
   const auth = useMutation({
     mutationFn: () => (isRegister ? api.signUp(form) : api.signIn(form)),
     onSuccess: async () => {
-      await queryClient.fetchQuery({
+      const freshUser = await queryClient.fetchQuery({
         ...queries.currentUser(),
         staleTime: 0,
       });
       setMessage(isRegister ? "Account created. Redirecting..." : "Logged in. Redirecting...");
       window.clearTimeout(redirectTimerRef.current);
-      redirectTimerRef.current = window.setTimeout(() => router.replace("/"), 650);
+      const destination = freshUser?.onboarded === false ? "/onboarding" : "/";
+      redirectTimerRef.current = window.setTimeout(() => router.replace(destination), 650);
     },
     onError: (error) => {
       setMessage(error.message || "Auth service is not ready yet.");
@@ -57,8 +58,9 @@ export function AuthForm({ mode }) {
   useEffect(() => () => window.clearTimeout(redirectTimerRef.current), []);
 
   useEffect(() => {
-    if (isAuthenticated && !auth.isPending) router.replace("/");
-  }, [auth.isPending, isAuthenticated, router]);
+    if (!isAuthenticated || auth.isPending) return;
+    router.replace(user?.onboarded === false ? "/onboarding" : "/");
+  }, [auth.isPending, isAuthenticated, router, user]);
 
   return (
     <main className="auth-page">
