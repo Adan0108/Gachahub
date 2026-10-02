@@ -267,6 +267,7 @@
   animation: modal-enter var(--motion-base) var(--motion-ease) both;
 }
 
+.brand-mark,
 .mini-avatar,
 .theme-toggle,
 .icon-btn,
@@ -302,6 +303,7 @@
     transform var(--motion-fast) var(--motion-ease);
 }
 
+.brand-mark:hover,
 .mini-avatar:hover,
 .theme-toggle:hover,
 .icon-btn:hover,

@@ -50,6 +50,7 @@ body {
   border-bottom-color: var(--line);
 }
 
+.brand-mark,
 .mini-avatar,
 .char-badge {
   background: var(--panel2);
@@ -162,6 +163,12 @@ body {
 .export,
 .primary {
   background: var(--purple);
+  color: white;
+}
+
+.brand-mark {
+  background: var(--purple);
+  border-color: color-mix(in srgb, var(--purple), white 18%);
   color: white;
 }
 

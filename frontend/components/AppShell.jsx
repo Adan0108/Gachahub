@@ -8,7 +8,6 @@ import { useTheme } from "../hooks/useTheme";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { useDeviceIdentity } from "../hooks/chat/useDeviceIdentity";
 import { useChatSocket } from "../hooks/chat/useChatSocket";
-import { BrandMark } from "./BrandMark";
 import { glyph, navItems } from "./constants";
 import { DevToolsPanel } from "./DevToolsPanel";
 import { Topbar } from "./Topbar";
@@ -16,7 +15,7 @@ import { Topbar } from "./Topbar";
 function Logo() {
   return (
     <Link href="/" className="brand">
-      <BrandMark size={29} />
+      <span className="brand-mark">{glyph.sparkle}</span>
       <b>GachaHub</b>
       <em>AI</em>
     </Link>
