@@ -40,7 +40,7 @@ describe('UsersRepository.searchByName', () => {
         blockedUsers: { none: { blockedId: 'me' } },
         blockedBy: { none: { blockerId: 'me' } },
       },
-      select: { id: true, name: true, image: true },
+      select: { id: true, name: true, image: true, username: true },
     });
   });
 
@@ -57,7 +57,7 @@ describe('UsersRepository.searchByName', () => {
       },
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
       take: 5,
-      select: { id: true, name: true, image: true },
+      select: { id: true, name: true, image: true, username: true },
     });
   });
 

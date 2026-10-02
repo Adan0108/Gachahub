@@ -6,14 +6,17 @@ import OnboardingPage from "../app/onboarding/page";
 
 const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
+  push: vi.fn(),
   checkUsernameAvailable: vi.fn(),
   completeOnboarding: vi.fn(),
+  signOut: vi.fn(),
+  runSessionCleanups: vi.fn(),
 }));
 
 let session = { user: { id: "u1", onboarded: false }, isAuthenticated: true, isLoading: false };
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: mocks.replace }),
+  useRouter: () => ({ replace: mocks.replace, push: mocks.push }),
 }));
 vi.mock("../hooks/useRequireAuth", () => ({
   useRequireAuth: () => session,
@@ -22,11 +25,16 @@ vi.mock("../lib/api", () => ({
   api: {
     checkUsernameAvailable: mocks.checkUsernameAvailable,
     completeOnboarding: mocks.completeOnboarding,
+    signOut: mocks.signOut,
   },
   fallbackCategories: vi.fn(() => []),
   fallbackGame: vi.fn(),
   fallbackGames: vi.fn(() => ({ items: [] })),
   fallbackPosts: vi.fn(() => []),
+}));
+vi.mock("../lib/sessionCleanup", () => ({
+  runSessionCleanups: mocks.runSessionCleanups,
+  registerSessionCleanup: vi.fn(),
 }));
 
 function renderPage() {
@@ -42,8 +50,11 @@ describe("OnboardingPage", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     mocks.replace.mockReset();
+    mocks.push.mockReset();
     mocks.checkUsernameAvailable.mockReset().mockResolvedValue({ available: true });
     mocks.completeOnboarding.mockReset().mockResolvedValue({});
+    mocks.signOut.mockReset().mockResolvedValue({});
+    mocks.runSessionCleanups.mockReset().mockResolvedValue();
     session = { user: { id: "u1", onboarded: false }, isAuthenticated: true, isLoading: false };
   });
 
@@ -156,5 +167,34 @@ describe("OnboardingPage", () => {
     renderPage();
 
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/"));
+  });
+
+  it("signs out and redirects home instead of being stuck here", async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: /sign out instead/i }));
+
+    await waitFor(() => expect(mocks.signOut).toHaveBeenCalled());
+    expect(mocks.runSessionCleanups).toHaveBeenCalled();
+    expect(mocks.push).toHaveBeenCalledWith("/");
+  });
+
+  it("stops trusting a stale available result the moment the handle changes", async () => {
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText("Hertzy"), {
+      target: { value: "Rover" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Hertzy-123"), {
+      target: { value: "Rover-123" },
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    await waitFor(() => expect(screen.getByText(/is available/i)).toBeInTheDocument());
+
+    fireEvent.change(screen.getByPlaceholderText("Hertzy-123"), {
+      target: { value: "Rover-456" },
+    });
+
+    expect(screen.queryByText(/is available/i)).not.toBeInTheDocument();
   });
 });

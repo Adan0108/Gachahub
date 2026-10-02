@@ -175,6 +175,7 @@ export default function ProfilePage() {
               <h1>
                 {displayName} <span className="verified">{glyph.check}</span>
               </h1>
+              {user.username && <p className="profile-handle">@{user.username}</p>}
               <p>{user.email}</p>
               <p className="profile-user-id">
                 User ID: <code>{user.id}</code>

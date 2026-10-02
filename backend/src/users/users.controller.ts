@@ -48,9 +48,15 @@ export class UsersController {
   @Get('username-available')
   @ApiCookieAuth('better-auth.session_token')
   @ApiOperation({ summary: 'Check whether a handle is free to claim' })
-  async checkUsernameAvailable(@Query() query: CheckUsernameQueryDto) {
+  async checkUsernameAvailable(
+    @Session() session: UserSession,
+    @Query() query: CheckUsernameQueryDto,
+  ) {
     return {
-      available: await this.usersService.isUsernameAvailable(query.username),
+      available: await this.usersService.isUsernameAvailable(
+        session.user.id,
+        query.username,
+      ),
     };
   }
 

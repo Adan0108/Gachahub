@@ -3,7 +3,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { escapeLikePattern } from '../common/utils/like-pattern';
 import type { Prisma, UserRole, UserStatus } from '../generated/prisma/client';
 
-const PICKER_SELECT = { id: true, name: true, image: true } as const;
+const PICKER_SELECT = {
+  id: true,
+  name: true,
+  image: true,
+  username: true,
+} as const;
 
 /** Active users the caller has no block with, in either direction. */
 const pickableBy = (callerId: string) =>

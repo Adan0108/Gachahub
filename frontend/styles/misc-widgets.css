@@ -26,6 +26,11 @@
   font-size: 12px;
 }
 
+.user-picker-handle {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .chat-new-form .user-picker button {
   display: inline-flex;
   padding: 2px;

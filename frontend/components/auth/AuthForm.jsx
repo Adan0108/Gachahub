@@ -22,6 +22,7 @@ export function AuthForm({ mode }) {
   const [message, setMessage] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const redirectTimerRef = useRef(null);
+  const postAuthDestination = (authedUser) => (authedUser?.onboarded === false ? "/onboarding" : "/");
   const canSubmit =
     form.email.trim().length > 0 &&
     form.password.length >= 8 &&
@@ -36,7 +37,7 @@ export function AuthForm({ mode }) {
       });
       setMessage(isRegister ? "Account created. Redirecting..." : "Logged in. Redirecting...");
       window.clearTimeout(redirectTimerRef.current);
-      const destination = freshUser?.onboarded === false ? "/onboarding" : "/";
+      const destination = postAuthDestination(freshUser);
       redirectTimerRef.current = window.setTimeout(() => router.replace(destination), 650);
     },
     onError: (error) => {
@@ -59,7 +60,7 @@ export function AuthForm({ mode }) {
 
   useEffect(() => {
     if (!isAuthenticated || auth.isPending) return;
-    router.replace(user?.onboarded === false ? "/onboarding" : "/");
+    router.replace(postAuthDestination(user));
   }, [auth.isPending, isAuthenticated, router, user]);
 
   return (

@@ -195,3 +195,18 @@
   text-decoration: none;
 }
 
+.onboarding-signout {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #a98bff;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.onboarding-signout:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+

@@ -81,7 +81,7 @@ describe('UsersController.checkUsernameAvailable', () => {
       UsersController.prototype,
       'checkUsernameAvailable',
     ) as unknown[];
-    expect(paramTypes[0]).toBe(CheckUsernameQueryDto);
+    expect(paramTypes[1]).toBe(CheckUsernameQueryDto);
 
     const usersService = {
       isUsernameAvailable: jest.fn().mockResolvedValue(true),
@@ -90,10 +90,16 @@ describe('UsersController.checkUsernameAvailable', () => {
     const query = new CheckUsernameQueryDto();
     query.username = 'Mado-123';
 
-    await expect(controller.checkUsernameAvailable(query)).resolves.toEqual({
-      available: true,
-    });
-    expect(usersService.isUsernameAvailable).toHaveBeenCalledWith('Mado-123');
+    await expect(
+      controller.checkUsernameAvailable(
+        { user: { id: 'me' } } as unknown as UserSession,
+        query,
+      ),
+    ).resolves.toEqual({ available: true });
+    expect(usersService.isUsernameAvailable).toHaveBeenCalledWith(
+      'me',
+      'Mado-123',
+    );
   });
 });
 
