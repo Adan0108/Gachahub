@@ -27,6 +27,7 @@ export class GameModeratorsRepository {
         id: true,
         name: true,
         slug: true,
+        status: true,
       },
     });
   }
@@ -84,6 +85,30 @@ export class GameModeratorsRepository {
           gameId,
           userId,
         },
+      },
+    });
+  }
+
+  // Lists the games a given user moderates - the reverse of findManyByGameId; backs the moderator's own "my games" page.
+  findManyByUserId(userId: string) {
+    return this.prisma.gameModerator.findMany({
+      where: {
+        userId,
+      },
+      select: {
+        game: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            iconUrl: true,
+            bannerUrl: true,
+            status: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
       },
     });
   }

@@ -19,6 +19,14 @@
   --chat-radius: 12px;
   --chat-bubble-radius: 14px;
   color-scheme: dark;
+
+  /* Admin console palette - shared by .admin-shell and any page (e.g. .moderator-page) reusing its components. */
+  --admin-bg: #0f1117;
+  --admin-panel: #161a22;
+  --admin-panel-raised: #1b202a;
+  --admin-line: #2d3442;
+  --admin-text: #f5f6fa;
+  --admin-muted: #929aaa;
 }
 
 /* Reset and base elements */
@@ -1239,12 +1247,6 @@ button {
 
 /* Admin console */
 .admin-shell {
-  --admin-bg: #0f1117;
-  --admin-panel: #161a22;
-  --admin-panel-raised: #1b202a;
-  --admin-line: #2d3442;
-  --admin-text: #f5f6fa;
-  --admin-muted: #929aaa;
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
   min-height: 100vh;
@@ -2329,6 +2331,94 @@ button {
 .admin-dialog-fields select:focus {
   border-color: #7c5cff;
   box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.12);
+}
+
+.branding-uploader {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.branding-uploader-preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid #3a4352;
+  border-radius: 9px;
+  background: #222936;
+  color: #bcaeff;
+  font-size: 20px;
+}
+
+.branding-uploader-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.branding-uploader-spinner {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(17, 21, 28, 0.72);
+  animation: admin-spin 0.9s linear infinite;
+}
+
+.branding-uploader-body {
+  display: grid;
+  gap: 7px;
+}
+
+.branding-uploader-body > span {
+  color: #c7ccd6;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.branding-immediate-note {
+  margin: 0;
+  color: var(--admin-muted);
+  font-size: 12px;
+}
+
+.moderator-game-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.moderator-game-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.moderator-game-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.moderator-game-heading h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.moderator-game-branding {
+  display: grid;
+  gap: 12px;
+}
+
+.moderator-game-archived-note {
+  margin: 0;
+  color: var(--admin-muted);
+  font-size: 13px;
 }
 
 .admin-moderation-summary {

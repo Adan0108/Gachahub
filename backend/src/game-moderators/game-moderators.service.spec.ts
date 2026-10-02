@@ -28,6 +28,7 @@ describe('GameModeratorsService', () => {
     findByGameIdAndUserId: jest.fn(),
     findGameBySlug: jest.fn(),
     findUserByEmail: jest.fn(),
+    findManyByUserId: jest.fn(),
     create: jest.fn(),
     deleteByGameIdAndUserId: jest.fn(),
   };
@@ -416,6 +417,73 @@ describe('GameModeratorsService', () => {
       await expect(service.resolveGameId('missing-game')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('resolveModeratableGame', () => {
+    it('returns the game id and status in one call for a moderator of that game', async () => {
+      gameModeratorsRepository.findGameBySlug.mockResolvedValue({
+        id: 'game-1',
+        status: 'ARCHIVED',
+      });
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'mod-1',
+        role: 'USER',
+        status: 'ACTIVE',
+      });
+      gameModeratorsRepository.findByGameIdAndUserId.mockResolvedValue({
+        id: 'assignment-1',
+      });
+
+      await expect(
+        service.resolveModeratableGame('wuthering-waves', 'mod-1'),
+      ).resolves.toEqual({ id: 'game-1', status: 'ARCHIVED' });
+    });
+
+    it('rejects a non-moderator', async () => {
+      gameModeratorsRepository.findGameBySlug.mockResolvedValue({
+        id: 'game-1',
+        status: 'ACTIVE',
+      });
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        role: 'USER',
+        status: 'ACTIVE',
+      });
+      gameModeratorsRepository.findByGameIdAndUserId.mockResolvedValue(null);
+
+      await expect(
+        service.resolveModeratableGame('wuthering-waves', 'user-1'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects an unknown game before checking permission', async () => {
+      gameModeratorsRepository.findGameBySlug.mockResolvedValue(null);
+
+      await expect(
+        service.resolveModeratableGame('missing', 'mod-1'),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listModerated', () => {
+    it('returns the games from each assignment', async () => {
+      gameModeratorsRepository.findManyByUserId.mockResolvedValue([
+        { game: { id: 'game-1', name: 'Wuthering Waves' } },
+        { game: { id: 'game-2', name: 'Genshin Impact' } },
+      ]);
+
+      const result = await service.listModerated('mod-1');
+
+      expect(gameModeratorsRepository.findManyByUserId).toHaveBeenCalledWith(
+        'mod-1',
+      );
+      expect(result).toEqual([
+        { id: 'game-1', name: 'Wuthering Waves' },
+        { id: 'game-2', name: 'Genshin Impact' },
+      ]);
     });
   });
 });

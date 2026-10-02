@@ -1,6 +1,22 @@
 import { Injectable } from '@nestjs/common';
-import type { Prisma } from '../generated/prisma/client';
+import type { Prisma, GameStatus } from '../generated/prisma/client';
+import { claimUploadsForAttachment } from '../media/media.repository';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  BRANDING_SLOTS,
+  type BrandingSlotKey,
+  type BrandingUpload,
+} from './branding-slots';
+
+// Thrown from inside claimAndUpdateBranding's transaction on a CAS miss, so Prisma rolls back the claim(s) too; the service maps it to a 409.
+export class BrandingConflictError extends Error {}
+
+/** Discriminated outcome of a conditional status swap - lets the caller pick the exact exception/response without a redundant pre-read. */
+type TransitionResult =
+  | { kind: 'success'; game: Prisma.GameGetPayload<object> }
+  | { kind: 'idempotent'; game: Prisma.GameGetPayload<object> }
+  | { kind: 'invalid_state'; game: Prisma.GameGetPayload<object> }
+  | { kind: 'not_found' };
 
 /** Shared by count() and findTopByMemberCount() so "what counts as active" can't drift between them. */
 const ACTIVE_GAME = {
@@ -127,5 +143,90 @@ export class GamesRepository {
       where: { id },
       data,
     });
+  }
+
+  // Claims the upload(s) and writes branding in one transaction, CAS-keyed on each slot's current id column read as its first statement; throws BrandingConflictError on a miss so the claim(s) roll back too.
+  async claimAndUpdateBranding(params: {
+    gameId: string;
+    actorId: string;
+    slots: Partial<Record<BrandingSlotKey, BrandingUpload>>;
+  }): Promise<{
+    game: Prisma.GameGetPayload<object>;
+    previousUploadIds: Partial<Record<BrandingSlotKey, string | null>>;
+  }> {
+    const { gameId, actorId, slots } = params;
+    const entries = Object.entries(slots) as [
+      BrandingSlotKey,
+      BrandingUpload,
+    ][];
+
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.game.findUniqueOrThrow({
+        where: { id: gameId },
+        select: { iconMediaUploadId: true, bannerMediaUploadId: true },
+      });
+
+      for (const [key, upload] of entries) {
+        await claimUploadsForAttachment(tx, {
+          ids: [upload.id],
+          userId: actorId,
+          purpose: BRANDING_SLOTS[key].purpose,
+        });
+      }
+
+      const where: Record<string, unknown> = { id: gameId };
+      const data: Record<string, unknown> = {};
+      const previousUploadIds: Partial<Record<BrandingSlotKey, string | null>> =
+        {};
+
+      for (const [key, upload] of entries) {
+        const slot = BRANDING_SLOTS[key];
+        where[slot.idField] = current[slot.idField];
+        data[slot.urlField] = upload.secureUrl;
+        data[slot.idField] = upload.id;
+        previousUploadIds[key] = current[slot.idField];
+      }
+
+      const result = await tx.game.updateMany({ where, data });
+
+      if (result.count === 0) {
+        throw new BrandingConflictError();
+      }
+
+      const game = await tx.game.findUniqueOrThrow({ where: { id: gameId } });
+
+      return { game, previousUploadIds };
+    });
+  }
+
+  // Conditional status swap (same race protection as PostsRepository.transitionStatus), run inside the caller's tx; discriminates not-found/idempotent/invalid-state instead of collapsing to one null.
+  async tryTransitionStatus(
+    tx: Prisma.TransactionClient,
+    params: { slug: string; from: GameStatus; to: GameStatus },
+  ): Promise<TransitionResult> {
+    const result = await tx.game.updateMany({
+      where: { slug: params.slug, status: params.from },
+      data: { status: params.to },
+    });
+
+    if (result.count > 0) {
+      const game = await tx.game.findUniqueOrThrow({
+        where: { slug: params.slug },
+      });
+
+      return { kind: 'success', game };
+    }
+
+    const game = await tx.game.findUnique({ where: { slug: params.slug } });
+
+    if (!game) {
+      return { kind: 'not_found' };
+    }
+
+    if (game.status === params.to) {
+      return { kind: 'idempotent', game };
+    }
+
+    return { kind: 'invalid_state', game };
   }
 }

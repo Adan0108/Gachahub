@@ -14,6 +14,11 @@ export const backendRoutes = {
   gameModerators: (gameSlug) => `/games/${encodePathParam(gameSlug)}/moderators`,
   gameModerator: (gameSlug, userId) =>
     `/games/${encodePathParam(gameSlug)}/moderators/${encodePathParam(userId)}`,
+  gamesModerated: '/games/moderated',
+  gameBranding: (gameSlug) => `/games/${encodePathParam(gameSlug)}/branding`,
+  gameArchive: (gameSlug) => `/games/${encodePathParam(gameSlug)}/archive`,
+  gameRestore: (gameSlug) => `/games/${encodePathParam(gameSlug)}/restore`,
+  gameFlag: (gameSlug) => `/games/${encodePathParam(gameSlug)}/flag`,
   adminOverview: "/admin/overview",
   adminReports: "/admin/reports",
   reportClaim: (gameSlug, reportId) =>
@@ -479,6 +484,49 @@ async function uploadToCloudinary(file, authorization) {
   };
 }
 
+// Shared signatures -> Cloudinary -> confirm pipeline behind uploadPostMedia and uploadSingleImage.
+async function uploadAndConfirm(files, purpose) {
+  if (!files.length) return { successful: [], failed: [] };
+  const authorizations = await api.createUploadSignatures(files, purpose);
+  const settled = await Promise.allSettled(
+    files.map((file, index) => uploadToCloudinary(file, authorizations.items[index])),
+  );
+  const uploaded = settled.flatMap((result, index) =>
+    result.status === "fulfilled" ? [{ file: files[index], payload: result.value }] : [],
+  );
+  const failed = settled.flatMap((result, index) =>
+    result.status === "rejected"
+      ? [{ file: files[index], error: result.reason?.message || "Upload failed" }]
+      : [],
+  );
+
+  if (!uploaded.length) return { successful: [], failed };
+
+  const confirmed = await api.confirmMediaUploads(uploaded.map(({ payload }) => payload));
+  const confirmedById = new Map(
+    confirmed.successful.map(({ uploadId, result }) => [uploadId, result]),
+  );
+  const uploadedFileById = new Map(uploaded.map(({ file, payload }) => [payload.uploadId, file]));
+  const confirmationErrors = new Map(
+    confirmed.failed.map(({ uploadId, error }) => [uploadId, error]),
+  );
+
+  return {
+    successful: uploaded.flatMap(({ payload }) => {
+      const result = confirmedById.get(payload.uploadId);
+      const file = uploadedFileById.get(payload.uploadId);
+      return result ? [{ ...result, fileName: file?.name || "Uploaded media" }] : [];
+    }),
+    failed: [
+      ...failed,
+      ...uploaded.flatMap(({ file, payload }) => {
+        const error = confirmationErrors.get(payload.uploadId);
+        return error ? [{ file, error }] : [];
+      }),
+    ],
+  };
+}
+
 function encryptedMessagePayload({
   ciphertext,
   encryptionMeta,
@@ -535,6 +583,21 @@ export const api = {
   createGame: (game) => mutation(backendRoutes.games, game),
   updateGame: (gameId, updates) =>
     mutation(backendRoutes.game(gameId), updates, { method: "PATCH" }),
+  // Moderator or admin of this specific game. Requires an already-confirmed
+  // upload id from uploadSingleImage, not a raw URL.
+  updateGameBranding: (gameSlug, { iconMediaUploadId, bannerMediaUploadId } = {}) =>
+    mutation(
+      backendRoutes.gameBranding(gameSlug),
+      { iconMediaUploadId, bannerMediaUploadId },
+      { method: "PATCH" },
+    ),
+  // Admin only - soft-deletes/restores the game community.
+  archiveGame: (gameSlug) => mutation(backendRoutes.gameArchive(gameSlug), undefined, { method: "PATCH" }),
+  restoreGame: (gameSlug) => mutation(backendRoutes.gameRestore(gameSlug), undefined, { method: "PATCH" }),
+  // Moderator or admin - no state change, just an audit entry for an admin to review.
+  flagGameForReview: (gameSlug, reason) => mutation(backendRoutes.gameFlag(gameSlug), { reason }),
+  // The current user's own moderated games - backs the standalone /moderator page.
+  listModeratedGames: (options = {}) => request(backendRoutes.gamesModerated, options),
   getCurrentUser: (options = {}) =>
     request(backendRoutes.currentUser, { ...options, allowUnauthorized: true }),
   getProfile: (options = {}) => api.getCurrentUser(options),
@@ -589,54 +652,22 @@ export const api = {
   createReply: (commentId, content) =>
     mutation(backendRoutes.commentReplies(commentId), { content }),
   createPost: (post) => mutation(backendRoutes.posts, post),
-  createUploadSignatures: (files) =>
+  createUploadSignatures: (files, purpose = 'POST') =>
     mutation(backendRoutes.mediaSignatures, {
-      purpose: 'POST',
+      purpose,
       items: files.map((file) => ({
         resourceType: file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE',
       })),
     }),
   confirmMediaUploads: (items) => mutation(backendRoutes.mediaConfirm, { items }),
-  uploadPostMedia: async (files) => {
-    if (!files.length) return { successful: [], failed: [] };
-    const authorizations = await api.createUploadSignatures(files);
-    const settled = await Promise.allSettled(
-      files.map((file, index) => uploadToCloudinary(file, authorizations.items[index])),
-    );
-    const uploaded = settled.flatMap((result, index) =>
-      result.status === "fulfilled" ? [{ file: files[index], payload: result.value }] : [],
-    );
-    const failed = settled.flatMap((result, index) =>
-      result.status === "rejected"
-        ? [{ file: files[index], error: result.reason?.message || "Upload failed" }]
-        : [],
-    );
-
-    if (!uploaded.length) return { successful: [], failed };
-
-    const confirmed = await api.confirmMediaUploads(uploaded.map(({ payload }) => payload));
-    const confirmedById = new Map(
-      confirmed.successful.map(({ uploadId, result }) => [uploadId, result]),
-    );
-    const uploadedFileById = new Map(uploaded.map(({ file, payload }) => [payload.uploadId, file]));
-    const confirmationErrors = new Map(
-      confirmed.failed.map(({ uploadId, error }) => [uploadId, error]),
-    );
-
-    return {
-      successful: uploaded.flatMap(({ payload }) => {
-        const result = confirmedById.get(payload.uploadId);
-        const file = uploadedFileById.get(payload.uploadId);
-        return result ? [{ ...result, fileName: file?.name || "Uploaded media" }] : [];
-      }),
-      failed: [
-        ...failed,
-        ...uploaded.flatMap(({ file, payload }) => {
-          const error = confirmationErrors.get(payload.uploadId);
-          return error ? [{ file, error }] : [];
-        }),
-      ],
-    };
+  uploadPostMedia: (files) => uploadAndConfirm(files, "POST"),
+  // Uploads one image for a non-post purpose (e.g. GAME_ICON, GAME_BANNER), returning its confirmed { mediaUploadId, secureUrl, ... }.
+  uploadSingleImage: async (file, purpose) => {
+    const { successful, failed } = await uploadAndConfirm([file], purpose);
+    if (!successful.length) {
+      throw new Error(failed[0]?.error || "Upload failed");
+    }
+    return successful[0];
   },
   /**
    * Uploads already-encrypted bytes as opaque raw blobs, returning upload ids in input order.

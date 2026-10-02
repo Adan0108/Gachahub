@@ -65,6 +65,9 @@ function resolveTargetName(
     }
     case AuditTargetType.USER:
       return userNameById.get(entry.targetId) ?? null;
+    case AuditTargetType.GAME:
+      // Already denormalized on the row - no extra lookup needed.
+      return entry.gameSlug ?? null;
     default: {
       const exhaustiveCheck: never = entry.targetType;
       return exhaustiveCheck;

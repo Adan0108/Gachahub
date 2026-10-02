@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { UserRole } from '../generated/prisma/client';
+import { UserRole, type GameStatus } from '../generated/prisma/client';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { loadActiveUser } from '../common/guards/active-user.util';
@@ -116,6 +116,30 @@ export class GameModeratorsService {
     await this.assertCanModerateGame(gameId, moderatorId);
 
     return gameId;
+  }
+
+  // Same as resolveModeratableGameId, but returns the game's id+status in one query - for callers (GameModerationService) that also need to know if the game itself is reachable.
+  async resolveModeratableGame(
+    gameSlug: string,
+    moderatorId: string,
+  ): Promise<{ id: string; status: GameStatus }> {
+    const game = await this.gameModeratorsRepository.findGameBySlug(gameSlug);
+
+    if (!game) {
+      throw new NotFoundException('Game not found');
+    }
+
+    await this.assertCanModerateGame(game.id, moderatorId);
+
+    return game;
+  }
+
+  // Games the given user moderates - backs their own "my games" page.
+  async listModerated(userId: string) {
+    const assignments =
+      await this.gameModeratorsRepository.findManyByUserId(userId);
+
+    return assignments.map((assignment) => assignment.game);
   }
 
   /**

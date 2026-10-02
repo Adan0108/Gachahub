@@ -45,9 +45,9 @@ model User {
   blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
   blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
 
-  reportsFiled    Report[] @relation("ReportsFiled")
-  reportsAssigned Report[] @relation("ReportsAssigned")
-  reportsResolved Report[] @relation("ReportsResolved")
+  reportsFiled    Report[]   @relation("ReportsFiled")
+  reportsAssigned Report[]   @relation("ReportsAssigned")
+  reportsResolved Report[]   @relation("ReportsResolved")
   auditLogsActed  AuditLog[] @relation("AuditLogActor")
 
   receivedNotifications Notification[] @relation("NotificationRecipient")
@@ -171,6 +171,12 @@ model Game {
   developer   String?
   publisher   String?
   status      GameStatus @default(ACTIVE)
+
+  /// FK to the MediaUpload row currently backing iconUrl/bannerUrl, so a replace can release the old Cloudinary asset.
+  iconMediaUploadId   String?      @unique
+  bannerMediaUploadId String?      @unique
+  iconMediaUpload     MediaUpload? @relation("GameIconUpload", fields: [iconMediaUploadId], references: [id], onDelete: SetNull)
+  bannerMediaUpload   MediaUpload? @relation("GameBannerUpload", fields: [bannerMediaUploadId], references: [id], onDelete: SetNull)
 
   memberCount Int @default(0)
   postCount   Int @default(0)
@@ -710,6 +716,8 @@ enum MediaPurpose {
   CHAT
   AVATAR
   BANNER
+  GAME_ICON
+  GAME_BANNER
 }
 
 enum MediaResourceType {
@@ -772,6 +780,8 @@ model MediaUpload {
   user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   postMedia        PostMedia?
   chatMessageMedia ChatMessageMedia?
+  gameIconFor      Game?             @relation("GameIconUpload")
+  gameBannerFor    Game?             @relation("GameBannerUpload")
 
   @@index([userId, status, createdAt])
   @@index([status, createdAt])
@@ -901,6 +911,9 @@ enum AuditAction {
   USER_BANNED
   USER_SUSPENDED
   USER_REACTIVATED
+  GAME_ARCHIVED
+  GAME_RESTORED
+  GAME_FLAGGED
 }
 
 enum AuditTargetType {
@@ -908,6 +921,7 @@ enum AuditTargetType {
   COMMENT
   REPORT
   USER
+  GAME
 }
 
 // Append-only record of moderator/admin actions. actorId and gameId are SetNull so the trail

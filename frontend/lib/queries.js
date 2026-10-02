@@ -10,6 +10,7 @@ export const queryKeys = {
   categories: (slug) => ["community-categories", slug],
   adminCategories: (slug, active) => ["admin", "categories", slug, { active }],
   adminModerators: (slug) => ["admin", "moderators", slug],
+  moderatedGames: ["moderated-games"],
   currentUser: ["current-user"],
   myPosts: ["posts", "mine"],
   posts: (search) => ["posts", { search }],
@@ -98,6 +99,12 @@ export const queries = {
     queryFn: ({ signal }) => api.getCurrentUser({ signal }),
     retry: false,
     staleTime: 30_000,
+  }),
+  moderatedGames: () => ({
+    queryKey: queryKeys.moderatedGames,
+    queryFn: ({ signal }) => api.listModeratedGames({ signal }),
+    retry: 1,
+    staleTime: 15_000,
   }),
   myPosts: () => ({
     queryKey: queryKeys.myPosts,

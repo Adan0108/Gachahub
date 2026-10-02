@@ -9,6 +9,10 @@ export type UserModerationAuditAction =
   | 'USER_BANNED'
   | 'USER_SUSPENDED'
   | 'USER_REACTIVATED';
+export type GameAuditAction =
+  | 'GAME_ARCHIVED'
+  | 'GAME_RESTORED'
+  | 'GAME_FLAGGED';
 
 /** Stored shape of `metadata` for post entries. Rows are permanent - change by adding optional keys only. */
 export type PostAuditMetadata = { authorId: string; postTitle: string };
@@ -28,6 +32,9 @@ export type UserModerationAuditMetadata = {
   previousStatus: string;
   reason?: string;
 };
+
+/** Stored shape of `metadata` for game entries. Rows are permanent - change by adding optional keys only. */
+export type GameAuditMetadata = { reason?: string };
 
 interface AuditEntryBase {
   actorId: string;
@@ -69,5 +76,10 @@ export type AuditEntry = AuditEntryBase &
         action: UserModerationAuditAction;
         targetType: 'USER';
         metadata: UserModerationAuditMetadata;
+      }
+    | {
+        action: GameAuditAction;
+        targetType: 'GAME';
+        metadata?: GameAuditMetadata;
       }
   );
