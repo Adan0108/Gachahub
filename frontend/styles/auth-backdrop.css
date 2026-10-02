@@ -85,12 +85,6 @@
   color: var(--text);
 }
 
-.auth-brand span {
-  background: var(--purple);
-  border-color: color-mix(in srgb, var(--purple), white 18%);
-  box-shadow: none;
-}
-
 .auth-back-link:hover {
   color: var(--text);
 }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { FiArrowLeft, FiArrowRight, FiEye, FiEyeOff, FiLock, FiMail, FiUser } from "react-icons/fi";
+import { BrandMark } from "../BrandMark";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { api } from "../../lib/api";
 import { queries } from "../../lib/queries";
@@ -65,7 +66,7 @@ export function AuthForm({ mode }) {
       <section className="auth-card">
         <div className="auth-card-header">
           <Link href="/" className="auth-brand">
-            <span>✦</span>
+            <BrandMark size={38} />
             GachaHub
           </Link>
           <Link href="/" className="auth-back-link">
