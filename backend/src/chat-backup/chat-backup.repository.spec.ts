@@ -4,7 +4,9 @@ jest.mock('../prisma/prisma.service', () => ({
   PrismaService: class {},
 }));
 
+import { ForbiddenException } from '@nestjs/common';
 import { ChatBackupRepository } from './chat-backup.repository';
+import { computeBackupProof } from './replace-proof';
 
 describe('ChatBackupRepository', () => {
   const prisma = {
@@ -38,24 +40,135 @@ describe('ChatBackupRepository', () => {
     );
   });
 
-  it('replaceKey deletes the blobs and swaps the key under the user lock', async () => {
-    const order: string[] = [];
-    prisma.$executeRaw.mockImplementation(() => order.push('lock'));
-    prisma.chatBackupBlob.deleteMany.mockImplementation(() =>
-      order.push('delete'),
-    );
-    prisma.chatBackupKey.update.mockImplementation(() => order.push('update'));
+  describe('verifyProofAndMutate', () => {
+    const SECRET = Buffer.alloc(32, 9);
+    const NONCE = Buffer.alloc(32, 3).toString('base64');
+    const validProof = (secret = SECRET) =>
+      computeBackupProof(secret, 'delete', {
+        userId: 'u1',
+        nonce: NONCE,
+      }).toString('base64');
 
-    await repository.replaceKey('u1', new Uint8Array([1]), new Uint8Array([2]));
+    beforeEach(() => {
+      prisma.chatBackupKey.findUnique.mockResolvedValue({
+        replaceSecret: SECRET,
+      });
+      prisma.chatBackupKey.updateMany.mockResolvedValue({ count: 1 });
+    });
 
-    expect(order).toEqual(['lock', 'delete', 'update']);
-    const [{ data }] = prisma.chatBackupKey.update.mock.calls[0] as [
-      { data: object },
-    ];
-    expect(data).toMatchObject({
-      deletionScheduledAt: null,
-      challengeNonce: null,
-      challengeExpiresAt: null,
+    it('locks, re-reads the secret, consumes the challenge, then mutates - in that order', async () => {
+      const order: string[] = [];
+      prisma.$executeRaw.mockImplementation(() => order.push('lock'));
+      prisma.chatBackupKey.findUnique.mockImplementation(() => {
+        order.push('read-secret');
+        return { replaceSecret: SECRET };
+      });
+      prisma.chatBackupKey.updateMany.mockImplementation(() => {
+        order.push('consume-challenge');
+        return { count: 1 };
+      });
+      const mutate = jest.fn(async () => {
+        order.push('mutate');
+      });
+
+      await repository.verifyProofAndMutate(
+        'u1',
+        { action: 'delete', nonce: NONCE, proof: validProof(), now: new Date() },
+        mutate,
+      );
+
+      expect(order).toEqual(['lock', 'read-secret', 'consume-challenge', 'mutate']);
+      expect(mutate).toHaveBeenCalledWith(prisma, SECRET);
+    });
+
+    it('refuses when there is no stored secret, without consuming the challenge', async () => {
+      prisma.chatBackupKey.findUnique.mockResolvedValue(null);
+      const mutate = jest.fn();
+
+      await expect(
+        repository.verifyProofAndMutate(
+          'u1',
+          { action: 'delete', nonce: NONCE, proof: validProof(), now: new Date() },
+          mutate,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.chatBackupKey.updateMany).not.toHaveBeenCalled();
+      expect(mutate).not.toHaveBeenCalled();
+    });
+
+    it('refuses a replayed, expired or unknown nonce, without mutating', async () => {
+      prisma.chatBackupKey.updateMany.mockResolvedValue({ count: 0 });
+      const mutate = jest.fn();
+
+      await expect(
+        repository.verifyProofAndMutate(
+          'u1',
+          { action: 'delete', nonce: NONCE, proof: validProof(), now: new Date() },
+          mutate,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mutate).not.toHaveBeenCalled();
+    });
+
+    it('refuses a proof that does not match the freshly-read secret, without mutating', async () => {
+      const mutate = jest.fn();
+
+      await expect(
+        repository.verifyProofAndMutate(
+          'u1',
+          {
+            action: 'delete',
+            nonce: NONCE,
+            proof: validProof(Buffer.alloc(32, 1)),
+            now: new Date(),
+          },
+          mutate,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mutate).not.toHaveBeenCalled();
+    });
+
+    it('two interleaved requests: the second sees the first mutation, under the same lock', async () => {
+      // A fake lock queue, like storeWithinQuota's concurrency test below:
+      // each transaction runs to completion before the next starts.
+      let secret = SECRET;
+      let chain: Promise<unknown> = Promise.resolve();
+      prisma.$transaction.mockImplementation(
+        (run: (tx: unknown) => unknown) => {
+          const result = chain.then(() => run(prisma));
+          chain = result.catch(() => undefined);
+          return result;
+        },
+      );
+      prisma.chatBackupKey.findUnique.mockImplementation(() => ({
+        replaceSecret: secret,
+      }));
+      prisma.chatBackupKey.updateMany.mockResolvedValue({ count: 1 });
+
+      const replacement = Buffer.alloc(32, 5);
+      const results = await Promise.allSettled([
+        repository.verifyProofAndMutate(
+          'u1',
+          { action: 'delete', nonce: NONCE, proof: validProof(SECRET), now: new Date() },
+          async () => {
+            secret = replacement;
+          },
+        ),
+        repository.verifyProofAndMutate(
+          'u1',
+          { action: 'delete', nonce: NONCE, proof: validProof(SECRET), now: new Date() },
+          async () => {
+            secret = replacement;
+          },
+        ),
+      ]);
+
+      // Whichever ran second re-read the secret the first one's mutate already
+      // changed, so its proof (computed for the original secret) no longer
+      // matches - it cannot silently act using proof for a stale key.
+      const outcomes = results.map((r) => r.status);
+      expect(outcomes.filter((s) => s === 'fulfilled')).toHaveLength(1);
+      expect(outcomes.filter((s) => s === 'rejected')).toHaveLength(1);
     });
   });
 

@@ -1,3 +1,8 @@
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { MediaService } from './media.service';
 
 describe('MediaService', () => {
@@ -6,6 +11,7 @@ describe('MediaService', () => {
     markDeleted: jest.fn(),
     findManyByIds: jest.fn(),
     markReleaseFailed: jest.fn(),
+    claimForCleanup: jest.fn(),
   };
 
   const cloudinaryService = {
@@ -83,6 +89,83 @@ describe('MediaService', () => {
         'public-1',
         'image',
       );
+    });
+  });
+
+  describe('removePendingUpload', () => {
+    const pending = (status: 'INITIATED' | 'UPLOADED') => ({
+      id: 'upload-1',
+      userId: 'user-1',
+      status,
+      publicId: 'public-1',
+      resourceType: 'IMAGE',
+    });
+
+    it('throws when the upload does not exist', async () => {
+      mediaRepository.findById.mockResolvedValue(null);
+
+      await expect(
+        service.removePendingUpload('upload-1', 'user-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(mediaRepository.claimForCleanup).not.toHaveBeenCalled();
+    });
+
+    it('throws when the caller does not own the upload', async () => {
+      mediaRepository.findById.mockResolvedValue(pending('UPLOADED'));
+
+      await expect(
+        service.removePendingUpload('upload-1', 'someone-else'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mediaRepository.claimForCleanup).not.toHaveBeenCalled();
+    });
+
+    it('throws for an upload that is already ATTACHED or DELETED, without claiming it', async () => {
+      mediaRepository.findById.mockResolvedValue({
+        ...pending('UPLOADED'),
+        status: 'ATTACHED',
+      });
+
+      await expect(
+        service.removePendingUpload('upload-1', 'user-1'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(mediaRepository.claimForCleanup).not.toHaveBeenCalled();
+    });
+
+    it('deletes the cloudinary asset and marks it deleted for an UPLOADED upload', async () => {
+      mediaRepository.findById.mockResolvedValue(pending('UPLOADED'));
+      mediaRepository.claimForCleanup.mockResolvedValue({ count: 1 });
+
+      await service.removePendingUpload('upload-1', 'user-1');
+
+      expect(mediaRepository.claimForCleanup).toHaveBeenCalledWith('upload-1');
+      expect(cloudinaryService.deleteAsset).toHaveBeenCalledWith(
+        'public-1',
+        'image',
+      );
+      expect(mediaRepository.markDeleted).toHaveBeenCalledWith('upload-1');
+    });
+
+    it('never touches cloudinary for an INITIATED upload (nothing was ever uploaded)', async () => {
+      mediaRepository.findById.mockResolvedValue(pending('INITIATED'));
+      mediaRepository.claimForCleanup.mockResolvedValue({ count: 1 });
+
+      await service.removePendingUpload('upload-1', 'user-1');
+
+      expect(cloudinaryService.deleteAsset).not.toHaveBeenCalled();
+      expect(mediaRepository.markDeleted).toHaveBeenCalledWith('upload-1');
+    });
+
+    it('refuses the delete and never touches cloudinary when a concurrent send has already claimed the upload', async () => {
+      // A concurrent attachMediaInTransaction() claim (UPLOADED -> ATTACHED) won
+      // the race between this read and the reservation below.
+      mediaRepository.findById.mockResolvedValue(pending('UPLOADED'));
+      mediaRepository.claimForCleanup.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.removePendingUpload('upload-1', 'user-1'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(cloudinaryService.deleteAsset).not.toHaveBeenCalled();
+      expect(mediaRepository.markDeleted).not.toHaveBeenCalled();
     });
   });
 

@@ -122,12 +122,34 @@ export class ChatBackupService {
         'Backup is already on; replacing its key deletes every stored blob and needs replace: true',
       );
     }
+    if (!dto.nonce || !dto.proof) {
+      throw new ForbiddenException('This needs a nonce and proof');
+    }
 
-    await this.assertProof(userId, existing.replaceSecret, 'replace', dto, {
-      keyCheck: dto.keyCheck,
-      replaceSecret: dto.replaceSecret,
-    });
-    await this.repository.replaceKey(userId, keyCheck, secret);
+    await this.repository.verifyProofAndMutate(
+      userId,
+      {
+        action: 'replace',
+        nonce: dto.nonce,
+        proof: dto.proof,
+        bound: { keyCheck: dto.keyCheck, replaceSecret: dto.replaceSecret },
+        now: new Date(),
+      },
+      async (tx) => {
+        await tx.chatBackupBlob.deleteMany({ where: { userId } });
+        await tx.chatBackupKey.update({
+          where: { userId },
+          data: {
+            keyCheck: keyCheck as Uint8Array<ArrayBuffer>,
+            replaceSecret: secret as Uint8Array<ArrayBuffer>,
+            createdAt: new Date(),
+            deletionScheduledAt: null,
+            challengeNonce: null,
+            challengeExpiresAt: null,
+          },
+        });
+      },
+    );
 
     return { enabled: true };
   }
@@ -147,16 +169,28 @@ export class ChatBackupService {
   /** With a valid proof deletes at once; without one only schedules deletion, which a proof can cancel. */
   async disable(userId: string, dto: DeleteBackupDto) {
     this.rateLimiter.assertCanDestroy(userId);
-    const existing = await this.repository.findKey(userId);
 
     if (dto.nonce || dto.proof) {
-      if (existing) {
-        await this.assertProof(userId, existing.replaceSecret, 'delete', dto);
+      if (!dto.nonce || !dto.proof) {
+        throw new ForbiddenException('This needs a nonce and proof');
       }
-      await this.repository.deleteAll(userId);
+
+      // No unlocked findKey() read here: verifyProofAndMutate re-reads the
+      // secret fresh under the lock, so a backup created after this request
+      // started can never be deleted without its own proof.
+      await this.repository.verifyProofAndMutate(
+        userId,
+        { action: 'delete', nonce: dto.nonce, proof: dto.proof, now: new Date() },
+        async (tx) => {
+          await tx.chatBackupBlob.deleteMany({ where: { userId } });
+          await tx.chatBackupKey.deleteMany({ where: { userId } });
+        },
+      );
 
       return { enabled: false, deletionScheduledFor: null };
     }
+
+    const existing = await this.repository.findKey(userId);
     if (!existing) {
       return { enabled: false, deletionScheduledFor: null };
     }

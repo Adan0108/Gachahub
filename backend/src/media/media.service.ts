@@ -276,6 +276,18 @@ export class MediaService {
       throw new ConflictException('Only unused media uploads can be removed');
     }
 
+    // Reserve the upload atomically before touching Cloudinary: a concurrent
+    // attach (claimUploadsForAttachment) requires status UPLOADED, so once this
+    // claim succeeds the upload can no longer be claimed by a message send -
+    // without it, a send could claim ATTACHED between this read and the
+    // Cloudinary delete below, leaving a committed message pointing at a
+    // destroyed asset.
+    const claimed = await this.mediaRepository.claimForCleanup(upload.id);
+
+    if (claimed.count === 0) {
+      throw new ConflictException('Only unused media uploads can be removed');
+    }
+
     if (upload.status === 'UPLOADED') {
       await this.destroyCloudinaryAsset(upload);
     }

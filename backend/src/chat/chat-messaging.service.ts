@@ -405,6 +405,23 @@ export class ChatMessagingService {
     let message: Awaited<ReturnType<typeof this.chatRepository.createMessage>>;
     try {
       message = await this.prisma.$transaction(async (tx) => {
+        // Authoritative re-check under the same lock a membership change takes:
+        // the participant list read above, outside this transaction, can be
+        // stale by the time this insert runs.
+        const freshParticipants = await this.chatRepository.lockAndFindParticipants(
+          tx,
+          conversationId,
+        );
+        const freshSender = freshParticipants.find(
+          (participant) => participant.userId === senderId,
+        );
+
+        if (!freshSender || freshSender.state !== 'ACTIVE') {
+          throw new ForbiddenException('You cannot send messages here');
+        }
+
+        this.chatAccessService.assertNoMembershipChangePending(freshParticipants);
+
         const created = await this.chatRepository.createMessage(tx, {
           conversationId,
           senderId,
