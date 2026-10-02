@@ -124,13 +124,13 @@ export class GameModerationService {
     return formatGame(result.game);
   }
 
-  /** Admin only (enforced by the controller's guard) - sets the game's soft-delete status. */
+  /** Admin only (checked here via assertIsAdmin, not just the controller's guard) - sets the game's soft-delete status. */
   async archive(gameSlug: string, adminId: string) {
     await this.assertIsAdmin(adminId);
     return this.transitionStatus(gameSlug, adminId, TRANSITIONS.archive);
   }
 
-  /** Admin only (enforced by the controller's guard) - reverses archive(). */
+  /** Admin only (checked here via assertIsAdmin, not just the controller's guard) - reverses archive(). */
   async restore(gameSlug: string, adminId: string) {
     await this.assertIsAdmin(adminId);
     return this.transitionStatus(gameSlug, adminId, TRANSITIONS.restore);

@@ -12,13 +12,7 @@ import { useAdminList } from "../../../hooks/useAdminList";
 import { useToast } from "../../../hooks/useToast";
 import { api } from "../../../lib/api";
 import { queries, queryKeys } from "../../../lib/queries";
-
-const REPORT_STATUS_CLASS = {
-  PENDING: "admin-status-pending",
-  IN_REVIEW: "admin-status-in-review",
-  RESOLVED: "admin-status-resolved",
-  DISMISSED: "admin-status-dismissed",
-};
+import { REPORT_STATUS_CLASS } from "../../../lib/statusTone";
 
 const DECISIONS = {
   RESOLVE: {

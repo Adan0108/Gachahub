@@ -12,11 +12,7 @@ import { useAdminList } from "../../../hooks/useAdminList";
 import { useToast } from "../../../hooks/useToast";
 import { api } from "../../../lib/api";
 import { queries, queryKeys } from "../../../lib/queries";
-
-const CONTENT_STATUS_CLASS = {
-  PUBLISHED: "",
-  HIDDEN: "admin-status-hidden",
-};
+import { CONTENT_STATUS_CLASS } from "../../../lib/statusTone";
 
 const MODES = {
   hide: {

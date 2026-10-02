@@ -1,15 +1,32 @@
 import { keepPreviousData } from "@tanstack/react-query";
 import { api, fallbackCategories, fallbackGame, fallbackGames, fallbackPosts } from "./api";
 
+// Normalizes an unpaginated, bare-array admin endpoint (categories, moderators) into the same
+// { items, meta } shape every paginated admin query already returns, so useAdminList's generic
+// `items: query.data?.items || []` reads correctly for these too.
+function asItemsList(data) {
+  const items = Array.isArray(data) ? data : data?.items || [];
+  return { items, meta: { total: items.length } };
+}
+
 export const queryKeys = {
   health: ["health"],
   home: (search) => ["home", { search }],
   games: (search) => ["games", { search }],
-  adminGames: (search, status) => ["admin", "games", { search, status }],
+  adminGames: {
+    all: ["admin", "games"],
+    list: (search, status) => ["admin", "games", { search, status }],
+  },
   community: (slug) => ["community", slug],
   categories: (slug) => ["community-categories", slug],
-  adminCategories: (slug, active) => ["admin", "categories", slug, { active }],
-  adminModerators: (slug) => ["admin", "moderators", slug],
+  adminCategories: {
+    all: (slug) => ["admin", "categories", slug],
+    list: (slug, active) => ["admin", "categories", slug, { active }],
+  },
+  adminModerators: {
+    all: (slug) => ["admin", "moderators", slug],
+    list: (slug) => ["admin", "moderators", slug],
+  },
   moderatedGames: ["moderated-games"],
   currentUser: ["current-user"],
   myPosts: ["posts", "mine"],
@@ -22,7 +39,7 @@ export const queryKeys = {
   adminOverview: { all: ["admin", "overview"] },
   adminReports: {
     all: ["admin", "reports"],
-    list: (status, page) => ["admin", "reports", { status, page }],
+    list: (status, page, limit = 20) => ["admin", "reports", { status, page, limit }],
   },
   adminUsers: {
     all: ["admin", "users"],
@@ -30,7 +47,11 @@ export const queryKeys = {
   },
   adminContent: {
     all: ["admin", "content"],
-    list: (type, page) => ["admin", "content", { type, page }],
+    list: (type, page, excludeHidden = false, limit = 20) => [
+      "admin",
+      "content",
+      { type, page, excludeHidden, limit },
+    ],
   },
   chatConversations: ["chat", "conversations"],
   chatArchivedConversations: ["chat", "archived"],
@@ -62,7 +83,7 @@ export const queries = {
     staleTime: 30_000,
   }),
   adminGames: (search = "", status = "") => ({
-    queryKey: queryKeys.adminGames(search, status),
+    queryKey: queryKeys.adminGames.list(search, status),
     queryFn: ({ signal }) => api.getGames({ search, status, page: 1, limit: 100 }, { signal }),
     retry: 1,
     staleTime: 15_000,
@@ -80,16 +101,18 @@ export const queries = {
     staleTime: 30_000,
   }),
   adminCategories: (slug, active = "") => ({
-    queryKey: queryKeys.adminCategories(slug, active),
-    queryFn: ({ signal }) =>
-      api.getCategories(slug, active === "" ? {} : { isActive: active }, { signal }),
+    queryKey: queryKeys.adminCategories.list(slug, active),
+    queryFn: async ({ signal }) =>
+      asItemsList(
+        await api.getCategories(slug, active === "" ? {} : { isActive: active }, { signal }),
+      ),
     enabled: Boolean(slug),
     retry: 1,
     staleTime: 15_000,
   }),
   adminModerators: (slug) => ({
-    queryKey: queryKeys.adminModerators(slug),
-    queryFn: ({ signal }) => api.getGameModerators(slug, { signal }),
+    queryKey: queryKeys.adminModerators.list(slug),
+    queryFn: async ({ signal }) => asItemsList(await api.getGameModerators(slug, { signal })),
     enabled: Boolean(slug),
     retry: 1,
     staleTime: 15_000,
@@ -161,9 +184,9 @@ export const queries = {
     retry: 1,
     staleTime: 30_000,
   }),
-  adminReports: (status = "", page = 1) => ({
-    queryKey: queryKeys.adminReports.list(status, page),
-    queryFn: ({ signal }) => api.listReports({ status, page, limit: 20 }, { signal }),
+  adminReports: (status = "", page = 1, limit = 20) => ({
+    queryKey: queryKeys.adminReports.list(status, page, limit),
+    queryFn: ({ signal }) => api.listReports({ status, page, limit }, { signal }),
     placeholderData: keepPreviousData,
     retry: 1,
     staleTime: 15_000,
@@ -175,9 +198,10 @@ export const queries = {
     retry: 1,
     staleTime: 15_000,
   }),
-  adminContent: (type = "", page = 1) => ({
-    queryKey: queryKeys.adminContent.list(type, page),
-    queryFn: ({ signal }) => api.listAdminContent({ type, page, limit: 20 }, { signal }),
+  adminContent: (type = "", page = 1, { excludeHidden = false, limit = 20 } = {}) => ({
+    queryKey: queryKeys.adminContent.list(type, page, excludeHidden, limit),
+    queryFn: ({ signal }) =>
+      api.listAdminContent({ type, page, limit, excludeHidden }, { signal }),
     placeholderData: keepPreviousData,
     retry: 1,
     staleTime: 15_000,

@@ -19,9 +19,10 @@ export function useAdminList(queryFactory, { prefix }) {
   const [filters, setFilters] = useState({});
   const [page, setPage] = useState(1);
   const deferredFilters = useDeferredValue(filters);
+  const { enabled: factoryEnabled = true, ...factory } = queryFactory(deferredFilters, page);
   const query = useQuery({
-    ...queryFactory(deferredFilters, page),
-    enabled: session.isAdmin,
+    ...factory,
+    enabled: session.isAdmin && factoryEnabled,
   });
 
   return {

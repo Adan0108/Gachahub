@@ -12,13 +12,7 @@ import { useAdminList } from "../../../hooks/useAdminList";
 import { useToast } from "../../../hooks/useToast";
 import { api } from "../../../lib/api";
 import { queries, queryKeys } from "../../../lib/queries";
-
-const USER_STATUS_CLASS = {
-  ACTIVE: "",
-  SUSPENDED: "admin-status-suspended",
-  BANNED: "admin-status-banned",
-  DELETED: "admin-status-deleted",
-};
+import { USER_STATUS_CLASS } from "../../../lib/statusTone";
 
 const MODES = {
   restrict: {

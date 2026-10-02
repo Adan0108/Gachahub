@@ -329,13 +329,14 @@ describe('PostsService', () => {
       expect(postsRepository.findByAuthorId).toHaveBeenCalledWith('author-1', {
         page: 1,
         limit: 20,
+        audience: 'self',
         userId: 'viewer-1',
       });
     });
   });
 
   describe('findByAuthorPublic', () => {
-    it('only requests public published posts', async () => {
+    it('requests the public audience', async () => {
       postsRepository.findByAuthorId.mockResolvedValue({
         items: [],
         total: 0,
@@ -346,8 +347,7 @@ describe('PostsService', () => {
       expect(postsRepository.findByAuthorId).toHaveBeenCalledWith('author-1', {
         page: 1,
         limit: 20,
-        visibility: 'PUBLIC',
-        status: 'PUBLISHED',
+        audience: 'public',
         userId: 'viewer-1',
       });
     });

@@ -7,28 +7,32 @@ import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
 import { useRequireAdmin } from "../../../hooks/useRequireAdmin";
 import { queries } from "../../../lib/queries";
-
-const REPORT_STATUS_CLASS = {
-  PENDING: "admin-status-pending",
-  IN_REVIEW: "admin-status-in-review",
-  RESOLVED: "admin-status-resolved",
-  DISMISSED: "admin-status-dismissed",
-};
+import { REPORT_STATUS_CLASS } from "../../../lib/statusTone";
 
 export default function AdminModerationPage() {
   const session = useRequireAdmin();
-  const reports = useQuery({ ...queries.adminReports(), enabled: session.isAdmin });
-  const content = useQuery({ ...queries.adminContent(), enabled: session.isAdmin });
+  // PENDING is the only status that needs triage attention; IN_REVIEW is already claimed.
+  // limit:100 so the preview list only undercounts in an extreme backlog, same bounded-snapshot
+  // philosophy as the Overview dashboard's own top-8 communities/activity.
+  const reports = useQuery({ ...queries.adminReports("PENDING", 1, 100), enabled: session.isAdmin });
+  // Server-side excludeHidden: /admin/content itself still needs to see HIDDEN items to restore them, this hub doesn't.
+  const content = useQuery({
+    ...queries.adminContent("", 1, { excludeHidden: true, limit: 100 }),
+    enabled: session.isAdmin,
+  });
+  // The headline "unresolved reports" number uses the dashboard's own authoritative count
+  // (countOpen, PENDING+IN_REVIEW) rather than this page's own PENDING-only, page-bounded list.
+  const overview = useQuery({ ...queries.adminOverview(), enabled: session.isAdmin });
 
   if (session.isLoading || !session.isAdmin)
     return <AdminState kind="loading" title="Checking admin access" />;
 
-  const loading = reports.isLoading || content.isLoading;
-  const failed = reports.isError || content.isError;
-  const openReports = (reports.data?.items || []).filter((item) => item.status !== "RESOLVED");
-  const flaggedContent = (content.data?.items || []).filter(
-    (item) => item.reportCount > 0 && item.status !== "HIDDEN",
-  );
+  const loading = reports.isLoading || content.isLoading || overview.isLoading;
+  const failed = reports.isError || content.isError || overview.isError;
+  const openReports = reports.data?.items || [];
+  const flaggedContent = content.data?.items || [];
+  const openReportCount =
+    overview.data?.metrics.find((metric) => metric.id === "reports")?.value ?? openReports.length;
 
   return (
     <AdminShell user={session.user}>
@@ -52,14 +56,16 @@ export default function AdminModerationPage() {
           message={
             reports.error?.message ||
             content.error?.message ||
+            overview.error?.message ||
             "Moderation data could not be loaded."
           }
           onRetry={() => {
             reports.refetch();
             content.refetch();
+            overview.refetch();
           }}
         />
-      ) : !openReports.length && !flaggedContent.length ? (
+      ) : !openReportCount && !flaggedContent.length ? (
         <AdminState
           kind="empty"
           title="All queues are clear"
@@ -74,7 +80,7 @@ export default function AdminModerationPage() {
               </span>
               <div>
                 <small>Unresolved reports</small>
-                <strong>{openReports.length}</strong>
+                <strong>{openReportCount}</strong>
               </div>
               <Link href="/admin/reports">
                 Open queue <FiArrowRight />

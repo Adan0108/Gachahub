@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { claimUploadsForAttachment } from '../media/media.repository';
+import { viewablePostWhere } from '../post-visibility/visibility-where';
 
 const postInclude = {
   author: {
@@ -71,34 +72,22 @@ export class PostsRepository {
     });
   }
 
+  // No optional visibility/status with a permissive default - a caller must state whose eyes these posts are for.
   async findByAuthorId(
     authorId: string,
     params: {
       page: number;
       limit: number;
-      visibility?: Prisma.PostWhereInput['visibility'];
-      status?: Prisma.PostWhereInput['status'];
+      audience: 'self' | 'public';
       userId?: string;
     },
   ) {
     const skip = (params.page - 1) * params.limit;
 
-    const where: Prisma.PostWhereInput = {
-      authorId,
-      deletedAt: null,
-
-      ...(params.visibility
-        ? {
-            visibility: params.visibility,
-          }
-        : {}),
-
-      ...(params.status
-        ? {
-            status: params.status,
-          }
-        : {}),
-    };
+    const where: Prisma.PostWhereInput =
+      params.audience === 'public'
+        ? { authorId, ...viewablePostWhere(params.userId) }
+        : { authorId, deletedAt: null };
 
     const [items, total] = await this.prisma.$transaction([
       this.prisma.post.findMany({

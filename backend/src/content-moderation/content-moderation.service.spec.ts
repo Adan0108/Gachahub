@@ -98,7 +98,7 @@ describe('ContentModerationService', () => {
     });
   });
 
-  it('drops a reported target whose row no longer exists', async () => {
+  it('drops a reported target whose row no longer exists, and excludes it from total too', async () => {
     reportsRepository.countAllByTarget.mockResolvedValue([
       { targetType: 'POST', targetId: 'deleted-post', count: 3 },
     ]);
@@ -107,7 +107,9 @@ describe('ContentModerationService', () => {
     const result = await service.listFlagged({ page: 1, limit: 20 });
 
     expect(result.items).toEqual([]);
-    expect(result.meta.total).toBe(1);
+    // Hydration (and the stale-row drop) now happens before total is computed, so a
+    // vanished target no longer inflates total into an upper bound - it's exact.
+    expect(result.meta.total).toBe(0);
   });
 
   it('shows a placeholder title for a reported comment that was soft-deleted', async () => {
@@ -137,6 +139,13 @@ describe('ContentModerationService', () => {
     ]);
     postsRepository.findManyByIdsForModeration.mockResolvedValue([
       {
+        id: 'post-1',
+        title: 'Least reported',
+        status: 'PUBLISHED',
+        author: { name: 'Rover' },
+        game: { slug: 'wuthering-waves' },
+      },
+      {
         id: 'post-2',
         title: 'Most reported',
         status: 'PUBLISHED',
@@ -147,7 +156,11 @@ describe('ContentModerationService', () => {
 
     const result = await service.listFlagged({ page: 1, limit: 1 });
 
+    // Hydrated for the whole filtered set up front, not just this page -
+    // excludeHidden and the stale-target drop both need every row's status
+    // before pagination runs, not after.
     expect(postsRepository.findManyByIdsForModeration).toHaveBeenCalledWith([
+      'post-1',
       'post-2',
     ]);
     expect(result.items).toHaveLength(1);
@@ -192,6 +205,16 @@ describe('ContentModerationService', () => {
       { targetType: 'POST', targetId: 'post-1', count: 5 },
       { targetType: 'COMMENT', targetId: 'comment-1', count: 3 },
     ]);
+    commentsRepository.findManyByIdsForModeration.mockResolvedValue([
+      {
+        id: 'comment-1',
+        content: 'Spam content',
+        status: 'PUBLISHED',
+        deletedAt: null,
+        author: { name: 'Trailblazer' },
+        post: { game: { slug: 'honkai-star-rail' } },
+      },
+    ]);
 
     const result = await service.listFlagged({
       page: 1,
@@ -204,5 +227,39 @@ describe('ContentModerationService', () => {
       'comment-1',
     ]);
     expect(result.meta.total).toBe(1);
+  });
+
+  it('excludes HIDDEN items only when excludeHidden is requested', async () => {
+    reportsRepository.countAllByTarget.mockResolvedValue([
+      { targetType: 'POST', targetId: 'post-1', count: 2 },
+      { targetType: 'POST', targetId: 'post-2', count: 1 },
+    ]);
+    postsRepository.findManyByIdsForModeration.mockResolvedValue([
+      {
+        id: 'post-1',
+        title: 'Still visible',
+        status: 'PUBLISHED',
+        author: { name: 'Rover' },
+        game: { slug: 'wuthering-waves' },
+      },
+      {
+        id: 'post-2',
+        title: 'Already hidden',
+        status: 'HIDDEN',
+        author: { name: 'Rover' },
+        game: { slug: 'wuthering-waves' },
+      },
+    ]);
+
+    const withHidden = await service.listFlagged({ page: 1, limit: 20 });
+    expect(withHidden.items.map((item) => item.id)).toEqual(['post-1', 'post-2']);
+
+    const withoutHidden = await service.listFlagged({
+      page: 1,
+      limit: 20,
+      excludeHidden: true,
+    });
+    expect(withoutHidden.items.map((item) => item.id)).toEqual(['post-1']);
+    expect(withoutHidden.meta.total).toBe(1);
   });
 });

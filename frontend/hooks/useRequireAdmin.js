@@ -2,9 +2,9 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { ADMIN_PREVIEW } from "../lib/api";
 import { useCurrentUser } from "./useCurrentUser";
 
-const ADMIN_PREVIEW = process.env.NEXT_PUBLIC_ADMIN_PREVIEW === "true";
 const previewUser = {
   id: "admin-preview",
   name: "Admin Preview",

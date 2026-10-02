@@ -1,13 +1,14 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { FiArrowLeft, FiEdit2, FiPlus, FiX } from "react-icons/fi";
 import { AdminShell } from "../../../../../components/admin/AdminShell";
+import { AdminQueryBoundary } from "../../../../../components/admin/AdminQueryBoundary";
 import { AdminState } from "../../../../../components/admin/AdminState";
-import { useRequireAdmin } from "../../../../../hooks/useRequireAdmin";
+import { useAdminList } from "../../../../../hooks/useAdminList";
 import { useToast } from "../../../../../hooks/useToast";
 import { api } from "../../../../../lib/api";
 import { queries, queryKeys } from "../../../../../lib/queries";
@@ -177,27 +178,29 @@ function CategoryForm({ category, gameSlug, onClose, onSaved }) {
 export default function AdminCategoriesPage() {
   const { slug: encodedSlug } = useParams();
   const gameSlug = decodeURIComponent(String(encodedSlug || ""));
-  const session = useRequireAdmin();
-  const queryClient = useQueryClient();
   const { notice, showNotice } = useToast(2400);
-  const [active, setActive] = useState("");
   const [selectedCategory, setSelectedCategory] = useState(undefined);
+  const {
+    session,
+    filters,
+    setFilter,
+    items,
+    invalidate,
+    query: categoriesQuery,
+  } = useAdminList((filters) => queries.adminCategories(gameSlug, filters.active), {
+    prefix: queryKeys.adminCategories.all(gameSlug),
+  });
   const community = useQuery({
     ...queries.community(gameSlug),
-    enabled: session.isAdmin && Boolean(gameSlug),
-  });
-  const categories = useQuery({
-    ...queries.adminCategories(gameSlug, active),
     enabled: session.isAdmin && Boolean(gameSlug),
   });
 
   if (session.isLoading || !session.isAdmin)
     return <AdminState kind="loading" title="Checking admin access" />;
 
-  const items = Array.isArray(categories.data) ? categories.data : categories.data?.items || [];
   const closeForm = () => setSelectedCategory(undefined);
   const handleSaved = async (message) => {
-    await queryClient.invalidateQueries({ queryKey: queryKeys.adminCategories(gameSlug, active) });
+    await invalidate();
     closeForm();
     showNotice(message);
   };
@@ -224,8 +227,8 @@ export default function AdminCategoriesPage() {
       <section aria-label="Category filters" className="admin-toolbar admin-toolbar-compact">
         <select
           aria-label="Filter category status"
-          onChange={(event) => setActive(event.target.value)}
-          value={active}
+          onChange={(event) => setFilter("active", event.target.value)}
+          value={filters.active || ""}
         >
           <option value="">All categories</option>
           <option value="true">Active</option>
@@ -233,37 +236,32 @@ export default function AdminCategoriesPage() {
         </select>
         <span>{items.length} categories</span>
       </section>
-      {categories.isLoading || community.isLoading ? (
-        <AdminState
-          kind="loading"
-          title="Loading categories"
-          message="Retrieving community structure."
-        />
-      ) : categories.isError || community.isError ? (
-        <AdminState
-          kind="error"
-          title="Categories unavailable"
-          message={
-            categories.error?.message ||
+      <AdminQueryBoundary
+        isLoading={categoriesQuery.isLoading || community.isLoading}
+        isError={categoriesQuery.isError || community.isError}
+        onRetry={() => {
+          categoriesQuery.refetch();
+          community.refetch();
+        }}
+        loading={{ title: "Loading categories", message: "Retrieving community structure." }}
+        error={{
+          title: "Categories unavailable",
+          message:
+            categoriesQuery.error?.message ||
             community.error?.message ||
-            "The category list could not be loaded."
-          }
-          onRetry={() => {
-            categories.refetch();
-            community.refetch();
-          }}
-        />
-      ) : !items.length ? (
-        <AdminState
-          kind="empty"
-          title="No categories found"
-          message={
-            active
-              ? "Try changing the status filter."
-              : "Create the first category for this community."
-          }
-        />
-      ) : (
+            "The category list could not be loaded.",
+        }}
+        empty={
+          !items.length
+            ? {
+                title: "No categories found",
+                message: filters.active
+                  ? "Try changing the status filter."
+                  : "Create the first category for this community.",
+              }
+            : null
+        }
+      >
         <section className="admin-panel">
           <div className="admin-table-wrap">
             <table className="admin-table">
@@ -314,7 +312,7 @@ export default function AdminCategoriesPage() {
             </table>
           </div>
         </section>
-      )}
+      </AdminQueryBoundary>
       {selectedCategory !== undefined ? (
         <CategoryForm
           category={selectedCategory}

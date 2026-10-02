@@ -1,14 +1,15 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { FiArchive, FiEdit2, FiList, FiPlus, FiRotateCcw, FiSearch, FiX } from "react-icons/fi";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminActionDialog } from "../../../components/admin/AdminActionDialog";
+import { AdminQueryBoundary } from "../../../components/admin/AdminQueryBoundary";
 import { AdminState } from "../../../components/admin/AdminState";
 import { GameBrandingUploader } from "../../../components/admin/GameBrandingUploader";
-import { useRequireAdmin } from "../../../hooks/useRequireAdmin";
+import { useAdminList } from "../../../hooks/useAdminList";
 import { useToast } from "../../../hooks/useToast";
 import { api } from "../../../lib/api";
 import { queries, queryKeys } from "../../../lib/queries";
@@ -206,33 +207,23 @@ function CommunityForm({ game, onClose, onSaved, onBrandingUpdated }) {
 }
 
 export default function AdminCommunitiesPage() {
-  const session = useRequireAdmin();
-  const queryClient = useQueryClient();
   const { notice, showNotice } = useToast(2400);
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
+  const { session, filters, setFilter, items, meta, invalidate, query } = useAdminList(
+    (filters) => queries.adminGames(filters.search, filters.status),
+    { prefix: queryKeys.adminGames.all },
+  );
   const [selectedGame, setSelectedGame] = useState(undefined);
   // { game, action: "archive" | "restore" } - one target for both, since both are just a confirm dialog in front of their own endpoint.
   const [pendingAction, setPendingAction] = useState(null);
-  const games = useQuery({ ...queries.adminGames(search, status), enabled: session.isAdmin });
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setSearch(searchInput.trim()), 300);
-    return () => window.clearTimeout(timer);
-  }, [searchInput]);
-
-  const invalidateGames = () =>
-    queryClient.invalidateQueries({ queryKey: queryKeys.adminGames(search, status) });
 
   const closeForm = () => setSelectedGame(undefined);
   const handleSaved = async (message) => {
-    await invalidateGames();
+    await invalidate();
     closeForm();
     showNotice(message);
   };
   const handleBrandingUpdated = async () => {
-    await invalidateGames();
+    await invalidate();
     showNotice("Branding updated");
   };
 
@@ -242,7 +233,7 @@ export default function AdminCommunitiesPage() {
         ? api.archiveGame(pendingAction.game.slug)
         : api.restoreGame(pendingAction.game.slug),
     onSuccess: async () => {
-      await invalidateGames();
+      await invalidate();
       showNotice(pendingAction.action === "archive" ? "Community archived" : "Community restored");
       setPendingAction(null);
     },
@@ -255,8 +246,6 @@ export default function AdminCommunitiesPage() {
 
   if (session.isLoading || !session.isAdmin)
     return <AdminState kind="loading" title="Checking admin access" />;
-
-  const items = games.data?.items || [];
 
   return (
     <AdminShell user={session.user}>
@@ -279,47 +268,42 @@ export default function AdminCommunitiesPage() {
           <FiSearch aria-hidden="true" />
           <input
             aria-label="Search communities"
-            onChange={(event) => setSearchInput(event.target.value)}
+            onChange={(event) => setFilter("search", event.target.value)}
             placeholder="Search name or slug"
-            value={searchInput}
+            value={filters.search || ""}
           />
         </label>
         <select
           aria-label="Filter by status"
-          onChange={(event) => setStatus(event.target.value)}
-          value={status}
+          onChange={(event) => setFilter("status", event.target.value)}
+          value={filters.status || ""}
         >
           <option value="">All statuses</option>
           <option value="ACTIVE">Active</option>
           <option value="HIDDEN">Hidden</option>
           <option value="ARCHIVED">Archived</option>
         </select>
-        <span>{games.data?.meta?.total ?? 0} communities</span>
+        <span>{meta?.total ?? 0} communities</span>
       </section>
-      {games.isLoading ? (
-        <AdminState
-          kind="loading"
-          title="Loading communities"
-          message="Retrieving community records."
-        />
-      ) : games.isError ? (
-        <AdminState
-          kind="error"
-          title="Communities unavailable"
-          message={games.error?.message || "The game list could not be loaded."}
-          onRetry={() => games.refetch()}
-        />
-      ) : !items.length ? (
-        <AdminState
-          kind="empty"
-          title="No communities found"
-          message={
-            search || status
-              ? "Try changing the current search or status filter."
-              : "Create the first official game community."
-          }
-        />
-      ) : (
+      <AdminQueryBoundary
+        query={query}
+        loading={{ title: "Loading communities", message: "Retrieving community records." }}
+        error={{
+          title: "Communities unavailable",
+          message: query.error?.message || "The game list could not be loaded.",
+        }}
+        empty={
+          !items.length
+            ? {
+                title: "No communities found",
+                message:
+                  filters.search || filters.status
+                    ? "Try changing the current search or status filter."
+                    : "Create the first official game community.",
+              }
+            : null
+        }
+      >
         <section className="admin-panel">
           <div className="admin-table-wrap">
             <table className="admin-table">
@@ -402,7 +386,7 @@ export default function AdminCommunitiesPage() {
             </table>
           </div>
         </section>
-      )}
+      </AdminQueryBoundary>
       {selectedGame !== undefined ? (
         <CommunityForm
           game={selectedGame}

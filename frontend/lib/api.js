@@ -3,8 +3,10 @@ import { mockCategories, mockGames, posts } from "./mockData";
 export const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000"
 ).replace(/\/$/, "");
-export const ADMIN_PREVIEW = process.env.NEXT_PUBLIC_ADMIN_PREVIEW === "true";
-export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true" || ADMIN_PREVIEW;
+// Dev-only: a production build must never be able to fake an admin session or the API layer.
+const previewAllowed = process.env.NODE_ENV !== "production";
+export const ADMIN_PREVIEW = previewAllowed && process.env.NEXT_PUBLIC_ADMIN_PREVIEW === "true";
+export const USE_MOCKS = previewAllowed && process.env.NEXT_PUBLIC_USE_MOCKS === "true";
 
 export const backendRoutes = {
   health: '/health',

@@ -1,10 +1,12 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { FiAlertTriangle, FiPlus, FiTrash2, FiUserCheck, FiX } from "react-icons/fi";
+import { AdminQueryBoundary } from "../../../components/admin/AdminQueryBoundary";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
+import { useAdminList } from "../../../hooks/useAdminList";
 import { useRequireAdmin } from "../../../hooks/useRequireAdmin";
 import { useToast } from "../../../hooks/useToast";
 import { api } from "../../../lib/api";
@@ -179,28 +181,27 @@ function RemovalDialog({ assignment, game, onClose, onRemoved }) {
 }
 
 export default function AdminModeratorsPage() {
-  const session = useRequireAdmin();
-  const queryClient = useQueryClient();
   const { notice, showNotice } = useToast(2400);
   const [gameSlug, setGameSlug] = useState("");
   const [assigning, setAssigning] = useState(false);
   const [removing, setRemoving] = useState(null);
+  const session = useRequireAdmin();
   const games = useQuery({ ...queries.adminGames("", ""), enabled: session.isAdmin });
   const selectedGameSlug = gameSlug || games.data?.items?.[0]?.slug || "";
-  const moderators = useQuery({
-    ...queries.adminModerators(selectedGameSlug),
-    enabled: session.isAdmin && Boolean(selectedGameSlug),
+  const {
+    items: assignments,
+    invalidate,
+    query: moderators,
+  } = useAdminList(() => queries.adminModerators(selectedGameSlug), {
+    prefix: queryKeys.adminModerators.all(selectedGameSlug),
   });
 
   if (session.isLoading || !session.isAdmin)
     return <AdminState kind="loading" title="Checking admin access" />;
 
   const selectedGame = games.data?.items?.find((game) => game.slug === selectedGameSlug);
-  const assignments = Array.isArray(moderators.data)
-    ? moderators.data
-    : moderators.data?.items || [];
   const refresh = async (message) => {
-    await queryClient.invalidateQueries({ queryKey: queryKeys.adminModerators(selectedGameSlug) });
+    await invalidate();
     setAssigning(false);
     setRemoving(null);
     showNotice(message);
@@ -261,26 +262,22 @@ export default function AdminModeratorsPage() {
               <FiUserCheck /> Moderator permissions apply only to the selected game.
             </p>
           </section>
-          {moderators.isLoading || !selectedGameSlug ? (
-            <AdminState
-              kind="loading"
-              title="Loading moderators"
-              message="Retrieving scoped assignments."
-            />
-          ) : moderators.isError ? (
-            <AdminState
-              kind="error"
-              title="Moderators unavailable"
-              message={moderators.error?.message || "Assignments could not be loaded."}
-              onRetry={() => moderators.refetch()}
-            />
-          ) : !assignments.length ? (
-            <AdminState
-              kind="empty"
-              title="No moderators assigned"
-              message={`Assign the first moderator for ${selectedGame?.name || "this community"}.`}
-            />
-          ) : (
+          <AdminQueryBoundary
+            query={moderators}
+            loading={{ title: "Loading moderators", message: "Retrieving scoped assignments." }}
+            error={{
+              title: "Moderators unavailable",
+              message: moderators.error?.message || "Assignments could not be loaded.",
+            }}
+            empty={
+              !assignments.length
+                ? {
+                    title: "No moderators assigned",
+                    message: `Assign the first moderator for ${selectedGame?.name || "this community"}.`,
+                  }
+                : null
+            }
+          >
             <section className="admin-panel">
               <div className="admin-table-wrap">
                 <table className="admin-table">
@@ -339,7 +336,7 @@ export default function AdminModeratorsPage() {
                 </table>
               </div>
             </section>
-          )}
+          </AdminQueryBoundary>
         </>
       )}
       {assigning && selectedGame ? (

@@ -166,6 +166,7 @@ export class PostsService {
     const result = await this.postsRepository.findByAuthorId(authorId, {
       page,
       limit,
+      audience: 'self',
       userId,
     });
 
@@ -185,8 +186,7 @@ export class PostsService {
     const result = await this.postsRepository.findByAuthorId(authorId, {
       page,
       limit,
-      visibility: 'PUBLIC',
-      status: 'PUBLISHED',
+      audience: 'public',
       userId,
     });
 

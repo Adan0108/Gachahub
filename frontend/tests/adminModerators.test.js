@@ -44,10 +44,12 @@ describe("admin moderator API", () => {
     );
   });
 
-  it("uses local moderator responses in admin preview mode", async () => {
+  it("uses local moderator responses when admin preview and mocks are both explicitly enabled", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    // ADMIN_PREVIEW no longer implies USE_MOCKS - each opts in separately.
     vi.stubEnv("NEXT_PUBLIC_ADMIN_PREVIEW", "true");
+    vi.stubEnv("NEXT_PUBLIC_USE_MOCKS", "true");
     const { api } = await import("../lib/api");
 
     const moderators = await api.getGameModerators("genshin-impact");
@@ -58,5 +60,16 @@ describe("admin moderator API", () => {
     expect(moderators).toEqual([]);
     expect(assigned.user).toMatchObject({ email: "mod@example.com", status: "ACTIVE" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("admin preview alone does not enable mocks - the two flags are independent", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => [] });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("NEXT_PUBLIC_ADMIN_PREVIEW", "true");
+    const { api } = await import("../lib/api");
+
+    await api.getGameModerators("genshin-impact");
+
+    expect(fetchMock).toHaveBeenCalled();
   });
 });
