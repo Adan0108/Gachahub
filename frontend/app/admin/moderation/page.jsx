@@ -5,9 +5,9 @@ import Link from "next/link";
 import { FiAlertTriangle, FiArrowRight, FiFileText } from "react-icons/fi";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
-import { useRequireAdmin } from "../../../hooks/useRequireAdmin";
+import { useRequireAdmin } from "../../../hooks/admin/useRequireAdmin";
 import { queries } from "../../../lib/queries";
-import { REPORT_STATUS_CLASS } from "../../../lib/statusTone";
+import { REPORT_STATUS_CLASS } from "../../../lib/admin/statusTone";
 
 export default function AdminModerationPage() {
   const session = useRequireAdmin();

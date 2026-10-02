@@ -8,7 +8,7 @@ import { FiArrowLeft, FiEdit2, FiPlus, FiX } from "react-icons/fi";
 import { AdminShell } from "../../../../../components/admin/AdminShell";
 import { AdminQueryBoundary } from "../../../../../components/admin/AdminQueryBoundary";
 import { AdminState } from "../../../../../components/admin/AdminState";
-import { useAdminList } from "../../../../../hooks/useAdminList";
+import { useAdminList } from "../../../../../hooks/admin/useAdminList";
 import { useToast } from "../../../../../hooks/useToast";
 import { api } from "../../../../../lib/api";
 import { queries, queryKeys } from "../../../../../lib/queries";

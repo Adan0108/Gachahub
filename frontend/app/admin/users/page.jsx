@@ -8,11 +8,11 @@ import { AdminPagination } from "../../../components/admin/AdminPagination";
 import { AdminQueryBoundary } from "../../../components/admin/AdminQueryBoundary";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
-import { useAdminList } from "../../../hooks/useAdminList";
+import { useAdminList } from "../../../hooks/admin/useAdminList";
 import { useToast } from "../../../hooks/useToast";
 import { api } from "../../../lib/api";
 import { queries, queryKeys } from "../../../lib/queries";
-import { USER_STATUS_CLASS } from "../../../lib/statusTone";
+import { USER_STATUS_CLASS } from "../../../lib/admin/statusTone";
 
 const MODES = {
   restrict: {

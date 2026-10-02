@@ -8,7 +8,7 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/admin/communities",
 }));
 
-vi.mock("../hooks/useRequireAdmin", () => ({
+vi.mock("../hooks/admin/useRequireAdmin", () => ({
   useRequireAdmin: () => ({
     user: { id: "admin-1", name: "Admin" },
     isAdmin: true,

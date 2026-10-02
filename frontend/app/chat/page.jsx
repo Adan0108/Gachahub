@@ -23,25 +23,25 @@ import {
   FiX,
 } from "react-icons/fi";
 import { QueryNotice } from "../../components/QueryNotice";
-import { ConversationInfoPanel } from "../../components/ConversationInfoPanel";
-import { GroupSettingsModal } from "../../components/GroupSettingsModal";
-import { SafetyNumberModal } from "../../components/SafetyNumberModal";
-import { SafetyChangedBanner } from "../../components/SafetyStatus";
-import { UserPicker } from "../../components/UserPicker";
-import { DevicesModal } from "../../components/DevicesModal";
-import { ChatBackupModal } from "../../components/ChatBackupModal";
-import { ThreadRow } from "../../components/ThreadRow";
-import { AttachmentComposerTray } from "../../components/AttachmentComposerTray";
-import { AttachmentLightbox } from "../../components/AttachmentLightbox";
-import { PendingContent } from "../../components/EnvelopeContent";
+import { ConversationInfoPanel } from "../../components/chat/ConversationInfoPanel";
+import { GroupSettingsModal } from "../../components/chat/GroupSettingsModal";
+import { SafetyNumberModal } from "../../components/chat/SafetyNumberModal";
+import { SafetyChangedBanner } from "../../components/chat/SafetyStatus";
+import { UserPicker } from "../../components/chat/UserPicker";
+import { DevicesModal } from "../../components/chat/DevicesModal";
+import { ChatBackupModal } from "../../components/chat/ChatBackupModal";
+import { ThreadRow } from "../../components/chat/ThreadRow";
+import { AttachmentComposerTray } from "../../components/chat/AttachmentComposerTray";
+import { AttachmentLightbox } from "../../components/chat/AttachmentLightbox";
+import { PendingContent } from "../../components/chat/EnvelopeContent";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
-import { useAttachmentPicker } from "../../hooks/useAttachmentPicker";
-import { useDeviceIdentity } from "../../hooks/useDeviceIdentity";
-import { useSyncEngine } from "../../hooks/useSyncEngine";
-import { useChatBackup } from "../../hooks/useChatBackup";
-import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/useFloatingPosition";
-import { useMenuDismiss } from "../../hooks/useMenuDismiss";
-import { useThreadData } from "../../hooks/useThreadData";
+import { useAttachmentPicker } from "../../hooks/chat/useAttachmentPicker";
+import { useDeviceIdentity } from "../../hooks/chat/useDeviceIdentity";
+import { useSyncEngine } from "../../hooks/chat/useSyncEngine";
+import { useChatBackup } from "../../hooks/chat/useChatBackup";
+import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
+import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
+import { useThreadData } from "../../hooks/chat/useThreadData";
 import { sendEncryptedChatMessage } from "../../lib/mls/messaging/sendEncryptedMessage";
 import { sendAttachmentsWithCache } from "../../lib/mls/messaging/sendEncryptedAttachment";
 import {
@@ -52,7 +52,7 @@ import {
 import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightboxContext";
 import { api } from "../../lib/api";
 import { queries, queryKeys } from "../../lib/queries";
-import { typingSignal } from "../../lib/chatTypingSignal";
+import { typingSignal } from "../../lib/chat/chatTypingSignal";
 import {
   activeMembers,
   conversationDisplayName,
@@ -61,11 +61,11 @@ import {
   myParticipant,
   otherActiveMemberIds,
   participantUser,
-} from "../../lib/chatDisplay";
+} from "../../lib/chat/chatDisplay";
 import { relativeTime } from "../../lib/time";
-import { threadItemKey, withOptimisticDelete } from "../../lib/chatThread";
-import { withOptimisticReaction } from "../../lib/chatReactions";
-import { getHiddenMessageIds, hideMessageForMe, unhideMessageForMe } from "../../lib/chatHiddenMessages";
+import { threadItemKey, withOptimisticDelete } from "../../lib/chat/chatThread";
+import { withOptimisticReaction } from "../../lib/chat/chatReactions";
+import { getHiddenMessageIds, hideMessageForMe, unhideMessageForMe } from "../../lib/chat/chatHiddenMessages";
 
 function ChatSkeletonRow() {
   return (

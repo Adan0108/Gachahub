@@ -1,0 +1,111 @@
+/* Explore, summaries, and lore pages */
+.explore-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+}
+
+.community-grid.compact {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.filter-panel {
+  position: sticky;
+  top: 92px;
+  height: max-content;
+}
+
+.chips.tall {
+  align-content: start;
+}
+
+.chips.tall span {
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  color: #c3ccef;
+  font-weight: 750;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.chips.tall span:hover {
+  transform: translateY(-1px);
+  color: #fff;
+  border-color: #8e70e8;
+  background: #262d50;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(190px, 1fr));
+  gap: 18px;
+}
+
+.summary-card {
+  min-height: 220px;
+}
+
+.summary-card p {
+  line-height: 1.65;
+}
+
+.summary-meter {
+  height: 8px;
+  background: #202846;
+  border-radius: 999px;
+  margin-top: 22px;
+  overflow: hidden;
+}
+
+.summary-meter i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #69e5ff, #9c6cff);
+  border-radius: inherit;
+}
+
+.lore-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 18px;
+}
+
+.lore-card {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 18px;
+  align-items: stretch;
+}
+
+.lore-card > .art {
+  min-height: 190px;
+  border-radius: 16px;
+}
+
+.lore-card h3 {
+  font-size: 22px;
+  margin: 4px 0 8px;
+}
+
+.lore-card p {
+  color: #b9c0d7;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.summary-hero {
+  background: linear-gradient(120deg, #101c37, #151027 55%, #241438);
+}
+
+.explore-hero {
+  background: linear-gradient(120deg, #102236, #11142c 55%, #152845);
+}
+
+.lore-hero {
+  background: linear-gradient(120deg, #17132f, #102037 55%, #251331);
+}
+

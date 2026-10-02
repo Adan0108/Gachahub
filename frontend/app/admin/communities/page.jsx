@@ -9,7 +9,7 @@ import { AdminActionDialog } from "../../../components/admin/AdminActionDialog";
 import { AdminQueryBoundary } from "../../../components/admin/AdminQueryBoundary";
 import { AdminState } from "../../../components/admin/AdminState";
 import { GameBrandingUploader } from "../../../components/admin/GameBrandingUploader";
-import { useAdminList } from "../../../hooks/useAdminList";
+import { useAdminList } from "../../../hooks/admin/useAdminList";
 import { useToast } from "../../../hooks/useToast";
 import { api } from "../../../lib/api";
 import { queries, queryKeys } from "../../../lib/queries";

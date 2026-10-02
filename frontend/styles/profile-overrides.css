@@ -1,0 +1,44 @@
+/* Profile page */
+.profile-hero {
+  height: 250px;
+}
+
+.profile-main h1 {
+  font-size: 34px;
+}
+
+.profile-main p,
+.profile-main blockquote {
+  font-size: 13px;
+}
+
+.profile-stats b {
+  font-size: 24px;
+}
+
+.profile-stats span {
+  font-size: 12px;
+}
+
+.studio-tools,
+.canvas-settings {
+  border-radius: 18px;
+}
+
+.studio-title {
+  font-size: 14px;
+}
+
+.studio-tools > small,
+.studio-tools > button,
+.canvas-settings label,
+.toggle-row,
+.segmented button,
+.canvas-settings select {
+  font-size: 12px;
+}
+
+.build-canvas {
+  width: min(100%, 980px);
+}
+
