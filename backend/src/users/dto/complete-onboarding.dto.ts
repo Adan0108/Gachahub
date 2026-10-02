@@ -2,8 +2,16 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsString, Length, Matches } from 'class-validator';
 
-/** Letters, digits, `_` and `-` only, 3-20 chars - case-insensitive uniqueness (citext) keeps the casing the user picks. */
-export const USERNAME_PATTERN = /^[A-Za-z0-9_-]{3,20}$/;
+/**
+ * Letters, digits, `_` and `-`, 3-20 chars - case-insensitive uniqueness (citext) keeps the
+ * casing the user picks. Must start and end with a letter or digit, and never two separators
+ * in a row (`(?!.*[_-]{2,})`) - an explicit call, not an accident: `-bob`, `bob-`, `---` and
+ * `a--b` are all rejected, matching Discord/GitHub's own handle rules.
+ */
+export const USERNAME_PATTERN =
+  /^(?=.{3,20}$)[A-Za-z0-9](?!.*[_-]{2,})[A-Za-z0-9_-]*[A-Za-z0-9]$/;
+export const USERNAME_HINT =
+  '3-20 characters: letters, digits, "_" and "-", starting and ending with a letter or digit, no "__" or "--".';
 
 export class CompleteOnboardingDto {
   @ApiProperty({ description: 'Display name shown across the app.' })
@@ -14,14 +22,8 @@ export class CompleteOnboardingDto {
   @Length(2, 50)
   name: string;
 
-  @ApiProperty({
-    description:
-      'Unique handle, 3-20 chars: letters, digits, "_" and "-" only.',
-  })
+  @ApiProperty({ description: USERNAME_HINT })
   @IsString()
-  @Matches(USERNAME_PATTERN, {
-    message:
-      'username must be 3-20 characters: letters, digits, "_" and "-" only',
-  })
+  @Matches(USERNAME_PATTERN, { message: `username must be ${USERNAME_HINT}` })
   username: string;
 }

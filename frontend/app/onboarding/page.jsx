@@ -7,9 +7,12 @@ import { useEffect, useState } from "react";
 import { FiArrowRight, FiAtSign, FiUser } from "react-icons/fi";
 import { useRequireAuth } from "../../hooks/useRequireAuth";
 import { api } from "../../lib/api";
+import { CHAT_BACKUP_QUERY_ROOT } from "../../lib/backup/backupQueryKeys";
+import "../../lib/backup/backupSessionCleanup";
 import { queryKeys } from "../../lib/queries";
+import { runSessionCleanups } from "../../lib/sessionCleanup";
+import { USERNAME_HINT, USERNAME_PATTERN } from "../../lib/username";
 
-const USERNAME_PATTERN = /^[A-Za-z0-9_-]{3,20}$/;
 const AVAILABILITY_DEBOUNCE_MS = 400;
 
 export default function OnboardingPage() {
@@ -21,13 +24,18 @@ export default function OnboardingPage() {
   const [name, setName] = useState(null);
   const [username, setUsername] = useState("");
   const [error, setError] = useState("");
-  // "idle" | "checking" | "available" | "taken"
-  const [availability, setAvailability] = useState("idle");
+  // Keyed by the username it was computed for, so a result for a now-superseded handle is never read as current.
+  const [availabilityResult, setAvailabilityResult] = useState({
+    forUsername: "",
+    status: "idle",
+  });
 
   const displayName = name ?? session.user?.name ?? "";
   const usernameFormatValid = USERNAME_PATTERN.test(username);
-  const canSubmit =
-    displayName.trim().length >= 2 && usernameFormatValid && availability === "available";
+  const availability =
+    availabilityResult.forUsername === username ? availabilityResult.status : "idle";
+  // Availability is advisory, not authoritative (the DB unique index is); only a known-taken handle blocks submit.
+  const canSubmit = displayName.trim().length >= 2 && usernameFormatValid && availability !== "taken";
 
   // Already done (e.g. a stale tab, or navigating back here after completing it) - leave.
   useEffect(() => {
@@ -35,20 +43,23 @@ export default function OnboardingPage() {
   }, [router, session.isLoading, session.user]);
 
   // Debounced live availability check - no point calling the backend on every keystroke.
-  // A stale "available"/"taken" from a previous, now-invalid username is harmless: every
-  // render below only shows it when usernameFormatValid is also true.
   useEffect(() => {
     if (!usernameFormatValid) return undefined;
 
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       if (cancelled) return;
-      setAvailability("checking");
+      setAvailabilityResult({ forUsername: username, status: "checking" });
       try {
         const result = await api.checkUsernameAvailable(username);
-        if (!cancelled) setAvailability(result.available ? "available" : "taken");
+        if (!cancelled) {
+          setAvailabilityResult({
+            forUsername: username,
+            status: result.available ? "available" : "taken",
+          });
+        }
       } catch {
-        if (!cancelled) setAvailability("idle");
+        if (!cancelled) setAvailabilityResult({ forUsername: username, status: "idle" });
       }
     }, AVAILABILITY_DEBOUNCE_MS);
 
@@ -71,6 +82,17 @@ export default function OnboardingPage() {
       router.replace("/");
     },
     onError: (nextError) => setError(nextError.message || "Could not save your profile"),
+  });
+
+  // This page is a mandatory interstitial - it needs its own exit.
+  const signOut = useMutation({
+    mutationFn: api.signOut,
+    onSuccess: async () => {
+      await runSessionCleanups();
+      queryClient.setQueryData(queryKeys.currentUser, null);
+      queryClient.removeQueries({ queryKey: CHAT_BACKUP_QUERY_ROOT });
+      router.push("/");
+    },
   });
 
   const submit = (event) => {
@@ -135,19 +157,31 @@ export default function OnboardingPage() {
             </span>
           </label>
           {username.length > 0 && !usernameFormatValid && (
-            <p className="auth-field-hint">3-20 characters: letters, digits, "_" and "-" only.</p>
+            <p className="auth-field-hint" role="alert">
+              {USERNAME_HINT}
+            </p>
           )}
           {usernameFormatValid && availability === "checking" && (
-            <p className="auth-field-hint">Checking availability...</p>
+            <p className="auth-field-hint" aria-live="polite">
+              Checking availability...
+            </p>
           )}
           {usernameFormatValid && availability === "available" && (
-            <p className="auth-field-hint available">@{username} is available.</p>
+            <p className="auth-field-hint available" aria-live="polite">
+              @{username} is available.
+            </p>
           )}
           {usernameFormatValid && availability === "taken" && (
-            <p className="auth-field-hint taken">@{username} is already taken.</p>
+            <p className="auth-field-hint taken" role="alert">
+              @{username} is already taken.
+            </p>
           )}
 
-          {error && <div className="auth-message error">{error}</div>}
+          {error && (
+            <div className="auth-message error" role="alert">
+              {error}
+            </div>
+          )}
 
           <button
             className="primary auth-submit"
@@ -158,6 +192,15 @@ export default function OnboardingPage() {
             <FiArrowRight />
           </button>
         </form>
+
+        <button
+          className="auth-switch onboarding-signout"
+          disabled={signOut.isPending}
+          onClick={() => signOut.mutate()}
+          type="button"
+        >
+          {signOut.isPending ? "Signing out..." : "Sign out instead"}
+        </button>
       </section>
     </main>
   );

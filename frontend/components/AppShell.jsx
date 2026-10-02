@@ -99,10 +99,7 @@ export function AppShell({ children, initialTheme = "dark" }) {
   const chat = pathname.startsWith("/chat");
   const { user, isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
 
-  // Global one-time gate: an authenticated account that hasn't claimed a name/handle
-  // yet is sent to onboarding from anywhere in the app, not just pages that opt in -
-  // this is the only chokepoint every route passes through (mounted once in
-  // app/layout.jsx), matching how useRequireAuth/useRequireAdmin gate individual pages.
+  // Global one-time onboarding gate (mounted once here, so it covers every route); /admin is exempt since AdminShell has its own useRequireAdmin gate, and `=== false` (not `!user?.onboarded`) fails open on a missing/unexpected field instead of trapping every signed-in user here.
   useEffect(() => {
     if (isSessionLoading || !isAuthenticated || onboarding || admin) return;
     if (user?.onboarded === false) router.replace("/onboarding");
