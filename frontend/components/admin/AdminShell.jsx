@@ -12,6 +12,7 @@ import {
   FiShield,
   FiUsers,
 } from "react-icons/fi";
+import { BrandMark } from "../BrandMark";
 
 const navigation = [
   { href: "/admin", label: "Overview", icon: FiGrid, exact: true },
@@ -30,7 +31,7 @@ export function AdminShell({ user, children }) {
     <div className="admin-shell">
       <aside className="admin-sidebar">
         <div className="admin-brand">
-          <span aria-hidden="true">G</span>
+          <BrandMark size={36} />
           <div>
             <b>GachaHub</b>
             <small>Admin console</small>
