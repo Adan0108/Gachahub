@@ -1,0 +1,58 @@
+/* Font imports */
+@import url("https://fonts.googleapis.com/css2?family=Barlow:wght@600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap");
+
+/* Base tokens */
+:root {
+  --bg: #0f1117;
+  --panel: #161a22;
+  --panel2: #1f2430;
+  --line: #2d3442;
+  --text: #f2f4f8;
+  --muted: #a8b0cb;
+  --muted-strong: #c5cbe0;
+  --purple: #7c5cff;
+  --cyan: #5bd6ff;
+  --pink: #ff7abf;
+  --chat-bubble-mine: #2f8fef;
+  --sidebar: 222px;
+  --content-max: 1320px;
+  --chat-radius: 12px;
+  --chat-bubble-radius: 14px;
+  color-scheme: dark;
+
+  /* Admin console palette - shared by .admin-shell and any page (e.g. .moderator-page) reusing its components. */
+  --admin-bg: #0f1117;
+  --admin-panel: #161a22;
+  --admin-panel-raised: #1b202a;
+  --admin-line: #2d3442;
+  --admin-text: #f5f6fa;
+  --admin-muted: #929aaa;
+}
+
+/* Reset and base elements */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body, "Source Sans 3", "Segoe UI", Arial, sans-serif);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+

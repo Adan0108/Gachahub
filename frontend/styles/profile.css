@@ -1,0 +1,274 @@
+/* Profile page */
+.profile-hero {
+  height: 190px;
+  position: relative;
+  border: 1px solid #39436b;
+  border-radius: 8px 8px 0 0;
+  overflow: hidden;
+}
+
+.profile-hero > .art {
+  height: 100%;
+}
+
+.profile-hero > .art .silhouette {
+  font-size: 200px;
+  right: 10%;
+  bottom: -80%;
+}
+
+.edit-profile {
+  position: absolute;
+  right: 16px;
+  top: 14px;
+  border: 1px solid #4e577d;
+  background: #11152b99;
+  border-radius: 5px;
+  padding: 6px 10px;
+  font-size: 9px;
+}
+
+.profile-main {
+  position: absolute;
+  left: 28px;
+  bottom: 22px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.profile-avatar {
+  width: 86px;
+  height: 86px;
+  border-radius: 50%;
+  border: 3px solid #c5caff;
+  overflow: hidden;
+}
+
+.profile-avatar > .art {
+  height: 100%;
+}
+
+.profile-avatar .silhouette {
+  font-size: 50px;
+  right: 28%;
+  bottom: 12%;
+}
+
+.profile-main h1 {
+  font-size: 21px;
+  margin: 0;
+}
+
+.profile-main p,
+.profile-main blockquote {
+  font-size: 9px;
+  margin: 4px 0;
+  color: #b5bdd3;
+}
+
+.profile-main blockquote {
+  font-style: italic;
+}
+
+.profile-user-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-user-id code {
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--panel2);
+  color: var(--muted-strong);
+  font-size: 9px;
+}
+
+.profile-user-id button {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--purple);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.social {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.social button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--panel2);
+  color: var(--muted-strong);
+  transition:
+    transform var(--motion-fast) var(--motion-ease),
+    color var(--motion-base) ease,
+    border-color var(--motion-base) ease,
+    background-color var(--motion-base) ease;
+}
+
+.social button:hover {
+  transform: translateY(-1px);
+  border-color: var(--purple);
+  background: color-mix(in srgb, var(--purple), transparent 88%);
+  color: var(--text);
+}
+
+.social button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+  transform: none;
+}
+
+.profile-stats {
+  height: 115px;
+  display: flex;
+  align-items: center;
+  gap: 55px;
+  padding: 10px 28px;
+  border: 1px solid #222a4b;
+  background: #0b0f20;
+  position: relative;
+}
+
+.profile-stats > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.profile-stats b {
+  font-size: 17px;
+}
+
+.profile-stats span {
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.reputation {
+  margin-left: auto;
+  width: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #3b4163;
+  background: #11152a;
+  padding: 14px;
+}
+
+.reputation strong {
+  display: block;
+  font-size: 24px;
+}
+
+.reputation b {
+  display: block;
+  font-size: 9px;
+  color: #ffc56e;
+}
+
+.rank-gem {
+  font-size: 48px;
+  color: #9b7eff;
+}
+
+.progress {
+  width: 155px;
+  height: 5px;
+  background: #222a48;
+  margin: 8px 0;
+}
+
+.progress i {
+  display: block;
+  width: 68%;
+  height: 100%;
+  background: linear-gradient(90deg, #6b3ce6, #b15cff);
+}
+
+.leader > span {
+  display: grid;
+  place-items: center;
+  width: 37px;
+  height: 37px;
+  border-radius: 5px;
+}
+
+.leader > div {
+  flex: 1;
+}
+
+.leader strong {
+  font-size: 12px;
+  color: #e6b85d;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: #02030acc;
+  display: grid;
+  place-items: center;
+  z-index: 50;
+}
+
+.modal {
+  width: min(400px, 90vw);
+  background: #10152b;
+  border: 1px solid #4b5685;
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 20px 70px #000;
+}
+
+.modal h2 {
+  margin: 0;
+}
+
+.modal label {
+  display: block;
+  font-size: 11px;
+  margin-top: 15px;
+}
+
+.modal input,
+.modal textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  background: #090c1b;
+  border: 1px solid #343c62;
+  padding: 10px;
+  border-radius: 5px;
+}
+
+.modal textarea {
+  height: 80px;
+  resize: none;
+}
+
+.modal .primary {
+  margin-top: 16px;
+}
+
+.modal .panel-head button {
+  border: 0;
+  background: none;
+}
+
+.menu-btn,
+.mobile-close,
+.scrim {
+  display: none;
+}
+

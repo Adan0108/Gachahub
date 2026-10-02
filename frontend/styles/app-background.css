@@ -1,0 +1,73 @@
+/* Main app background */
+.app-shell {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(
+      circle at 82% 12%,
+      color-mix(in srgb, var(--cyan), transparent 78%),
+      transparent 30%
+    ),
+    radial-gradient(
+      circle at 24% 4%,
+      color-mix(in srgb, var(--purple), transparent 82%),
+      transparent 26%
+    ),
+    linear-gradient(180deg, #111722 0%, #0f1117 46%, #111018 100%);
+}
+
+.app-shell:before,
+.app-shell:after {
+  content: "";
+  position: fixed;
+  inset-inline: var(--sidebar) 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.app-shell:before {
+  top: 72px;
+  height: 240px;
+  background:
+    linear-gradient(
+      135deg,
+      transparent 0 36%,
+      color-mix(in srgb, #7c5cff, transparent 88%) 36% 58%,
+      transparent 58%
+    ),
+    linear-gradient(180deg, color-mix(in srgb, #67b7c8, transparent 86%), transparent);
+  clip-path: polygon(0 0, 100% 0, 100% 58%, 76% 76%, 45% 62%, 0 82%);
+}
+
+.app-shell:after {
+  bottom: 0;
+  height: 210px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, #c77d53, transparent 90%), transparent 46%),
+    linear-gradient(180deg, transparent, color-mix(in srgb, #ff7abf, transparent 92%));
+  clip-path: polygon(0 34%, 34% 20%, 68% 34%, 100% 18%, 100% 100%, 0 100%);
+}
+
+.main-column {
+  position: relative;
+  z-index: 1;
+}
+
+:root[data-theme="light"] .app-shell {
+  background:
+    radial-gradient(circle at 82% 10%, #bedce8 0, transparent 32%),
+    radial-gradient(circle at 18% 6%, #e7d7f1 0, transparent 28%),
+    linear-gradient(180deg, #f6f1f7 0%, #f8f6f3 48%, #f2edf1 100%);
+}
+
+:root[data-theme="light"] .app-shell:before {
+  background:
+    linear-gradient(135deg, transparent 0 36%, #e8d8ee 36% 58%, transparent 58%),
+    linear-gradient(180deg, #e5eff6, transparent);
+}
+
+:root[data-theme="light"] .app-shell:after {
+  background:
+    linear-gradient(90deg, #e7d6c9, transparent 46%), linear-gradient(180deg, transparent, #eadce6);
+}
+
