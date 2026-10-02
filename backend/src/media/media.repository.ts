@@ -135,6 +135,26 @@ export class MediaRepository {
     });
   }
 
+  /**
+   * Marks an upload DELETED and drops its chat link row (if any) in one
+   * transaction, after the Cloudinary asset is destroyed. The chat link
+   * cleanup is a no-op for uploads from any other purpose (games, posts, …).
+   */
+  finalizeReleasedUpload(id: string) {
+    return this.prisma.$transaction([
+      this.prisma.mediaUpload.updateMany({
+        where: {
+          id,
+          status: { in: ['ATTACHED', 'RELEASE_FAILED'] },
+        },
+        data: { status: 'DELETED', deletedAt: new Date() },
+      }),
+      this.prisma.chatMessageMedia.deleteMany({
+        where: { mediaUploadId: id },
+      }),
+    ]);
+  }
+
   /** Flags an upload whose release failed so a retry job can pick it up; also matches RELEASE_FAILED. */
   markReleaseFailed(id: string) {
     return this.prisma.mediaUpload.updateMany({

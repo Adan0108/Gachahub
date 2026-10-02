@@ -1,8 +1,9 @@
-import { ChatMediaReleaseRetryService } from './chat-media-release-retry.service';
+import { MediaReleaseRetryService } from './media-release-retry.service';
 
-describe('ChatMediaReleaseRetryService', () => {
+describe('MediaReleaseRetryService', () => {
   const mediaRepository = {
     findReleaseFailedUploads: jest.fn(),
+    finalizeReleasedUpload: jest.fn(),
   };
 
   const mediaService = {
@@ -10,18 +11,13 @@ describe('ChatMediaReleaseRetryService', () => {
     markReleaseFailed: jest.fn().mockResolvedValue(undefined),
   };
 
-  const chatRepository = {
-    finalizeReleasedMedia: jest.fn(),
-  };
-
-  let service: ChatMediaReleaseRetryService;
+  let service: MediaReleaseRetryService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new ChatMediaReleaseRetryService(
+    service = new MediaReleaseRetryService(
       mediaRepository as any,
       mediaService as any,
-      chatRepository as any,
     );
   });
 
@@ -44,7 +40,7 @@ describe('ChatMediaReleaseRetryService', () => {
     expect(mediaService.destroyAttachedCloudinaryAsset).toHaveBeenCalledWith(
       'upload-1',
     );
-    expect(chatRepository.finalizeReleasedMedia).toHaveBeenCalledWith(
+    expect(mediaRepository.finalizeReleasedUpload).toHaveBeenCalledWith(
       'upload-1',
     );
     expect(mediaService.markReleaseFailed).not.toHaveBeenCalled();
@@ -60,7 +56,7 @@ describe('ChatMediaReleaseRetryService', () => {
 
     await service.retryFailedReleases();
 
-    expect(chatRepository.finalizeReleasedMedia).not.toHaveBeenCalled();
+    expect(mediaRepository.finalizeReleasedUpload).not.toHaveBeenCalled();
     expect(mediaService.markReleaseFailed).toHaveBeenCalledWith('upload-1');
   });
 
@@ -78,9 +74,33 @@ describe('ChatMediaReleaseRetryService', () => {
 
     await service.retryFailedReleases();
 
-    expect(chatRepository.finalizeReleasedMedia).toHaveBeenCalledWith(
+    expect(mediaRepository.finalizeReleasedUpload).toHaveBeenCalledWith(
       'upload-2',
     );
     expect(mediaService.markReleaseFailed).toHaveBeenCalledWith('upload-1');
+  });
+
+  it('retries RELEASE_FAILED uploads regardless of purpose, not just chat ones', async () => {
+    mediaRepository.findReleaseFailedUploads.mockResolvedValue([
+      { id: 'chat-upload', purpose: 'CHAT' },
+      { id: 'game-icon-upload', purpose: 'GAME_ICON' },
+      { id: 'banner-upload', purpose: 'BANNER' },
+    ]);
+    mediaService.destroyAttachedCloudinaryAsset.mockResolvedValue(true);
+
+    await service.retryFailedReleases();
+
+    expect(mediaService.destroyAttachedCloudinaryAsset).toHaveBeenCalledTimes(
+      3,
+    );
+    expect(mediaRepository.finalizeReleasedUpload).toHaveBeenCalledWith(
+      'chat-upload',
+    );
+    expect(mediaRepository.finalizeReleasedUpload).toHaveBeenCalledWith(
+      'game-icon-upload',
+    );
+    expect(mediaRepository.finalizeReleasedUpload).toHaveBeenCalledWith(
+      'banner-upload',
+    );
   });
 });

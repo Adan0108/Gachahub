@@ -1,18 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { MediaRepository } from '../media/media.repository';
-import { MediaService } from '../media/media.service';
-import { ChatRepository } from './chat.repository';
+import { MediaRepository } from './media.repository';
+import { MediaService } from './media.service';
 
-/** Retries releasing chat media whose Cloudinary delete failed after its message was deleted. */
+/** Retries releasing media whose Cloudinary delete failed, regardless of the upload's purpose. */
 @Injectable()
-export class ChatMediaReleaseRetryService {
-  private readonly logger = new Logger(ChatMediaReleaseRetryService.name);
+export class MediaReleaseRetryService {
+  private readonly logger = new Logger(MediaReleaseRetryService.name);
 
   constructor(
     private readonly mediaRepository: MediaRepository,
     private readonly mediaService: MediaService,
-    private readonly chatRepository: ChatRepository,
   ) {}
 
   @Cron(CronExpression.EVERY_HOUR)
@@ -30,7 +28,7 @@ export class ChatMediaReleaseRetryService {
         );
 
         if (released) {
-          await this.chatRepository.finalizeReleasedMedia(upload.id);
+          await this.mediaRepository.finalizeReleasedUpload(upload.id);
         }
       } catch (error) {
         this.logger.warn(

@@ -270,7 +270,7 @@ export class ChatMessageActionsService {
    * Best-effort on purpose: deleting the message content is the user's actual
    * intent, so a Cloudinary hiccup on one attachment must not fail the whole
    * delete. A failed release is flagged RELEASE_FAILED so
-   * ChatMediaReleaseRetryService picks it back up on a backoff instead of it
+   * MediaReleaseRetryService picks it back up on a backoff instead of it
    * sitting ATTACHED - permanently excluded from cleanup - forever.
    */
   private async releaseDeletedMessageMedia(
@@ -297,7 +297,7 @@ export class ChatMessageActionsService {
           error instanceof Error ? error.stack : undefined,
         );
 
-        // flag for ChatMediaReleaseRetryService instead of leaving it stuck
+        // flag for MediaReleaseRetryService instead of leaving it stuck
         // ATTACHED - permanently excluded from cleanup - forever
         await this.mediaService
           .markReleaseFailed(item.mediaUploadId)
