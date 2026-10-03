@@ -258,8 +258,11 @@
 }
 
 .mini-avatar {
+  display: grid;
+  place-items: center;
   width: 35px;
   height: 35px;
+  padding: 0;
   overflow: hidden;
   border-radius: 50%;
   border: 1px solid #9a83d5;
