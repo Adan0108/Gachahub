@@ -8,6 +8,7 @@ import { PostSortDto } from './dto/query-posts.dto';
 import { CreatePostStatusDto } from './dto/create-post.dto';
 import type { PostsRepository } from './posts.repository';
 import type { MediaService } from '../media/media.service';
+import type { MentionsService } from '../mentions/mentions.service';
 import type { FollowsService } from '../follows/follows.service';
 import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import type { UserInterestService } from '../recommendation/user-interest.service';
@@ -79,6 +80,11 @@ describe('PostsService', () => {
     recordPostInteraction: jest.fn(),
   };
 
+  const mentions = {
+    resolveTargets: jest.fn(),
+    publishMentions: jest.fn(),
+  };
+
   const eventPublisherPort = {
     publish: jest.fn(),
     publishMany: jest.fn(),
@@ -145,6 +151,7 @@ describe('PostsService', () => {
   };
 
   beforeEach(() => {
+    mentions.resolveTargets.mockResolvedValue(['u1']);
     jest.clearAllMocks();
 
     prisma.$transaction.mockImplementation(
@@ -160,6 +167,7 @@ describe('PostsService', () => {
       userInterestService as unknown as UserInterestService,
       eventPublisherPort as EventPublisherPort,
       prisma as unknown as PrismaService,
+      mentions as unknown as MentionsService,
     );
   });
 
@@ -393,6 +401,7 @@ describe('PostsService', () => {
       });
 
       expect(postsRepository.create).toHaveBeenCalledWith(
+        transaction,
         expect.objectContaining({
           authorId: 'author-1',
           gameId: 'game-1',
@@ -406,6 +415,60 @@ describe('PostsService', () => {
       );
 
       expect(result.id).toBe('post-1');
+    });
+
+    describe('mentions', () => {
+      const create = async (status?: 'PUBLISHED' | 'DRAFT') => {
+        postsRepository.findGameById.mockResolvedValue({
+          id: 'game-1',
+          status: 'ACTIVE',
+        });
+        mediaService.resolveAttachableMedia.mockResolvedValue([]);
+        postsRepository.create.mockResolvedValue(basePost);
+
+        await service.create(
+          {
+            gameId: 'game-1',
+            title: 'Hi @bob',
+            content: 'cc @amy',
+            status,
+          } as never,
+          'author-1',
+        );
+      };
+
+      it('resolves who to ping before the transaction opens, then records them inside it', async () => {
+        await create();
+
+        expect(mentions.resolveTargets).toHaveBeenCalledWith(
+          expect.objectContaining({
+            text: 'Hi @bob\ncc @amy',
+            actorId: 'author-1',
+          }),
+        );
+        expect(mentions.publishMentions).toHaveBeenCalledWith(
+          {
+            targetIds: ['u1'],
+            actorId: 'author-1',
+            entityType: 'POST',
+            entityId: basePost.id,
+          },
+          transaction,
+        );
+        expect(
+          mentions.resolveTargets.mock.invocationCallOrder[0],
+        ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0]);
+      });
+
+      it('notifies nobody for a draft', async () => {
+        await create('DRAFT');
+
+        expect(mentions.resolveTargets).not.toHaveBeenCalled();
+        expect(mentions.publishMentions).toHaveBeenCalledWith(
+          expect.objectContaining({ targetIds: [] }),
+          transaction,
+        );
+      });
     });
 
     it('throws when game does not exist', async () => {
@@ -518,7 +581,7 @@ describe('PostsService', () => {
         'author-1',
       );
 
-      expect(postsRepository.update).toHaveBeenCalledWith({
+      expect(postsRepository.update).toHaveBeenCalledWith(transaction, {
         id: 'post-1',
 
         data: {
@@ -529,6 +592,62 @@ describe('PostsService', () => {
       });
 
       expect(result.title).toBe('Updated title');
+    });
+
+    describe('mentions', () => {
+      const edit = async (
+        existing: Record<string, unknown>,
+        dto: Record<string, unknown>,
+      ) => {
+        postsRepository.findById.mockResolvedValue({
+          ...basePost,
+          ...existing,
+        });
+        postsRepository.update.mockResolvedValue(basePost);
+        await service.update('post-1', dto, 'author-1');
+      };
+
+      it('resolves the edited text before the transaction and records targets inside it', async () => {
+        await edit({ title: 'T', content: 'hi' }, { content: 'hi @user123' });
+
+        expect(mentions.resolveTargets).toHaveBeenCalledWith(
+          expect.objectContaining({
+            text: 'T\nhi @user123',
+            actorId: 'author-1',
+          }),
+        );
+        expect(mentions.publishMentions).toHaveBeenCalledWith(
+          {
+            targetIds: ['u1'],
+            actorId: 'author-1',
+            entityType: 'POST',
+            entityId: 'post-1',
+          },
+          transaction,
+        );
+        expect(
+          mentions.resolveTargets.mock.invocationCallOrder[0],
+        ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0]);
+      });
+
+      it('publishing a draft resolves everyone mentioned in it', async () => {
+        await edit(
+          { status: 'DRAFT', content: 'hi @user123' },
+          { status: 'PUBLISHED' },
+        );
+
+        expect(mentions.resolveTargets).toHaveBeenCalledWith(
+          expect.objectContaining({
+            text: expect.stringContaining('@user123') as unknown,
+          }),
+        );
+      });
+
+      it('notifies nobody while the post stays a draft', async () => {
+        await edit({ status: 'DRAFT' }, { content: '@user123' });
+
+        expect(mentions.resolveTargets).not.toHaveBeenCalled();
+      });
     });
 
     it('rejects updating another user post', async () => {

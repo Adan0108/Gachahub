@@ -3,7 +3,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { escapeLikePattern } from '../common/utils/like-pattern';
 import type { Prisma, UserRole, UserStatus } from '../generated/prisma/client';
 
-const PICKER_SELECT = { id: true, name: true, image: true } as const;
+const PICKER_SELECT = {
+  id: true,
+  name: true,
+  image: true,
+  username: true,
+} as const;
 
 /** Active users the caller has no block with, in either direction. */
 const pickableBy = (callerId: string) =>
@@ -38,6 +43,14 @@ export class UsersRepository {
       },
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
       take: limit,
+      select: PICKER_SELECT,
+    });
+  }
+
+  /** Exact handle (citext, so case-insensitive), served by the unique index - same rules as a name search. */
+  findPickableByUsername(callerId: string, username: string) {
+    return this.prisma.user.findFirst({
+      where: { username, NOT: { id: callerId }, ...pickableBy(callerId) },
       select: PICKER_SELECT,
     });
   }

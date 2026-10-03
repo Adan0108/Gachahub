@@ -16,7 +16,7 @@ export function UserPicker({
   multiple = false,
   disabled = false,
   excludeIds = [],
-  placeholder = "Search by name...",
+  placeholder = "Search by name or @handle...",
   label = "Search people",
   currentUser,
 }) {
@@ -83,6 +83,7 @@ export function UserPicker({
             <li className="user-picker-chip" key={user.id}>
               <span className="chat-avatar small">{initialOf(user.name)}</span>
               <span>{user.name}</span>
+              {user.username && <span className="user-picker-handle">@{user.username}</span>}
               <button
                 aria-label={`Remove ${user.name}`}
                 disabled={disabled}
@@ -152,6 +153,7 @@ export function UserPicker({
             >
               <span className="chat-avatar small">{initialOf(user.name)}</span>
               <span>{user.name}</span>
+              {user.username && <span className="user-picker-handle">@{user.username}</span>}
             </li>
           ))}
         </ul>

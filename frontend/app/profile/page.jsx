@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { FiCompass, FiEdit3, FiMessageCircle, FiShare2, FiX } from "react-icons/fi";
@@ -175,6 +176,13 @@ export default function ProfilePage() {
               <h1>
                 {displayName} <span className="verified">{glyph.check}</span>
               </h1>
+              {user.username ? (
+                <p className="profile-handle">@{user.username}</p>
+              ) : (
+                <p className="profile-handle">
+                  <Link href="/onboarding">Claim your @handle</Link>
+                </p>
+              )}
               <p>{user.email}</p>
               <p className="profile-user-id">
                 User ID: <code>{user.id}</code>

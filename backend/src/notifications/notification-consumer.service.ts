@@ -347,9 +347,10 @@ export class NotificationConsumerService
         return notification ? [notification] : [];
       }
 
-      case 'user.mentioned':
-        this.logger.debug(`Ignoring unsupported event ${event.type}`);
-        return [];
+      case 'user.mentioned': {
+        const notification = await this.handleUserMentioned(event, transaction);
+        return notification ? [notification] : [];
+      }
 
       case 'chat.message.sent':
         return this.handleChatMessageSent(event, transaction);
@@ -458,6 +459,28 @@ export class NotificationConsumerService
         type: 'USER_FOLLOWED',
         entityType: 'USER',
         entityId: payload.actorId,
+      },
+      transaction,
+    );
+  }
+
+  /**
+   * Converts a user.mentioned domain event (one per mentioned user) into a USER_MENTIONED
+   * notification; createNotification drops self-mentions.
+   */
+  private async handleUserMentioned(
+    event: KafkaDomainEvent,
+    transaction: Prisma.TransactionClient,
+  ): Promise<NotificationRecord | null> {
+    const payload = event.payload as DomainEventPayloadMap['user.mentioned'];
+
+    return this.notificationService.createNotification(
+      {
+        recipientId: payload.targetUserId,
+        actorId: payload.actorId,
+        type: 'USER_MENTIONED',
+        entityType: payload.entityType,
+        entityId: payload.entityId,
       },
       transaction,
     );
