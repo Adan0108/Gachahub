@@ -40,9 +40,22 @@ export class UsersService {
     private readonly usernameAvailabilityRateLimiter: UsernameAvailabilityRateLimiterService,
   ) {}
 
-  /** Name search for the chat picker: prefix matches first, then the rest that merely contain q. */
+  /**
+   * Chat picker search: `@handle` is an exact handle lookup (a handle is unique, so there is
+   * one answer and the unique index serves it); anything else searches display names, plus an
+   * exact pasted id. Routing is on the sigil, so a display name that itself starts with "@"
+   * can only be found through the handle path.
+   */
   async searchForPicker(callerId: string, { q, limit }: SearchUsersQueryDto) {
     this.searchRateLimiter.assertNotRateLimited(callerId);
+
+    if (q.startsWith('@')) {
+      const match = await this.usersRepository.findPickableByUsername(
+        callerId,
+        q.slice(1),
+      );
+      return { items: match ? [match] : [] };
+    }
 
     const byId = await this.usersRepository.findPickableById(callerId, q);
     const prefixed = await this.usersRepository.searchByName(
@@ -99,9 +112,10 @@ export class UsersService {
    * (backfilled `onboarded: true`, never forced through the redirect gate) still has a real
    * code path to claim a handle later - `onboarded` only controls the forced redirect, not
    * whether this endpoint accepts a request. The actual guarantee is the conditional
-   * `updateMany` below, not the pre-read: two concurrent calls (a double-click, a retry) both
-   * reading `username: null` would otherwise both pass and the second would silently
-   * overwrite the first's claim.
+   * `updateManyAndReturn` below (one statement, so no separate read-back), not the pre-read:
+   * two concurrent calls (a double-click, a retry) both reading `username: null` would
+   * otherwise both pass and the second would silently overwrite the first's claim.
+   * The frontend only reaches this from /onboarding and the profile page's claim link.
    */
   async completeOnboarding(userId: string, dto: CompleteOnboardingDto) {
     if (isReservedUsername(dto.username)) {
@@ -120,18 +134,21 @@ export class UsersService {
       throw new ConflictException('Profile already set up');
     }
 
+    const claimed = await this.claimHandle(userId, dto);
+
+    if (claimed.length === 0) {
+      throw new ConflictException('Profile already set up');
+    }
+
+    return claimed[0];
+  }
+
+  /** The conditional write, kept apart so only the Prisma call sits inside the P2002 translation. */
+  private async claimHandle(userId: string, dto: CompleteOnboardingDto) {
     try {
-      const claimed = await this.prisma.user.updateMany({
+      return await this.prisma.user.updateManyAndReturn({
         where: { id: userId, username: null },
         data: { name: dto.name, username: dto.username, onboarded: true },
-      });
-
-      if (claimed.count === 0) {
-        throw new ConflictException('Profile already set up');
-      }
-
-      return await this.prisma.user.findUniqueOrThrow({
-        where: { id: userId },
         select: ME_SELECT,
       });
     } catch (error) {

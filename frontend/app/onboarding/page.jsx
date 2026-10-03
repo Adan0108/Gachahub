@@ -6,12 +6,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { FiArrowRight, FiAtSign, FiUser } from "react-icons/fi";
 import { useRequireAuth } from "../../hooks/useRequireAuth";
+import { useSignOut } from "../../hooks/useSignOut";
 import { api } from "../../lib/api";
-import { CHAT_BACKUP_QUERY_ROOT } from "../../lib/backup/backupQueryKeys";
-import "../../lib/backup/backupSessionCleanup";
 import { queryKeys } from "../../lib/queries";
-import { runSessionCleanups } from "../../lib/sessionCleanup";
-import { USERNAME_HINT, USERNAME_PATTERN } from "../../lib/username";
+import { USERNAME_HINT, USERNAME_PATTERN, canClaimHandle } from "../../lib/username";
 
 const AVAILABILITY_DEBOUNCE_MS = 400;
 
@@ -37,9 +35,9 @@ export default function OnboardingPage() {
   // Availability is advisory, not authoritative (the DB unique index is); only a known-taken handle blocks submit.
   const canSubmit = displayName.trim().length >= 2 && usernameFormatValid && availability !== "taken";
 
-  // Already done (e.g. a stale tab, or navigating back here after completing it) - leave.
+  // Keyed on the handle, not `onboarded`: a backfilled account isn't forced here but may still claim.
   useEffect(() => {
-    if (!session.isLoading && session.user?.onboarded) router.replace("/");
+    if (!session.isLoading && session.user && !canClaimHandle(session.user)) router.replace("/");
   }, [router, session.isLoading, session.user]);
 
   // Debounced live availability check - no point calling the backend on every keystroke.
@@ -85,15 +83,7 @@ export default function OnboardingPage() {
   });
 
   // This page is a mandatory interstitial - it needs its own exit.
-  const signOut = useMutation({
-    mutationFn: api.signOut,
-    onSuccess: async () => {
-      await runSessionCleanups();
-      queryClient.setQueryData(queryKeys.currentUser, null);
-      queryClient.removeQueries({ queryKey: CHAT_BACKUP_QUERY_ROOT });
-      router.push("/");
-    },
-  });
+  const signOut = useSignOut();
 
   const submit = (event) => {
     event.preventDefault();

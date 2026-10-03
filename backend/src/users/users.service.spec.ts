@@ -8,7 +8,7 @@ describe('UsersService', () => {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
       findUniqueOrThrow: jest.fn(),
-      updateMany: jest.fn(),
+      updateManyAndReturn: jest.fn(),
     },
   };
 
@@ -19,6 +19,7 @@ describe('UsersService', () => {
   const repository = {
     searchByName: jest.fn(),
     findPickableById: jest.fn(),
+    findPickableByUsername: jest.fn(),
   };
   const limiter = { assertNotRateLimited: jest.fn() };
   const usernameLimiter = { assertNotRateLimited: jest.fn() };
@@ -123,13 +124,7 @@ describe('UsersService', () => {
 
   describe('completeOnboarding', () => {
     const dto = { name: 'Mado', username: 'Mado-123' };
-
-    beforeEach(() => {
-      prisma.user.findUniqueOrThrow.mockResolvedValue({
-        id: 'user-1',
-        ...dto,
-      });
-    });
+    const claimedRow = { id: 'user-1', ...dto, onboarded: true };
 
     it('throws when the user does not exist', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
@@ -137,7 +132,7 @@ describe('UsersService', () => {
       await expect(service.completeOnboarding('user-1', dto)).rejects.toThrow(
         NotFoundException,
       );
-      expect(prisma.user.updateMany).not.toHaveBeenCalled();
+      expect(prisma.user.updateManyAndReturn).not.toHaveBeenCalled();
     });
 
     it('refuses a reserved handle without touching the database write', async () => {
@@ -145,7 +140,7 @@ describe('UsersService', () => {
         service.completeOnboarding('user-1', { ...dto, username: 'admin' }),
       ).rejects.toThrow(ConflictException);
       expect(prisma.user.findUnique).not.toHaveBeenCalled();
-      expect(prisma.user.updateMany).not.toHaveBeenCalled();
+      expect(prisma.user.updateManyAndReturn).not.toHaveBeenCalled();
     });
 
     it('refuses a reserved handle case-insensitively', async () => {
@@ -160,38 +155,49 @@ describe('UsersService', () => {
       await expect(service.completeOnboarding('user-1', dto)).rejects.toThrow(
         ConflictException,
       );
-      expect(prisma.user.updateMany).not.toHaveBeenCalled();
+      expect(prisma.user.updateManyAndReturn).not.toHaveBeenCalled();
     });
 
-    it('claims atomically, conditioned on username still being null', async () => {
+    it('claims atomically, conditioned on username still being null, and returns the row', async () => {
       prisma.user.findUnique.mockResolvedValue({ username: null });
-      prisma.user.updateMany.mockResolvedValue({ count: 1 });
+      prisma.user.updateManyAndReturn.mockResolvedValue([claimedRow]);
 
-      await service.completeOnboarding('user-1', dto);
+      await expect(service.completeOnboarding('user-1', dto)).resolves.toBe(
+        claimedRow,
+      );
 
-      expect(prisma.user.updateMany).toHaveBeenCalledWith({
-        where: { id: 'user-1', username: null },
-        data: { name: dto.name, username: dto.username, onboarded: true },
-      });
-      expect(prisma.user.findUniqueOrThrow).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'user-1' } }),
+      expect(prisma.user.updateManyAndReturn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'user-1', username: null },
+          data: { name: dto.name, username: dto.username, onboarded: true },
+        }),
       );
     });
 
-    it('refuses when two concurrent claims race - only the one that actually matched the condition counts', async () => {
-      // The pre-read saw username: null for both callers (the TOCTOU window), but only
-      // one updateMany actually matches the row by the time it runs.
+    it('two parallel claims for one account: exactly one succeeds, the other gets a 409', async () => {
+      // Both pre-reads see username: null (the TOCTOU window); the database lets only the
+      // first conditional update match the row.
       prisma.user.findUnique.mockResolvedValue({ username: null });
-      prisma.user.updateMany.mockResolvedValue({ count: 0 });
+      prisma.user.updateManyAndReturn
+        .mockResolvedValueOnce([claimedRow])
+        .mockResolvedValueOnce([]);
 
-      await expect(service.completeOnboarding('user-1', dto)).rejects.toThrow(
-        ConflictException,
+      const results = await Promise.allSettled([
+        service.completeOnboarding('user-1', dto),
+        service.completeOnboarding('user-1', { ...dto, username: 'Other-1' }),
+      ]);
+
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      const rejected = results.filter(
+        (r): r is PromiseRejectedResult => r.status === 'rejected',
       );
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0].reason).toBeInstanceOf(ConflictException);
     });
 
     it('maps a taken handle (P2002) to a 409 instead of leaking the Prisma error', async () => {
       prisma.user.findUnique.mockResolvedValue({ username: null });
-      prisma.user.updateMany.mockRejectedValue(
+      prisma.user.updateManyAndReturn.mockRejectedValue(
         new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
           code: 'P2002',
           clientVersion: 'test',
@@ -200,14 +206,14 @@ describe('UsersService', () => {
       );
 
       await expect(service.completeOnboarding('user-1', dto)).rejects.toThrow(
-        ConflictException,
+        'That handle is taken',
       );
     });
 
     it('does not swallow an unrelated error', async () => {
       prisma.user.findUnique.mockResolvedValue({ username: null });
       const boom = new Error('db down');
-      prisma.user.updateMany.mockRejectedValue(boom);
+      prisma.user.updateManyAndReturn.mockRejectedValue(boom);
 
       await expect(service.completeOnboarding('user-1', dto)).rejects.toBe(
         boom,
@@ -311,6 +317,37 @@ describe('UsersService', () => {
 
       expect(repository.findPickableById).toHaveBeenCalledWith('me', b.id);
       expect(result).toEqual({ items: [b, a] });
+    });
+
+    it('looks up an @query as an exact handle, with no name or id search', async () => {
+      limiter.assertNotRateLimited.mockReset();
+      repository.findPickableByUsername.mockResolvedValueOnce(a);
+
+      const result = await service.searchForPicker('me', {
+        q: '@mado',
+        limit: 3,
+      });
+
+      expect(result).toEqual({ items: [a] });
+      expect(repository.findPickableByUsername).toHaveBeenCalledWith(
+        'me',
+        'mado',
+      );
+      expect(repository.findPickableById).not.toHaveBeenCalled();
+      expect(repository.searchByName).not.toHaveBeenCalled();
+    });
+
+    it('returns nothing for an @query that matches no handle', async () => {
+      limiter.assertNotRateLimited.mockReset();
+      repository.findPickableByUsername.mockResolvedValueOnce(null);
+
+      const result = await service.searchForPicker('me', {
+        q: '@ghost',
+        limit: 3,
+      });
+
+      expect(result).toEqual({ items: [] });
+      expect(repository.searchByName).not.toHaveBeenCalled();
     });
 
     it('skips the contains query when prefix matches fill the limit', async () => {

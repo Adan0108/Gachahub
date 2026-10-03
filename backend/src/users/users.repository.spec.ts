@@ -71,6 +71,21 @@ describe('UsersRepository.searchByName', () => {
     expect(args().take).toBe(2);
   });
 
+  it('finds an exact handle only when active, not the caller and not blocked either way', async () => {
+    await repository.findPickableByUsername('me', 'Bob-1');
+
+    expect(prisma.user.findFirst).toHaveBeenCalledWith({
+      where: {
+        username: 'Bob-1',
+        NOT: { id: 'me' },
+        status: 'ACTIVE',
+        blockedUsers: { none: { blockedId: 'me' } },
+        blockedBy: { none: { blockerId: 'me' } },
+      },
+      select: { id: true, name: true, image: true, username: true },
+    });
+  });
+
   it('sends the escaped text to both the prefix and the contains filter', async () => {
     await repository.searchByName('me', '100%_', 'contains', 3);
 

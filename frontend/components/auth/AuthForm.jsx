@@ -8,6 +8,7 @@ import { FiArrowLeft, FiArrowRight, FiEye, FiEyeOff, FiLock, FiMail, FiUser } fr
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { api } from "../../lib/api";
 import { queries } from "../../lib/queries";
+import { mustOnboard } from "../../lib/username";
 
 export function AuthForm({ mode }) {
   const router = useRouter();
@@ -22,7 +23,7 @@ export function AuthForm({ mode }) {
   const [message, setMessage] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const redirectTimerRef = useRef(null);
-  const postAuthDestination = (authedUser) => (authedUser?.onboarded === false ? "/onboarding" : "/");
+  const postAuthDestination = (authedUser) => (mustOnboard(authedUser) ? "/onboarding" : "/");
   const canSubmit =
     form.email.trim().length > 0 &&
     form.password.length >= 8 &&

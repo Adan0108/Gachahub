@@ -1,7 +1,6 @@
 /**
- * Handles nobody gets to claim - once a username is shown next to a name
- * anywhere (profile, picker), one of these would be an impersonation vector.
- * Checked case-insensitively, same as citext uniqueness itself.
+ * Exact-match denylist of obvious official-sounding handles, checked case-insensitively at
+ * claim time only. Raises the bar; it does not stop lookalikes like `admin1` or `support-team`.
  */
 const RESERVED_USERNAMES = new Set([
   'admin',

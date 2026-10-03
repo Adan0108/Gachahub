@@ -3,6 +3,7 @@ import { Transform } from 'class-transformer';
 import { IsString, Length, Matches } from 'class-validator';
 
 /**
+ * NOTE: frontend/lib/username.js holds a copy of this pattern and hint - change both together.
  * Letters, digits, `_` and `-`, 3-20 chars - case-insensitive uniqueness (citext) keeps the
  * casing the user picks. Must start and end with a letter or digit, and never two separators
  * in a row (`(?!.*[_-]{2,})`) - an explicit call, not an accident: `-bob`, `bob-`, `---` and
@@ -11,7 +12,7 @@ import { IsString, Length, Matches } from 'class-validator';
 export const USERNAME_PATTERN =
   /^(?=.{3,20}$)[A-Za-z0-9](?!.*[_-]{2,})[A-Za-z0-9_-]*[A-Za-z0-9]$/;
 export const USERNAME_HINT =
-  '3-20 characters: letters, digits, "_" and "-", starting and ending with a letter or digit, no "__" or "--".';
+  '3-20 characters: letters, digits, "_" and "-", starting and ending with a letter or digit, and never two separators in a row.';
 
 export class CompleteOnboardingDto {
   @ApiProperty({ description: 'Display name shown across the app.' })

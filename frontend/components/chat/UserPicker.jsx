@@ -16,7 +16,7 @@ export function UserPicker({
   multiple = false,
   disabled = false,
   excludeIds = [],
-  placeholder = "Search by name...",
+  placeholder = "Search by name or @handle...",
   label = "Search people",
   currentUser,
 }) {

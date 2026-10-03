@@ -162,11 +162,24 @@ describe("OnboardingPage", () => {
     expect(mocks.replace).not.toHaveBeenCalled();
   });
 
-  it("redirects home immediately if the user is already onboarded", async () => {
-    session = { user: { id: "u1", onboarded: true }, isAuthenticated: true, isLoading: false };
+  it("redirects home immediately if the user already has a handle", async () => {
+    session = {
+      user: { id: "u1", onboarded: true, username: "Rover" },
+      isAuthenticated: true,
+      isLoading: false,
+    };
     renderPage();
 
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/"));
+  });
+
+  it("lets a backfilled account (onboarded, no handle yet) stay and claim one", async () => {
+    session = { user: { id: "u1", onboarded: true }, isAuthenticated: true, isLoading: false };
+    renderPage();
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(mocks.replace).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText("Hertzy-123")).toBeInTheDocument();
   });
 
   it("signs out and redirects home instead of being stuck here", async () => {

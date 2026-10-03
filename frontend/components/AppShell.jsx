@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { FiX } from "react-icons/fi";
 import { useTheme } from "../hooks/useTheme";
 import { useCurrentUser } from "../hooks/useCurrentUser";
+import { mustOnboard } from "../lib/username";
 import { useDeviceIdentity } from "../hooks/chat/useDeviceIdentity";
 import { useChatSocket } from "../hooks/chat/useChatSocket";
 import { glyph, navItems } from "./constants";
@@ -102,7 +103,7 @@ export function AppShell({ children, initialTheme = "dark" }) {
   // Global one-time onboarding gate (mounted once here, so it covers every route); /admin is exempt since AdminShell has its own useRequireAdmin gate, and `=== false` (not `!user?.onboarded`) fails open on a missing/unexpected field instead of trapping every signed-in user here.
   useEffect(() => {
     if (isSessionLoading || !isAuthenticated || onboarding || admin) return;
-    if (user?.onboarded === false) router.replace("/onboarding");
+    if (mustOnboard(user)) router.replace("/onboarding");
   }, [admin, isAuthenticated, isSessionLoading, onboarding, router, user]);
 
   useEffect(() => {

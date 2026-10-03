@@ -47,6 +47,14 @@ export class UsersRepository {
     });
   }
 
+  /** Exact handle (citext, so case-insensitive), served by the unique index - same rules as a name search. */
+  findPickableByUsername(callerId: string, username: string) {
+    return this.prisma.user.findFirst({
+      where: { username, NOT: { id: callerId }, ...pickableBy(callerId) },
+      select: PICKER_SELECT,
+    });
+  }
+
   /** Exact user id, so a pasted id finds its owner under the same rules as a name search. */
   findPickableById(callerId: string, id: string) {
     return this.prisma.user.findFirst({
