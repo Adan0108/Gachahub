@@ -43,7 +43,6 @@
   letter-spacing: -0.02em;
 }
 
-.admin-brand > span,
 .admin-identity > span {
   display: grid;
   place-items: center;
