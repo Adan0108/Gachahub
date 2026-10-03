@@ -24,6 +24,11 @@ model User {
   // original casing kept for display. Null until the user completes onboarding.
   username              String?               @unique @db.Citext
   onboarded             Boolean               @default(false)
+  /// MediaUpload backing `image` (the avatar), so a replace can release the old Cloudinary asset.
+  avatarMediaUploadId   String?               @unique
+  avatarMediaUpload     MediaUpload?          @relation("UserAvatarUpload", fields: [avatarMediaUploadId], references: [id], onDelete: SetNull)
+  /// Id of a design in the backend's profile banner catalog; null shows the default banner.
+  bannerPresetId        String?
 
   sessions     Session[]
   accounts     Account[]
@@ -787,6 +792,7 @@ model MediaUpload {
   chatMessageMedia ChatMessageMedia?
   gameIconFor      Game?             @relation("GameIconUpload")
   gameBannerFor    Game?             @relation("GameBannerUpload")
+  avatarFor        User?             @relation("UserAvatarUpload")
 
   @@index([userId, status, createdAt])
   @@index([status, createdAt])
