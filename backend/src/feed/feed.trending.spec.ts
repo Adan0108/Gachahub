@@ -55,6 +55,7 @@ describe('FeedService - Trending snapshots', () => {
       feedRanker as never,
       {} as never,
       trendingSnapshots as never,
+      {} as never,
     );
 
     feedRepository.findTrendingCandidates.mockResolvedValue([]);

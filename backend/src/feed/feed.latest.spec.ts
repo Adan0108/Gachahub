@@ -47,6 +47,7 @@ describe('FeedService - Latest', () => {
       feedRanker as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     postsRepository.findLatestPage.mockResolvedValue([]);

@@ -659,6 +659,44 @@ export class PostsRepository {
   }
 
   /**
+   * Hydrates frozen For You snapshot IDs while reapplying the requesting
+   * user's current eligibility and visibility rules.
+   */
+  async findForYouManyByIds(
+    ids: string[],
+    where: Prisma.PostWhereInput,
+    userId: string,
+  ) {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    return this.prisma.post.findMany({
+      where: {
+        AND: [
+          where,
+          {
+            id: {
+              in: ids,
+            },
+          },
+        ],
+      },
+      include: {
+        ...postInclude,
+        postLikes: {
+          where: {
+            userId,
+          },
+          select: {
+            userId: true,
+          },
+        },
+      },
+    });
+  }
+
+  /**
    * Hydrates Trending snapshot IDs while reapplying the live feed filters.
    *
    * Snapshot order is restored by FeedService because Prisma IN queries do

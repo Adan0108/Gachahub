@@ -5,7 +5,7 @@ import { formatPost } from '../posts/post.mapper';
 import { PostsRepository } from '../posts/posts.repository';
 import {
   GameFeedSortDto,
-  QueryFeedDto,
+  QueryForYouFeedDto,
   QueryGameFeedDto,
   QueryLatestFeedDto,
   QueryTrendingFeedDto,
@@ -28,8 +28,14 @@ import {
   decodeTrendingFeedCursor,
   encodeTrendingFeedCursor,
 } from './utils/trending-cursor.util';
-
-const FOR_YOU_MAX_CANDIDATES = 400;
+import {
+  ForYouSnapshotService,
+  type ForYouSnapshotFilters,
+} from './for-you/for-you-snapshot.service';
+import {
+  decodeForYouFeedCursor,
+  encodeForYouFeedCursor,
+} from './utils/for-you-cursor.util';
 
 const FOR_YOU_INTEREST_TAKE = 200;
 const FOR_YOU_TRENDING_TAKE = 80;
@@ -50,6 +56,8 @@ export class FeedService {
     private readonly userInterestService: UserInterestService,
 
     private readonly trendingSnapshots: TrendingSnapshotService,
+
+    private readonly forYouSnapshots: ForYouSnapshotService,
   ) {}
 
   /**
@@ -85,58 +93,85 @@ export class FeedService {
   }
 
   /**
-   * Builds the personalized For You feed for the current user.
+   * Builds or continues the personalized For You feed for the current user.
    *
-   * Flow:
-   * 1. Load the user's materialized interest profile.
-   * 2. Select the strongest interests used for candidate retrieval.
-   * 3. Fetch candidates from multiple sources:
+   * First request:
+   * 1. Reuse the current user/filter snapshot when it is still available.
+   * 2. Otherwise load the user's materialized interest profile.
+   * 3. Select the strongest interests used for candidate retrieval.
+   * 4. Fetch candidates from multiple sources:
    *    - interest matches
    *    - followed authors
    *    - trending posts
    *    - recent posts
-   * 4. Merge and deduplicate the candidate pool.
-   * 5. Resolve social relationships for candidate authors.
-   * 6. Rank candidates using interest, engagement, freshness, and social signals.
-   * 7. Apply diversity rules to reduce repetitive authors and games.
-   * 8. Paginate the ranked candidate list.
-   * 9. Hydrate only the selected post IDs with full post data.
+   * 5. Merge, rank, diversify, and freeze the ordered IDs in Redis.
+   *
+   * Continuation:
+   * 1. Reuse the exact user-bound snapshot without rebuilding its ranking.
+   * 2. Live-revalidate posts and scan forward through invalid IDs.
+   * 3. Return an opaque cursor containing the next raw snapshot position.
    *
    * Users without interest signals use a cold-start mix with more
    * trending and recent candidates instead of personalized interest candidates.
    */
-  async forYou(query: QueryFeedDto, userId: string) {
-    const page = query.page ?? 1;
+  async forYou(query: QueryForYouFeedDto, userId: string) {
     const limit = query.limit ?? 20;
+    const cursor = query.cursor
+      ? decodeForYouFeedCursor(query.cursor)
+      : undefined;
+    const filters: ForYouSnapshotFilters = {
+      type: query.type ?? null,
+    };
+    const snapshot = cursor
+      ? await this.forYouSnapshots.getForContinuation(
+          cursor.snapshotId,
+          userId,
+          filters,
+        )
+      : await this.forYouSnapshots.getOrCreate(userId, filters, () =>
+          this.buildForYouSnapshotRanking(userId, query.type),
+        );
+    const offset = cursor?.offset ?? 0;
 
-    const start = (page - 1) * limit;
-
-    if (start >= FOR_YOU_MAX_CANDIDATES) {
-      throw new BadRequestException('For You feed pagination limit exceeded');
+    if (offset > snapshot.postIds.length) {
+      throw new BadRequestException('Invalid For You feed cursor');
     }
 
-    const profile = await this.userInterestService.getProfile(userId);
+    const where = this.buildForYouWhere(userId, query.type);
+    const page = await this.hydrateForYouSnapshotPage({
+      postIds: snapshot.postIds,
+      offset,
+      limit,
+      where,
+      userId,
+    });
 
-    const strongest = this.selectStrongestInterests(profile);
+    return {
+      items: page.posts.map((post) => formatPost(post)),
 
-    const where: Prisma.PostWhereInput = {
-      status: 'PUBLISHED',
-      deletedAt: null,
-
-      // Do not recommend the user's own posts.
-      authorId: {
-        not: userId,
+      meta: {
+        limit,
+        hasMore: page.hasMore,
+        nextCursor:
+          page.hasMore && page.nextOffset !== null
+            ? encodeForYouFeedCursor({
+                snapshotId: snapshot.id,
+                offset: page.nextOffset,
+              })
+            : null,
+        personalized: snapshot.personalized,
       },
-
-      ...this.buildLatestVisibilityWhere(userId),
-
-      ...(query.type
-        ? {
-            type: query.type,
-          }
-        : {}),
     };
+  }
 
+  /**
+   * Executes the existing candidate, ranking, and diversity pipeline exactly
+   * once when a new For You snapshot is required.
+   */
+  private async buildForYouSnapshotRanking(userId: string, type?: PostType) {
+    const profile = await this.userInterestService.getProfile(userId);
+    const strongest = this.selectStrongestInterests(profile);
+    const where = this.buildForYouWhere(userId, type);
     const [
       interestCandidates,
       trendingCandidates,
@@ -150,31 +185,26 @@ export class FeedService {
             FOR_YOU_INTEREST_TAKE,
           )
         : Promise.resolve([]),
-
       this.feedRepository.findForYouTrendingCandidates(
         where,
         profile.hasSignals ? FOR_YOU_TRENDING_TAKE : 200,
       ),
-
       this.feedRepository.findRecentForYouCandidates(
         where,
         profile.hasSignals ? FOR_YOU_RECENT_TAKE : 160,
       ),
-
       this.feedRepository.findFollowedAuthorCandidates(
         where,
         userId,
         FOR_YOU_FOLLOWING_TAKE,
       ),
     ]);
-
     const candidates = this.mergeCandidates([
       interestCandidates,
       followedCandidates,
       trendingCandidates,
       recentCandidates,
     ]);
-
     const followedAuthorIds =
       candidates.length > 0
         ? await this.followsService.getFollowingIdsAmong(
@@ -182,36 +212,87 @@ export class FeedService {
             candidates.map((candidate) => candidate.authorId),
           )
         : new Set<string>();
-
     const ranked = this.feedRanker.rankForYou(
       candidates,
       profile,
       followedAuthorIds,
     );
-
     const diversified = this.feedRanker.diversifyForYou(ranked);
 
-    const selectedIds = diversified
-      .slice(start, start + limit)
-      .map((candidate) => candidate.id);
+    return {
+      postIds: diversified.map((candidate) => candidate.id),
+      personalized: profile.hasSignals,
+    };
+  }
 
-    const posts = await this.postsRepository.findManyByIds(selectedIds, userId);
+  /**
+   * Reapplies live For You eligibility while scanning raw snapshot positions
+   * until a full page and one extra valid post have been found.
+   */
+  private async hydrateForYouSnapshotPage(params: {
+    postIds: string[];
+    offset: number;
+    limit: number;
+    where: Prisma.PostWhereInput;
+    userId: string;
+  }) {
+    const { postIds, offset, limit, where, userId } = params;
+    const hydrated: Array<{
+      index: number;
+      post: Awaited<ReturnType<PostsRepository['findForYouManyByIds']>>[number];
+    }> = [];
+    let scanOffset = offset;
+
+    while (scanOffset < postIds.length && hydrated.length <= limit) {
+      const remainingNeeded = limit + 1 - hydrated.length;
+      const chunkSize = Math.max(20, remainingNeeded);
+      const chunkEnd = Math.min(postIds.length, scanOffset + chunkSize);
+      const chunkIds = postIds.slice(scanOffset, chunkEnd);
+      const posts = await this.postsRepository.findForYouManyByIds(
+        chunkIds,
+        where,
+        userId,
+      );
+      const postMap = new Map(posts.map((post) => [post.id, post] as const));
+
+      for (let index = scanOffset; index < chunkEnd; index += 1) {
+        const postId = postIds[index];
+        const post = postId ? postMap.get(postId) : undefined;
+
+        if (post) {
+          hydrated.push({ index, post });
+        }
+      }
+
+      scanOffset = chunkEnd;
+    }
+
+    const selected = hydrated.slice(0, limit);
+    const last = selected[selected.length - 1];
+    const hasMore = hydrated.length > limit;
 
     return {
-      items: this.orderPostsByIds(posts, selectedIds).map((post) =>
-        formatPost(post),
-      ),
+      posts: selected.map((item) => item.post),
+      hasMore,
+      nextOffset: hasMore && last ? last.index + 1 : null,
+    };
+  }
 
-      meta: {
-        page,
-        limit,
-
-        candidateCount: candidates.length,
-
-        hasMore: start + limit < diversified.length,
-
-        personalized: profile.hasSignals,
+  /**
+   * Defines both candidate-time and hydration-time For You eligibility.
+   */
+  private buildForYouWhere(
+    userId: string,
+    type?: PostType,
+  ): Prisma.PostWhereInput {
+    return {
+      status: 'PUBLISHED',
+      deletedAt: null,
+      authorId: {
+        not: userId,
       },
+      ...this.buildLatestVisibilityWhere(userId),
+      ...(type ? { type } : {}),
     };
   }
 

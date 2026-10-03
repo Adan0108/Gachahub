@@ -3,7 +3,7 @@ import { ApiOperation, ApiTags, ApiCookieAuth } from '@nestjs/swagger';
 import { OptionalAuth, Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import {
-  QueryFeedDto,
+  QueryForYouFeedDto,
   QueryGameFeedDto,
   QueryLatestFeedDto,
   QueryTrendingFeedDto,
@@ -20,7 +20,7 @@ export class FeedController {
   @ApiOperation({
     summary: 'Get personalized For You posts',
   })
-  forYou(@Query() query: QueryFeedDto, @Session() session: UserSession) {
+  forYou(@Query() query: QueryForYouFeedDto, @Session() session: UserSession) {
     return this.feedService.forYou(query, session.user.id);
   }
 

@@ -1,9 +1,10 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, GoneException } from '@nestjs/common';
 import type { UserInterestProfile } from '../recommendation/recommendation.types';
 import type {
   ForYouFeedCandidate,
   RankedForYouFeedCandidate,
 } from './feed.types';
+import { encodeForYouFeedCursor } from './utils/for-you-cursor.util';
 
 jest.mock('../follows/follows.service', () => ({
   FollowsService: class FollowsService {},
@@ -38,6 +39,7 @@ describe('FeedService - For You', () => {
 
   const postsRepository = {
     findManyByIds: jest.fn(),
+    findForYouManyByIds: jest.fn(),
     findMany: jest.fn(),
     count: jest.fn(),
   };
@@ -55,6 +57,12 @@ describe('FeedService - For You', () => {
 
   const userInterestService = {
     getProfile: jest.fn(),
+  };
+
+  const snapshotId = '123e4567-e89b-42d3-a456-426614174000';
+  const forYouSnapshots = {
+    getOrCreate: jest.fn(),
+    getForContinuation: jest.fn(),
   };
 
   let service: FeedService;
@@ -131,6 +139,7 @@ describe('FeedService - For You', () => {
       feedRanker as never,
       userInterestService as never,
       {} as never,
+      forYouSnapshots as never,
     );
 
     feedRepository.findInterestCandidates.mockResolvedValue([]);
@@ -143,7 +152,22 @@ describe('FeedService - For You', () => {
     feedRanker.rankForYou.mockReturnValue([]);
     feedRanker.diversifyForYou.mockReturnValue([]);
 
-    postsRepository.findManyByIds.mockResolvedValue([]);
+    postsRepository.findForYouManyByIds.mockResolvedValue([]);
+    forYouSnapshots.getOrCreate.mockImplementation(
+      async (
+        userId: string,
+        _filters: unknown,
+        createRanking: () => Promise<{
+          postIds: string[];
+          personalized: boolean;
+        }>,
+      ) => ({
+        id: snapshotId,
+        userId,
+        filterKey: 'filter',
+        ...(await createRanking()),
+      }),
+    );
   });
 
   it('uses personalized candidate sources when the user has interests', async () => {
@@ -151,7 +175,6 @@ describe('FeedService - For You', () => {
 
     await service.forYou(
       {
-        page: 1,
         limit: 20,
       },
       'user-1',
@@ -199,7 +222,6 @@ describe('FeedService - For You', () => {
 
     await service.forYou(
       {
-        page: 1,
         limit: 20,
       },
       'user-1',
@@ -261,7 +283,6 @@ describe('FeedService - For You', () => {
 
     await service.forYou(
       {
-        page: 1,
         limit: 20,
       },
       'user-1',
@@ -311,7 +332,6 @@ describe('FeedService - For You', () => {
 
     await service.forYou(
       {
-        page: 1,
         limit: 20,
       },
       'user-1',
@@ -329,50 +349,30 @@ describe('FeedService - For You', () => {
     );
   });
 
-  it('hydrates only post IDs selected for the requested page', async () => {
-    userInterestService.getProfile.mockResolvedValue(personalizedProfile);
-
-    const candidates = Array.from(
-      {
-        length: 30,
-      },
-      (_, index) => candidate(`post-${index + 1}`),
+  it('starts continuation hydration at the raw cursor offset', async () => {
+    const postIds = Array.from(
+      { length: 30 },
+      (_, index) => `post-${index + 1}`,
     );
-
-    feedRepository.findInterestCandidates.mockResolvedValue(candidates);
-
-    const ranked: RankedForYouFeedCandidate[] = candidates.map(
-      (item, index) => ({
-        ...item,
-        score: 100 - index,
-      }),
-    );
-
-    feedRanker.rankForYou.mockReturnValue(ranked);
-
-    feedRanker.diversifyForYou.mockReturnValue(ranked);
+    forYouSnapshots.getForContinuation.mockResolvedValue({
+      id: snapshotId,
+      userId: 'user-1',
+      filterKey: 'filter',
+      postIds,
+      personalized: true,
+    });
 
     await service.forYou(
       {
-        page: 2,
+        cursor: encodeForYouFeedCursor({ snapshotId, offset: 10 }),
         limit: 10,
       },
       'user-1',
     );
 
-    expect(postsRepository.findManyByIds).toHaveBeenCalledWith(
-      [
-        'post-11',
-        'post-12',
-        'post-13',
-        'post-14',
-        'post-15',
-        'post-16',
-        'post-17',
-        'post-18',
-        'post-19',
-        'post-20',
-      ],
+    expect(postsRepository.findForYouManyByIds).toHaveBeenCalledWith(
+      postIds.slice(10, 30),
+      expect.any(Object),
       'user-1',
     );
   });
@@ -382,7 +382,6 @@ describe('FeedService - For You', () => {
 
     await service.forYou(
       {
-        page: 1,
         limit: 20,
       },
       'user-1',
@@ -397,11 +396,19 @@ describe('FeedService - For You', () => {
     );
   });
 
-  it('rejects pagination beyond the bounded candidate pool', async () => {
+  it('rejects a cursor offset beyond its snapshot', async () => {
+    forYouSnapshots.getForContinuation.mockResolvedValue({
+      id: snapshotId,
+      userId: 'user-1',
+      filterKey: 'filter',
+      postIds: ['post-1'],
+      personalized: true,
+    });
+
     await expect(
       service.forYou(
         {
-          page: 21,
+          cursor: encodeForYouFeedCursor({ snapshotId, offset: 2 }),
           limit: 20,
         },
         'user-1',
@@ -422,7 +429,6 @@ describe('FeedService - For You', () => {
 
     const result = await service.forYou(
       {
-        page: 1,
         limit: 20,
       },
       'user-1',
@@ -436,7 +442,6 @@ describe('FeedService - For You', () => {
 
     const result = await service.forYou(
       {
-        page: 1,
         limit: 20,
       },
       'user-1',
@@ -465,14 +470,14 @@ describe('FeedService - For You', () => {
 
     await service.forYou(
       {
-        page: 1,
         limit: 20,
       },
       'user-1',
     );
 
-    expect(postsRepository.findManyByIds).toHaveBeenCalledWith(
+    expect(postsRepository.findForYouManyByIds).toHaveBeenCalledWith(
       ['post-1'],
+      expect.any(Object),
       'user-1',
     );
   });
@@ -499,10 +504,12 @@ describe('FeedService - For You', () => {
     feedRanker.rankForYou.mockReturnValue(ranked);
 
     feedRanker.diversifyForYou.mockReturnValue(ranked);
+    postsRepository.findForYouManyByIds.mockImplementation((ids: string[]) =>
+      ids.map((id) => ({ ...candidate(id), tags: [], postLikes: [] })),
+    );
 
     const result = await service.forYou(
       {
-        page: 1,
         limit: 20,
       },
       'user-1',
@@ -528,15 +535,205 @@ describe('FeedService - For You', () => {
     feedRanker.rankForYou.mockReturnValue(ranked);
 
     feedRanker.diversifyForYou.mockReturnValue(ranked);
+    postsRepository.findForYouManyByIds.mockResolvedValue([
+      { ...post1, tags: [], postLikes: [] },
+    ]);
 
     const result = await service.forYou(
       {
-        page: 1,
         limit: 20,
       },
       'user-1',
     );
 
     expect(result.meta.hasMore).toBe(false);
+    expect(result.meta.nextCursor).toBeNull();
+  });
+
+  it('reuses a current first-page snapshot without rebuilding ranking', async () => {
+    forYouSnapshots.getOrCreate.mockResolvedValue({
+      id: snapshotId,
+      userId: 'user-1',
+      filterKey: 'filter',
+      postIds: ['post-1'],
+      personalized: true,
+    });
+
+    await service.forYou({ limit: 20 }, 'user-1');
+
+    expect(userInterestService.getProfile).not.toHaveBeenCalled();
+    expect(feedRepository.findInterestCandidates).not.toHaveBeenCalled();
+    expect(feedRanker.rankForYou).not.toHaveBeenCalled();
+    expect(feedRanker.diversifyForYou).not.toHaveBeenCalled();
+  });
+
+  it('continues a snapshot without rebuilding personalized ranking', async () => {
+    forYouSnapshots.getForContinuation.mockResolvedValue({
+      id: snapshotId,
+      userId: 'user-1',
+      filterKey: 'filter',
+      postIds: ['post-1'],
+      personalized: false,
+    });
+
+    const result = await service.forYou(
+      {
+        limit: 20,
+        cursor: encodeForYouFeedCursor({ snapshotId, offset: 1 }),
+      },
+      'user-1',
+    );
+
+    expect(userInterestService.getProfile).not.toHaveBeenCalled();
+    expect(feedRepository.findInterestCandidates).not.toHaveBeenCalled();
+    expect(feedRepository.findForYouTrendingCandidates).not.toHaveBeenCalled();
+    expect(feedRepository.findRecentForYouCandidates).not.toHaveBeenCalled();
+    expect(feedRepository.findFollowedAuthorCandidates).not.toHaveBeenCalled();
+    expect(followsService.getFollowingIdsAmong).not.toHaveBeenCalled();
+    expect(feedRanker.rankForYou).not.toHaveBeenCalled();
+    expect(feedRanker.diversifyForYou).not.toHaveBeenCalled();
+    expect(result.meta.personalized).toBe(false);
+  });
+
+  it('skips invalid IDs, fills the page, and restores snapshot order', async () => {
+    const postIds = ['post-1', 'post-2', 'post-3', 'post-4', 'post-5'];
+    forYouSnapshots.getForContinuation.mockResolvedValue({
+      id: snapshotId,
+      userId: 'user-1',
+      filterKey: 'filter',
+      postIds,
+      personalized: true,
+    });
+    postsRepository.findForYouManyByIds.mockResolvedValue([
+      { ...candidate('post-5'), tags: [], postLikes: [] },
+      { ...candidate('post-3'), tags: [], postLikes: [] },
+      { ...candidate('post-1'), tags: [], postLikes: [] },
+      { ...candidate('post-4'), tags: [], postLikes: [] },
+    ]);
+
+    const result = await service.forYou(
+      {
+        limit: 3,
+        cursor: encodeForYouFeedCursor({ snapshotId, offset: 1 }),
+      },
+      'user-1',
+    );
+
+    expect(result.items.map((post) => post.id)).toEqual([
+      'post-3',
+      'post-4',
+      'post-5',
+    ]);
+    expect(result.meta.hasMore).toBe(false);
+    expect(result.meta.nextCursor).toBeNull();
+  });
+
+  it('uses raw snapshot positions across pages without duplicates', async () => {
+    const postIds = [
+      'post-1',
+      'post-2',
+      'post-3',
+      'post-4',
+      'post-5',
+      'post-6',
+    ];
+    const snapshot = {
+      id: snapshotId,
+      userId: 'user-1',
+      filterKey: 'filter',
+      postIds,
+      personalized: true,
+    };
+    forYouSnapshots.getOrCreate.mockResolvedValue(snapshot);
+    forYouSnapshots.getForContinuation.mockResolvedValue(snapshot);
+    postsRepository.findForYouManyByIds.mockImplementation((ids: string[]) =>
+      ids
+        .filter((id) => id !== 'post-2')
+        .map((id) => ({ ...candidate(id), tags: [], postLikes: [] })),
+    );
+
+    const first = await service.forYou({ limit: 3 }, 'user-1');
+    const second = await service.forYou(
+      { limit: 2, cursor: first.meta.nextCursor ?? undefined },
+      'user-1',
+    );
+
+    expect(first.items.map((post) => post.id)).toEqual([
+      'post-1',
+      'post-3',
+      'post-4',
+    ]);
+    expect(second.items.map((post) => post.id)).toEqual(['post-5', 'post-6']);
+    expect(second.meta.hasMore).toBe(false);
+    expect(second.meta.nextCursor).toBeNull();
+  });
+
+  it('reapplies live authenticated eligibility and the requested type', async () => {
+    forYouSnapshots.getOrCreate.mockResolvedValue({
+      id: snapshotId,
+      userId: 'user-1',
+      filterKey: 'filter',
+      postIds: ['post-1'],
+      personalized: true,
+    });
+
+    await service.forYou({ limit: 20, type: 'GUIDE' }, 'user-1');
+
+    expect(postsRepository.findForYouManyByIds).toHaveBeenCalledWith(
+      ['post-1'],
+      {
+        status: 'PUBLISHED',
+        deletedAt: null,
+        authorId: { not: 'user-1' },
+        type: 'GUIDE',
+        OR: [
+          { visibility: 'PUBLIC' },
+          { authorId: 'user-1', visibility: 'FOLLOWERS_ONLY' },
+          {
+            visibility: 'FOLLOWERS_ONLY',
+            author: {
+              followers: {
+                some: { followerId: 'user-1' },
+              },
+            },
+          },
+        ],
+      },
+      'user-1',
+    );
+  });
+
+  it('propagates ownership or filter mismatch rejection before hydration', async () => {
+    forYouSnapshots.getForContinuation.mockRejectedValue(
+      new BadRequestException('Invalid For You feed cursor'),
+    );
+
+    await expect(
+      service.forYou(
+        {
+          limit: 20,
+          cursor: encodeForYouFeedCursor({ snapshotId, offset: 1 }),
+        },
+        'user-2',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(postsRepository.findForYouManyByIds).not.toHaveBeenCalled();
+  });
+
+  it('propagates an expired snapshot as 410 before hydration', async () => {
+    forYouSnapshots.getForContinuation.mockRejectedValue(
+      new GoneException('For You snapshot expired'),
+    );
+
+    await expect(
+      service.forYou(
+        {
+          limit: 20,
+          cursor: encodeForYouFeedCursor({ snapshotId, offset: 1 }),
+        },
+        'user-1',
+      ),
+    ).rejects.toBeInstanceOf(GoneException);
+    expect(postsRepository.findForYouManyByIds).not.toHaveBeenCalled();
   });
 });
