@@ -14,6 +14,8 @@ import { MediaModule } from '../media/media.module';
 import { UserAvatarController } from './avatar/user-avatar.controller';
 import { UserAvatarRepository } from './avatar/user-avatar.repository';
 import { UserAvatarService } from './avatar/user-avatar.service';
+import { UserBannerController } from './banner/user-banner.controller';
+import { UserBannerService } from './banner/user-banner.service';
 
 @Module({
   imports: [
@@ -23,13 +25,19 @@ import { UserAvatarService } from './avatar/user-avatar.service';
     SessionTerminatorModule,
     MediaModule,
   ],
-  controllers: [UsersController, AdminUsersController, UserAvatarController],
+  controllers: [
+    UsersController,
+    AdminUsersController,
+    UserAvatarController,
+    UserBannerController,
+  ],
   providers: [
     UsersService,
     UserModerationService,
     UsersRepository,
     UserAvatarService,
     UserAvatarRepository,
+    UserBannerService,
     UserSearchRateLimiterService,
     UsernameAvailabilityRateLimiterService,
   ],

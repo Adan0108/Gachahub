@@ -188,3 +188,28 @@ describe('UsersRepository admin moderation', () => {
     expect(result).toEqual({ id: 'user-1', status: 'BANNED' });
   });
 });
+
+describe('UsersRepository.setBannerPreset', () => {
+  const prisma = { user: { update: jest.fn() } };
+  const repository = new UsersRepository(prisma as unknown as PrismaService);
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it.each([['violet-dusk'], [null]])(
+    'writes bannerPresetId=%s and returns the me-shaped row',
+    async (preset) => {
+      prisma.user.update.mockResolvedValue({ id: 'user-1' });
+
+      await repository.setBannerPreset('user-1', preset);
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { bannerPresetId: preset },
+        select: expect.objectContaining({
+          id: true,
+          bannerPresetId: true,
+        }) as unknown,
+      });
+    },
+  );
+});
