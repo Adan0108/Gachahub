@@ -10,14 +10,26 @@ import { PostsModule } from '../posts/posts.module';
 import { BlocksModule } from '../blocks/blocks.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { SessionTerminatorModule } from '../auth/session-terminator.module';
+import { MediaModule } from '../media/media.module';
+import { UserAvatarController } from './avatar/user-avatar.controller';
+import { UserAvatarRepository } from './avatar/user-avatar.repository';
+import { UserAvatarService } from './avatar/user-avatar.service';
 
 @Module({
-  imports: [PostsModule, BlocksModule, AuditLogModule, SessionTerminatorModule],
-  controllers: [UsersController, AdminUsersController],
+  imports: [
+    PostsModule,
+    BlocksModule,
+    AuditLogModule,
+    SessionTerminatorModule,
+    MediaModule,
+  ],
+  controllers: [UsersController, AdminUsersController, UserAvatarController],
   providers: [
     UsersService,
     UserModerationService,
     UsersRepository,
+    UserAvatarService,
+    UserAvatarRepository,
     UserSearchRateLimiterService,
     UsernameAvailabilityRateLimiterService,
   ],
