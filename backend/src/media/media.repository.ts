@@ -180,6 +180,26 @@ export class MediaRepository {
     });
   }
 
+  /**
+   * ATTACHED single-image uploads nothing points at any more, idle past `retryCutoff`. A crash
+   * between a replace committing and its release leaves these behind, and the RELEASE_FAILED
+   * sweep never sees them.
+   */
+  findOrphanedSingleImageUploads(retryCutoff: Date, take = 50) {
+    return this.prisma.mediaUpload.findMany({
+      where: {
+        status: 'ATTACHED',
+        purpose: { in: ['AVATAR', 'GAME_ICON', 'GAME_BANNER'] },
+        updatedAt: { lt: retryCutoff },
+        avatarFor: null,
+        gameIconFor: null,
+        gameBannerFor: null,
+      },
+      orderBy: { updatedAt: 'asc' },
+      take,
+    });
+  }
+
   findExpiredUploads(normalCutoff: Date, cleaningCutoff: Date, take = 100) {
     return this.prisma.mediaUpload.findMany({
       where: {

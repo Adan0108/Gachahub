@@ -71,3 +71,6 @@ Apply with `prisma migrate deploy` only. Never rename, edit or squash an applied
 
 ## Mentions
 - `20261003100000_add_mentions`: one row per notified (post/comment, user), so re-adding a removed @mention does not ping twice
+
+## Profile images
+- `20261003120000_add_user_profile_images`: `User.avatarMediaUploadId` (unique FK to the upload backing `image`, set null on delete) and `User.bannerPresetId` (catalog design id)

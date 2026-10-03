@@ -12,23 +12,8 @@ import { UsernameAvailabilityRateLimiterService } from './username-availability-
 import { SearchUsersQueryDto } from './dto/search-users-query.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CompleteOnboardingDto } from './dto/complete-onboarding.dto';
+import { ME_SELECT } from './me-select';
 import { isReservedUsername } from './reserved-usernames';
-
-/** Every field `session.user` used to expose - see getMe's own docblock for why this is a live read instead. */
-const ME_SELECT = {
-  id: true,
-  name: true,
-  email: true,
-  emailVerified: true,
-  image: true,
-  createdAt: true,
-  updatedAt: true,
-  role: true,
-  status: true,
-  messageRequestSetting: true,
-  username: true,
-  onboarded: true,
-} as const;
 
 @Injectable()
 export class UsersService {
@@ -191,6 +176,7 @@ export class UsersService {
         name: true,
         username: true,
         image: true,
+        bannerPresetId: true,
         createdAt: true,
       },
     });

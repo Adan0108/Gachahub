@@ -11,6 +11,7 @@ import { useSignOut } from "../hooks/useSignOut";
 import { useToast } from "../hooks/useToast";
 import { api } from "../lib/api";
 import { queries } from "../lib/queries";
+import { AvatarFace } from "./AvatarFace";
 import { glyph } from "./constants";
 import { GlobalSearch } from "./GlobalSearch";
 
@@ -202,7 +203,7 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
               ref={accountButtonRef}
               type="button"
             >
-              {initials}
+              <AvatarFace fallback={initials} image={user.image} />
             </button>
             {accountOpen && (
               <div className="user-menu" ref={accountMenuRef} role="menu">
