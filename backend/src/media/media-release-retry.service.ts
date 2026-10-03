@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { MediaRepository } from './media.repository';
 import { MediaService } from './media.service';
 
-/** Retries releasing media whose Cloudinary delete failed, regardless of the upload's purpose. */
+/** Releases media whose Cloudinary delete failed, plus replaced single-image uploads a crash left unreleased, regardless of purpose. */
 @Injectable()
 export class MediaReleaseRetryService {
   private readonly logger = new Logger(MediaReleaseRetryService.name);
@@ -16,10 +16,11 @@ export class MediaReleaseRetryService {
   @Cron(CronExpression.EVERY_HOUR)
   async retryFailedReleases(): Promise<void> {
     const retryCutoff = new Date(Date.now() - 60 * 60 * 1000);
-    const uploads = await this.mediaRepository.findReleaseFailedUploads(
-      retryCutoff,
-      50,
-    );
+    const [failed, orphaned] = await Promise.all([
+      this.mediaRepository.findReleaseFailedUploads(retryCutoff, 50),
+      this.mediaRepository.findOrphanedSingleImageUploads(retryCutoff, 50),
+    ]);
+    const uploads = [...failed, ...orphaned];
 
     for (const upload of uploads) {
       try {
