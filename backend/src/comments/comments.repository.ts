@@ -8,6 +8,7 @@ const commentInclude = {
       id: true,
       image: true,
       name: true,
+      username: true,
     },
   },
 } as const;
@@ -52,6 +53,33 @@ export class CommentsRepository {
       },
       include: commentInclude,
     });
+  }
+
+  /** Handles of the users each comment actually pinged, so the UI only highlights real mentions. */
+  async findMentionedUsernames(
+    commentIds: string[],
+  ): Promise<Map<string, string[]>> {
+    const byComment = new Map<string, string[]>();
+
+    if (commentIds.length === 0) {
+      return byComment;
+    }
+
+    const rows = await this.prisma.mention.findMany({
+      where: { entityType: 'COMMENT', entityId: { in: commentIds } },
+      select: { entityId: true, user: { select: { username: true } } },
+    });
+
+    for (const { entityId, user } of rows) {
+      if (user.username) {
+        byComment.set(entityId, [
+          ...(byComment.get(entityId) ?? []),
+          user.username,
+        ]);
+      }
+    }
+
+    return byComment;
   }
 
   /**

@@ -36,8 +36,14 @@ export class CommentsService {
       limit,
     });
 
+    const mentioned = await this.commentsRepository.findMentionedUsernames(
+      result.items.map((comment) => comment.id),
+    );
+
     return toPaginated(
-      result.items.map((comment) => this.formatComment(comment)),
+      result.items.map((comment) =>
+        this.formatComment(comment, mentioned.get(comment.id)),
+      ),
       { page, limit, total: result.total },
     );
   }
@@ -67,8 +73,14 @@ export class CommentsService {
       limit,
     });
 
+    const mentioned = await this.commentsRepository.findMentionedUsernames(
+      result.items.map((comment) => comment.id),
+    );
+
     return toPaginated(
-      result.items.map((comment) => this.formatComment(comment)),
+      result.items.map((comment) =>
+        this.formatComment(comment, mentioned.get(comment.id)),
+      ),
       { page, limit, total: result.total },
     );
   }
@@ -312,7 +324,7 @@ export class CommentsService {
         replies: number;
       };
     },
-  >(comment: T) {
+  >(comment: T, mentions: string[] = []) {
     const { _count, ...rest } = comment;
 
     return {
@@ -326,6 +338,8 @@ export class CommentsService {
           : comment.content,
 
       replyCount: _count?.replies ?? 0,
+
+      mentions,
     };
   }
 }

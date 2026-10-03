@@ -33,6 +33,7 @@ describe('CommentsService', () => {
     findById: jest.fn(),
     findByPostId: jest.fn(),
     findReplies: jest.fn(),
+    findMentionedUsernames: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     softDelete: jest.fn(),
@@ -67,6 +68,7 @@ describe('CommentsService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mentions.resolveTargets.mockResolvedValue(['mentioned-1']);
+    commentsRepository.findMentionedUsernames.mockResolvedValue(new Map());
 
     prisma.$transaction.mockImplementation(
       async (
@@ -141,6 +143,46 @@ describe('CommentsService', () => {
         total: 1,
         totalPages: 1,
       });
+    });
+
+    it('attaches the handles each comment actually mentioned', async () => {
+      commentsRepository.findPostById.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'PUBLISHED',
+        visibility: 'PUBLIC',
+        deletedAt: null,
+      });
+      const row = (id: string) => ({
+        id,
+        postId: 'post-1',
+        authorId: 'user-1',
+        parentId: null,
+        content: 'hi @iamme',
+        status: 'VISIBLE',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+        author: { id: 'user-1', name: 'User 1', image: null },
+      });
+      commentsRepository.findByPostId.mockResolvedValue({
+        items: [row('c1'), row('c2')],
+        total: 2,
+      });
+      commentsRepository.findMentionedUsernames.mockResolvedValue(
+        new Map([['c1', ['iamme']]]),
+      );
+
+      const result = await service.findByPost('post-1', {});
+
+      expect(commentsRepository.findMentionedUsernames).toHaveBeenCalledWith([
+        'c1',
+        'c2',
+      ]);
+      expect(result.items.map((item) => item.mentions)).toEqual([
+        ['iamme'],
+        [],
+      ]);
     });
 
     it('uses provided pagination', async () => {
