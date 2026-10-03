@@ -7,6 +7,7 @@ import { PostVisibilityService } from '../post-visibility/post-visibility.servic
 import type { UserInterestService } from '../recommendation/user-interest.service';
 import { EventPublisherPort } from '../domain-events/event-publisher.port';
 import { PrismaService } from '../prisma/prisma.service';
+import type { MentionsService } from '../mentions/mentions.service';
 
 /*
  * These dependencies are mocked at module level so Jest does not load their
@@ -50,6 +51,8 @@ describe('CommentsService', () => {
     publishMany: jest.fn(),
   };
 
+  const mentions = { publishMentions: jest.fn() };
+
   const transaction = {} as Prisma.TransactionClient;
 
   const prisma = {
@@ -73,6 +76,7 @@ describe('CommentsService', () => {
       userInterestService as unknown as UserInterestService,
       eventPublisher as EventPublisherPort,
       prisma as unknown as PrismaService,
+      mentions as unknown as MentionsService,
     );
   });
 
@@ -384,6 +388,16 @@ describe('CommentsService', () => {
             parentCommentAuthorId: null,
           },
         },
+        transaction,
+      );
+
+      expect(mentions.publishMentions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: 'Nice post',
+          actorId: 'user-1',
+          entityType: 'COMMENT',
+          entityId: 'comment-1',
+        }),
         transaction,
       );
 

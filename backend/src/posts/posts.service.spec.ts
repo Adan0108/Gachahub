@@ -8,6 +8,7 @@ import { PostSortDto } from './dto/query-posts.dto';
 import { CreatePostStatusDto } from './dto/create-post.dto';
 import type { PostsRepository } from './posts.repository';
 import type { MediaService } from '../media/media.service';
+import type { MentionsService } from '../mentions/mentions.service';
 import type { FollowsService } from '../follows/follows.service';
 import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import type { UserInterestService } from '../recommendation/user-interest.service';
@@ -78,6 +79,8 @@ describe('PostsService', () => {
   const userInterestService = {
     recordPostInteraction: jest.fn(),
   };
+
+  const mentions = { publishMentions: jest.fn() };
 
   const eventPublisherPort = {
     publish: jest.fn(),
@@ -160,6 +163,7 @@ describe('PostsService', () => {
       userInterestService as unknown as UserInterestService,
       eventPublisherPort as EventPublisherPort,
       prisma as unknown as PrismaService,
+      mentions as unknown as MentionsService,
     );
   });
 
@@ -408,6 +412,65 @@ describe('PostsService', () => {
       expect(result.id).toBe('post-1');
     });
 
+    describe('mentions', () => {
+      const createWithStatus = async (status: 'PUBLISHED' | 'DRAFT') => {
+        postsRepository.findGameById.mockResolvedValue({
+          id: 'game-1',
+          status: 'ACTIVE',
+        });
+        mediaService.resolveAttachableMedia.mockResolvedValue([]);
+        postsRepository.create.mockResolvedValue(basePost);
+
+        await service.create(
+          {
+            gameId: 'game-1',
+            title: 'Hi @bob',
+            content: 'cc @amy',
+            status,
+          } as never,
+          'author-1',
+        );
+
+        const [{ afterCreate }] = postsRepository.create.mock.calls[0] as [
+          {
+            afterCreate: (
+              tx: Prisma.TransactionClient,
+              post: Record<string, unknown>,
+            ) => Promise<void>;
+          },
+        ];
+        await afterCreate(transaction, {
+          id: 'post-1',
+          title: 'Hi @bob',
+          content: 'cc @amy',
+          status,
+          visibility: 'PUBLIC',
+          authorId: 'author-1',
+          deletedAt: null,
+        });
+      };
+
+      it('publishes mentions of a published post inside the creating transaction', async () => {
+        await createWithStatus('PUBLISHED');
+
+        expect(mentions.publishMentions).toHaveBeenCalledWith(
+          expect.objectContaining({
+            text: 'Hi @bob\ncc @amy',
+            actorId: 'author-1',
+            entityType: 'POST',
+            entityId: 'post-1',
+          }),
+          transaction,
+        );
+      });
+
+      it('notifies nobody for a draft', async () => {
+        await createWithStatus('DRAFT');
+
+        expect(mentions.publishMentions).not.toHaveBeenCalled();
+      });
+    });
+
     it('throws when game does not exist', async () => {
       postsRepository.findGameById.mockResolvedValue(null);
 
@@ -526,9 +589,78 @@ describe('PostsService', () => {
         },
 
         tags: undefined,
+        afterUpdate: expect.any(Function) as unknown,
       });
 
       expect(result.title).toBe('Updated title');
+    });
+
+    describe('mentions', () => {
+      const row = (over: Record<string, unknown>) => ({
+        id: 'post-1',
+        title: 'T',
+        content: 'C',
+        status: 'PUBLISHED',
+        visibility: 'PUBLIC',
+        authorId: 'author-1',
+        deletedAt: null,
+        ...over,
+      });
+
+      const runAfterUpdate = async (before: object, after: object) => {
+        postsRepository.findById.mockResolvedValue(basePost);
+        postsRepository.update.mockResolvedValue(basePost);
+        await service.update('post-1', { title: 'x' }, 'author-1');
+
+        const [{ afterUpdate }] = postsRepository.update.mock.calls[0] as [
+          {
+            afterUpdate: (
+              tx: Prisma.TransactionClient,
+              before: object,
+              after: object,
+            ) => Promise<void>;
+          },
+        ];
+        await afterUpdate(transaction, before, after);
+      };
+
+      it('on a published post, passes the old text so only new mentions ping', async () => {
+        await runAfterUpdate(
+          row({ content: 'hi' }),
+          row({ content: 'hi @user123' }),
+        );
+
+        expect(mentions.publishMentions).toHaveBeenCalledWith(
+          expect.objectContaining({
+            text: 'T\nhi @user123',
+            entityType: 'POST',
+            entityId: 'post-1',
+            previous: expect.objectContaining({ text: 'T\nhi' }) as unknown,
+          }),
+          transaction,
+        );
+      });
+
+      it('publishing a draft has no previous text, so everyone mentioned pings', async () => {
+        await runAfterUpdate(
+          row({ status: 'DRAFT', content: 'hi @user123' }),
+          row({ status: 'PUBLISHED', content: 'hi @user123' }),
+        );
+
+        const [input] = mentions.publishMentions.mock.calls[0] as [
+          { previous?: unknown },
+        ];
+        expect(input.previous).toBeUndefined();
+      });
+
+      it('notifies nobody while the post stays a draft', async () => {
+        await runAfterUpdate(
+          row({ status: 'DRAFT' }),
+          row({ status: 'DRAFT', content: '@user123' }),
+        );
+
+        expect(mentions.publishMentions).not.toHaveBeenCalled();
+      });
     });
 
     it('rejects updating another user post', async () => {

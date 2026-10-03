@@ -255,6 +255,11 @@ export class PostsRepository {
       name: string;
       slug: string;
     }>;
+    /** Runs inside the creating transaction, e.g. to enqueue events that must commit or roll back with the post. */
+    afterCreate?: (
+      tx: Prisma.TransactionClient,
+      post: Prisma.PostGetPayload<object>,
+    ) => Promise<void>;
   }) {
     return this.prisma.$transaction(
       async (tx) => {
@@ -345,6 +350,8 @@ export class PostsRepository {
           });
         }
 
+        await params.afterCreate?.(tx, post);
+
         return tx.post.findUniqueOrThrow({
           where: {
             id: post.id,
@@ -366,15 +373,17 @@ export class PostsRepository {
       name: string;
       slug: string;
     }>;
+    /** Runs inside the updating transaction with the row as it was just before and just after. */
+    afterUpdate?: (
+      tx: Prisma.TransactionClient,
+      before: Prisma.PostGetPayload<object>,
+      after: Prisma.PostGetPayload<object>,
+    ) => Promise<void>;
   }) {
     return this.prisma.$transaction(async (tx) => {
       const before = await tx.post.findUniqueOrThrow({
         where: {
           id: params.id,
-        },
-        select: {
-          status: true,
-          gameId: true,
         },
       });
 
@@ -433,6 +442,8 @@ export class PostsRepository {
           });
         }
       }
+
+      await params.afterUpdate?.(tx, before, updated);
 
       return updated;
     });

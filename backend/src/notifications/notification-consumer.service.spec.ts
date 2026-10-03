@@ -462,6 +462,45 @@ describe('NotificationConsumerService', () => {
     });
 
     /**
+     * Verifies that a mention event creates a USER_MENTIONED notification
+     * targeting whatever entity the mention was made on.
+     */
+    it.each(['POST', 'COMMENT', 'MESSAGE'] as const)(
+      'creates USER_MENTIONED notification for a mention in a %s',
+      async (entityType) => {
+        claimMock.mockResolvedValue(true);
+        createNotificationMock.mockResolvedValue(null);
+
+        const event: TestKafkaDomainEvent = {
+          eventId: `mention-event-${entityType}`,
+          type: 'user.mentioned',
+          version: 1,
+          occurredAt: new Date().toISOString(),
+          aggregateId: 'entity-1',
+          payload: {
+            targetUserId: 'user-b',
+            actorId: 'user-a',
+            entityType,
+            entityId: 'entity-1',
+          },
+        };
+
+        await handleEvent(service, event);
+
+        expect(createNotificationMock).toHaveBeenCalledWith(
+          {
+            recipientId: 'user-b',
+            actorId: 'user-a',
+            type: 'USER_MENTIONED',
+            entityType,
+            entityId: 'entity-1',
+          },
+          transactionMock,
+        );
+      },
+    );
+
+    /**
      * Verifies that a plain (non-reply) chat message notifies exactly the
      * recipientUserIds already on the event - the producer, not this
      * consumer, decided that audience via isRecipientNotifiable.

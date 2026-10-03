@@ -13,6 +13,7 @@ import { UserInterestService } from '../recommendation/user-interest.service';
 import { resolvePagination, toPaginated } from '../common/utils/paginated';
 import { EventPublisherPort } from '../domain-events/event-publisher.port';
 import { PrismaService } from '../prisma/prisma.service';
+import { MentionsService } from '../mentions/mentions.service';
 
 @Injectable()
 export class CommentsService {
@@ -22,6 +23,7 @@ export class CommentsService {
     private readonly userInterestService: UserInterestService,
     private readonly eventPublisher: EventPublisherPort,
     private readonly prisma: PrismaService,
+    private readonly mentions: MentionsService,
   ) {}
 
   async findByPost(postId: string, query: PaginationQueryDto, userId?: string) {
@@ -97,6 +99,18 @@ export class CommentsService {
         transaction,
       );
 
+      await this.mentions.publishMentions(
+        {
+          text: createdComment.content,
+          actorId: userId,
+          entityType: 'COMMENT',
+          entityId: createdComment.id,
+          canView: (mentionedId) =>
+            this.postVisibility.canView(post, mentionedId),
+        },
+        transaction,
+      );
+
       return createdComment;
     });
 
@@ -142,6 +156,18 @@ export class CommentsService {
             parentCommentId: parent.id,
             parentCommentAuthorId: parent.authorId,
           },
+        },
+        transaction,
+      );
+
+      await this.mentions.publishMentions(
+        {
+          text: createdReply.content,
+          actorId: userId,
+          entityType: 'COMMENT',
+          entityId: createdReply.id,
+          canView: (mentionedId) =>
+            this.postVisibility.canView(post, mentionedId),
         },
         transaction,
       );

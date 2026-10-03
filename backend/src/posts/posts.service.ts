@@ -18,7 +18,12 @@ import { PostVisibilityService } from '../post-visibility/post-visibility.servic
 import { UserInterestService } from '../recommendation/user-interest.service';
 import { resolvePagination, toPaginated } from '../common/utils/paginated';
 import { EventPublisherPort } from '../domain-events/event-publisher.port';
+import { MentionsService } from '../mentions/mentions.service';
 import { PrismaService } from '../prisma/prisma.service';
+
+const mentionText = (post: { title: string; content: string }) =>
+  `${post.title}
+${post.content}`;
 
 @Injectable()
 export class PostsService {
@@ -29,6 +34,7 @@ export class PostsService {
     private readonly userInterestService: UserInterestService,
     private readonly eventPublisher: EventPublisherPort,
     private readonly prisma: PrismaService,
+    private readonly mentions: MentionsService,
   ) {}
 
   async findAll(query: QueryPostsDto, userId?: string) {
@@ -274,6 +280,21 @@ export class PostsService {
       isSpoiler: dto.isSpoiler,
       media,
       tags: this.normalizeTags(dto.tags),
+      // Drafts notify nobody; the post's own visibility decides who may be pinged.
+      afterCreate: (tx, created) =>
+        created.status === 'PUBLISHED'
+          ? this.mentions.publishMentions(
+              {
+                text: mentionText(created),
+                actorId: authorId,
+                entityType: 'POST',
+                entityId: created.id,
+                canView: (mentionedId) =>
+                  this.postVisibility.canView(created, mentionedId),
+              },
+              tx,
+            )
+          : Promise.resolve(),
     });
 
     return formatPost(post);
@@ -372,6 +393,29 @@ export class PostsService {
       id,
       data,
       tags: dto.tags !== undefined ? this.normalizeTags(dto.tags) : undefined,
+      // Newly added mentions ping on edit; publishing a draft pings everyone mentioned.
+      afterUpdate: (tx, before, after) =>
+        after.status === 'PUBLISHED'
+          ? this.mentions.publishMentions(
+              {
+                text: mentionText(after),
+                actorId: userId,
+                entityType: 'POST',
+                entityId: id,
+                canView: (mentionedId) =>
+                  this.postVisibility.canView(after, mentionedId),
+                previous:
+                  before.status === 'PUBLISHED'
+                    ? {
+                        text: mentionText(before),
+                        canView: (mentionedId) =>
+                          this.postVisibility.canView(before, mentionedId),
+                      }
+                    : undefined,
+              },
+              tx,
+            )
+          : Promise.resolve(),
     });
 
     return formatPost(post);
