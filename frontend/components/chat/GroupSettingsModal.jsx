@@ -5,7 +5,8 @@ import { useMutation } from "@tanstack/react-query";
 import { FiLogOut, FiX } from "react-icons/fi";
 import { useModalFocusTrap } from "../../hooks/chat/useModalFocusTrap";
 import { api } from "../../lib/api";
-import { activeMembers, initialOf, myParticipant } from "../../lib/chat/chatDisplay";
+import { AvatarFace } from "../AvatarFace";
+import { activeMembers, myParticipant } from "../../lib/chat/chatDisplay";
 import { SafetyBadge } from "./SafetyStatus";
 import { UserPicker } from "./UserPicker";
 
@@ -139,7 +140,9 @@ export function GroupSettingsModal({
               const canActOnMember = !isSelf && participant.state === "ACTIVE";
               return (
                 <div className="group-member-row" key={participant.userId}>
-                  <span className="chat-avatar small">{initialOf(participant.user?.name)}</span>
+                  <span className="chat-avatar small">
+                    <AvatarFace image={participant.user?.image} name={participant.user?.name} />
+                  </span>
                   <span className="group-member-name">
                     <b>
                       {participant.user?.name || "GachaHub member"}
