@@ -56,6 +56,7 @@ export const backendRoutes = {
   followStatus: (userId) => `/users/${encodePathParam(userId)}/follow-status`,
   postComments: (postId) => `/posts/${encodePathParam(postId)}/comments`,
   commentReplies: (commentId) => `/comments/${encodePathParam(commentId)}/replies`,
+  reports: "/reports",
   mediaSignatures: '/media/uploads/signatures',
   mediaConfirm: '/media/uploads/confirm',
   chatConversations: '/chat/conversations',
@@ -653,6 +654,7 @@ export const api = {
     request(withQuery(backendRoutes.commentReplies(commentId), query), options),
   createReply: (commentId, content) =>
     mutation(backendRoutes.commentReplies(commentId), { content }),
+  createReport: (report) => mutation(backendRoutes.reports, report),
   createPost: (post) => mutation(backendRoutes.posts, post),
   createUploadSignatures: (files, purpose = 'POST') =>
     mutation(backendRoutes.mediaSignatures, {

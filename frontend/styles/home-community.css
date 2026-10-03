@@ -586,6 +586,10 @@
   margin-top: 3px;
 }
 
+.post-feed-card .post-head-actions {
+  align-self: start;
+}
+
 .post-feed-card .post-body,
 .post-feed-card .post-social,
 .post-feed-card .post-action-error,
@@ -619,16 +623,17 @@
 }
 
 .post-feed-card .post-social {
-  justify-content: space-around;
+  justify-content: flex-start;
   margin: 0 -6px -7px;
-  padding-top: 5px;
+  padding: 7px 6px 0;
   border-top: 1px solid var(--line);
 }
 
 .post-feed-card .post-social button {
   justify-content: center;
   min-height: 38px;
-  flex: 1;
+  min-width: 96px;
+  flex: 0 1 132px;
   font-size: 12px;
 }
 

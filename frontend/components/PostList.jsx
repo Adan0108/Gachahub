@@ -2,19 +2,26 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FiCornerUpLeft,
   FiEye,
+  FiEyeOff,
+  FiFlag,
   FiHeart,
+  FiLink,
   FiMessageCircle,
+  FiMoreHorizontal,
+  FiSave,
   FiSend,
+  FiShare2,
   FiUserPlus,
   FiX,
 } from "react-icons/fi";
 import { useCurrentUser } from "../hooks/useCurrentUser";
+import { useDismiss } from "../hooks/useDismiss";
 import { api } from "../lib/api";
 import { queries, queryKeys } from "../lib/queries";
 import { artTones, glyph } from "./constants";
@@ -169,6 +176,15 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
   const [likeOverride, setLikeOverride] = useState(null);
   const [spoilerRevealed, setSpoilerRevealed] = useState(false);
   const [expandedImage, setExpandedImage] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("UNMARKED_SPOILERS");
+  const [reportDetails, setReportDetails] = useState("");
+  const [actionNotice, setActionNotice] = useState("");
+  const menuRef = useRef(null);
+  const menuTriggerRef = useRef(null);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  useDismiss({ isOpen: menuOpen, onDismiss: closeMenu, contentRef: menuRef, triggerRef: menuTriggerRef });
   const media = Array.isArray(post.media) ? post.media : [];
   const isFeed = variant === "feed";
   const liked = likeOverride?.liked ?? Boolean(post.likedByCurrentUser);
@@ -225,6 +241,45 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
     },
   });
 
+  const reportPost = useMutation({
+    mutationFn: () =>
+      api.createReport({
+        targetType: "POST",
+        targetId: post.id,
+        reasonCode: reportReason,
+        ...(reportDetails.trim() ? { details: reportDetails.trim() } : {}),
+      }),
+    onSuccess: () => {
+      setReportOpen(false);
+      setReportDetails("");
+      setActionNotice("Report submitted. Thank you for helping keep the community safe.");
+    },
+  });
+
+  const postUrl = () => `${window.location.origin}/post/${encodeURIComponent(post.id)}`;
+
+  const copyPostLink = async () => {
+    await navigator.clipboard.writeText(postUrl());
+    setActionNotice("Post link copied.");
+  };
+
+  const sharePost = async () => {
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: post.title, text: post.content || post.title, url: postUrl() });
+        return;
+      }
+      await copyPostLink();
+    } catch (error) {
+      if (error?.name !== "AbortError") setActionNotice("Could not share this post. Try again.");
+    }
+  };
+
+  const showUnavailable = (feature) => {
+    closeMenu();
+    setActionNotice(`${feature} is not available yet.`);
+  };
+
   useEffect(() => {
     if (!expandedImage) return undefined;
     const previousOverflow = document.body.style.overflow;
@@ -254,7 +309,53 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
           {post.author} - {post.time}
         </small>
       </Link>
-      <span className="tag">{post.tag}</span>
+      <div className="post-head-actions">
+        <span className="tag">{post.tag}</span>
+        <div className="post-options">
+          <button
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            aria-label={`More options for ${post.title}`}
+            className="post-options-trigger"
+            onClick={() => setMenuOpen((open) => !open)}
+            ref={menuTriggerRef}
+            type="button"
+          >
+            <FiMoreHorizontal />
+          </button>
+          {menuOpen && (
+            <div className="post-options-menu" ref={menuRef} role="menu">
+              <button
+                onClick={() => {
+                  closeMenu();
+                  copyPostLink().catch(() => setActionNotice("Could not copy the post link."));
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <FiLink /> Copy link
+              </button>
+              <button onClick={() => showUnavailable("Save posts")} role="menuitem" type="button">
+                <FiSave /> Save
+              </button>
+              <button onClick={() => showUnavailable("Hide posts")} role="menuitem" type="button">
+                <FiEyeOff /> Hide
+              </button>
+              <button
+                className="danger"
+                onClick={() => {
+                  closeMenu();
+                  if (requireAuth()) setReportOpen(true);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <FiFlag /> Report
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
       {(detail || isFeed) && (post.content || media.length > 0) && (
         <div className={`post-body ${detail ? "full" : ""}`}>
           {post.content && <p>{post.content}</p>}
@@ -297,6 +398,9 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
         >
           <FiMessageCircle /> {post.commentCount || 0}
         </button>
+        <button onClick={sharePost} type="button">
+          <FiShare2 /> Share
+        </button>
         {detail && canFollow && (
           <button
             aria-pressed={Boolean(followStatus.data?.following)}
@@ -311,6 +415,14 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
       </div>
       {(toggleLike.isError || toggleFollow.isError) && (
         <small className="post-action-error">Could not update this post. Try again.</small>
+      )}
+      {actionNotice && (
+        <div className="post-action-notice" role="status">
+          {actionNotice}
+          <button aria-label="Dismiss post notice" onClick={() => setActionNotice("")} type="button">
+            <FiX />
+          </button>
+        </div>
       )}
       {threadOpen && (
         <section className="post-thread" aria-label={`Comments on ${post.title}`}>
@@ -375,6 +487,57 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
               onClick={(event) => event.stopPropagation()}
               src={expandedImage.url}
             />
+          </div>,
+          document.body,
+        )}
+      {reportOpen &&
+        createPortal(
+          <div className="post-report-backdrop" onMouseDown={() => setReportOpen(false)}>
+            <section
+              aria-label={`Report ${post.title}`}
+              aria-modal="true"
+              className="post-report-dialog"
+              onMouseDown={(event) => event.stopPropagation()}
+              role="dialog"
+            >
+              <div className="post-report-head">
+                <div>
+                  <small>REPORT POST</small>
+                  <h2>What’s wrong with this post?</h2>
+                </div>
+                <button aria-label="Close report dialog" onClick={() => setReportOpen(false)} type="button">
+                  <FiX />
+                </button>
+              </div>
+              <label>
+                Reason
+                <select onChange={(event) => setReportReason(event.target.value)} value={reportReason}>
+                  <option value="UNMARKED_SPOILERS">Unmarked spoilers</option>
+                  <option value="HARASSMENT">Harassment</option>
+                  <option value="COMMERCIAL_SPAM">Commercial spam</option>
+                  <option value="MISINFORMATION">Misinformation</option>
+                  <option value="NSFW">NSFW content</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </label>
+              <label>
+                Details <span>Optional</span>
+                <textarea
+                  maxLength={1000}
+                  onChange={(event) => setReportDetails(event.target.value)}
+                  placeholder="Add context for the moderation team"
+                  rows={4}
+                  value={reportDetails}
+                />
+              </label>
+              {reportPost.isError && <small className="post-action-error">{reportPost.error.message}</small>}
+              <div className="post-report-actions">
+                <button onClick={() => setReportOpen(false)} type="button">Cancel</button>
+                <button disabled={reportPost.isPending} onClick={() => reportPost.mutate()} type="button">
+                  {reportPost.isPending ? "Submitting..." : "Submit report"}
+                </button>
+              </div>
+            </section>
           </div>,
           document.body,
         )}
