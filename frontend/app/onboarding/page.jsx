@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { FiArrowRight, FiAtSign, FiUser } from "react-icons/fi";
+import { BrandMark } from "../../components/BrandMark";
 import { useRequireAuth } from "../../hooks/useRequireAuth";
 import { api } from "../../lib/api";
 import { CHAT_BACKUP_QUERY_ROOT } from "../../lib/backup/backupQueryKeys";
@@ -117,7 +118,7 @@ export default function OnboardingPage() {
       <section className="auth-card">
         <div className="auth-card-header">
           <Link href="/" className="auth-brand">
-            <span>✦</span>
+            <BrandMark size={38} />
             GachaHub
           </Link>
         </div>
