@@ -76,8 +76,22 @@ describe("AvatarEditor", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(mocks.removeAvatar).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Delete picture" }));
 
     await waitFor(() => expect(client.getQueryData(queryKeys.currentUser).image).toBeNull());
+  });
+
+  it("does not delete anything when the user keeps the picture", () => {
+    renderWithClient(
+      <AvatarEditor user={{ id: "user-1", name: "Rover", image: "https://cdn/me.png" }} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+
+    expect(mocks.removeAvatar).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
   });
 
   it("shows the error when removal fails", async () => {
@@ -87,6 +101,7 @@ describe("AvatarEditor", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete picture" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("changed elsewhere");
   });

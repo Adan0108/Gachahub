@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { AvatarFace } from "../AvatarFace";
 import { IMAGE_ACCEPT, useImageUpload } from "../../hooks/useImageUpload";
 import { useProfileImages } from "../../hooks/useProfileImages";
@@ -9,6 +9,7 @@ import { api } from "../../lib/api";
 /** Pick, replace or remove the signed-in user's profile picture. */
 export function AvatarEditor({ user }) {
   const inputRef = useRef(null);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   const { cacheUser, removeAvatar } = useProfileImages();
   const { pickFile, displayUrl, isPending, error } = useImageUpload({
     purpose: "AVATAR",
@@ -36,15 +37,37 @@ export function AvatarEditor({ user }) {
         >
           {isPending ? "Uploading..." : displayUrl ? "Replace" : "Upload"}
         </button>
-        {displayUrl ? (
+        {displayUrl && !confirmingRemove ? (
           <button
             className="soft-btn"
             disabled={busy}
-            onClick={() => removeAvatar.mutate()}
+            onClick={() => setConfirmingRemove(true)}
             type="button"
           >
             Remove
           </button>
+        ) : null}
+        {displayUrl && confirmingRemove ? (
+          <>
+            <button
+              className="soft-btn profile-image-danger"
+              disabled={busy}
+              onClick={() =>
+                removeAvatar.mutate(undefined, { onSettled: () => setConfirmingRemove(false) })
+              }
+              type="button"
+            >
+              {removeAvatar.isPending ? "Removing..." : "Delete picture"}
+            </button>
+            <button
+              className="soft-btn"
+              disabled={busy}
+              onClick={() => setConfirmingRemove(false)}
+              type="button"
+            >
+              Keep
+            </button>
+          </>
         ) : null}
         <input accept={IMAGE_ACCEPT} hidden onChange={pickFile} ref={inputRef} type="file" />
       </div>

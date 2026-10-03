@@ -8,9 +8,12 @@ import { useLocalFileUrl } from "./useLocalFileUrl";
 export const IMAGE_ACCEPT = "image/jpeg,image/png,image/webp,image/gif";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
-// Mirrors the backend's single-image policy for instant feedback; the backend stays the authority.
+// Mirrors the policy MediaService enforces at confirm time (see backend .env.example for the
+// Cloudinary preset limits) - this is only for instant feedback.
 function assertAcceptableImage(file) {
-  if (!IMAGE_ACCEPT.split(",").includes(file.type)) {
+  // An empty type means the browser couldn't infer one, not that the file is wrong; the
+  // backend decides by the real format after upload.
+  if (file.type && !IMAGE_ACCEPT.split(",").includes(file.type)) {
     throw new Error("Use a JPG, PNG, WebP or GIF image");
   }
   if (file.size > MAX_IMAGE_BYTES) {

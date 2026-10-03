@@ -74,6 +74,25 @@ describe("GameBrandingUploader", () => {
     expect(mocks.uploadSingleImage).not.toHaveBeenCalled();
   });
 
+  it("lets a file with no detected type through to the backend", async () => {
+    mocks.uploadSingleImage.mockResolvedValue({ mediaUploadId: "upload-1" });
+    mocks.updateGameBranding.mockResolvedValue({ iconUrl: "https://cdn/new.png" });
+    renderUploader();
+
+    pick(new File([new Uint8Array(10)], "photo", { type: "" }));
+
+    await waitFor(() => expect(mocks.uploadSingleImage).toHaveBeenCalled());
+  });
+
+  it("still rejects an oversize file even when its type is unknown", async () => {
+    renderUploader();
+
+    pick(new File([new Uint8Array(10 * 1024 * 1024 + 1)], "photo", { type: "" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/10 mb/i);
+    expect(mocks.uploadSingleImage).not.toHaveBeenCalled();
+  });
+
   it("rejects an image over 10 MB without uploading", async () => {
     renderUploader();
 

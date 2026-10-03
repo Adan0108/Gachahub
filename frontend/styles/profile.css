@@ -343,6 +343,11 @@
   cursor: not-allowed;
 }
 
+.profile-image-danger {
+  border-color: #ff8aa1;
+  color: #ff8aa1;
+}
+
 .profile-image-error {
   margin: 0;
   color: #ff8aa1;
