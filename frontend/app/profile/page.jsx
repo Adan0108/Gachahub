@@ -169,7 +169,7 @@ export default function ProfilePage() {
       </div>
       <QueryNotice isLoading={isSessionLoading} isError={isError} />
       <div aria-hidden={editing ? "true" : undefined}>
-        <section className="profile-hero">
+        <section className={`profile-hero ${heroBannerColor ? "profile-hero-solid" : ""}`}>
           {heroBannerColor ? (
             <div className="profile-banner-solid" style={{ backgroundColor: heroBannerColor }} />
           ) : (

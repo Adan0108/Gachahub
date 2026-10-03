@@ -406,6 +406,11 @@
   height: 100%;
 }
 
+/* A picked colour stays flat: no readability overlay on top (extra class beats the theme rules). */
+.profile-hero.profile-hero-solid:after {
+  display: none;
+}
+
 .profile-image-error {
   margin: 0;
   color: #ff8aa1;
