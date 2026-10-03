@@ -1,16 +1,14 @@
-// How each backend banner design id (backend/src/users/banner/profile-banner-catalog.ts) looks: an `Art` tone.
-const BANNER_TONES = {
-  "violet-dusk": "violet",
-  "azure-tide": "blue",
-  "amber-glow": "amber",
-  "rose-haze": "rose",
-  "cyan-grid": "cyan",
-  "indigo-night": "indigo",
+// How each backend banner id (backend/src/users/banner/profile-banner-catalog.ts) looks: a solid colour.
+const BANNER_COLORS = {
+  violet: "#6d4aff",
+  blue: "#2f6fed",
+  amber: "#d98324",
+  rose: "#d94a6a",
+  teal: "#14a39a",
+  slate: "#475069",
 };
 
-const DEFAULT_BANNER_TONE = "indigo";
-
-/** Art tone for a stored banner id; an unset or since-retired id shows the default. */
-export function bannerTone(bannerPresetId) {
-  return BANNER_TONES[bannerPresetId] ?? DEFAULT_BANNER_TONE;
+/** Solid colour for a stored banner id; null (nothing picked, or a since-retired id) means the default banner. */
+export function bannerColor(bannerPresetId) {
+  return BANNER_COLORS[bannerPresetId] ?? null;
 }

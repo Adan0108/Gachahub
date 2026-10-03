@@ -4,12 +4,12 @@ export type ProfileBanner = { id: string; label: string; tier: BannerTier };
 
 // Designs users can pick for their profile banner. The ids are the contract with the frontend, which owns how each one looks.
 export const PROFILE_BANNERS: readonly ProfileBanner[] = [
-  { id: 'violet-dusk', label: 'Violet Dusk', tier: 'FREE' },
-  { id: 'azure-tide', label: 'Azure Tide', tier: 'FREE' },
-  { id: 'amber-glow', label: 'Amber Glow', tier: 'FREE' },
-  { id: 'rose-haze', label: 'Rose Haze', tier: 'FREE' },
-  { id: 'cyan-grid', label: 'Cyan Grid', tier: 'FREE' },
-  { id: 'indigo-night', label: 'Indigo Night', tier: 'FREE' },
+  { id: 'violet', label: 'Violet', tier: 'FREE' },
+  { id: 'blue', label: 'Blue', tier: 'FREE' },
+  { id: 'amber', label: 'Amber', tier: 'FREE' },
+  { id: 'rose', label: 'Rose', tier: 'FREE' },
+  { id: 'teal', label: 'Teal', tier: 'FREE' },
+  { id: 'slate', label: 'Slate', tier: 'FREE' },
 ];
 
 export const PROFILE_BANNER_IDS = PROFILE_BANNERS.map((banner) => banner.id);

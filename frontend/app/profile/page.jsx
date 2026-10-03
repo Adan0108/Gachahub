@@ -16,7 +16,7 @@ import { SectionTitle } from "../../components/SectionTitle";
 import { builds, glyph } from "../../components/constants";
 import { useRequireAuth } from "../../hooks/useRequireAuth";
 import { useToast } from "../../hooks/useToast";
-import { bannerTone } from "../../lib/profileBanners";
+import { bannerColor } from "../../lib/profileBanners";
 import { queries } from "../../lib/queries";
 
 const focusableSelector = [
@@ -160,6 +160,8 @@ export default function ProfilePage() {
     );
   }
 
+  const heroBannerColor = bannerColor(user.bannerPresetId);
+
   return (
     <div className="page profile-page">
       <div className="toast-slot" aria-live="polite">
@@ -168,7 +170,11 @@ export default function ProfilePage() {
       <QueryNotice isLoading={isSessionLoading} isError={isError} />
       <div aria-hidden={editing ? "true" : undefined}>
         <section className="profile-hero">
-          <Art tone={bannerTone(user.bannerPresetId)}>{glyph.sparkle}</Art>
+          {heroBannerColor ? (
+            <div className="profile-banner-solid" style={{ backgroundColor: heroBannerColor }} />
+          ) : (
+            <Art tone="indigo">{glyph.sparkle}</Art>
+          )}
           <button ref={editButtonRef} className="edit-profile" onClick={openEditor} type="button">
             <FiEdit3 /> Edit Profile
           </button>

@@ -29,46 +29,51 @@ export function AvatarEditor({ user }) {
         <span className="profile-avatar-preview">
           <AvatarFace image={displayUrl} name={user.name} />
         </span>
-        <button
-          className="soft-btn"
-          disabled={busy}
-          onClick={() => inputRef.current?.click()}
-          type="button"
-        >
-          {isPending ? "Uploading..." : displayUrl ? "Replace" : "Upload"}
-        </button>
-        {displayUrl && !confirmingRemove ? (
-          <button
-            className="soft-btn"
-            disabled={busy}
-            onClick={() => setConfirmingRemove(true)}
-            type="button"
-          >
-            Remove
-          </button>
-        ) : null}
-        {displayUrl && confirmingRemove ? (
-          <>
+        <div className="profile-avatar-actions">
+          <div className="profile-avatar-buttons">
             <button
-              className="soft-btn profile-image-danger"
+              className="profile-image-btn"
               disabled={busy}
-              onClick={() =>
-                removeAvatar.mutate(undefined, { onSettled: () => setConfirmingRemove(false) })
-              }
+              onClick={() => inputRef.current?.click()}
               type="button"
             >
-              {removeAvatar.isPending ? "Removing..." : "Delete picture"}
+              {isPending ? "Uploading..." : displayUrl ? "Replace" : "Upload"}
             </button>
-            <button
-              className="soft-btn"
-              disabled={busy}
-              onClick={() => setConfirmingRemove(false)}
-              type="button"
-            >
-              Keep
-            </button>
-          </>
-        ) : null}
+            {displayUrl && !confirmingRemove ? (
+              <button
+                className="profile-image-btn"
+                disabled={busy}
+                onClick={() => setConfirmingRemove(true)}
+                type="button"
+              >
+                Remove
+              </button>
+            ) : null}
+            {displayUrl && confirmingRemove ? (
+              <>
+                <button
+                  className="profile-image-btn profile-image-danger"
+                  disabled={busy}
+                  onClick={() =>
+                    removeAvatar.mutate(undefined, { onSettled: () => setConfirmingRemove(false) })
+                  }
+                  type="button"
+                >
+                  {removeAvatar.isPending ? "Removing..." : "Delete picture"}
+                </button>
+                <button
+                  className="profile-image-btn"
+                  disabled={busy}
+                  onClick={() => setConfirmingRemove(false)}
+                  type="button"
+                >
+                  Keep
+                </button>
+              </>
+            ) : null}
+          </div>
+          <small className="profile-image-hint">JPG, PNG, WebP or GIF, up to 10 MB</small>
+        </div>
         <input accept={IMAGE_ACCEPT} hidden onChange={pickFile} ref={inputRef} type="file" />
       </div>
       {failure ? (

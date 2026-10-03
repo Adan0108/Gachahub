@@ -24,7 +24,7 @@ vi.mock("../lib/api", () => ({
 }));
 
 const banners = [
-  { id: "violet-dusk", label: "Violet Dusk", tier: "FREE", available: true },
+  { id: "violet", label: "Violet", tier: "FREE", available: true },
   { id: "gilded", label: "Gilded", tier: "PREMIUM", available: false },
 ];
 
@@ -125,34 +125,34 @@ describe("BannerPicker", () => {
   });
 
   it("lists designs, marks the current one, and locks unavailable ones", async () => {
-    renderWithClient(<BannerPicker currentId="violet-dusk" />);
+    renderWithClient(<BannerPicker currentId="violet" />);
 
-    const free = await screen.findByRole("radio", { name: /violet dusk/i });
+    const free = await screen.findByRole("radio", { name: "Violet" });
     expect(free).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("radio", { name: /gilded/i })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Gilded" })).toBeDisabled();
   });
 
   it("saves the picked design into the cache", async () => {
-    mocks.updateBanner.mockResolvedValue({ id: "user-1", bannerPresetId: "violet-dusk" });
+    mocks.updateBanner.mockResolvedValue({ id: "user-1", bannerPresetId: "violet" });
     renderWithClient(<BannerPicker currentId={null} />);
 
-    fireEvent.click(await screen.findByRole("radio", { name: /violet dusk/i }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Violet" }));
 
     await waitFor(() =>
-      expect(client.getQueryData(queryKeys.currentUser).bannerPresetId).toBe("violet-dusk"),
+      expect(client.getQueryData(queryKeys.currentUser).bannerPresetId).toBe("violet"),
     );
-    expect(mocks.updateBanner.mock.calls[0][0]).toBe("violet-dusk");
+    expect(mocks.updateBanner.mock.calls[0][0]).toBe("violet");
   });
 
   it("only offers 'Use default' when a banner is set, and clears it", async () => {
     mocks.removeBanner.mockResolvedValue({ id: "user-1", bannerPresetId: null });
     const { unmount } = renderWithClient(<BannerPicker currentId={null} />);
-    await screen.findByRole("radio", { name: /violet dusk/i });
-    expect(screen.queryByRole("button", { name: /use default/i })).not.toBeInTheDocument();
+    await screen.findByRole("radio", { name: "Violet" });
+    expect(screen.queryByRole("button", { name: /reset to default/i })).not.toBeInTheDocument();
     unmount();
 
-    renderWithClient(<BannerPicker currentId="violet-dusk" />);
-    fireEvent.click(await screen.findByRole("button", { name: /use default/i }));
+    renderWithClient(<BannerPicker currentId="violet" />);
+    fireEvent.click(await screen.findByRole("button", { name: /reset to default/i }));
 
     await waitFor(() => expect(client.getQueryData(queryKeys.currentUser).bannerPresetId).toBeNull());
   });
@@ -161,7 +161,7 @@ describe("BannerPicker", () => {
     mocks.updateBanner.mockRejectedValue(new Error("This banner is not available to you yet"));
     renderWithClient(<BannerPicker currentId={null} />);
 
-    fireEvent.click(await screen.findByRole("radio", { name: /violet dusk/i }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Violet" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("not available");
   });

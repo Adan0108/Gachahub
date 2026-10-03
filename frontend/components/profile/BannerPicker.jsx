@@ -1,12 +1,12 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FiLock } from "react-icons/fi";
+import { FiCheck, FiLock } from "react-icons/fi";
 import { useProfileImages } from "../../hooks/useProfileImages";
-import { bannerTone } from "../../lib/profileBanners";
+import { bannerColor } from "../../lib/profileBanners";
 import { queries } from "../../lib/queries";
 
-/** Choose the profile banner from the designs we offer; locked ones are shown but not selectable. */
+/** Choose the profile banner from the colours we offer; locked ones are shown but not selectable. */
 export function BannerPicker({ currentId }) {
   const options = useQuery(queries.bannerOptions());
   const { saveBanner, removeBanner } = useProfileImages();
@@ -15,7 +15,19 @@ export function BannerPicker({ currentId }) {
 
   return (
     <div className="profile-image-field">
-      <span className="profile-image-label">Profile banner</span>
+      <div className="profile-image-heading">
+        <span className="profile-image-label">Profile banner</span>
+        {currentId ? (
+          <button
+            className="profile-image-link"
+            disabled={busy}
+            onClick={() => removeBanner.mutate()}
+            type="button"
+          >
+            Reset to default
+          </button>
+        ) : null}
+      </div>
       {options.isError ? (
         <p className="profile-image-error" role="alert">
           Could not load banners
@@ -25,29 +37,22 @@ export function BannerPicker({ currentId }) {
           {(options.data ?? []).map((option) => (
             <button
               aria-checked={option.id === currentId}
-              className={`banner-option art-${bannerTone(option.id)}`}
+              aria-label={option.label}
+              className="banner-swatch"
               disabled={busy || !option.available}
               key={option.id}
               onClick={() => saveBanner.mutate(option.id)}
               role="radio"
+              style={{ backgroundColor: bannerColor(option.id) ?? undefined }}
+              title={option.label}
               type="button"
             >
-              <span>{option.label}</span>
+              {option.id === currentId ? <FiCheck aria-hidden="true" /> : null}
               {option.available ? null : <FiLock aria-label="Locked" />}
             </button>
           ))}
         </div>
       )}
-      {currentId ? (
-        <button
-          className="soft-btn"
-          disabled={busy}
-          onClick={() => removeBanner.mutate()}
-          type="button"
-        >
-          Use default banner
-        </button>
-      ) : null}
       {failedWrite ? (
         <p className="profile-image-error" role="alert">
           {failedWrite.error.message || "Could not update your banner"}

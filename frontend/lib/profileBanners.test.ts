@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { bannerTone } from "./profileBanners";
+import { bannerColor } from "./profileBanners";
 
-describe("bannerTone", () => {
-  it("maps a catalog id to its art tone", () => {
-    expect(bannerTone("azure-tide")).toBe("blue");
+describe("bannerColor", () => {
+  it("maps a catalog id to its solid colour", () => {
+    expect(bannerColor("blue")).toBe("#2f6fed");
   });
 
-  it.each([[null], [undefined], ["retired-design"]])("falls back to the default for %s", (id) => {
-    expect(bannerTone(id)).toBe("indigo");
+  it.each([[null], [undefined], ["retired-design"]])("is null (default banner) for %s", (id) => {
+    expect(bannerColor(id)).toBeNull();
   });
 });

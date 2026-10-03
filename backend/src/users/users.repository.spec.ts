@@ -195,7 +195,7 @@ describe('UsersRepository.setBannerPreset', () => {
 
   beforeEach(() => jest.clearAllMocks());
 
-  it.each([['violet-dusk'], [null]])(
+  it.each([['violet'], [null]])(
     'writes bannerPresetId=%s and returns the me-shaped row',
     async (preset) => {
       prisma.user.update.mockResolvedValue({ id: 'user-1' });
