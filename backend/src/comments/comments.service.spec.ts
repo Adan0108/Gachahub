@@ -51,7 +51,10 @@ describe('CommentsService', () => {
     publishMany: jest.fn(),
   };
 
-  const mentions = { publishMentions: jest.fn() };
+  const mentions = {
+    resolveTargets: jest.fn(),
+    publishMentions: jest.fn(),
+  };
 
   const transaction = {} as Prisma.TransactionClient;
 
@@ -63,6 +66,7 @@ describe('CommentsService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mentions.resolveTargets.mockResolvedValue(['mentioned-1']);
 
     prisma.$transaction.mockImplementation(
       async (
@@ -391,13 +395,16 @@ describe('CommentsService', () => {
         transaction,
       );
 
+      expect(mentions.resolveTargets).toHaveBeenCalledWith(
+        expect.objectContaining({ text: 'Nice post', actorId: 'user-1' }),
+      );
       expect(mentions.publishMentions).toHaveBeenCalledWith(
-        expect.objectContaining({
-          text: 'Nice post',
+        {
+          targetIds: ['mentioned-1'],
           actorId: 'user-1',
           entityType: 'COMMENT',
           entityId: 'comment-1',
-        }),
+        },
         transaction,
       );
 

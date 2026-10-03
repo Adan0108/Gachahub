@@ -1,128 +1,118 @@
 import type { Prisma } from '../generated/prisma/client';
 import type { EventPublisherPort } from '../domain-events/event-publisher.port';
+import type { PrismaService } from '../prisma/prisma.service';
 import { MentionsService } from './mentions.service';
+
+jest.mock('../prisma/prisma.service', () => ({ PrismaService: class {} }));
 
 describe('MentionsService', () => {
   const eventPublisher = { publishMany: jest.fn() };
-  const transaction = {
-    user: { findMany: jest.fn() },
-  };
+  const prisma = { user: { findMany: jest.fn() } };
+  const transaction = { mention: { createManyAndReturn: jest.fn() } };
   const service = new MentionsService(
+    prisma as unknown as PrismaService,
     eventPublisher as unknown as EventPublisherPort,
   );
   const tx = transaction as unknown as Prisma.TransactionClient;
-  const base = {
-    actorId: 'me',
-    entityType: 'COMMENT' as const,
-    entityId: 'c1',
-  };
+  const yes = () => Promise.resolve(true);
 
   beforeEach(() => jest.clearAllMocks());
 
-  it('does nothing when the text has no mentions', async () => {
-    await service.publishMentions(
-      { ...base, text: 'plain', canView: () => Promise.resolve(true) },
-      tx,
-    );
+  describe('resolveTargets', () => {
+    it('does nothing when the text has no mentions', async () => {
+      await expect(
+        service.resolveTargets({ text: 'plain', actorId: 'me', canView: yes }),
+      ).resolves.toEqual([]);
 
-    expect(transaction.user.findMany).not.toHaveBeenCalled();
-    expect(eventPublisher.publishMany).not.toHaveBeenCalled();
-  });
+      expect(prisma.user.findMany).not.toHaveBeenCalled();
+    });
 
-  it('only looks up active, non-blocked users other than the author', async () => {
-    transaction.user.findMany.mockResolvedValue([]);
+    it('only looks up active, non-blocked users other than the author', async () => {
+      prisma.user.findMany.mockResolvedValue([]);
 
-    await service.publishMentions(
-      { ...base, text: 'hi @bob', canView: () => Promise.resolve(true) },
-      tx,
-    );
+      await service.resolveTargets({
+        text: 'hi @bob',
+        actorId: 'me',
+        canView: yes,
+      });
 
-    expect(transaction.user.findMany).toHaveBeenCalledWith({
-      where: {
-        username: { in: ['bob'] },
-        id: { not: 'me' },
-        status: 'ACTIVE',
-        blockedUsers: { none: { blockedId: 'me' } },
-        blockedBy: { none: { blockerId: 'me' } },
-      },
-      select: { id: true, username: true },
+      expect(prisma.user.findMany).toHaveBeenCalledWith({
+        where: {
+          username: { in: ['bob'] },
+          id: { not: 'me' },
+          status: 'ACTIVE',
+          blockedUsers: { none: { blockedId: 'me' } },
+          blockedBy: { none: { blockerId: 'me' } },
+        },
+        select: { id: true },
+      });
+    });
+
+    it('keeps only the users allowed to view', async () => {
+      prisma.user.findMany.mockResolvedValue([{ id: 'u1' }, { id: 'u2' }]);
+
+      await expect(
+        service.resolveTargets({
+          text: '@bob @amy',
+          actorId: 'me',
+          canView: (id) => Promise.resolve(id === 'u1'),
+        }),
+      ).resolves.toEqual(['u1']);
     });
   });
 
-  it('emits one user.mentioned per mentioned user who can view it', async () => {
-    transaction.user.findMany.mockResolvedValue([
-      { id: 'u1', username: 'bob' },
-      { id: 'u2', username: 'amy' },
-    ]);
+  describe('publishMentions', () => {
+    const base = {
+      actorId: 'me',
+      entityType: 'COMMENT' as const,
+      entityId: 'c1',
+    };
 
-    await service.publishMentions(
-      {
-        ...base,
-        text: '@bob @amy',
-        canView: (id) => Promise.resolve(id === 'u1'),
-      },
-      tx,
-    );
+    it('writes nothing without targets', async () => {
+      await service.publishMentions({ ...base, targetIds: [] }, tx);
 
-    expect(eventPublisher.publishMany).toHaveBeenCalledWith(
-      [
-        {
-          type: 'user.mentioned',
-          aggregateId: 'c1',
-          payload: {
-            targetUserId: 'u1',
-            actorId: 'me',
-            entityType: 'COMMENT',
-            entityId: 'c1',
+      expect(transaction.mention.createManyAndReturn).not.toHaveBeenCalled();
+      expect(eventPublisher.publishMany).not.toHaveBeenCalled();
+    });
+
+    it('emits user.mentioned only for users it newly recorded', async () => {
+      transaction.mention.createManyAndReturn.mockResolvedValue([
+        { userId: 'u2' },
+      ]);
+
+      await service.publishMentions({ ...base, targetIds: ['u1', 'u2'] }, tx);
+
+      expect(transaction.mention.createManyAndReturn).toHaveBeenCalledWith({
+        data: [
+          { entityType: 'COMMENT', entityId: 'c1', userId: 'u1' },
+          { entityType: 'COMMENT', entityId: 'c1', userId: 'u2' },
+        ],
+        skipDuplicates: true,
+        select: { userId: true },
+      });
+      expect(eventPublisher.publishMany).toHaveBeenCalledWith(
+        [
+          {
+            type: 'user.mentioned',
+            aggregateId: 'c1',
+            payload: {
+              targetUserId: 'u2',
+              actorId: 'me',
+              entityType: 'COMMENT',
+              entityId: 'c1',
+            },
           },
-        },
-      ],
-      tx,
-    );
-  });
-
-  describe('on edit (previous text given)', () => {
-    const users = [
-      { id: 'u1', username: 'Bob' },
-      { id: 'u2', username: 'amy' },
-    ];
-
-    it('pings only users newly mentioned since the old text', async () => {
-      transaction.user.findMany.mockResolvedValue(users);
-
-      await service.publishMentions(
-        {
-          ...base,
-          text: 'hi @bob and @amy',
-          canView: () => Promise.resolve(true),
-          previous: { text: 'hi @BOB', canView: () => Promise.resolve(true) },
-        },
+        ],
         tx,
       );
-
-      const [events] = eventPublisher.publishMany.mock.calls[0] as [
-        { payload: { targetUserId: string } }[],
-      ];
-      expect(events.map((e) => e.payload.targetUserId)).toEqual(['u2']);
     });
 
-    it('pings again someone who could not see the old version', async () => {
-      transaction.user.findMany.mockResolvedValue(users.slice(0, 1));
+    it('emits nothing when every target was already notified', async () => {
+      transaction.mention.createManyAndReturn.mockResolvedValue([]);
 
-      await service.publishMentions(
-        {
-          ...base,
-          text: 'hi @bob',
-          canView: () => Promise.resolve(true),
-          previous: { text: 'hi @bob', canView: () => Promise.resolve(false) },
-        },
-        tx,
-      );
+      await service.publishMentions({ ...base, targetIds: ['u1'] }, tx);
 
-      const [events] = eventPublisher.publishMany.mock.calls[0] as [
-        { payload: { targetUserId: string } }[],
-      ];
-      expect(events.map((e) => e.payload.targetUserId)).toEqual(['u1']);
+      expect(eventPublisher.publishMany).toHaveBeenCalledWith([], tx);
     });
   });
 });

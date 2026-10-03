@@ -21,6 +21,14 @@ describe('extractMentionHandles', () => {
     ]);
   });
 
+  it('treats a hyphenated handle as one whole handle, never a shorter prefix', () => {
+    expect(extractMentionHandles('hi @bob-smith')).toEqual(['bob-smith']);
+  });
+
+  it('mentions nobody for an invalid run, rather than falling back to a prefix', () => {
+    expect(extractMentionHandles('hi @bob--x')).toEqual([]);
+  });
+
   it('dedupes case-insensitively and caps the count', () => {
     expect(extractMentionHandles('@Bob @bob @BOB')).toEqual(['Bob']);
 

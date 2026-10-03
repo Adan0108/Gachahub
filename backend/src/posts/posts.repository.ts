@@ -227,226 +227,209 @@ export class PostsRepository {
     });
   }
 
-  create(params: {
-    authorId: string;
-    gameId: string;
-    categoryId?: string;
-    title: string;
-    content: string;
-    type?: Prisma.PostCreateInput['type'];
-    status?: Prisma.PostCreateInput['status'];
-    visibility?: Prisma.PostCreateInput['visibility'];
-    isSpoiler?: boolean;
-    media?: Array<{
-      mediaUploadId: string;
-      assetId: string;
-      publicId: string;
-      url: string;
-      mediaType: 'IMAGE' | 'GIF' | 'VIDEO';
-      altText?: string;
-      sortOrder: number;
-      width: number | null;
-      height: number | null;
-      duration: number | null;
-      bytes: number | null;
-      format: string | null;
-    }>;
-    tags?: Array<{
-      name: string;
-      slug: string;
-    }>;
-    /** Runs inside the creating transaction, e.g. to enqueue events that must commit or roll back with the post. */
-    afterCreate?: (
-      tx: Prisma.TransactionClient,
-      post: Prisma.PostGetPayload<object>,
-    ) => Promise<void>;
-  }) {
-    return this.prisma.$transaction(
-      async (tx) => {
-        const post = await tx.post.create({
-          data: {
-            author: {
-              connect: {
-                id: params.authorId,
-              },
-            },
-            game: {
-              connect: {
-                id: params.gameId,
-              },
-            },
-            ...(params.categoryId
-              ? {
-                  category: {
-                    connect: {
-                      id: params.categoryId,
-                    },
-                  },
-                }
-              : {}),
-            title: params.title,
-            content: params.content,
-            type: params.type,
-            status: params.status,
-            visibility: params.visibility,
-            isSpoiler: params.isSpoiler,
-            tags: params.tags?.length
-              ? {
-                  create: params.tags.map((tag) => ({
-                    tag: {
-                      connectOrCreate: {
-                        where: {
-                          slug: tag.slug,
-                        },
-                        create: tag,
-                      },
-                    },
-                  })),
-                }
-              : undefined,
+  async create(
+    tx: Prisma.TransactionClient,
+    params: {
+      authorId: string;
+      gameId: string;
+      categoryId?: string;
+      title: string;
+      content: string;
+      type?: Prisma.PostCreateInput['type'];
+      status?: Prisma.PostCreateInput['status'];
+      visibility?: Prisma.PostCreateInput['visibility'];
+      isSpoiler?: boolean;
+      media?: Array<{
+        mediaUploadId: string;
+        assetId: string;
+        publicId: string;
+        url: string;
+        mediaType: 'IMAGE' | 'GIF' | 'VIDEO';
+        altText?: string;
+        sortOrder: number;
+        width: number | null;
+        height: number | null;
+        duration: number | null;
+        bytes: number | null;
+        format: string | null;
+      }>;
+      tags?: Array<{
+        name: string;
+        slug: string;
+      }>;
+    },
+  ) {
+    const post = await tx.post.create({
+      data: {
+        author: {
+          connect: {
+            id: params.authorId,
           },
-        });
-
-        if (params.media?.length) {
-          const mediaUploadIds = params.media.map(
-            (media) => media.mediaUploadId,
-          );
-
-          await claimUploadsForAttachment(tx, {
-            ids: mediaUploadIds,
-            userId: params.authorId,
-            purpose: 'POST',
-          });
-
-          await tx.postMedia.createMany({
-            data: params.media.map((media) => ({
-              postId: post.id,
-              mediaUploadId: media.mediaUploadId,
-              assetId: media.assetId,
-              publicId: media.publicId,
-              url: media.url,
-              mediaType: media.mediaType,
-              altText: media.altText,
-              sortOrder: media.sortOrder,
-              width: media.width,
-              height: media.height,
-              duration: media.duration,
-              bytes: media.bytes,
-              format: media.format,
-            })),
-          });
-        }
-
-        if (post.status === 'PUBLISHED') {
-          await tx.game.update({
-            where: {
-              id: params.gameId,
-            },
-            data: {
-              postCount: {
-                increment: 1,
-              },
-            },
-          });
-        }
-
-        await params.afterCreate?.(tx, post);
-
-        return tx.post.findUniqueOrThrow({
-          where: {
-            id: post.id,
-          },
-          include: postInclude,
-        });
-      },
-      {
-        maxWait: 5_000,
-        timeout: 15_000,
-      },
-    );
-  }
-
-  update(params: {
-    id: string;
-    data: Prisma.PostUpdateInput;
-    tags?: Array<{
-      name: string;
-      slug: string;
-    }>;
-    /** Runs inside the updating transaction with the row as it was just before and just after. */
-    afterUpdate?: (
-      tx: Prisma.TransactionClient,
-      before: Prisma.PostGetPayload<object>,
-      after: Prisma.PostGetPayload<object>,
-    ) => Promise<void>;
-  }) {
-    return this.prisma.$transaction(async (tx) => {
-      const before = await tx.post.findUniqueOrThrow({
-        where: {
-          id: params.id,
         },
+        game: {
+          connect: {
+            id: params.gameId,
+          },
+        },
+        ...(params.categoryId
+          ? {
+              category: {
+                connect: {
+                  id: params.categoryId,
+                },
+              },
+            }
+          : {}),
+        title: params.title,
+        content: params.content,
+        type: params.type,
+        status: params.status,
+        visibility: params.visibility,
+        isSpoiler: params.isSpoiler,
+        tags: params.tags?.length
+          ? {
+              create: params.tags.map((tag) => ({
+                tag: {
+                  connectOrCreate: {
+                    where: {
+                      slug: tag.slug,
+                    },
+                    create: tag,
+                  },
+                },
+              })),
+            }
+          : undefined,
+      },
+    });
+
+    if (params.media?.length) {
+      const mediaUploadIds = params.media.map((media) => media.mediaUploadId);
+
+      await claimUploadsForAttachment(tx, {
+        ids: mediaUploadIds,
+        userId: params.authorId,
+        purpose: 'POST',
       });
 
-      if (params.tags !== undefined) {
-        await tx.postTag.deleteMany({
-          where: {
-            postId: params.id,
-          },
-        });
-      }
+      await tx.postMedia.createMany({
+        data: params.media.map((media) => ({
+          postId: post.id,
+          mediaUploadId: media.mediaUploadId,
+          assetId: media.assetId,
+          publicId: media.publicId,
+          url: media.url,
+          mediaType: media.mediaType,
+          altText: media.altText,
+          sortOrder: media.sortOrder,
+          width: media.width,
+          height: media.height,
+          duration: media.duration,
+          bytes: media.bytes,
+          format: media.format,
+        })),
+      });
+    }
 
-      const updated = await tx.post.update({
+    if (post.status === 'PUBLISHED') {
+      await tx.game.update({
         where: {
-          id: params.id,
+          id: params.gameId,
         },
         data: {
-          ...params.data,
-          ...(params.tags !== undefined
-            ? {
-                tags: {
-                  create: params.tags.map((tag) => ({
-                    tag: {
-                      connectOrCreate: {
-                        where: {
-                          slug: tag.slug,
-                        },
-                        create: tag,
-                      },
-                    },
-                  })),
-                },
-              }
-            : {}),
+          postCount: {
+            increment: 1,
+          },
         },
-        include: postInclude,
       });
+    }
 
-      if (before.status !== updated.status) {
-        const delta =
-          updated.status === 'PUBLISHED'
-            ? 1
-            : before.status === 'PUBLISHED'
-              ? -1
-              : 0;
-
-        if (delta !== 0) {
-          await tx.game.update({
-            where: {
-              id: before.gameId,
-            },
-            data: {
-              postCount: {
-                increment: delta,
-              },
-            },
-          });
-        }
-      }
-
-      await params.afterUpdate?.(tx, before, updated);
-
-      return updated;
+    return tx.post.findUniqueOrThrow({
+      where: {
+        id: post.id,
+      },
+      include: postInclude,
     });
+  }
+
+  async update(
+    tx: Prisma.TransactionClient,
+    params: {
+      id: string;
+      data: Prisma.PostUpdateInput;
+      tags?: Array<{
+        name: string;
+        slug: string;
+      }>;
+    },
+  ) {
+    const before = await tx.post.findUniqueOrThrow({
+      where: {
+        id: params.id,
+      },
+      select: {
+        status: true,
+        gameId: true,
+      },
+    });
+
+    if (params.tags !== undefined) {
+      await tx.postTag.deleteMany({
+        where: {
+          postId: params.id,
+        },
+      });
+    }
+
+    const updated = await tx.post.update({
+      where: {
+        id: params.id,
+      },
+      data: {
+        ...params.data,
+        ...(params.tags !== undefined
+          ? {
+              tags: {
+                create: params.tags.map((tag) => ({
+                  tag: {
+                    connectOrCreate: {
+                      where: {
+                        slug: tag.slug,
+                      },
+                      create: tag,
+                    },
+                  },
+                })),
+              },
+            }
+          : {}),
+      },
+      include: postInclude,
+    });
+
+    if (before.status !== updated.status) {
+      const delta =
+        updated.status === 'PUBLISHED'
+          ? 1
+          : before.status === 'PUBLISHED'
+            ? -1
+            : 0;
+
+      if (delta !== 0) {
+        await tx.game.update({
+          where: {
+            id: before.gameId,
+          },
+          data: {
+            postCount: {
+              increment: delta,
+            },
+          },
+        });
+      }
+    }
+
+    return updated;
   }
 
   /**

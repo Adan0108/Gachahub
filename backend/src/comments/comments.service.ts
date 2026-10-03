@@ -75,12 +75,18 @@ export class CommentsService {
 
   async create(postId: string, dto: CreateCommentDto, userId: string) {
     const post = await this.ensurePostCanBeCommentedOn(postId, userId);
+    const content = dto.content.trim();
+    const mentionTargetIds = await this.resolveMentionTargets(
+      content,
+      post,
+      userId,
+    );
 
     const comment = await this.prisma.$transaction(async (transaction) => {
       const createdComment = await this.commentsRepository.create(transaction, {
         postId,
         authorId: userId,
-        content: dto.content.trim(),
+        content,
       });
 
       await this.eventPublisher.publish(
@@ -101,12 +107,10 @@ export class CommentsService {
 
       await this.mentions.publishMentions(
         {
-          text: createdComment.content,
+          targetIds: mentionTargetIds,
           actorId: userId,
           entityType: 'COMMENT',
           entityId: createdComment.id,
-          canView: (mentionedId) =>
-            this.postVisibility.canView(post, mentionedId),
         },
         transaction,
       );
@@ -135,13 +139,19 @@ export class CommentsService {
     }
 
     const post = await this.ensurePostCanBeCommentedOn(parent.postId, userId);
+    const content = dto.content.trim();
+    const mentionTargetIds = await this.resolveMentionTargets(
+      content,
+      post,
+      userId,
+    );
 
     const reply = await this.prisma.$transaction(async (transaction) => {
       const createdReply = await this.commentsRepository.create(transaction, {
         postId: parent.postId,
         authorId: userId,
         parentId: parent.id,
-        content: dto.content.trim(),
+        content,
       });
 
       await this.eventPublisher.publish(
@@ -162,12 +172,10 @@ export class CommentsService {
 
       await this.mentions.publishMentions(
         {
-          text: createdReply.content,
+          targetIds: mentionTargetIds,
           actorId: userId,
           entityType: 'COMMENT',
           entityId: createdReply.id,
-          canView: (mentionedId) =>
-            this.postVisibility.canView(post, mentionedId),
         },
         transaction,
       );
@@ -267,6 +275,19 @@ export class CommentsService {
    * Later this can also check locked posts, moderation,
    * follower-only visibility, blocked users, etc.
    */
+  /** Resolved before the transaction opens: visibility checks use their own connection. */
+  private resolveMentionTargets(
+    content: string,
+    post: Parameters<PostVisibilityService['canView']>[0],
+    actorId: string,
+  ) {
+    return this.mentions.resolveTargets({
+      text: content,
+      actorId,
+      canView: (mentionedId) => this.postVisibility.canView(post, mentionedId),
+    });
+  }
+
   private async ensurePostCanBeCommentedOn(postId: string, userId: string) {
     return this.ensurePostCanBeViewed(postId, userId);
   }

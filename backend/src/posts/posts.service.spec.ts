@@ -80,7 +80,10 @@ describe('PostsService', () => {
     recordPostInteraction: jest.fn(),
   };
 
-  const mentions = { publishMentions: jest.fn() };
+  const mentions = {
+    resolveTargets: jest.fn(),
+    publishMentions: jest.fn(),
+  };
 
   const eventPublisherPort = {
     publish: jest.fn(),
@@ -148,6 +151,7 @@ describe('PostsService', () => {
   };
 
   beforeEach(() => {
+    mentions.resolveTargets.mockResolvedValue(['u1']);
     jest.clearAllMocks();
 
     prisma.$transaction.mockImplementation(
@@ -397,6 +401,7 @@ describe('PostsService', () => {
       });
 
       expect(postsRepository.create).toHaveBeenCalledWith(
+        transaction,
         expect.objectContaining({
           authorId: 'author-1',
           gameId: 'game-1',
@@ -413,7 +418,7 @@ describe('PostsService', () => {
     });
 
     describe('mentions', () => {
-      const createWithStatus = async (status: 'PUBLISHED' | 'DRAFT') => {
+      const create = async (status?: 'PUBLISHED' | 'DRAFT') => {
         postsRepository.findGameById.mockResolvedValue({
           id: 'game-1',
           status: 'ACTIVE',
@@ -430,44 +435,39 @@ describe('PostsService', () => {
           } as never,
           'author-1',
         );
-
-        const [{ afterCreate }] = postsRepository.create.mock.calls[0] as [
-          {
-            afterCreate: (
-              tx: Prisma.TransactionClient,
-              post: Record<string, unknown>,
-            ) => Promise<void>;
-          },
-        ];
-        await afterCreate(transaction, {
-          id: 'post-1',
-          title: 'Hi @bob',
-          content: 'cc @amy',
-          status,
-          visibility: 'PUBLIC',
-          authorId: 'author-1',
-          deletedAt: null,
-        });
       };
 
-      it('publishes mentions of a published post inside the creating transaction', async () => {
-        await createWithStatus('PUBLISHED');
+      it('resolves who to ping before the transaction opens, then records them inside it', async () => {
+        await create();
 
-        expect(mentions.publishMentions).toHaveBeenCalledWith(
+        expect(mentions.resolveTargets).toHaveBeenCalledWith(
           expect.objectContaining({
             text: 'Hi @bob\ncc @amy',
             actorId: 'author-1',
-            entityType: 'POST',
-            entityId: 'post-1',
           }),
+        );
+        expect(mentions.publishMentions).toHaveBeenCalledWith(
+          {
+            targetIds: ['u1'],
+            actorId: 'author-1',
+            entityType: 'POST',
+            entityId: basePost.id,
+          },
           transaction,
         );
+        expect(
+          mentions.resolveTargets.mock.invocationCallOrder[0],
+        ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0]);
       });
 
       it('notifies nobody for a draft', async () => {
-        await createWithStatus('DRAFT');
+        await create('DRAFT');
 
-        expect(mentions.publishMentions).not.toHaveBeenCalled();
+        expect(mentions.resolveTargets).not.toHaveBeenCalled();
+        expect(mentions.publishMentions).toHaveBeenCalledWith(
+          expect.objectContaining({ targetIds: [] }),
+          transaction,
+        );
       });
     });
 
@@ -581,7 +581,7 @@ describe('PostsService', () => {
         'author-1',
       );
 
-      expect(postsRepository.update).toHaveBeenCalledWith({
+      expect(postsRepository.update).toHaveBeenCalledWith(transaction, {
         id: 'post-1',
 
         data: {
@@ -589,77 +589,64 @@ describe('PostsService', () => {
         },
 
         tags: undefined,
-        afterUpdate: expect.any(Function) as unknown,
       });
 
       expect(result.title).toBe('Updated title');
     });
 
     describe('mentions', () => {
-      const row = (over: Record<string, unknown>) => ({
-        id: 'post-1',
-        title: 'T',
-        content: 'C',
-        status: 'PUBLISHED',
-        visibility: 'PUBLIC',
-        authorId: 'author-1',
-        deletedAt: null,
-        ...over,
-      });
-
-      const runAfterUpdate = async (before: object, after: object) => {
-        postsRepository.findById.mockResolvedValue(basePost);
+      const edit = async (
+        existing: Record<string, unknown>,
+        dto: Record<string, unknown>,
+      ) => {
+        postsRepository.findById.mockResolvedValue({
+          ...basePost,
+          ...existing,
+        });
         postsRepository.update.mockResolvedValue(basePost);
-        await service.update('post-1', { title: 'x' }, 'author-1');
-
-        const [{ afterUpdate }] = postsRepository.update.mock.calls[0] as [
-          {
-            afterUpdate: (
-              tx: Prisma.TransactionClient,
-              before: object,
-              after: object,
-            ) => Promise<void>;
-          },
-        ];
-        await afterUpdate(transaction, before, after);
+        await service.update('post-1', dto, 'author-1');
       };
 
-      it('on a published post, passes the old text so only new mentions ping', async () => {
-        await runAfterUpdate(
-          row({ content: 'hi' }),
-          row({ content: 'hi @user123' }),
-        );
+      it('resolves the edited text before the transaction and records targets inside it', async () => {
+        await edit({ title: 'T', content: 'hi' }, { content: 'hi @user123' });
 
-        expect(mentions.publishMentions).toHaveBeenCalledWith(
+        expect(mentions.resolveTargets).toHaveBeenCalledWith(
           expect.objectContaining({
             text: 'T\nhi @user123',
+            actorId: 'author-1',
+          }),
+        );
+        expect(mentions.publishMentions).toHaveBeenCalledWith(
+          {
+            targetIds: ['u1'],
+            actorId: 'author-1',
             entityType: 'POST',
             entityId: 'post-1',
-            previous: expect.objectContaining({ text: 'T\nhi' }) as unknown,
-          }),
+          },
           transaction,
         );
+        expect(
+          mentions.resolveTargets.mock.invocationCallOrder[0],
+        ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0]);
       });
 
-      it('publishing a draft has no previous text, so everyone mentioned pings', async () => {
-        await runAfterUpdate(
-          row({ status: 'DRAFT', content: 'hi @user123' }),
-          row({ status: 'PUBLISHED', content: 'hi @user123' }),
+      it('publishing a draft resolves everyone mentioned in it', async () => {
+        await edit(
+          { status: 'DRAFT', content: 'hi @user123' },
+          { status: 'PUBLISHED' },
         );
 
-        const [input] = mentions.publishMentions.mock.calls[0] as [
-          { previous?: unknown },
-        ];
-        expect(input.previous).toBeUndefined();
+        expect(mentions.resolveTargets).toHaveBeenCalledWith(
+          expect.objectContaining({
+            text: expect.stringContaining('@user123') as unknown,
+          }),
+        );
       });
 
       it('notifies nobody while the post stays a draft', async () => {
-        await runAfterUpdate(
-          row({ status: 'DRAFT' }),
-          row({ status: 'DRAFT', content: '@user123' }),
-        );
+        await edit({ status: 'DRAFT' }, { content: '@user123' });
 
-        expect(mentions.publishMentions).not.toHaveBeenCalled();
+        expect(mentions.resolveTargets).not.toHaveBeenCalled();
       });
     });
 
