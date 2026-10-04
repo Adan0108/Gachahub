@@ -153,6 +153,7 @@ export default function HomePage() {
               isError={home.isError}
               isEmpty={!forYouPosts.length}
               emptyText="No posts match your feed yet."
+              onRetry={() => home.refetch()}
             />
             <PostList posts={forYouPosts} variant="feed" />
           </section>

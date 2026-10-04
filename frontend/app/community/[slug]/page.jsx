@@ -128,6 +128,10 @@ function CommunityContent() {
       <QueryNotice
         isLoading={communityQuery.isLoading || categoriesQuery.isLoading}
         isError={communityQuery.isError || categoriesQuery.isError}
+        onRetry={() => {
+          communityQuery.refetch();
+          categoriesQuery.refetch();
+        }}
       />
       <section className="community-hero">
         <Art tone="indigo">
@@ -194,6 +198,7 @@ function CommunityContent() {
                   isError={feedQuery.isError}
                   isEmpty={!communityPosts.length}
                   emptyText="No community discussions yet."
+                  onRetry={() => feedQuery.refetch()}
                 />
                 <PostList posts={communityPosts.slice(0, 3)} />
               </div>
@@ -246,7 +251,11 @@ function CommunityContent() {
           {!["Overview", "Builds", "Teams"].includes(activeTab) && (
             <>
               <SectionTitle>{activeTab} discussions</SectionTitle>
-              <QueryNotice isLoading={feedQuery.isLoading} isError={feedQuery.isError} />
+              <QueryNotice
+                isLoading={feedQuery.isLoading}
+                isError={feedQuery.isError}
+                onRetry={() => feedQuery.refetch()}
+              />
               {categoryPosts.length ? (
                 <PostList posts={categoryPosts} />
               ) : (
