@@ -6,11 +6,11 @@ import { formatBytes } from "../../lib/mls/media/attachmentView";
 import { saveAttachment } from "../../lib/mls/media/saveAttachment";
 import "./ChatAttachments.css";
 
-/** Decrypts on click, then saves; the file is never fetched until asked for. */
-export function DownloadButton({ source, name }) {
+/** Decrypts on save; the file is never fetched until asked for. */
+function useSaveAttachment(source, name) {
   const [state, setState] = useState("idle");
 
-  const download = async () => {
+  const save = async () => {
     setState("busy");
     try {
       await saveAttachment(source, name);
@@ -21,12 +21,18 @@ export function DownloadButton({ source, name }) {
     }
   };
 
+  return { state, save };
+}
+
+export function DownloadButton({ source, name }) {
+  const { state, save } = useSaveAttachment(source, name);
+
   return (
     <>
       <button
         className="chat-attachment-action"
         disabled={!source || state === "busy"}
-        onClick={download}
+        onClick={save}
         type="button"
       >
         <FiDownload aria-hidden="true" /> {state === "busy" ? "Decrypting..." : "Download"}
@@ -36,19 +42,35 @@ export function DownloadButton({ source, name }) {
   );
 }
 
+function fileExtension(name) {
+  const match = /\.([A-Za-z0-9]{1,5})$/.exec(name ?? "");
+  return match ? match[1].toUpperCase() : "";
+}
+
+/** The whole card is the download target: click saves the file, hover greys it. */
 export function AttachmentFileChip({ file, source }) {
+  const { state, save } = useSaveAttachment(source, file.name);
+  const details = [formatBytes(file.size), fileExtension(file.name)].filter(Boolean).join(" · ");
+  const status =
+    state === "busy" ? "Decrypting..." : !source || state === "error" ? "File unavailable" : details;
+
   return (
-    <div className="chat-attachment-chip">
-      <FiFile aria-hidden="true" />
-      <span className="chat-attachment-name" title={file.name}>
-        {file.name}
+    <button
+      aria-busy={state === "busy"}
+      className="chat-file-card"
+      data-state={!source ? "error" : state}
+      disabled={!source || state === "busy"}
+      onClick={save}
+      title={source ? `Download ${file.name}` : file.name}
+      type="button"
+    >
+      <span className="chat-file-card-icon">
+        <FiFile aria-hidden="true" />
       </span>
-      <small>{formatBytes(file.size)}</small>
-      {source ? (
-        <DownloadButton name={file.name} source={source} />
-      ) : (
-        <span className="chat-attachment-error">File unavailable</span>
-      )}
-    </div>
+      <span className="chat-file-card-text">
+        <span className="chat-file-card-name">{file.name}</span>
+        <small>{status}</small>
+      </span>
+    </button>
   );
 }
