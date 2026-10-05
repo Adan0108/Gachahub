@@ -1,6 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import type {
   MediaOpaqueKind,
+  MediaUpload,
   MediaPurpose,
   MediaResourceType,
 } from '../generated/prisma/client';
@@ -183,21 +184,61 @@ export class MediaRepository {
   /**
    * ATTACHED single-image uploads nothing points at any more, idle past `retryCutoff`. A crash
    * between a replace committing and its release leaves these behind, and the RELEASE_FAILED
-   * sweep never sees them.
+   * sweep never sees them. A game created from a bare iconUrl/bannerUrl has no upload FK, so an
+   * upload whose URL a game still shows is skipped; pages on so skipped rows never starve the rest.
    */
-  findOrphanedSingleImageUploads(retryCutoff: Date, take = 50) {
-    return this.prisma.mediaUpload.findMany({
-      where: {
-        status: 'ATTACHED',
-        purpose: { in: ['AVATAR', 'GAME_ICON', 'GAME_BANNER'] },
-        updatedAt: { lt: retryCutoff },
-        avatarFor: null,
-        gameIconFor: null,
-        gameBannerFor: null,
-      },
-      orderBy: { updatedAt: 'asc' },
-      take,
-    });
+  async findOrphanedSingleImageUploads(retryCutoff: Date, take = 50) {
+    const orphans: MediaUpload[] = [];
+    let cursor: string | undefined;
+
+    while (orphans.length < take) {
+      const batch = await this.prisma.mediaUpload.findMany({
+        where: {
+          status: 'ATTACHED',
+          purpose: { in: ['AVATAR', 'GAME_ICON', 'GAME_BANNER'] },
+          updatedAt: { lt: retryCutoff },
+          avatarFor: null,
+          gameIconFor: null,
+          gameBannerFor: null,
+        },
+        orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+        take,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+
+      if (batch.length === 0) {
+        break;
+      }
+
+      const urls = batch.flatMap((upload) =>
+        upload.secureUrl ? [upload.secureUrl] : [],
+      );
+      const inUse = urls.length
+        ? await this.prisma.game.findMany({
+            where: {
+              OR: [{ iconUrl: { in: urls } }, { bannerUrl: { in: urls } }],
+            },
+            select: { iconUrl: true, bannerUrl: true },
+          })
+        : [];
+      const usedUrls = new Set(
+        inUse.flatMap((game) => [game.iconUrl, game.bannerUrl]),
+      );
+
+      orphans.push(
+        ...batch.filter(
+          (upload) => !upload.secureUrl || !usedUrls.has(upload.secureUrl),
+        ),
+      );
+
+      if (batch.length < take) {
+        break;
+      }
+
+      cursor = batch[batch.length - 1].id;
+    }
+
+    return orphans.slice(0, take);
   }
 
   findExpiredUploads(normalCutoff: Date, cleaningCutoff: Date, take = 100) {
