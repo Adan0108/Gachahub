@@ -23,6 +23,12 @@ export function myParticipant(conversation, userId) {
   return conversation?.participants?.find((participant) => participant.userId === userId);
 }
 
+/** Whether you muted this conversation (the backend decides, including expiry), and until when; null = until you turn it back on. */
+export function conversationMute(conversation, userId) {
+  const mine = myParticipant(conversation, userId);
+  return { isMuted: Boolean(mine?.isMuted), mutedUntil: mine?.mutedUntil ?? null };
+}
+
 export function conversationDisplayName(conversation, userId) {
   if (conversation?.type === "GROUP") return conversation.title || "Group chat";
   return conversationPeer(conversation, userId)?.name || "GachaHub member";

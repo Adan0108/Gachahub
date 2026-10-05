@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   FiArrowLeft,
-  FiBell,
   FiFile,
   FiFlag,
   FiImage,
@@ -16,6 +15,7 @@ import {
   FiX,
 } from "react-icons/fi";
 import { AttachmentFileChip } from "./AttachmentFileChip";
+import { MuteRow } from "./MuteRow";
 import { ImageTile, VideoTile } from "./AttachmentTiles";
 import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightboxContext";
 import { attachmentKind } from "../../lib/mls/media/attachmentView";
@@ -45,6 +45,7 @@ export function ConversationInfoPanel({
   isGroup,
   onManageGroup,
   manageButtonRef,
+  conversation,
 }) {
   const [view, setView] = useState("main");
   const [toast, setToast] = useState(null);
@@ -94,12 +95,6 @@ export function ConversationInfoPanel({
                 </span>
                 Profile
               </button>
-              <button onClick={() => notImplemented("Muting")} type="button">
-                <span className="chat-info-quick-icon">
-                  <FiBell />
-                </span>
-                Mute
-              </button>
               <button onClick={() => notImplemented("Search in conversation")} type="button">
                 <span className="chat-info-quick-icon">
                   <FiSearch />
@@ -131,13 +126,7 @@ export function ConversationInfoPanel({
                   <FiUsers /> Manage group
                 </button>
               )}
-              <button
-                className="chat-info-row"
-                onClick={() => notImplemented("Muting notifications")}
-                type="button"
-              >
-                <FiBell /> Mute notifications
-              </button>
+              <MuteRow conversation={conversation} />
               {canVerify && (
                 <button className="chat-info-row" onClick={onVerify} type="button">
                   <FiShield /> {verifyLabel}

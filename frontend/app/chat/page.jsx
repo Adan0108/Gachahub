@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FiArchive,
+  FiBellOff,
   FiCheck,
   FiCheckCircle,
   FiEdit2,
@@ -58,6 +59,7 @@ import {
   activeMembers,
   conversationDisplayName,
   conversationImage,
+  conversationMute,
   conversationPeer,
   myParticipant,
   otherActiveMemberIds,
@@ -860,6 +862,7 @@ export default function ChatPage() {
             {currentList.map((conversation) => {
               const isGroup = conversation.type === "GROUP";
               const displayName = conversationDisplayName(conversation, user?.id);
+              const isMuted = conversationMute(conversation, user?.id).isMuted;
               return (
                 <button
                   className={activeId === conversation.id ? "active" : ""}
@@ -888,8 +891,13 @@ export default function ChatPage() {
                     </small>
                   </span>
                   <span className="chat-list-meta">
-                    <small>{relativeTime(conversation.updatedAt)}</small>
-                    {conversation.unreadCount > 0 && <b>{conversation.unreadCount}</b>}
+                    <small>
+                      {isMuted && <FiBellOff aria-label="Muted" />}
+                      {relativeTime(conversation.updatedAt)}
+                    </small>
+                    {conversation.unreadCount > 0 && (
+                      <b className={isMuted ? "muted" : undefined}>{conversation.unreadCount}</b>
+                    )}
                   </span>
                 </button>
               );
@@ -1266,6 +1274,7 @@ export default function ChatPage() {
 
         <ConversationInfoPanel
           canVerify={canVerify}
+          conversation={activeConversation}
           displayImage={activeConversationImage}
           displayName={activeConversationName}
           encryptionStatus={encryptionStatus}

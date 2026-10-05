@@ -87,6 +87,8 @@ export const backendRoutes = {
     `/chat/requests/${encodePathParam(conversationId)}/decline`,
   chatBlockConversation: (conversationId) =>
     `/chat/conversations/${encodePathParam(conversationId)}/block`,
+  chatNotificationLevel: (conversationId) =>
+    `/chat/conversations/${encodePathParam(conversationId)}/notification-level`,
   chatGroups: '/chat/groups',
   chatGroup: (conversationId) => `/chat/groups/${encodePathParam(conversationId)}`,
   chatGroupMembers: (conversationId) =>
@@ -837,6 +839,13 @@ export const api = {
     mutation(backendRoutes.chatDeclineRequest(conversationId)),
   blockChatConversation: (conversationId) =>
     mutation(backendRoutes.chatBlockConversation(conversationId)),
+  /** `notificationLevel` is ALL or NOTHING (muted); `mutedUntil` is an ISO time, omitted for an open-ended mute. */
+  setChatNotificationLevel: (conversationId, { notificationLevel, mutedUntil }) =>
+    mutation(
+      backendRoutes.chatNotificationLevel(conversationId),
+      { notificationLevel, mutedUntil },
+      { method: 'PATCH' },
+    ),
   createGroupChat: ({ title, photoUrl, memberUserIds }) =>
     mutation(backendRoutes.chatGroups, { title, photoUrl, memberUserIds }),
   updateGroupChat: (conversationId, { title, photoUrl }) =>
