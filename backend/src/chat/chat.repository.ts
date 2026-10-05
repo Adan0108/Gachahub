@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
 import { pendingSinceChange } from './membership/apply-participant-transitions';
 import { lockConversation } from './membership/lock-conversation';
+import { notMutedParticipantWhere } from './notification-mute';
 import {
   claimUploadsForAttachment,
   type PrismaTransaction,
@@ -533,7 +534,7 @@ export class ChatRepository {
     });
   }
 
-  /** Counts unread messages in the accepted inbox, excluding own messages, pending requests and archived chats. */
+  /** Unread messages in the accepted inbox, excluding own messages, pending requests, archived and muted chats (a muted chat keeps its own per-conversation count). No client reads the total yet. */
   countUnreadMessagesForUser(userId: string) {
     return this.prisma.chatMessageReceipt.count({
       where: {
@@ -550,6 +551,7 @@ export class ChatRepository {
                 userId,
                 state: 'ACTIVE',
                 deletedAt: null,
+                ...notMutedParticipantWhere(),
               },
             },
           },
@@ -558,7 +560,7 @@ export class ChatRepository {
     });
   }
 
-  /** Counts main-inbox convos with at least one unread message. */
+  /** Main-inbox conversations with an unread message, excluding muted ones, like countUnreadMessagesForUser. No client reads the total yet. */
   countUnreadConversationsForUser(userId: string) {
     return this.prisma.chatConversation.count({
       where: {
@@ -567,6 +569,7 @@ export class ChatRepository {
             userId,
             state: 'ACTIVE',
             deletedAt: null,
+            ...notMutedParticipantWhere(),
           },
         },
         messages: {

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
+import { isNotificationMuted } from './notification-mute';
 import { BlocksService } from '../blocks/blocks.service';
 import { ChatMembershipService } from './membership/chat-membership.service';
 import { ChatHistoryFetchRateLimiterService } from './chat-history-fetch-rate-limiter.service';
@@ -311,13 +312,20 @@ export class ChatInboxService {
       userId,
     );
 
+    const mutedUntilDate =
+      notificationLevel === 'NOTHING' && mutedUntil
+        ? new Date(mutedUntil)
+        : null;
+
+    if (mutedUntilDate && mutedUntilDate <= new Date()) {
+      throw new BadRequestException('mutedUntil must be in the future');
+    }
+
     return this.chatRepository.updateParticipantNotificationLevel(
       conversationId,
       userId,
       notificationLevel,
-      notificationLevel === 'NOTHING' && mutedUntil
-        ? new Date(mutedUntil)
-        : null,
+      mutedUntilDate,
     );
   }
 
@@ -578,6 +586,8 @@ export class ChatInboxService {
       pinnedAt: isViewer ? participant.pinnedAt : null,
       notificationLevel: isViewer ? participant.notificationLevel : null,
       mutedUntil: isViewer ? participant.mutedUntil : null,
+      // Branch on this, not notificationLevel: an expired mute keeps NOTHING in the row forever.
+      isMuted: isViewer ? isNotificationMuted(participant) : null,
       user: participant.user,
       isBlockedByMe: blockedUserIds.has(participant.userId),
     };

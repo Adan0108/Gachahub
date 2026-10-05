@@ -217,21 +217,46 @@ describe('ChatInboxService', () => {
     });
 
     it('setNotificationLevel sets NOTHING with a mute expiry', async () => {
+      const until = new Date(Date.now() + 60 * 60 * 1000);
+
       await service.setNotificationLevel(
         'user-1',
         'conversation-1',
         'NOTHING',
-        '2026-08-17T20:00:00.000Z',
+        until.toISOString(),
       );
 
       expect(
         repository.updateParticipantNotificationLevel,
-      ).toHaveBeenCalledWith(
-        'conversation-1',
-        'user-1',
-        'NOTHING',
-        new Date('2026-08-17T20:00:00.000Z'),
-      );
+      ).toHaveBeenCalledWith('conversation-1', 'user-1', 'NOTHING', until);
+    });
+
+    it('setNotificationLevel rejects a mute that already ended, without writing', async () => {
+      await expect(
+        service.setNotificationLevel(
+          'user-1',
+          'conversation-1',
+          'NOTHING',
+          new Date(Date.now() - 1000).toISOString(),
+        ),
+      ).rejects.toThrow('mutedUntil must be in the future');
+
+      expect(
+        repository.updateParticipantNotificationLevel,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('setNotificationLevel checks access before judging the end time', async () => {
+      repository.findParticipant.mockResolvedValue(null);
+
+      await expect(
+        service.setNotificationLevel(
+          'user-1',
+          'conversation-1',
+          'NOTHING',
+          new Date(Date.now() - 1000).toISOString(),
+        ),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('setNotificationLevel sets ALL and clears any mute expiry', async () => {
@@ -779,6 +804,90 @@ describe('ChatInboxService', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].participantState).toBe('ARCHIVED');
+    });
+  });
+
+  describe('mute state in conversation summaries', () => {
+    const conversationWith = (viewer: {
+      notificationLevel: 'ALL' | 'NOTHING';
+      mutedUntil: Date | null;
+    }) => ({
+      id: 'conversation-1',
+      type: 'DIRECT',
+      status: 'ACTIVE',
+      updatedAt: new Date('2024-01-01'),
+      createdAt: new Date('2024-01-01'),
+      participants: [
+        {
+          userId: 'user-1',
+          role: 'MEMBER',
+          state: 'ARCHIVED',
+          pinnedAt: null,
+          ...viewer,
+          user: { id: 'user-1' },
+        },
+        {
+          userId: 'user-2',
+          role: 'MEMBER',
+          state: 'ACTIVE',
+          pinnedAt: null,
+          notificationLevel: 'NOTHING',
+          mutedUntil: null,
+          user: { id: 'user-2' },
+        },
+      ],
+      messages: [],
+    });
+
+    const viewerRow = async (viewer: {
+      notificationLevel: 'ALL' | 'NOTHING';
+      mutedUntil: Date | null;
+    }) => {
+      repository.findInboxConversations.mockResolvedValue([
+        conversationWith(viewer),
+      ]);
+      const [summary] = await service.listArchivedConversations('user-1');
+      return {
+        mine: summary.participants.find((p) => p.userId === 'user-1'),
+        theirs: summary.participants.find((p) => p.userId === 'user-2'),
+      };
+    };
+
+    it('marks the viewer muted for an open-ended mute, and keeps everyone else private', async () => {
+      const { mine, theirs } = await viewerRow({
+        notificationLevel: 'NOTHING',
+        mutedUntil: null,
+      });
+
+      expect(mine?.isMuted).toBe(true);
+      expect(theirs?.isMuted).toBeNull();
+    });
+
+    it('marks the viewer muted while a timed mute is still running', async () => {
+      const { mine } = await viewerRow({
+        notificationLevel: 'NOTHING',
+        mutedUntil: new Date(Date.now() + 60_000),
+      });
+
+      expect(mine?.isMuted).toBe(true);
+    });
+
+    it('marks the viewer not muted once a timed mute has ended, even though the row still says NOTHING', async () => {
+      const { mine } = await viewerRow({
+        notificationLevel: 'NOTHING',
+        mutedUntil: new Date(Date.now() - 60_000),
+      });
+
+      expect(mine?.isMuted).toBe(false);
+    });
+
+    it('marks the viewer not muted at level ALL', async () => {
+      const { mine } = await viewerRow({
+        notificationLevel: 'ALL',
+        mutedUntil: null,
+      });
+
+      expect(mine?.isMuted).toBe(false);
     });
   });
 

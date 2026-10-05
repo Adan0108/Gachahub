@@ -10,6 +10,7 @@ import {
 } from '../generated/prisma/client';
 import { MembershipChangePendingException } from '../common/exceptions/membership-change-pending.exception';
 import { ChatRepository } from './chat.repository';
+import { isNotificationMuted } from './notification-mute';
 import { FollowsService } from '../follows/follows.service';
 import { BlocksService } from '../blocks/blocks.service';
 import { GameModeratorsService } from '../game-moderators/game-moderators.service';
@@ -266,11 +267,7 @@ export class ChatAccessService {
       mutedUntil: Date | null;
     },
   ) {
-    const isMuted =
-      recipient.notificationLevel === 'NOTHING' &&
-      (!recipient.mutedUntil || recipient.mutedUntil > new Date());
-
-    if (recipient.state !== 'ACTIVE' || isMuted) {
+    if (recipient.state !== 'ACTIVE' || isNotificationMuted(recipient)) {
       return false;
     }
 
