@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FiChevronRight, FiCompass, FiEdit3 } from "react-icons/fi";
+import { FeedLoadSentinel } from "../components/FeedLoadSentinel";
 import { CommunityGrid } from "../components/CommunityGrid";
 import { PostList } from "../components/PostList";
 import { QueryNotice } from "../components/QueryNotice";
@@ -87,7 +88,7 @@ export default function HomePage() {
               onRetry={feed.restart}
             />
             <PostList posts={forYouPosts} variant="feed" />
-            {feed.hasNextPage && <button className="soft-btn" type="button" disabled={feed.isFetching} onClick={feed.loadMore}>Load more</button>}
+            <FeedLoadSentinel feed={feed} />
           </section>
         </main>
 
