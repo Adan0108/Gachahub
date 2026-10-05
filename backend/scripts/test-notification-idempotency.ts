@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { randomUUID } from 'crypto';
 
+import { CommentsRepository } from '../src/comments/comments.repository';
 import { NotificationRepository } from '../src/notifications/notification.repository';
 import { NotificationService } from '../src/notifications/notification.service';
 import { ProcessedEventRepository } from '../src/notifications/processed-event.repository';
@@ -12,7 +13,10 @@ async function main() {
   const prisma = new PrismaService();
 
   const notificationRepository = new NotificationRepository(prisma);
-  const notificationService = new NotificationService(notificationRepository);
+  const notificationService = new NotificationService(
+    notificationRepository,
+    new CommentsRepository(prisma),
+  );
   const processedEventRepository = new ProcessedEventRepository();
 
   const suffix = randomUUID();

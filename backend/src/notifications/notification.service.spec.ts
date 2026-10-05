@@ -7,8 +7,14 @@ import {
   UserStatus,
 } from '../generated/prisma/client';
 
+import { CommentsRepository } from '../comments/comments.repository';
 import { NotificationRepository } from './notification.repository';
 import { NotificationService } from './notification.service';
+
+// Loading the real repository would pull in Prisma; the service only needs the injection token.
+jest.mock('../comments/comments.repository', () => ({
+  CommentsRepository: class {},
+}));
 
 type NotificationRepositoryMock = {
   create: jest.MockedFunction<NotificationRepository['create']>;
@@ -47,6 +53,13 @@ describe('NotificationService', () => {
     findExisting: jest.fn(),
   };
 
+  const commentsRepositoryMock = {
+    findPostIdsByCommentIds: jest.fn<
+      Promise<Array<{ id: string; postId: string }>>,
+      [string[]]
+    >(),
+  };
+
   const recipientId = 'recipient-1';
   const actorId = 'actor-1';
   const entityId = 'post-1';
@@ -80,12 +93,17 @@ describe('NotificationService', () => {
           provide: NotificationRepository,
           useValue: repositoryMock,
         },
+        {
+          provide: CommentsRepository,
+          useValue: commentsRepositoryMock,
+        },
       ],
     }).compile();
 
     service = module.get<NotificationService>(NotificationService);
 
     jest.clearAllMocks();
+    commentsRepositoryMock.findPostIdsByCommentIds.mockResolvedValue([]);
   });
 
   describe('createNotification', () => {
@@ -576,7 +594,10 @@ describe('NotificationService', () => {
       });
 
       expect(result).toEqual({
-        items: [n1, n2],
+        items: [
+          { ...n1, postId: null },
+          { ...n2, postId: null },
+        ],
         nextCursor: 'notification-2',
         hasMore: true,
       });
@@ -590,10 +611,34 @@ describe('NotificationService', () => {
       });
 
       expect(result).toEqual({
-        items: [notificationWithActor],
+        items: [{ ...notificationWithActor, postId: null }],
         nextCursor: null,
         hasMore: false,
       });
+    });
+
+    it('should attach the post id to comment notifications only', async () => {
+      const commentNotification = {
+        ...notificationWithActor,
+        id: 'notification-comment',
+        type: NotificationType.POST_COMMENTED,
+        entityType: NotificationEntityType.COMMENT,
+        entityId: 'comment-1',
+      };
+      repositoryMock.findByRecipient.mockResolvedValue([
+        commentNotification,
+        notificationWithActor,
+      ]);
+      commentsRepositoryMock.findPostIdsByCommentIds.mockResolvedValue([
+        { id: 'comment-1', postId: 'post-9' },
+      ]);
+
+      const result = await service.getNotifications(recipientId, {});
+
+      expect(
+        commentsRepositoryMock.findPostIdsByCommentIds,
+      ).toHaveBeenCalledWith(['comment-1']);
+      expect(result.items.map((item) => item.postId)).toEqual(['post-9', null]);
     });
 
     it('should use default page size', async () => {

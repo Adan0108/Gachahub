@@ -57,6 +57,10 @@ export const queryKeys = {
       { type, page, excludeHidden, limit },
     ],
   },
+  // One root so a single invalidate refreshes both the list and the badge count.
+  notifications: ["notifications"],
+  notificationList: ["notifications", "list"],
+  notificationUnreadCount: ["notifications", "unread-count"],
   chatConversations: ["chat", "conversations"],
   chatArchivedConversations: ["chat", "archived"],
   chatRequests: ["chat", "requests"],
@@ -241,6 +245,24 @@ export const queries = {
     retry: 1,
     staleTime: 10_000,
     refetchInterval: 15_000,
+  }),
+  // Infinite: each page's cursor is the last notification id; the bell enables it only while open.
+  notificationList: () => ({
+    queryKey: queryKeys.notificationList,
+    queryFn: ({ pageParam, signal }) =>
+      api.getNotifications({ limit: 20, cursor: pageParam }, { signal }),
+    initialPageParam: undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    retry: 1,
+    staleTime: 10_000,
+  }),
+  // Pushed live over the socket (useNotificationSocket); the interval only covers a missed push.
+  notificationUnreadCount: () => ({
+    queryKey: queryKeys.notificationUnreadCount,
+    queryFn: ({ signal }) => api.getNotificationUnreadCount({ signal }),
+    retry: 1,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   }),
   chatArchivedConversations: () => ({
     queryKey: queryKeys.chatArchivedConversations,

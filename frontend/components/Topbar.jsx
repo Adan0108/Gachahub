@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FiBell, FiLogOut, FiMenu, FiMoon, FiPlus, FiSettings, FiSun, FiUser } from "react-icons/fi";
+import { FiLogOut, FiMenu, FiMoon, FiPlus, FiSettings, FiSun, FiUser } from "react-icons/fi";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { useDismiss } from "../hooks/useDismiss";
 import { useSignOut } from "../hooks/useSignOut";
@@ -12,47 +12,19 @@ import { useToast } from "../hooks/useToast";
 import { api } from "../lib/api";
 import { queries } from "../lib/queries";
 import { AvatarFace } from "./AvatarFace";
-import { glyph } from "./constants";
 import { GlobalSearch } from "./GlobalSearch";
-
-const notifications = [
-  {
-    id: "build-like",
-    title: "Your Sanhua build is trending",
-    detail: "12 new reactions in Wuthering Waves",
-    href: "/profile",
-    time: "8m",
-  },
-  {
-    id: "lore-reply",
-    title: "New reply in The Lament",
-    detail: "LoreSeeker added a source to the theory",
-    href: "/lore",
-    time: "32m",
-  },
-  {
-    id: "summary-ready",
-    title: "Community digest is ready",
-    detail: "Three new trends were summarized",
-    href: "/summaries",
-    time: "1h",
-  },
-];
+import { NotificationBell } from "./NotificationBell";
 
 export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobalActions = true }) {
   const router = useRouter();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [readNotifications, setReadNotifications] = useState([]);
   const { notice, showNotice } = useToast(2200);
-  const notificationButtonRef = useRef(null);
-  const notificationDrawerRef = useRef(null);
   const accountButtonRef = useRef(null);
   const accountMenuRef = useRef(null);
   const health = useQuery(queries.health());
   const { user, isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
   const apiStatus = health.isSuccess ? "connected" : health.isError ? "offline" : "checking";
-  const unreadCount = notifications.filter((item) => !readNotifications.includes(item.id)).length;
   const initials = (user?.name || user?.email || "User")
     .split(/\s+/)
     .map((part) => part[0])
@@ -66,21 +38,9 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
     },
   });
 
-  const openNotification = (notification) => {
-    setReadNotifications((current) => [...new Set([...current, notification.id])]);
-    setNotificationsOpen(false);
-    router.push(notification.href);
-  };
-
   const closeNotifications = useCallback(() => setNotificationsOpen(false), []);
   const closeAccountMenu = useCallback(() => setAccountOpen(false), []);
 
-  useDismiss({
-    isOpen: notificationsOpen,
-    onDismiss: closeNotifications,
-    contentRef: notificationDrawerRef,
-    triggerRef: notificationButtonRef,
-  });
   useDismiss({
     isOpen: accountOpen,
     onDismiss: closeAccountMenu,
@@ -132,62 +92,14 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
         )}
         {isSessionLoading && <span className="auth-session-placeholder" aria-hidden="true" />}
         {isAuthenticated && (
-          <div className="notification-wrap">
-            <button
-              aria-expanded={notificationsOpen}
-              aria-haspopup="dialog"
-              className="icon-btn notification-btn"
-              aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
-              onClick={() => {
-                setAccountOpen(false);
-                setNotificationsOpen((current) => !current);
-              }}
-              ref={notificationButtonRef}
-              type="button"
-            >
-              <FiBell />
-              {unreadCount > 0 && <i />}
-            </button>
-            {notificationsOpen && (
-              <section
-                aria-label="Notifications"
-                className="notification-drawer"
-                ref={notificationDrawerRef}
-                role="dialog"
-              >
-                <div className="notification-head">
-                  <div>
-                    <span className="eyebrow">Inbox</span>
-                    <b>Notifications</b>
-                  </div>
-                  <button
-                    disabled={!unreadCount}
-                    onClick={() => setReadNotifications(notifications.map((item) => item.id))}
-                    type="button"
-                  >
-                    Mark all read
-                  </button>
-                </div>
-                <div className="notification-list">
-                  {notifications.map((notification) => (
-                    <button
-                      className={readNotifications.includes(notification.id) ? "read" : "unread"}
-                      key={notification.id}
-                      onClick={() => openNotification(notification)}
-                      type="button"
-                    >
-                      <span>{glyph.sparkle}</span>
-                      <div>
-                        <b>{notification.title}</b>
-                        <small>{notification.detail}</small>
-                      </div>
-                      <time>{notification.time}</time>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
+          <NotificationBell
+            onClose={closeNotifications}
+            onToggle={() => {
+              setAccountOpen(false);
+              setNotificationsOpen((current) => !current);
+            }}
+            open={notificationsOpen}
+          />
         )}
         {isAuthenticated && (
           <div className="account-wrap">
