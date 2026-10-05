@@ -4,11 +4,13 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FiChevronRight, FiCompass, FiEdit3 } from "react-icons/fi";
+import { FeedLoadSentinel } from "../components/FeedLoadSentinel";
 import { CommunityGrid } from "../components/CommunityGrid";
 import { PostList } from "../components/PostList";
 import { QueryNotice } from "../components/QueryNotice";
 import { SectionTitle } from "../components/SectionTitle";
 import { glyph } from "../components/constants";
+import { useCursorFeed } from "../hooks/useCursorFeed";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { api } from "../lib/api";
 import { fallbacks, queries } from "../lib/queries";
@@ -17,13 +19,14 @@ import { defaultFeedPreferences, FEED_PREFERENCES_KEY, readStoredJson } from "..
 export default function HomePage() {
   const [preferences, setPreferences] = useState(defaultFeedPreferences);
   const { user } = useCurrentUser();
-  const home = useQuery(queries.home(""));
+  const home = useQuery(queries.games(""));
+  const feed = useCursorFeed(queries.feed("latest", { limit: 10 }, user?.id, preferences));
   const data =
-    home.data ||
+    (home.data ? { communities: home.data.items } : null) ||
     (api.usingMocks
       ? fallbacks.home("")
       : { communities: [], forYouPosts: [], posts: [], meta: {} });
-  const allForYouPosts = data.forYouPosts || data.posts || [];
+  const allForYouPosts = feed.items || data.forYouPosts || data.posts || [];
   const selectedGames = new Set(preferences.games);
   const selectedCategories = new Set(preferences.categories);
   const visibleCommunities = selectedGames.size
@@ -78,13 +81,14 @@ export default function HomePage() {
               </Link>
             </div>
             <QueryNotice
-              isLoading={home.isLoading}
-              isError={home.isError}
+              isLoading={feed.isLoading}
+              isError={feed.isError}
               isEmpty={!forYouPosts.length}
               emptyText="No posts match your feed yet."
-              onRetry={() => home.refetch()}
+              onRetry={feed.restart}
             />
             <PostList posts={forYouPosts} variant="feed" />
+            <FeedLoadSentinel feed={feed} />
           </section>
         </main>
 

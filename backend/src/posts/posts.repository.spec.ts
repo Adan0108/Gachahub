@@ -3,7 +3,7 @@ import { PostsRepository } from './posts.repository';
 describe('PostsRepository - Latest feed', () => {
   const prisma = {
     post: {
-      findMany: jest.fn<(query: unknown) => Promise<unknown[]>>(),
+      findMany: jest.fn<Promise<unknown[]>, [unknown]>(),
     },
   };
   let repository: PostsRepository;
@@ -122,7 +122,7 @@ describe('PostsRepository - Latest feed', () => {
       'user-1',
     );
 
-    const calls = prisma.post.findMany.mock.calls as Array<[unknown]>;
+    const calls = prisma.post.findMany.mock.calls;
 
     expect(calls[0]?.[0]).toMatchObject({
       where: {
@@ -154,7 +154,7 @@ describe('PostsRepository - Latest feed', () => {
 
     await repository.findForYouManyByIds(['post-1', 'post-2'], where, 'user-1');
 
-    const calls = prisma.post.findMany.mock.calls as Array<[unknown]>;
+    const calls = prisma.post.findMany.mock.calls;
 
     expect(calls[0]?.[0]).toMatchObject({
       where: {

@@ -1,3 +1,6 @@
+import { GameMembershipController } from './game-membership.controller';
+import { GameMembershipService } from './game-membership.service';
+import { GameMembershipRepository } from './game-membership.repository';
 import { Module } from '@nestjs/common';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { CommonModule } from '../common/common.module';
@@ -17,8 +20,18 @@ import { GamesService } from './games.service';
  */
 @Module({
   imports: [CommonModule, GameModeratorsModule, MediaModule, AuditLogModule],
-  controllers: [GamesController, GameModerationController],
-  providers: [GamesService, GamesRepository, GameModerationService],
+  controllers: [
+    GameMembershipController,
+    GamesController,
+    GameModerationController,
+  ],
+  providers: [
+    GamesService,
+    GamesRepository,
+    GameModerationService,
+    GameMembershipService,
+    GameMembershipRepository,
+  ],
   exports: [GamesService, GamesRepository],
 })
 export class GamesModule {}

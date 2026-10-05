@@ -8,7 +8,9 @@ import { useTheme } from "../hooks/useTheme";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { mustOnboard } from "../lib/username";
 import { useDeviceIdentity } from "../hooks/chat/useDeviceIdentity";
+import { useAppSocket } from "../hooks/useAppSocket";
 import { useChatSocket } from "../hooks/chat/useChatSocket";
+import { useNotificationSocket } from "../hooks/useNotificationSocket";
 import { BrandMark } from "./BrandMark";
 import { glyph, navItems } from "./constants";
 import { DevToolsPanel } from "./DevToolsPanel";
@@ -92,10 +94,14 @@ export function AppShell({ children, initialTheme = "dark" }) {
   // they land on it. useDeviceIdentity no-ops until useCurrentUser resolves
   // an authenticated user, so this is harmless on /login and /register too.
   useDeviceIdentity();
+  // The one live connection, app-wide. Each feature below attaches only its own listeners to it.
+  useAppSocket();
   // Live push for new messages app-wide, same reasoning as useDeviceIdentity
   // above - so a message shows up immediately even on a page other than
   // /chat, not just once the poll interval there happens to fire.
   useChatSocket();
+  // Keeps the top-bar bell live on every page.
+  useNotificationSocket();
   const router = useRouter();
   const menuButtonRef = useRef(null);
   const menuCloseButtonRef = useRef(null);

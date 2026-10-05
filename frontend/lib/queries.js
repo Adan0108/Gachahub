@@ -1,4 +1,5 @@
 import { keepPreviousData } from "@tanstack/react-query";
+import { cursorFeedOptions } from "./cursorFeed";
 import { api, fallbackCategories, fallbackGame, fallbackGames, fallbackPosts } from "./api";
 
 // Normalizes an unpaginated, bare-array admin endpoint (categories, moderators) into the same
@@ -18,6 +19,8 @@ export const queryKeys = {
     list: (search, status) => ["admin", "games", { search, status }],
   },
   community: (slug) => ["community", slug],
+  gameJoinStatus: (slug, userId) => ["game-join-status", userId, slug],
+  joinedGames: (userId) => ["joined-games", userId],
   categories: (slug) => ["community-categories", slug],
   adminCategories: {
     all: (slug) => ["admin", "categories", slug],
@@ -33,7 +36,7 @@ export const queryKeys = {
   myPosts: ["posts", "mine"],
   posts: (search) => ["posts", { search }],
   post: (postId) => ["posts", "detail", postId],
-  gameFeed: (slug, categorySlug) => ["game-feed", slug, { categorySlug }],
+  gameFeed: (slug, categorySlug, { sort = "latest", type = "", userId = "" } = {}) => ["game-feed", slug, { categorySlug, sort, type, userId }],
   followStatus: (userId) => ["follow-status", userId],
   comments: (postId) => ["comments", postId],
   replies: (commentId) => ["comment-replies", commentId],
@@ -54,6 +57,10 @@ export const queryKeys = {
       { type, page, excludeHidden, limit },
     ],
   },
+  // One root so a single invalidate refreshes both the list and the badge count.
+  notifications: ["notifications"],
+  notificationList: ["notifications", "list"],
+  notificationUnreadCount: ["notifications", "unread-count"],
   chatConversations: ["chat", "conversations"],
   chatArchivedConversations: ["chat", "archived"],
   chatRequests: ["chat", "requests"],
@@ -94,6 +101,20 @@ export const queries = {
     queryFn: () => api.getCommunity(slug),
     retry: 1,
     staleTime: 30_000,
+  }),
+  gameJoinStatus: (slug, userId) => ({
+    queryKey: queryKeys.gameJoinStatus(slug, userId),
+    queryFn: ({ signal }) => api.getGameJoinStatus(slug, { signal }),
+    enabled: Boolean(slug && userId),
+    retry: false,
+    gcTime: 0,
+  }),
+  joinedGames: (userId) => ({
+    queryKey: queryKeys.joinedGames(userId),
+    queryFn: ({ signal }) => api.getJoinedGames({ signal }),
+    enabled: Boolean(userId),
+    retry: false,
+    gcTime: 0,
   }),
   categories: (slug) => ({
     queryKey: queryKeys.categories(slug),
@@ -156,14 +177,13 @@ export const queries = {
     retry: 1,
     staleTime: 30_000,
   }),
-  gameFeed: (slug, categorySlug) => ({
-    queryKey: queryKeys.gameFeed(slug, categorySlug),
-    queryFn: ({ signal }) =>
-      api.getGameFeed(slug, { page: 1, limit: 20, sort: "latest", categorySlug }, { signal }),
-    enabled: Boolean(slug),
-    retry: 1,
-    staleTime: 30_000,
-  }),
+  feed: (sort = "latest", filters = {}, userId = "", scope = null) =>
+    cursorFeedOptions(["feed", sort, filters, userId, scope],
+      ({ cursor, signal }) => api[sort === "for-you" ? "getForYouFeed" : sort === "trending" ? "getTrendingFeed" : "getLatestFeed"]({ ...filters, cursor }, { signal }),
+      sort !== "for-you" || Boolean(userId)),
+  gameFeed: (slug, categorySlug, { sort = "latest", type = "", userId = "" } = {}) =>
+    cursorFeedOptions(queryKeys.gameFeed(slug, categorySlug, { sort, type, userId }),
+      ({ cursor, signal }) => api.getGameFeed(slug, { limit: 20, sort, type, categorySlug, cursor }, { signal }), Boolean(slug)),
   followStatus: (userId) => ({
     queryKey: queryKeys.followStatus(userId),
     queryFn: ({ signal }) => api.getFollowStatus(userId, { signal }),
@@ -226,6 +246,24 @@ export const queries = {
     staleTime: 10_000,
     refetchInterval: 15_000,
   }),
+  // Infinite: each page's cursor is the last notification id; the bell enables it only while open.
+  notificationList: () => ({
+    queryKey: queryKeys.notificationList,
+    queryFn: ({ pageParam, signal }) =>
+      api.getNotifications({ limit: 20, cursor: pageParam }, { signal }),
+    initialPageParam: undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    retry: 1,
+    staleTime: 10_000,
+  }),
+  // Pushed live over the socket (useNotificationSocket); the interval only covers a missed push.
+  notificationUnreadCount: () => ({
+    queryKey: queryKeys.notificationUnreadCount,
+    queryFn: ({ signal }) => api.getNotificationUnreadCount({ signal }),
+    retry: 1,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  }),
   chatArchivedConversations: () => ({
     queryKey: queryKeys.chatArchivedConversations,
     queryFn: api.getArchivedChatConversations,
@@ -265,3 +303,4 @@ export const fallbacks = {
   categories: fallbackCategories,
   posts: fallbackPosts,
 };
+

@@ -1,4 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
+import { GameFeedSortDto } from './dto/query-feed.dto';
+import { PostTypeDto } from '../posts/dto/create-post.dto';
 import { FeedService } from './feed.service';
 import { encodeTrendingFeedCursor } from './utils/trending-cursor.util';
 import type { TrendingSnapshot } from './trending/trending-snapshot.service';
@@ -205,10 +207,10 @@ describe('FeedService - Trending snapshots', () => {
 
   it('binds game, category, and type filters to a game snapshot', async () => {
     await service.gameFeed('genshin-impact', {
-      sort: 'trending',
+      sort: GameFeedSortDto.TRENDING,
       limit: 10,
       categorySlug: 'build',
-      type: 'GUIDE',
+      type: PostTypeDto.GUIDE,
     });
 
     expect(trendingSnapshots.getOrCreate).toHaveBeenCalledWith(
@@ -246,10 +248,10 @@ describe('FeedService - Trending snapshots', () => {
     });
 
     await service.gameFeed('genshin-impact', {
-      sort: 'trending',
+      sort: GameFeedSortDto.TRENDING,
       limit: 1,
       categorySlug: 'build',
-      type: 'GUIDE',
+      type: PostTypeDto.GUIDE,
       cursor: encodeTrendingFeedCursor({ snapshotId, offset: 1 }),
     });
 

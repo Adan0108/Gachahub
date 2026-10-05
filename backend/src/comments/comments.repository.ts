@@ -46,6 +46,20 @@ export class CommentsRepository {
     });
   }
 
+  /** The live post each comment sits on, so a notification can link to it; a deleted comment still resolves, a deleted post does not. */
+  async findPostIdsByCommentIds(
+    commentIds: string[],
+  ): Promise<Array<{ id: string; postId: string }>> {
+    if (commentIds.length === 0) {
+      return [];
+    }
+
+    return this.prisma.comment.findMany({
+      where: { id: { in: commentIds }, post: { deletedAt: null } },
+      select: { id: true, postId: true },
+    });
+  }
+
   findById(id: string) {
     return this.prisma.comment.findUnique({
       where: {

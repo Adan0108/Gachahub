@@ -1,4 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
+import { GameFeedSortDto } from './dto/query-feed.dto';
+import { PostTypeDto } from '../posts/dto/create-post.dto';
 import { FeedService } from './feed.service';
 import {
   decodeLatestFeedCursor,
@@ -210,11 +212,11 @@ describe('FeedService - Latest', () => {
     await service.gameFeed(
       'genshin-impact',
       {
-        sort: 'latest',
+        sort: GameFeedSortDto.LATEST,
         limit: 10,
         cursor,
         categorySlug: 'builds',
-        type: 'GUIDE',
+        type: PostTypeDto.GUIDE,
       },
       undefined,
     );

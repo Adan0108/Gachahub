@@ -17,6 +17,9 @@ export const backendRoutes = {
   gameModerator: (gameSlug, userId) =>
     `/games/${encodePathParam(gameSlug)}/moderators/${encodePathParam(userId)}`,
   gamesModerated: '/games/moderated',
+  gamesJoined: '/games/joined',
+  gameJoin: (slug) => `/games/${encodePathParam(slug)}/join`,
+  gameJoinStatus: (slug) => `/games/${encodePathParam(slug)}/join-status`,
   gameBranding: (gameSlug) => `/games/${encodePathParam(gameSlug)}/branding`,
   gameArchive: (gameSlug) => `/games/${encodePathParam(gameSlug)}/archive`,
   gameRestore: (gameSlug) => `/games/${encodePathParam(gameSlug)}/restore`,
@@ -55,6 +58,7 @@ export const backendRoutes = {
   post: (postId) => `/posts/${encodePathParam(postId)}`,
   latestFeed: "/feed/latest",
   trendingFeed: "/feed/trending",
+  forYouFeed: "/feed/for-you",
   gameFeed: (gameSlug) => `/games/${encodePathParam(gameSlug)}/feed`,
   postLike: (postId) => `/posts/${encodePathParam(postId)}/like`,
   userFollow: (userId) => `/users/${encodePathParam(userId)}/follow`,
@@ -62,6 +66,11 @@ export const backendRoutes = {
   postComments: (postId) => `/posts/${encodePathParam(postId)}/comments`,
   commentReplies: (commentId) => `/comments/${encodePathParam(commentId)}/replies`,
   reports: "/reports",
+  notifications: '/notifications',
+  notificationsUnreadCount: '/notifications/unread-count',
+  notificationsReadAll: '/notifications/read-all',
+  notificationRead: (notificationId) =>
+    `/notifications/${encodePathParam(notificationId)}/read`,
   mediaSignatures: '/media/uploads/signatures',
   mediaConfirm: '/media/uploads/confirm',
   chatConversations: '/chat/conversations',
@@ -358,6 +367,8 @@ function mutationAuthHeaders(headers) {
   return headers || {};
 }
 
+const mockJoinedGames = new Set();
+
 async function mockResponse(path, options = {}) {
   await new Promise((resolve) => setTimeout(resolve, 120));
   const [pathname, queryString] = path.split('?');
@@ -381,9 +392,9 @@ async function mockResponse(path, options = {}) {
     const items = fallbackPosts();
     return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
   }
-  if (pathname === backendRoutes.latestFeed || pathname === backendRoutes.trendingFeed) {
-    const items = fallbackPosts();
-    return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
+  if (pathname === backendRoutes.latestFeed || pathname === backendRoutes.trendingFeed || pathname === backendRoutes.forYouFeed) {
+    const items = params.has("cursor") ? [] : fallbackPosts();
+    return { items, meta: { limit: Number(params.get("limit") || 20), hasMore: false, nextCursor: null, ...(pathname === backendRoutes.forYouFeed ? { personalized: false } : {}) } };
   }
   if (pathname === backendRoutes.posts && options.method === 'POST') {
     return { id: `mock-post-${Date.now()}`, ...JSON.parse(options.body || '{}') };
@@ -405,6 +416,16 @@ async function mockResponse(path, options = {}) {
     return { items: [], meta: { page: 1, limit: 20, total: 0, totalPages: 0 } };
   }
   if (/^\/users\/[^/]+\/follow-status$/.test(pathname)) return { following: false };
+  if (pathname === backendRoutes.signOut) { mockJoinedGames.clear(); return { ok: true }; }
+  if (pathname === backendRoutes.gamesJoined) return { items: mockGames.filter((game) => mockJoinedGames.has(game.slug)) };
+  if (/^\/games\/[^/]+\/(join|join-status)$/.test(pathname)) {
+    const slug = decodePathParam(pathname.split('/')[2]);
+    if (pathname.endsWith('/join')) {
+      if (options.method === 'DELETE') mockJoinedGames.delete(slug);
+      else mockJoinedGames.add(slug);
+    }
+    return { joined: mockJoinedGames.has(slug) };
+  }
   if (pathname === backendRoutes.games) return fallbackGames(params.get("search") || "");
   if (/^\/games\/[^/]+\/moderators\/[^/]+$/.test(pathname) && options.method === "DELETE")
     return { message: "Moderator removed successfully" };
@@ -433,7 +454,7 @@ async function mockResponse(path, options = {}) {
       const tag = post.tag.toLowerCase();
       return tag === categorySlug || `${tag}s` === categorySlug;
     });
-    return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
+    return { items: params.has("cursor") ? [] : items, meta: { limit: Number(params.get("limit") || 20), hasMore: false, nextCursor: null } };
   }
   if (pathname.startsWith('/games/')) {
     const slug = decodePathParam(pathname.split('/')[2]);
@@ -575,6 +596,17 @@ export const api = {
       meta: response.meta || { total: items.length },
     };
   },
+  /** Reads server-backed membership for the authenticated session. */
+  getGameJoinStatus: (slug, options = {}) => request(backendRoutes.gameJoinStatus(slug), options),
+  /** Idempotently joins the game as the authenticated session user. */
+  joinGame: (slug) => mutation(backendRoutes.gameJoin(slug)),
+  /** Idempotently leaves the game as the authenticated session user. */
+  leaveGame: (slug) => mutation(backendRoutes.gameJoin(slug), undefined, { method: 'DELETE' }),
+  /** Lists the session user's joined games using normal community shapes. */
+  getJoinedGames: async (options = {}) => {
+    const response = await request(backendRoutes.gamesJoined, options);
+    return { items: (response.items || []).map(normalizeGame) };
+  },
   getCommunity: async (slug) => normalizeGame(await request(backendRoutes.game(slug))),
   getCategories: (gameSlug, query = {}, options = {}) =>
     request(withQuery(backendRoutes.gameCategories(gameSlug), query), options),
@@ -648,9 +680,11 @@ export const api = {
     };
   },
   getLatestFeed: (query = {}, options = {}) =>
-    api.getPostCollection(backendRoutes.latestFeed, query, options),
+    api.getFeedCollection(backendRoutes.latestFeed, query, options),
+  getForYouFeed: (query = {}, options = {}) =>
+    api.getFeedCollection(backendRoutes.forYouFeed, query, options),
   getTrendingFeed: (query = {}, options = {}) =>
-    api.getPostCollection(backendRoutes.trendingFeed, query, options),
+    api.getFeedCollection(backendRoutes.trendingFeed, query, options),
   getPosts: (query = {}, options = {}) =>
     api.getPostCollection(backendRoutes.posts, query, options),
   getPost: async (postId, options = {}) => {
@@ -658,7 +692,7 @@ export const api = {
     return normalizePostResponse(post);
   },
   getGameFeed: (gameSlug, query = {}, options = {}) =>
-    api.getPostCollection(backendRoutes.gameFeed(gameSlug), query, options),
+    api.getFeedCollection(backendRoutes.gameFeed(gameSlug), query, options),
   likePost: (postId) => mutation(backendRoutes.postLike(postId)),
   unlikePost: (postId) => mutation(backendRoutes.postLike(postId), undefined, { method: 'DELETE' }),
   getFollowStatus: (userId, options = {}) => request(backendRoutes.followStatus(userId), options),
@@ -716,6 +750,11 @@ export const api = {
     }
     return uploaded;
   },
+  /** @returns {Promise<import("./feedTypes").FeedResponse<ReturnType<typeof normalizePostResponse>>>} */
+  getFeedCollection: async (path, { limit = 20, cursor, type, sort, categorySlug } = {}, options = {}) => {
+    const response = await request(withQuery(path, { limit, cursor, type, sort, categorySlug }), options);
+    return { items: (response.items || []).map(normalizePostResponse), meta: response.meta };
+  },
   getPostCollection: async (path, query = {}, options = {}) => {
     const response = await request(withQuery(path, query), options);
     const items = Array.isArray(response) ? response : response.items || [];
@@ -727,14 +766,16 @@ export const api = {
   getHome: async ({ search = '' } = {}) => {
     const [games, latest, trending] = await Promise.all([
       api.getGames({ status: 'ACTIVE', search, limit: 20 }),
-      api.getLatestFeed({ page: 1, limit: 10 }),
-      api.getTrendingFeed({ page: 1, limit: 10 }),
+      api.getLatestFeed({ limit: 10 }),
+      api.getTrendingFeed({ limit: 10 }),
     ]);
     return {
       communities: games.items,
       forYouPosts: latest.items,
       posts: trending.items,
       meta: games.meta,
+      latestMeta: latest.meta,
+      trendingMeta: trending.meta,
     };
   },
   getAdminOverview: (options = {}) => request(backendRoutes.adminOverview, options),
@@ -770,6 +811,15 @@ export const api = {
     ),
   getChatConversations: () => request(backendRoutes.chatConversations),
   getArchivedChatConversations: () => request(backendRoutes.chatArchivedConversations),
+  /** @param {{ limit?: number, cursor?: string }} [query] @param {{ signal?: AbortSignal }} [options] */
+  getNotifications: (query = {}, options = {}) =>
+    request(withQuery(backendRoutes.notifications, query), { signal: options.signal }),
+  getNotificationUnreadCount: ({ signal } = {}) =>
+    request(backendRoutes.notificationsUnreadCount, { signal }),
+  markNotificationRead: (notificationId) =>
+    mutation(backendRoutes.notificationRead(notificationId), undefined, { method: 'PATCH' }),
+  markAllNotificationsRead: () =>
+    mutation(backendRoutes.notificationsReadAll, undefined, { method: 'PATCH' }),
   getChatRequests: () => request(backendRoutes.chatRequests),
   getChatMessages: (conversationId, query = {}) =>
     request(withQuery(backendRoutes.chatMessages(conversationId), query)),
