@@ -72,6 +72,71 @@ export class PostsRepository {
     });
   }
 
+  /**
+   * Loads one chronological Latest page strictly after the compound cursor.
+   *
+   * Both createdAt and id participate in the boundary so posts sharing the
+   * same timestamp are neither skipped nor repeated between pages.
+   */
+  findLatestPage(params: {
+    where: Prisma.PostWhereInput;
+    cursor?: {
+      createdAt: Date;
+      id: string;
+    };
+    take: number;
+    userId?: string;
+  }) {
+    const { where, cursor, take, userId } = params;
+
+    return this.prisma.post.findMany({
+      where: cursor
+        ? {
+            AND: [
+              where,
+              {
+                OR: [
+                  {
+                    createdAt: {
+                      lt: cursor.createdAt,
+                    },
+                  },
+                  {
+                    createdAt: cursor.createdAt,
+                    id: {
+                      lt: cursor.id,
+                    },
+                  },
+                ],
+              },
+            ],
+          }
+        : where,
+      orderBy: [
+        {
+          createdAt: 'desc',
+        },
+        {
+          id: 'desc',
+        },
+      ],
+      take,
+      include: {
+        ...postInclude,
+        postLikes: userId
+          ? {
+              where: {
+                userId,
+              },
+              select: {
+                userId: true,
+              },
+            }
+          : false,
+      },
+    });
+  }
+
   // No optional visibility/status with a permissive default - a caller must state whose eyes these posts are for.
   async findByAuthorId(
     authorId: string,
@@ -685,6 +750,44 @@ export class PostsRepository {
   }
 
   /**
+   * Hydrates frozen For You snapshot IDs while reapplying the requesting
+   * user's current eligibility and visibility rules.
+   */
+  async findForYouManyByIds(
+    ids: string[],
+    where: Prisma.PostWhereInput,
+    userId: string,
+  ) {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    return this.prisma.post.findMany({
+      where: {
+        AND: [
+          where,
+          {
+            id: {
+              in: ids,
+            },
+          },
+        ],
+      },
+      include: {
+        ...postInclude,
+        postLikes: {
+          where: {
+            userId,
+          },
+          select: {
+            userId: true,
+          },
+        },
+      },
+    });
+  }
+
+  /**
    * Hydrates the post side of the cross-game flagged-content listing -
    * ContentModerationService already knows which ids it needs from the
    * report counts, so this is a plain batch fetch, not a search. Unlike
@@ -716,6 +819,48 @@ export class PostsRepository {
             slug: true,
           },
         },
+      },
+    });
+  }
+
+  /**
+   * Hydrates Trending snapshot IDs while reapplying the live feed filters.
+   *
+   * Snapshot order is restored by FeedService because Prisma IN queries do
+   * not preserve the order of the supplied IDs.
+   */
+  async findTrendingManyByIds(
+    ids: string[],
+    where: Prisma.PostWhereInput,
+    userId?: string,
+  ) {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    return this.prisma.post.findMany({
+      where: {
+        AND: [
+          where,
+          {
+            id: {
+              in: ids,
+            },
+          },
+        ],
+      },
+      include: {
+        ...postInclude,
+        postLikes: userId
+          ? {
+              where: {
+                userId,
+              },
+              select: {
+                userId: true,
+              },
+            }
+          : false,
       },
     });
   }
