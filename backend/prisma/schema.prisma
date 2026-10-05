@@ -20,6 +20,15 @@ model User {
   role                  UserRole              @default(USER)
   status                UserStatus            @default(ACTIVE)
   messageRequestSetting MessageRequestSetting @default(EVERYONE)
+  // Claimed once during onboarding; case-insensitive (citext) so "Bob" and "bob" collide,
+  // original casing kept for display. Null until the user completes onboarding.
+  username              String?               @unique @db.Citext
+  onboarded             Boolean               @default(false)
+  /// MediaUpload backing `image` (the avatar), so a replace can release the old Cloudinary asset.
+  avatarMediaUploadId   String?               @unique
+  avatarMediaUpload     MediaUpload?          @relation("UserAvatarUpload", fields: [avatarMediaUploadId], references: [id], onDelete: SetNull)
+  /// Id of a design in the backend's profile banner catalog; null shows the default banner.
+  bannerPresetId        String?
 
   sessions     Session[]
   accounts     Account[]
@@ -52,6 +61,7 @@ model User {
 
   receivedNotifications Notification[] @relation("NotificationRecipient")
   actedNotifications    Notification[] @relation("NotificationActor")
+  mentions              Mention[]
 
   chatDevices ChatDevice[]
 
@@ -782,6 +792,7 @@ model MediaUpload {
   chatMessageMedia ChatMessageMedia?
   gameIconFor      Game?             @relation("GameIconUpload")
   gameBannerFor    Game?             @relation("GameBannerUpload")
+  avatarFor        User?             @relation("UserAvatarUpload")
 
   @@index([userId, status, createdAt])
   @@index([status, createdAt])
@@ -1237,4 +1248,18 @@ model ProcessedEvent {
   @@id([eventId, consumer])
   @@index([consumer, processedAt])
   @@map("processed_events")
+}
+
+// One row per (post/comment, mentioned user) once notified, so editing a mention out and back in never pings twice.
+model Mention {
+  entityType NotificationEntityType
+  entityId   String
+  userId     String
+  createdAt  DateTime               @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([entityType, entityId, userId])
+  @@index([userId])
+  @@map("mentions")
 }

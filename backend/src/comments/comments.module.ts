@@ -10,6 +10,7 @@ import { PostVisibilityModule } from '../post-visibility/post-visibility.module'
 import { RecommendationModule } from '../recommendation/recommendation.module';
 import { GameModeratorsModule } from '../game-moderators/game-moderators.module';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
+import { MentionsModule } from '../mentions/mentions.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
     GameModeratorsModule,
     AuditLogModule,
     DomainEventsModule,
+    MentionsModule,
   ],
   controllers: [CommentsController, CommentModerationController],
   providers: [CommentsService, CommentsRepository, CommentModerationService],

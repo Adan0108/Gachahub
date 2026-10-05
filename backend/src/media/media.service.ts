@@ -5,6 +5,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -49,6 +50,8 @@ const SINGLE_IMAGE_PURPOSES = new Set([
 
 @Injectable()
 export class MediaService {
+  private readonly logger = new Logger(MediaService.name);
+
   constructor(
     private readonly mediaRepository: MediaRepository,
     private readonly cloudinaryService: CloudinaryService,
@@ -308,6 +311,22 @@ export class MediaService {
     }
   }
 
+  /** Releases an upload a caller just replaced; never throws - a failure is flagged RELEASE_FAILED for the retry job. */
+  async releaseReplacedUpload(mediaUploadId: string): Promise<void> {
+    try {
+      await this.releaseAttachedUpload(mediaUploadId);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to release replaced media ${mediaUploadId}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+
+      await this.markReleaseFailed(mediaUploadId).catch(() => {
+        // Already RELEASE_FAILED or gone; the next sweep handles it.
+      });
+    }
+  }
+
   /**
    * Destroys the Cloudinary asset for an upload that still needs releasing
    * (ATTACHED, or RELEASE_FAILED from a previous failed attempt) without
@@ -469,6 +488,26 @@ export class MediaService {
     }
 
     return uploads;
+  }
+
+  /** Resolves one attachable image for a single-image slot (avatar, game icon, ...). */
+  async resolveSingleImage(params: {
+    id: string;
+    userId: string;
+    purpose: MediaPurpose;
+    entityLabel: string;
+  }) {
+    const [upload] = await this.resolveAttachableMedia({
+      ids: [params.id],
+      userId: params.userId,
+      purpose: params.purpose,
+      maxImages: 1,
+      maxVideos: 0,
+      entityLabel: params.entityLabel,
+    });
+
+    // resolveAttachableMedia only returns UPLOADED rows, which always carry a secureUrl.
+    return { id: upload.id, secureUrl: upload.secureUrl! };
   }
 
   private assertOpaquePolicy(

@@ -19,7 +19,7 @@ import { AttachmentFileChip } from "./AttachmentFileChip";
 import { ImageTile, VideoTile } from "./AttachmentTiles";
 import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightboxContext";
 import { attachmentKind } from "../../lib/mls/media/attachmentView";
-import { initialOf } from "../../lib/chat/chatDisplay";
+import { AvatarFace } from "../AvatarFace";
 
 const NOT_IMPLEMENTED_TOAST_MS = 1800;
 
@@ -31,6 +31,7 @@ const NOT_IMPLEMENTED_TOAST_MS = 1800;
 export function ConversationInfoPanel({
   isOpen,
   displayName,
+  displayImage,
   encryptionStatus,
   onClose,
   visualAttachments,
@@ -77,7 +78,9 @@ export function ConversationInfoPanel({
           <div className="chat-info-body">
             <div className="chat-info-banner" />
             <div className="chat-info-profile">
-              <span className="chat-avatar large">{initialOf(displayName)}</span>
+              <span className="chat-avatar large">
+                <AvatarFace image={displayImage} name={displayName} />
+              </span>
               <b>{displayName}</b>
               <span className="chat-info-encryption-badge">
                 <FiLock aria-hidden="true" /> {encryptionStatus}
