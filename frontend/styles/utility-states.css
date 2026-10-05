@@ -194,6 +194,54 @@
   background: #24160d;
 }
 
+.query-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+}
+
+.query-state > svg {
+  flex: 0 0 auto;
+  font-size: 17px;
+}
+
+.query-state.loading > svg {
+  animation: query-spin 0.85s linear infinite;
+}
+
+.query-state.empty > svg {
+  color: var(--muted);
+}
+
+.query-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 7px 10px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.query-retry:hover {
+  background: color-mix(in srgb, currentColor, transparent 88%);
+}
+
+@keyframes query-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .query-state.loading > svg {
+    animation: none;
+  }
+}
+
 .state-panel {
   max-width: 720px;
   margin: 80px auto;
