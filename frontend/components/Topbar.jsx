@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FiBell, FiLogOut, FiMenu, FiMoon, FiPlus, FiSun, FiUser } from "react-icons/fi";
+import { FiBell, FiLogOut, FiMenu, FiMoon, FiPlus, FiSettings, FiSun, FiUser } from "react-icons/fi";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { useDismiss } from "../hooks/useDismiss";
 import { useSignOut } from "../hooks/useSignOut";
@@ -213,6 +213,9 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
                 </div>
                 <Link href="/profile" onClick={() => setAccountOpen(false)} role="menuitem">
                   <FiUser /> View profile
+                </Link>
+                <Link href="/settings" onClick={() => setAccountOpen(false)} role="menuitem">
+                  <FiSettings /> Settings
                 </Link>
                 <button
                   disabled={logout.isPending}
