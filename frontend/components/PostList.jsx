@@ -19,6 +19,8 @@ import { api } from "../lib/api";
 import { queries, queryKeys } from "../lib/queries";
 import { AvatarFace } from "./AvatarFace";
 import { artTones, glyph } from "./constants";
+import { MentionInput } from "./MentionInput";
+import { MentionText } from "./MentionText";
 
 function relativeTime(value) {
   const date = value ? new Date(value) : null;
@@ -70,10 +72,17 @@ function CommentItem({ comment }) {
   return (
     <article className="post-comment">
       <div className="post-comment-head">
-        <b>{comment.author?.name || "GachaHub user"}</b>
+        <span className="post-comment-author">
+          <b>{comment.author?.name || "GachaHub user"}</b>
+          {comment.author?.username && (
+            <span className="post-comment-handle">@{comment.author.username}</span>
+          )}
+        </span>
         <small>{relativeTime(comment.createdAt)}</small>
       </div>
-      <p>{comment.content}</p>
+      <p>
+        <MentionText content={comment.content} usernames={comment.mentions} />
+      </p>
       <div className="post-comment-actions">
         <button onClick={startReply} type="button">
           <FiCornerUpLeft /> Reply
@@ -92,16 +101,16 @@ function CommentItem({ comment }) {
             submitReply();
           }}
         >
-          <input
+          <MentionInput
             aria-label={`Reply to ${comment.author?.name || "comment"}`}
             maxLength={2000}
-            onChange={(event) => setReply(event.target.value)}
+            onChange={setReply}
             onKeyDown={(event) => {
               if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
               event.preventDefault();
               submitReply();
             }}
-            placeholder="Write a reply..."
+            placeholder="Write a reply... use @handle to mention"
             value={reply}
           />
           <button disabled={!reply.trim() || createReply.isPending} type="submit">
@@ -118,8 +127,15 @@ function CommentItem({ comment }) {
           {replies.isError && <small className="post-action-error">Could not load replies.</small>}
           {(replies.data?.items || []).map((item) => (
             <div className="post-reply" key={item.id}>
-              <b>{item.author?.name || "GachaHub user"}</b>
-              <p>{item.content}</p>
+              <span className="post-comment-author">
+                <b>{item.author?.name || "GachaHub user"}</b>
+                {item.author?.username && (
+                  <span className="post-comment-handle">@{item.author.username}</span>
+                )}
+              </span>
+              <p>
+                <MentionText content={item.content} usernames={item.mentions} />
+              </p>
             </div>
           ))}
         </div>
@@ -340,11 +356,11 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
                 if (comment.trim()) createComment.mutate();
               }}
             >
-              <input
+              <MentionInput
                 aria-label={`Comment on ${post.title}`}
                 maxLength={2000}
-                onChange={(event) => setComment(event.target.value)}
-                placeholder="Add a comment..."
+                onChange={setComment}
+                placeholder="Add a comment... use @handle to mention"
                 value={comment}
               />
               <button disabled={!comment.trim() || createComment.isPending} type="submit">
