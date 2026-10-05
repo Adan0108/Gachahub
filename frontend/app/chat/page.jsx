@@ -32,6 +32,8 @@ import { DevicesModal } from "../../components/chat/DevicesModal";
 import { ChatBackupModal } from "../../components/chat/ChatBackupModal";
 import { ThreadRow } from "../../components/chat/ThreadRow";
 import { ConversationListItem } from "../../components/chat/ConversationListItem";
+import { NoChatSelected } from "../../components/chat/NoChatSelected";
+import { SidebarMessageSearch } from "../../components/chat/SidebarMessageSearch";
 import { JumpToBottomButton } from "../../components/chat/JumpToBottomButton";
 import { AttachmentComposerTray } from "../../components/chat/AttachmentComposerTray";
 import { AttachmentLightbox } from "../../components/chat/AttachmentLightbox";
@@ -59,6 +61,8 @@ import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightbo
 import { api } from "../../lib/api";
 import { queries, queryKeys } from "../../lib/queries";
 import { typingSignal } from "../../lib/chat/chatTypingSignal";
+import { conversationMatches } from "../../lib/chat/conversationSearch";
+import { MIN_SEARCH_CHARS, parseSearchQuery } from "../../lib/chat/searchFolding";
 import {
   activeMembers,
   conversationDisplayName,
@@ -103,7 +107,9 @@ function ChatSkeleton() {
             ))}
           </div>
         </aside>
-        <section className="panel chat-thread" />
+        <section className="panel chat-thread">
+          <NoChatSelected />
+        </section>
       </div>
     </div>
   );
@@ -116,6 +122,8 @@ export default function ChatPage() {
   const [view, setView] = useState("inbox");
   const [selectedId, setSelectedId] = useState("");
   const [search, setSearch] = useState("");
+  // The text message search was last run for (on Enter); null until it has been used.
+  const [messageQuery, setMessageQuery] = useState(null);
   const conversations = useQuery({ ...queries.chatConversations(), enabled: isAuthenticated });
   const requests = useQuery({ ...queries.chatRequests(), enabled: isAuthenticated });
   const archived = useQuery({
@@ -125,16 +133,14 @@ export default function ChatPage() {
   const listByView = { inbox: conversations, requests, archived };
   const listQuery = listByView[view];
   const rawList = listQuery.data || [];
-  const searchTerm = search.trim().toLowerCase();
-  const currentList = searchTerm
-    ? rawList.filter((conversation) =>
-        conversationDisplayName(conversation, user?.id).toLowerCase().includes(searchTerm),
-      )
+  const searchTerms = parseSearchQuery(search);
+  const isFiltering = searchTerms.length > 0;
+  const currentList = isFiltering
+    ? rawList.filter((conversation) => conversationMatches(conversation, user?.id, searchTerms))
     : rawList;
-  const activeId = currentList.some((conversation) => conversation.id === selectedId)
-    ? selectedId
-    : currentList[0]?.id || "";
-  const activeConversation = currentList.find((conversation) => conversation.id === activeId);
+  // Nothing is open until you pick a conversation; searching narrows the list but never changes what is open.
+  const activeId = rawList.some((conversation) => conversation.id === selectedId) ? selectedId : "";
+  const activeConversation = rawList.find((conversation) => conversation.id === activeId);
   // DM-only; a group's recipients are recomputed per send.
   const peer = conversationPeer(activeConversation, user?.id);
   // A pending invite (group invite or DM message request) can read history; only sending is gated until accept.
@@ -152,6 +158,8 @@ export default function ChatPage() {
     rateLimitSecondsLeft,
     historyError,
     retryHistory,
+    hasMoreHistory,
+    loadOlderMessages,
     containerRef: messagesContainerRef,
     handleScroll: handleMessagesScroll,
     decrypted: decryptedMessages,
@@ -556,6 +564,17 @@ export default function ChatPage() {
   const composeMenuStyle = useFloatingPosition(isComposeMenuOpen, composeMenuButtonRef, composeMenuRef);
 
   const [isConversationInfoOpen, setIsConversationInfoOpen] = useState(false);
+  // A message search started from the sidebar: opens that conversation's search panel with the same text.
+  const [searchSeed, setSearchSeed] = useState(null);
+  const selectConversation = (conversationId) => {
+    setSelectedId(conversationId);
+    setSearchSeed(null);
+  };
+  const openMessageSearch = (conversationId, messageId) => {
+    setSelectedId(conversationId);
+    setSearchSeed({ conversationId, messageId, query: messageQuery ?? "", nonce: Date.now() });
+    setIsConversationInfoOpen(true);
+  };
 
   if (isSessionLoading || !isAuthenticated) {
     return <ChatSkeleton />;
@@ -847,18 +866,28 @@ export default function ChatPage() {
           <div className="chat-sidebar-search">
             <FiSearch aria-hidden="true" />
             <input
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search conversations..."
+              enterKeyHint="search"
+              onChange={(event) => {
+                setSearch(event.target.value);
+                if (!event.target.value.trim()) setMessageQuery((current) => (current === null ? null : ""));
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && search.trim().length >= MIN_SEARCH_CHARS) setMessageQuery(search.trim());
+              }}
+              placeholder="Search chats and messages..."
               type="text"
               value={search}
             />
           </div>
+          {search.trim().length >= MIN_SEARCH_CHARS && search.trim() !== messageQuery && (
+            <small className="chat-sidebar-search-hint">Press Enter to search messages</small>
+          )}
           <QueryNotice
             isLoading={listQuery.isLoading}
             isError={listQuery.isError}
             isEmpty={!currentList.length}
             emptyText={
-              searchTerm
+              isFiltering
                 ? "No conversations match your search."
                 : view === "requests"
                   ? "No pending requests."
@@ -873,12 +902,20 @@ export default function ChatPage() {
                 active={activeId === conversation.id}
                 conversation={conversation}
                 key={conversation.id}
-                onSelect={setSelectedId}
+                onSelect={selectConversation}
                 preview={conversationPreviews[conversation.lastMessage?.id]}
                 userId={user?.id}
               />
             ))}
           </div>
+          {messageQuery !== null && (
+            <SidebarMessageSearch
+              conversations={listQuery.data}
+              onSelect={openMessageSearch}
+              query={messageQuery}
+              userId={user?.id}
+            />
+          )}
         </aside>
 
         <section
@@ -1241,11 +1278,7 @@ export default function ChatPage() {
               )}
             </>
           ) : (
-            <div className="chat-empty-thread">
-              <FiMessageCircle />
-              <b>Select a conversation</b>
-              <small>Your messages or requests will appear here.</small>
-            </div>
+            <NoChatSelected />
           )}
         </section>
 
@@ -1266,6 +1299,22 @@ export default function ChatPage() {
           onManageGroup={() => setIsGroupSettingsOpen(true)}
           onOpenAttachment={setLightboxKey}
           onVerify={() => setVerifyPeerId(verifyPeerCandidate)}
+          search={{
+            messagesById,
+            hiddenMessageIds,
+            history: {
+              hasMoreHistory,
+              isLoadingOlder,
+              isWaitingOnRateLimit,
+              rateLimitSecondsLeft,
+              historyError,
+              retryHistory,
+              loadOlderMessages,
+            },
+            onJump: jumpToMessage,
+          }}
+          searchSeed={searchSeed?.conversationId === activeId ? searchSeed : null}
+          userId={user?.id}
           verifyLabel={verifyLabel}
           visualAttachments={flatAttachments}
         />

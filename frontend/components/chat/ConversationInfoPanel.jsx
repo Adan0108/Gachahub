@@ -17,11 +17,13 @@ import {
 import { AttachmentFileChip } from "./AttachmentFileChip";
 import { MuteRow } from "./MuteRow";
 import { ImageTile, VideoTile } from "./AttachmentTiles";
+import { ConversationSearchView } from "./ConversationSearchView";
 import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightboxContext";
 import { attachmentKind } from "../../lib/mls/media/attachmentView";
 import { AvatarFace } from "../AvatarFace";
 
 const NOT_IMPLEMENTED_TOAST_MS = 1800;
+const PANEL_TITLES = { main: "Conversation info", media: "Media", files: "Files", search: "Search" };
 
 /**
  * Right-docked panel: who you're talking to, shared media/files, and conversation-level actions.
@@ -46,12 +48,22 @@ export function ConversationInfoPanel({
   onManageGroup,
   manageButtonRef,
   conversation,
+  userId,
+  search,
+  searchSeed,
 }) {
-  const [view, setView] = useState("main");
+  const [view, setView] = useState(searchSeed ? "search" : "main");
+  // A search started from the sidebar opens this panel on the search view with its text.
+  const [appliedSeed, setAppliedSeed] = useState(searchSeed);
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
 
   useEffect(() => () => window.clearTimeout(toastTimerRef.current), []);
+
+  if (searchSeed !== appliedSeed) {
+    setAppliedSeed(searchSeed);
+    if (searchSeed) setView("search");
+  }
 
   if (!isOpen) return null;
 
@@ -72,7 +84,7 @@ export function ConversationInfoPanel({
           >
             {view === "main" ? <FiX /> : <FiArrowLeft />}
           </button>
-          <b>{view === "media" ? "Media" : view === "files" ? "Files" : "Conversation info"}</b>
+          <b>{PANEL_TITLES[view]}</b>
         </div>
 
         {view === "main" && (
@@ -95,7 +107,7 @@ export function ConversationInfoPanel({
                 </span>
                 Profile
               </button>
-              <button onClick={() => notImplemented("Search in conversation")} type="button">
+              <button onClick={() => setView("search")} type="button">
                 <span className="chat-info-quick-icon">
                   <FiSearch />
                 </span>
@@ -192,6 +204,17 @@ export function ConversationInfoPanel({
               </div>
             )}
           </div>
+        )}
+
+        {view === "search" && (
+          <ConversationSearchView
+            conversation={conversation}
+            initialQuery={appliedSeed?.query}
+            key={appliedSeed?.nonce ?? "manual"}
+            targetMessageId={appliedSeed?.messageId}
+            userId={userId}
+            {...search}
+          />
         )}
 
         {toast && (

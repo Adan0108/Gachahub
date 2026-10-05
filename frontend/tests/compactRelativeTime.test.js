@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { compactRelativeTime } from "../lib/time";
+import { compactRelativeTime, messageDateLabel } from "../lib/time";
 
 const NOW = new Date("2026-10-05T12:00:00.000Z");
 const ago = (ms) => new Date(NOW.valueOf() - ms).toISOString();
@@ -35,5 +35,31 @@ describe("compactRelativeTime", () => {
   it("returns nothing for a missing or invalid time", () => {
     expect(compactRelativeTime(null)).toBe("");
     expect(compactRelativeTime("nope")).toBe("");
+  });
+});
+
+describe("messageDateLabel", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("counts how long ago for the past week", () => {
+    expect(messageDateLabel(ago(5 * MIN))).toBe("5m");
+    expect(messageDateLabel(ago(6 * DAY))).toBe("6d");
+  });
+
+  it("switches to the date after a week", () => {
+    expect(messageDateLabel(ago(10 * DAY))).toBe("Sep 25");
+  });
+
+  it("adds the year for another year", () => {
+    expect(messageDateLabel("2025-03-04T12:00:00.000Z")).toBe("Mar 4, 2025");
+  });
+
+  it("returns nothing for a missing or invalid time", () => {
+    expect(messageDateLabel(null)).toBe("");
+    expect(messageDateLabel("nope")).toBe("");
   });
 });

@@ -25,3 +25,19 @@ export function compactRelativeTime(value) {
   const days = Math.floor(hours / 24);
   return days < 7 ? `${days}d` : `${Math.floor(days / 7)}w`;
 }
+
+/** How long ago for the past week ("5m", "2d"), then the date ("Oct 3", "Oct 3, 2025" from another year). */
+export function messageDateLabel(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.valueOf())) return "";
+
+  const days = (Date.now() - date.valueOf()) / 86_400_000;
+  if (days < 7) return compactRelativeTime(value);
+
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+}

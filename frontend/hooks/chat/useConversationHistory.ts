@@ -29,6 +29,10 @@ export interface ConversationHistory<Message> {
   historyError: Error | undefined;
   /** Clears historyError and tries the same batch again. */
   retryHistory: () => void;
+  /** Whether the server has messages older than the ones loaded. */
+  hasMoreHistory: boolean;
+  /** Loads the next older batch (no-op while one is loading, rate limited, or failed). */
+  loadOlderMessages: () => void;
   /** Attach to the scrollable message list. */
   containerRef: RefObject<HTMLDivElement | null>;
   handleScroll: (event: UIEvent<HTMLDivElement>) => void;
@@ -197,6 +201,8 @@ export function useConversationHistory<Message extends HistoryMessage>(
       : 0,
     historyError,
     retryHistory,
+    hasMoreHistory,
+    loadOlderMessages,
     containerRef,
     handleScroll,
     patchOlder,
