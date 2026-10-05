@@ -29,6 +29,7 @@ export const queryKeys = {
   },
   moderatedGames: ["moderated-games"],
   currentUser: ["current-user"],
+  bannerOptions: ["profile-banner-options"],
   myPosts: ["posts", "mine"],
   posts: (search) => ["posts", { search }],
   post: (postId) => ["posts", "detail", postId],
@@ -122,6 +123,12 @@ export const queries = {
     queryFn: ({ signal }) => api.getCurrentUser({ signal }),
     retry: false,
     staleTime: 30_000,
+  }),
+  bannerOptions: () => ({
+    queryKey: queryKeys.bannerOptions,
+    queryFn: ({ signal }) => api.getBannerOptions({ signal }),
+    retry: 1,
+    staleTime: 5 * 60_000,
   }),
   moderatedGames: () => ({
     queryKey: queryKeys.moderatedGames,

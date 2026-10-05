@@ -6,17 +6,37 @@ import { PostsRepository } from '../posts/posts.repository';
 import { viewablePostWhere } from '../post-visibility/visibility-where';
 import {
   GameFeedSortDto,
-  QueryFeedDto,
+  QueryForYouFeedDto,
   QueryGameFeedDto,
+  QueryLatestFeedDto,
+  QueryTrendingFeedDto,
 } from './dto/query-feed.dto';
 import { FeedRankerService } from './feed-ranker.service';
 import { FeedRepository } from './feed.repository';
 import { UserInterestService } from '../recommendation/user-interest.service';
 import type { ForYouFeedCandidate } from './feed.types';
 import type { UserInterestProfile } from '../recommendation/recommendation.types';
-import { resolvePagination, toPaginated } from '../common/utils/paginated';
-
-const FOR_YOU_MAX_CANDIDATES = 400;
+import {
+  decodeLatestFeedCursor,
+  encodeLatestFeedCursor,
+} from './utils/feed-cursor.util';
+import {
+  TRENDING_CANDIDATE_POOL,
+  TrendingSnapshotService,
+  type TrendingSnapshotFilters,
+} from './trending/trending-snapshot.service';
+import {
+  decodeTrendingFeedCursor,
+  encodeTrendingFeedCursor,
+} from './utils/trending-cursor.util';
+import {
+  ForYouSnapshotService,
+  type ForYouSnapshotFilters,
+} from './for-you/for-you-snapshot.service';
+import {
+  decodeForYouFeedCursor,
+  encodeForYouFeedCursor,
+} from './utils/for-you-cursor.util';
 
 const FOR_YOU_INTEREST_TAKE = 200;
 const FOR_YOU_TRENDING_TAKE = 80;
@@ -35,6 +55,10 @@ export class FeedService {
     private readonly feedRanker: FeedRankerService,
 
     private readonly userInterestService: UserInterestService,
+
+    private readonly trendingSnapshots: TrendingSnapshotService,
+
+    private readonly forYouSnapshots: ForYouSnapshotService,
   ) {}
 
   /**
@@ -49,7 +73,7 @@ export class FeedService {
    *
    * Followed authors receive a small ranking boost.
    */
-  latest(query: QueryFeedDto, userId?: string) {
+  latest(query: QueryLatestFeedDto, userId?: string) {
     return this.latestInternal({
       query,
       userId,
@@ -62,7 +86,7 @@ export class FeedService {
    * This intentionally stays global instead
    * of using follow relationships.
    */
-  trending(query: QueryFeedDto, userId?: string) {
+  trending(query: QueryTrendingFeedDto, userId?: string) {
     return this.trendingInternal({
       query,
       userId,
@@ -70,55 +94,85 @@ export class FeedService {
   }
 
   /**
-   * Builds the personalized For You feed for the current user.
+   * Builds or continues the personalized For You feed for the current user.
    *
-   * Flow:
-   * 1. Load the user's materialized interest profile.
-   * 2. Select the strongest interests used for candidate retrieval.
-   * 3. Fetch candidates from multiple sources:
+   * First request:
+   * 1. Reuse the current user/filter snapshot when it is still available.
+   * 2. Otherwise load the user's materialized interest profile.
+   * 3. Select the strongest interests used for candidate retrieval.
+   * 4. Fetch candidates from multiple sources:
    *    - interest matches
    *    - followed authors
    *    - trending posts
    *    - recent posts
-   * 4. Merge and deduplicate the candidate pool.
-   * 5. Resolve social relationships for candidate authors.
-   * 6. Rank candidates using interest, engagement, freshness, and social signals.
-   * 7. Apply diversity rules to reduce repetitive authors and games.
-   * 8. Paginate the ranked candidate list.
-   * 9. Hydrate only the selected post IDs with full post data.
+   * 5. Merge, rank, diversify, and freeze the ordered IDs in Redis.
+   *
+   * Continuation:
+   * 1. Reuse the exact user-bound snapshot without rebuilding its ranking.
+   * 2. Live-revalidate posts and scan forward through invalid IDs.
+   * 3. Return an opaque cursor containing the next raw snapshot position.
    *
    * Users without interest signals use a cold-start mix with more
    * trending and recent candidates instead of personalized interest candidates.
    */
-  async forYou(query: QueryFeedDto, userId: string) {
-    const { page, limit, skip: start } = resolvePagination(query);
+  async forYou(query: QueryForYouFeedDto, userId: string) {
+    const limit = query.limit ?? 20;
+    const cursor = query.cursor
+      ? decodeForYouFeedCursor(query.cursor)
+      : undefined;
+    const filters: ForYouSnapshotFilters = {
+      type: query.type ?? null,
+    };
+    const snapshot = cursor
+      ? await this.forYouSnapshots.getForContinuation(
+          cursor.snapshotId,
+          userId,
+          filters,
+        )
+      : await this.forYouSnapshots.getOrCreate(userId, filters, () =>
+          this.buildForYouSnapshotRanking(userId, query.type),
+        );
+    const offset = cursor?.offset ?? 0;
 
-    if (start >= FOR_YOU_MAX_CANDIDATES) {
-      throw new BadRequestException('For You feed pagination limit exceeded');
+    if (offset > snapshot.postIds.length) {
+      throw new BadRequestException('Invalid For You feed cursor');
     }
 
-    const profile = await this.userInterestService.getProfile(userId);
+    const where = this.buildForYouWhere(userId, query.type);
+    const page = await this.hydrateForYouSnapshotPage({
+      postIds: snapshot.postIds,
+      offset,
+      limit,
+      where,
+      userId,
+    });
 
-    const strongest = this.selectStrongestInterests(profile);
+    return {
+      items: page.posts.map((post) => formatPost(post)),
 
-    const where: Prisma.PostWhereInput = {
-      status: 'PUBLISHED',
-      deletedAt: null,
-
-      // Do not recommend the user's own posts.
-      authorId: {
-        not: userId,
+      meta: {
+        limit,
+        hasMore: page.hasMore,
+        nextCursor:
+          page.hasMore && page.nextOffset !== null
+            ? encodeForYouFeedCursor({
+                snapshotId: snapshot.id,
+                offset: page.nextOffset,
+              })
+            : null,
+        personalized: snapshot.personalized,
       },
-
-      ...this.buildLatestVisibilityWhere(userId),
-
-      ...(query.type
-        ? {
-            type: query.type,
-          }
-        : {}),
     };
+  }
 
+  /**
+   * Executes the existing candidate, ranking, and diversity pipeline exactly
+   * once when a new For You snapshot is required.
+   */
+  private async buildForYouSnapshotRanking(userId: string, type?: PostType) {
+    const profile = await this.userInterestService.getProfile(userId);
+    const strongest = this.selectStrongestInterests(profile);
+    const where = this.buildForYouWhere(userId, type);
     const [
       interestCandidates,
       trendingCandidates,
@@ -132,31 +186,26 @@ export class FeedService {
             FOR_YOU_INTEREST_TAKE,
           )
         : Promise.resolve([]),
-
       this.feedRepository.findForYouTrendingCandidates(
         where,
         profile.hasSignals ? FOR_YOU_TRENDING_TAKE : 200,
       ),
-
       this.feedRepository.findRecentForYouCandidates(
         where,
         profile.hasSignals ? FOR_YOU_RECENT_TAKE : 160,
       ),
-
       this.feedRepository.findFollowedAuthorCandidates(
         where,
         userId,
         FOR_YOU_FOLLOWING_TAKE,
       ),
     ]);
-
     const candidates = this.mergeCandidates([
       interestCandidates,
       followedCandidates,
       trendingCandidates,
       recentCandidates,
     ]);
-
     const followedAuthorIds =
       candidates.length > 0
         ? await this.followsService.getFollowingIdsAmong(
@@ -164,36 +213,87 @@ export class FeedService {
             candidates.map((candidate) => candidate.authorId),
           )
         : new Set<string>();
-
     const ranked = this.feedRanker.rankForYou(
       candidates,
       profile,
       followedAuthorIds,
     );
-
     const diversified = this.feedRanker.diversifyForYou(ranked);
 
-    const selectedIds = diversified
-      .slice(start, start + limit)
-      .map((candidate) => candidate.id);
+    return {
+      postIds: diversified.map((candidate) => candidate.id),
+      personalized: profile.hasSignals,
+    };
+  }
 
-    const posts = await this.postsRepository.findManyByIds(selectedIds, userId);
+  /**
+   * Reapplies live For You eligibility while scanning raw snapshot positions
+   * until a full page and one extra valid post have been found.
+   */
+  private async hydrateForYouSnapshotPage(params: {
+    postIds: string[];
+    offset: number;
+    limit: number;
+    where: Prisma.PostWhereInput;
+    userId: string;
+  }) {
+    const { postIds, offset, limit, where, userId } = params;
+    const hydrated: Array<{
+      index: number;
+      post: Awaited<ReturnType<PostsRepository['findForYouManyByIds']>>[number];
+    }> = [];
+    let scanOffset = offset;
+
+    while (scanOffset < postIds.length && hydrated.length <= limit) {
+      const remainingNeeded = limit + 1 - hydrated.length;
+      const chunkSize = Math.max(20, remainingNeeded);
+      const chunkEnd = Math.min(postIds.length, scanOffset + chunkSize);
+      const chunkIds = postIds.slice(scanOffset, chunkEnd);
+      const posts = await this.postsRepository.findForYouManyByIds(
+        chunkIds,
+        where,
+        userId,
+      );
+      const postMap = new Map(posts.map((post) => [post.id, post] as const));
+
+      for (let index = scanOffset; index < chunkEnd; index += 1) {
+        const postId = postIds[index];
+        const post = postId ? postMap.get(postId) : undefined;
+
+        if (post) {
+          hydrated.push({ index, post });
+        }
+      }
+
+      scanOffset = chunkEnd;
+    }
+
+    const selected = hydrated.slice(0, limit);
+    const last = selected[selected.length - 1];
+    const hasMore = hydrated.length > limit;
 
     return {
-      items: this.orderPostsByIds(posts, selectedIds).map((post) =>
-        formatPost(post),
-      ),
+      posts: selected.map((item) => item.post),
+      hasMore,
+      nextOffset: hasMore && last ? last.index + 1 : null,
+    };
+  }
 
-      meta: {
-        page,
-        limit,
-
-        candidateCount: candidates.length,
-
-        hasMore: start + limit < diversified.length,
-
-        personalized: profile.hasSignals,
+  /**
+   * Defines both candidate-time and hydration-time For You eligibility.
+   */
+  private buildForYouWhere(
+    userId: string,
+    type?: PostType,
+  ): Prisma.PostWhereInput {
+    return {
+      status: 'PUBLISHED',
+      deletedAt: null,
+      authorId: {
+        not: userId,
       },
+      ...this.buildLatestVisibilityWhere(userId),
+      ...(type ? { type } : {}),
     };
   }
 
@@ -226,15 +326,23 @@ export class FeedService {
     });
   }
 
+  /**
+   * Loads a chronological Latest page and preserves the existing social boost
+   * inside that selected page. The continuation key is taken before ranking so
+   * page boundaries always follow createdAt DESC, id DESC.
+   */
   private async latestInternal(params: {
-    query: QueryFeedDto;
+    query: QueryLatestFeedDto | QueryGameFeedDto;
     userId?: string;
     gameSlug?: string;
     categorySlug?: string;
   }) {
     const { query, userId, gameSlug, categorySlug } = params;
 
-    const { page, limit, skip } = resolvePagination(query);
+    const limit = query.limit ?? 20;
+    const cursor = query.cursor
+      ? decodeLatestFeedCursor(query.cursor)
+      : undefined;
 
     const where: Prisma.PostWhereInput = {
       status: 'PUBLISHED',
@@ -267,25 +375,16 @@ export class FeedService {
         : {}),
     };
 
-    const [posts, total] = await Promise.all([
-      this.postsRepository.findMany({
-        where,
-        skip,
-        take: limit,
+    const rows = await this.postsRepository.findLatestPage({
+      where,
+      cursor,
+      take: limit + 1,
+      userId,
+    });
 
-        orderBy: [
-          {
-            createdAt: 'desc',
-          },
-          {
-            id: 'desc',
-          },
-        ],
-        userId,
-      }),
-
-      this.postsRepository.count(where),
-    ]);
+    const hasMore = rows.length > limit;
+    const posts = hasMore ? rows.slice(0, limit) : rows;
+    const lastPost = posts[posts.length - 1];
 
     let followedAuthorIds = new Set<string>();
 
@@ -301,32 +400,65 @@ export class FeedService {
       followedAuthorIds,
     );
 
-    return toPaginated(
-      rankedPosts.map((post) => formatPost(post)),
-      { page, limit, total },
-    );
+    return {
+      items: rankedPosts.map((post) => formatPost(post)),
+
+      meta: {
+        limit,
+        hasMore,
+        nextCursor:
+          hasMore && lastPost
+            ? encodeLatestFeedCursor({
+                createdAt: lastPost.createdAt,
+                id: lastPost.id,
+              })
+            : null,
+      },
+    };
   }
 
+  /**
+   * Builds the global/community-ranked Trending feed without follow-based
+   * personalization.
+   *
+   * Flow:
+   * 1. Decode any Trending continuation cursor and build the effective filters.
+   * 2. For a first page, derive the filter-specific snapshot identity and reuse
+   *    the current Redis snapshot when available.
+   * 3. Otherwise fetch up to TRENDING_CANDIDATE_POOL candidates, rank them with
+   *    the existing Trending ranker, and keep at most TRENDING_MAX_RESULTS.
+   * 4. Store the frozen ranking as ordered post IDs in a short-lived Redis
+   *    snapshot; full post objects are never cached.
+   * 5. For continuation, load the exact cursor snapshot without reranking and
+   *    treat its offset as the next raw position in that snapshot.
+   * 6. Hydrate IDs from PostgreSQL with live visibility and post-state filters,
+   *    scanning farther when invalid posts would otherwise shorten the page.
+   * 7. Restore the frozen snapshot order after hydration so ranking stays stable
+   *    while returned post data remains fresh.
+   * 8. Return hasMore and an opaque cursor carrying the same snapshot identity
+   *    and the next raw offset.
+   *
+   * The current-snapshot TTL controls first-page reuse, while the longer snapshot
+   * TTL allows existing cursors to continue after a newer ranking is published.
+   */
   private async trendingInternal(params: {
-    query: QueryFeedDto;
+    query: QueryTrendingFeedDto | QueryGameFeedDto;
     userId?: string;
     gameSlug?: string;
     categorySlug?: string;
   }) {
     const { query, userId, gameSlug, categorySlug } = params;
 
-    const { page, limit, skip: start } = resolvePagination(query);
+    const limit = query.limit ?? 20;
+    const cursor = query.cursor
+      ? decodeTrendingFeedCursor(query.cursor)
+      : undefined;
 
-    /*
-     * We rank a bounded pool rather than
-     * reading every post from the database.
-     */
-    const maxCandidates = 500;
-
-    const candidateLimit = Math.min(
-      maxCandidates,
-      Math.max(100, page * limit * 5),
-    );
+    const filters: TrendingSnapshotFilters = {
+      gameSlug: gameSlug ?? null,
+      categorySlug: categorySlug ?? null,
+      type: query.type ?? null,
+    };
 
     const where: Prisma.PostWhereInput = {
       status: 'PUBLISHED',
@@ -364,36 +496,106 @@ export class FeedService {
         : {}),
     };
 
-    const candidates = await this.feedRepository.findTrendingCandidates(
-      where,
-      candidateLimit,
-    );
+    const snapshot = cursor
+      ? await this.trendingSnapshots.getForContinuation(
+          cursor.snapshotId,
+          filters,
+        )
+      : await this.trendingSnapshots.getOrCreate(filters, async () => {
+          const candidates = await this.feedRepository.findTrendingCandidates(
+            where,
+            TRENDING_CANDIDATE_POOL,
+          );
 
-    const ranked = this.feedRanker.rankTrending(candidates);
+          return this.feedRanker
+            .rankTrending(candidates)
+            .map((candidate) => candidate.id);
+        });
 
-    if (start >= maxCandidates) {
-      throw new BadRequestException('Trending feed pagination limit exceeded');
+    const offset = cursor?.offset ?? 0;
+
+    if (offset > snapshot.postIds.length) {
+      throw new BadRequestException('Invalid Trending feed cursor');
     }
 
-    const selectedIds = ranked
-      .slice(start, start + limit)
-      .map((candidate) => candidate.id);
-
-    const posts = await this.postsRepository.findManyByIds(selectedIds, userId);
+    const page = await this.hydrateTrendingSnapshotPage({
+      postIds: snapshot.postIds,
+      offset,
+      limit,
+      where,
+      userId,
+    });
 
     return {
-      items: this.orderPostsByIds(posts, selectedIds).map((post) =>
-        formatPost(post),
-      ),
+      items: page.posts.map((post) => formatPost(post)),
 
       meta: {
-        page,
         limit,
-
-        candidateCount: candidates.length,
-
-        hasMore: start + limit < ranked.length,
+        hasMore: page.hasMore,
+        nextCursor:
+          page.hasMore && page.nextOffset !== null
+            ? encodeTrendingFeedCursor({
+                snapshotId: snapshot.id,
+                offset: page.nextOffset,
+              })
+            : null,
       },
+    };
+  }
+
+  /**
+   * Hydrates one Trending page while scanning past snapshot IDs that are no
+   * longer visible. One extra valid post is resolved to calculate hasMore
+   * without exposing stale or unnecessarily short pages.
+   */
+  private async hydrateTrendingSnapshotPage(params: {
+    postIds: string[];
+    offset: number;
+    limit: number;
+    where: Prisma.PostWhereInput;
+    userId?: string;
+  }) {
+    const { postIds, offset, limit, where, userId } = params;
+    const hydrated: Array<{
+      index: number;
+      post: Awaited<
+        ReturnType<PostsRepository['findTrendingManyByIds']>
+      >[number];
+    }> = [];
+    let scanOffset = offset;
+
+    while (scanOffset < postIds.length && hydrated.length <= limit) {
+      const remainingNeeded = limit + 1 - hydrated.length;
+      const chunkSize = Math.max(20, remainingNeeded);
+      const chunkEnd = Math.min(postIds.length, scanOffset + chunkSize);
+      const chunkIds = postIds.slice(scanOffset, chunkEnd);
+      const posts = await this.postsRepository.findTrendingManyByIds(
+        chunkIds,
+        where,
+        userId,
+      );
+      const postMap = new Map(posts.map((post) => [post.id, post] as const));
+
+      for (let index = scanOffset; index < chunkEnd; index += 1) {
+        const postId = postIds[index];
+        const post = postId ? postMap.get(postId) : undefined;
+
+        if (post) {
+          hydrated.push({ index, post });
+        }
+      }
+
+      scanOffset = chunkEnd;
+    }
+
+    const selected = hydrated.slice(0, limit);
+    const last = selected[selected.length - 1];
+    const hasMore = hydrated.length > limit;
+
+    return {
+      posts: selected.map((item) => item.post),
+      hasMore,
+      nextOffset: hasMore && last ? last.index + 1 : null,
     };
   }
 

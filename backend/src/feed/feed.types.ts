@@ -1,5 +1,10 @@
 import type { PostType } from '../generated/prisma/client';
 
+export interface LatestFeedCursor {
+  createdAt: Date;
+  id: string;
+}
+
 export interface TrendingFeedCandidate {
   id: string;
 

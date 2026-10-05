@@ -3,16 +3,15 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { FiBell, FiLogOut, FiMenu, FiMoon, FiPlus, FiSun, FiUser } from "react-icons/fi";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { useDismiss } from "../hooks/useDismiss";
+import { useSignOut } from "../hooks/useSignOut";
 import { useToast } from "../hooks/useToast";
 import { api } from "../lib/api";
-import { CHAT_BACKUP_QUERY_ROOT } from "../lib/backup/backupQueryKeys";
-import "../lib/backup/backupSessionCleanup";
-import { runSessionCleanups } from "../lib/sessionCleanup";
-import { queries, queryKeys } from "../lib/queries";
+import { queries } from "../lib/queries";
+import { AvatarFace } from "./AvatarFace";
 import { glyph } from "./constants";
 import { GlobalSearch } from "./GlobalSearch";
 
@@ -42,7 +41,6 @@ const notifications = [
 
 export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobalActions = true }) {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [readNotifications, setReadNotifications] = useState([]);
@@ -61,15 +59,10 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
     .join("")
     .slice(0, 2)
     .toUpperCase();
-  const logout = useMutation({
-    mutationFn: api.signOut,
-    onSuccess: async () => {
-      await runSessionCleanups();
-      queryClient.setQueryData(queryKeys.currentUser, null);
-      queryClient.removeQueries({ queryKey: CHAT_BACKUP_QUERY_ROOT });
+  const logout = useSignOut({
+    onSignedOut: () => {
       setAccountOpen(false);
       showNotice("Logged out successfully");
-      router.push("/");
     },
   });
 
@@ -210,7 +203,7 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
               ref={accountButtonRef}
               type="button"
             >
-              {initials}
+              <AvatarFace fallback={initials} image={user.image} />
             </button>
             {accountOpen && (
               <div className="user-menu" ref={accountMenuRef} role="menu">

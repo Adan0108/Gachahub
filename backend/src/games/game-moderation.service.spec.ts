@@ -46,9 +46,8 @@ describe('GameModerationService', () => {
     resolveModeratableGame: jest.fn(),
   };
   const mediaService = {
-    resolveAttachableMedia: jest.fn(),
-    releaseAttachedUpload: jest.fn(),
-    markReleaseFailed: jest.fn(),
+    resolveSingleImage: jest.fn(),
+    releaseReplacedUpload: jest.fn(),
   };
   const auditLogService = { record: jest.fn(), recordOrThrow: jest.fn() };
 
@@ -88,8 +87,7 @@ describe('GameModerationService', () => {
     );
     auditLogService.record.mockResolvedValue(undefined);
     auditLogService.recordOrThrow.mockResolvedValue(undefined);
-    mediaService.releaseAttachedUpload.mockResolvedValue(undefined);
-    mediaService.markReleaseFailed.mockResolvedValue(undefined);
+    mediaService.releaseReplacedUpload.mockResolvedValue(undefined);
 
     service = new GameModerationService(
       gamesRepository as unknown as GamesRepository,
@@ -112,9 +110,10 @@ describe('GameModerationService', () => {
     });
 
     it('claims and writes a new icon, with no old upload to release', async () => {
-      mediaService.resolveAttachableMedia.mockResolvedValue([
-        { id: 'upload-1', secureUrl: 'https://res.cloudinary.com/icon.png' },
-      ]);
+      mediaService.resolveSingleImage.mockResolvedValue({
+        id: 'upload-1',
+        secureUrl: 'https://res.cloudinary.com/icon.png',
+      });
       gamesRepository.claimAndUpdateBranding.mockResolvedValue({
         game: {
           ...baseGame,
@@ -132,13 +131,11 @@ describe('GameModerationService', () => {
         'wuthering-waves',
         'mod-1',
       );
-      expect(mediaService.resolveAttachableMedia).toHaveBeenCalledWith(
+      expect(mediaService.resolveSingleImage).toHaveBeenCalledWith(
         expect.objectContaining({
-          ids: ['upload-1'],
+          id: 'upload-1',
           userId: 'mod-1',
           purpose: 'GAME_ICON',
-          maxImages: 1,
-          maxVideos: 0,
         }),
       );
       expect(gamesRepository.claimAndUpdateBranding).toHaveBeenCalledWith({
@@ -151,22 +148,23 @@ describe('GameModerationService', () => {
           },
         },
       });
-      expect(mediaService.releaseAttachedUpload).not.toHaveBeenCalled();
+      expect(mediaService.releaseReplacedUpload).not.toHaveBeenCalled();
       expect(result.iconUrl).toBe('https://res.cloudinary.com/icon.png');
       expect(result).not.toHaveProperty('iconMediaUploadId');
     });
 
     it('claims both icon and banner in one call', async () => {
-      mediaService.resolveAttachableMedia
-        .mockResolvedValueOnce([
-          { id: 'upload-icon', secureUrl: 'https://res.cloudinary.com/i.png' },
-        ])
-        .mockResolvedValueOnce([
-          {
-            id: 'upload-banner',
-            secureUrl: 'https://res.cloudinary.com/b.png',
-          },
-        ]);
+      mediaService.resolveSingleImage
+
+        .mockResolvedValueOnce({
+          id: 'upload-icon',
+          secureUrl: 'https://res.cloudinary.com/i.png',
+        })
+
+        .mockResolvedValueOnce({
+          id: 'upload-banner',
+          secureUrl: 'https://res.cloudinary.com/b.png',
+        });
       gamesRepository.claimAndUpdateBranding.mockResolvedValue({
         game: baseGame,
         previousUploadIds: {},
@@ -177,7 +175,7 @@ describe('GameModerationService', () => {
         bannerMediaUploadId: 'upload-banner',
       });
 
-      expect(mediaService.resolveAttachableMedia).toHaveBeenCalledWith(
+      expect(mediaService.resolveSingleImage).toHaveBeenCalledWith(
         expect.objectContaining({ purpose: 'GAME_BANNER' }),
       );
       expect(gamesRepository.claimAndUpdateBranding).toHaveBeenCalledWith({
@@ -197,9 +195,10 @@ describe('GameModerationService', () => {
     });
 
     it('releases the old icon upload after a successful replace', async () => {
-      mediaService.resolveAttachableMedia.mockResolvedValue([
-        { id: 'upload-new', secureUrl: 'https://res.cloudinary.com/new.png' },
-      ]);
+      mediaService.resolveSingleImage.mockResolvedValue({
+        id: 'upload-new',
+        secureUrl: 'https://res.cloudinary.com/new.png',
+      });
       gamesRepository.claimAndUpdateBranding.mockResolvedValue({
         game: baseGame,
         previousUploadIds: { icon: 'old-upload' },
@@ -209,30 +208,9 @@ describe('GameModerationService', () => {
         iconMediaUploadId: 'upload-new',
       });
 
-      expect(mediaService.releaseAttachedUpload).toHaveBeenCalledWith(
+      expect(mediaService.releaseReplacedUpload).toHaveBeenCalledWith(
         'old-upload',
       );
-    });
-
-    it('flags the old upload for retry when release fails, without failing the request', async () => {
-      mediaService.resolveAttachableMedia.mockResolvedValue([
-        { id: 'upload-new', secureUrl: 'https://res.cloudinary.com/new.png' },
-      ]);
-      gamesRepository.claimAndUpdateBranding.mockResolvedValue({
-        game: baseGame,
-        previousUploadIds: { banner: 'old-banner' },
-      });
-      mediaService.releaseAttachedUpload.mockRejectedValue(
-        new Error('cloudinary down'),
-      );
-
-      await expect(
-        service.updateBranding('wuthering-waves', 'mod-1', {
-          bannerMediaUploadId: 'upload-new',
-        }),
-      ).resolves.toBeDefined();
-
-      expect(mediaService.markReleaseFailed).toHaveBeenCalledWith('old-banner');
     });
 
     it('propagates a moderator permission failure without touching media', async () => {
@@ -246,13 +224,14 @@ describe('GameModerationService', () => {
         }),
       ).rejects.toThrow(ForbiddenException);
 
-      expect(mediaService.resolveAttachableMedia).not.toHaveBeenCalled();
+      expect(mediaService.resolveSingleImage).not.toHaveBeenCalled();
     });
 
     it('propagates a conflict when another replace wins the race', async () => {
-      mediaService.resolveAttachableMedia.mockResolvedValue([
-        { id: 'upload-new', secureUrl: 'https://res.cloudinary.com/new.png' },
-      ]);
+      mediaService.resolveSingleImage.mockResolvedValue({
+        id: 'upload-new',
+        secureUrl: 'https://res.cloudinary.com/new.png',
+      });
       gamesRepository.claimAndUpdateBranding.mockRejectedValue(
         new BrandingConflictError(),
       );
@@ -263,7 +242,7 @@ describe('GameModerationService', () => {
         }),
       ).rejects.toThrow(ConflictException);
 
-      expect(mediaService.releaseAttachedUpload).not.toHaveBeenCalled();
+      expect(mediaService.releaseReplacedUpload).not.toHaveBeenCalled();
     });
 
     it('rejects branding replace on an archived game', async () => {
@@ -278,7 +257,7 @@ describe('GameModerationService', () => {
         }),
       ).rejects.toThrow(NotFoundException);
 
-      expect(mediaService.resolveAttachableMedia).not.toHaveBeenCalled();
+      expect(mediaService.resolveSingleImage).not.toHaveBeenCalled();
     });
   });
 
