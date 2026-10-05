@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -252,6 +253,110 @@ describe('MediaService', () => {
       );
 
       expect(mediaRepository.markDeleted).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('releaseReplacedUpload', () => {
+    const attached = {
+      id: 'upload-1',
+      status: 'ATTACHED',
+      publicId: 'public-1',
+      resourceType: 'IMAGE',
+    };
+
+    beforeEach(() => {
+      cloudinaryService.deleteAsset.mockResolvedValue(undefined);
+      mediaRepository.markReleaseFailed.mockResolvedValue(undefined);
+    });
+
+    it('releases the upload on the happy path', async () => {
+      mediaRepository.findById.mockResolvedValue(attached);
+
+      await service.releaseReplacedUpload('upload-1');
+
+      expect(cloudinaryService.deleteAsset).toHaveBeenCalledWith(
+        'public-1',
+        'image',
+      );
+      expect(mediaRepository.markDeleted).toHaveBeenCalledWith('upload-1');
+      expect(mediaRepository.markReleaseFailed).not.toHaveBeenCalled();
+    });
+
+    it('flags RELEASE_FAILED instead of throwing when cloudinary fails', async () => {
+      mediaRepository.findById.mockResolvedValue(attached);
+      cloudinaryService.deleteAsset.mockRejectedValue(
+        new Error('cloudinary down'),
+      );
+
+      await expect(
+        service.releaseReplacedUpload('upload-1'),
+      ).resolves.toBeUndefined();
+
+      expect(mediaRepository.markReleaseFailed).toHaveBeenCalledWith(
+        'upload-1',
+      );
+    });
+
+    it('still resolves when flagging the failure also fails', async () => {
+      mediaRepository.findById.mockResolvedValue(attached);
+      cloudinaryService.deleteAsset.mockRejectedValue(
+        new Error('cloudinary down'),
+      );
+      mediaRepository.markReleaseFailed.mockRejectedValue(new Error('db down'));
+
+      await expect(
+        service.releaseReplacedUpload('upload-1'),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('resolveSingleImage', () => {
+    const params = {
+      id: 'upload-1',
+      userId: 'user-1',
+      purpose: 'AVATAR' as const,
+      entityLabel: 'avatar',
+    };
+    const upload = {
+      id: 'upload-1',
+      userId: 'user-1',
+      purpose: 'AVATAR',
+      status: 'UPLOADED',
+      resourceType: 'IMAGE',
+      publicId: 'gachahub/avatar/user-1/asset-1',
+      assetId: 'asset-1',
+      secureUrl: 'https://res.cloudinary.com/avatar.png',
+      format: 'png',
+      bytes: 1000,
+    };
+
+    it('returns the id and secureUrl of the resolved upload', async () => {
+      mediaRepository.findManyByIds.mockResolvedValue([upload]);
+
+      await expect(service.resolveSingleImage(params)).resolves.toEqual({
+        id: 'upload-1',
+        secureUrl: 'https://res.cloudinary.com/avatar.png',
+      });
+    });
+
+    it('rejects an upload with the wrong purpose', async () => {
+      mediaRepository.findManyByIds.mockResolvedValue([
+        { ...upload, purpose: 'GAME_ICON' },
+      ]);
+
+      await expect(service.resolveSingleImage(params)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('rejects a video', async () => {
+      mediaRepository.findManyByIds.mockResolvedValue([
+        { ...upload, resourceType: 'VIDEO' },
+      ]);
+
+      await expect(service.resolveSingleImage(params)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 

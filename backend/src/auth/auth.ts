@@ -67,6 +67,10 @@ export const auth = betterAuth({
     additionalFields: {
       role: { type: 'string', input: false },
       status: { type: 'string', input: false },
+      // input: false - only UsersController's dedicated onboarding endpoint may set these,
+      // never better-auth's own generic user-update path.
+      username: { type: 'string', required: false, input: false },
+      onboarded: { type: 'boolean', input: false },
     },
   },
 

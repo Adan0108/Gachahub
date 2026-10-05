@@ -3,6 +3,7 @@ import { MediaReleaseRetryService } from './media-release-retry.service';
 describe('MediaReleaseRetryService', () => {
   const mediaRepository = {
     findReleaseFailedUploads: jest.fn(),
+    findOrphanedSingleImageUploads: jest.fn(),
     finalizeReleasedUpload: jest.fn(),
   };
 
@@ -15,6 +16,7 @@ describe('MediaReleaseRetryService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mediaRepository.findOrphanedSingleImageUploads.mockResolvedValue([]);
     service = new MediaReleaseRetryService(
       mediaRepository as any,
       mediaService as any,
@@ -102,5 +104,66 @@ describe('MediaReleaseRetryService', () => {
     expect(mediaRepository.finalizeReleasedUpload).toHaveBeenCalledWith(
       'banner-upload',
     );
+  });
+});
+
+describe('MediaReleaseRetryService orphan sweep', () => {
+  const mediaRepository = {
+    findReleaseFailedUploads: jest.fn(),
+    findOrphanedSingleImageUploads: jest.fn(),
+    finalizeReleasedUpload: jest.fn(),
+  };
+  const mediaService = {
+    destroyAttachedCloudinaryAsset: jest.fn(),
+    markReleaseFailed: jest.fn().mockResolvedValue(undefined),
+  };
+  const service = new MediaReleaseRetryService(
+    mediaRepository as any,
+    mediaService as any,
+  );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mediaRepository.findReleaseFailedUploads.mockResolvedValue([]);
+    mediaService.destroyAttachedCloudinaryAsset.mockResolvedValue(true);
+  });
+
+  it('releases an unreferenced single-image upload left behind by a crash', async () => {
+    mediaRepository.findOrphanedSingleImageUploads.mockResolvedValue([
+      { id: 'orphan-1', purpose: 'AVATAR' },
+    ]);
+
+    await service.retryFailedReleases();
+
+    expect(mediaService.destroyAttachedCloudinaryAsset).toHaveBeenCalledWith(
+      'orphan-1',
+    );
+    expect(mediaRepository.finalizeReleasedUpload).toHaveBeenCalledWith(
+      'orphan-1',
+    );
+  });
+
+  it('handles failed releases and orphans in the same sweep', async () => {
+    mediaRepository.findReleaseFailedUploads.mockResolvedValue([
+      { id: 'failed-1' },
+    ]);
+    mediaRepository.findOrphanedSingleImageUploads.mockResolvedValue([
+      { id: 'orphan-1' },
+    ]);
+
+    await service.retryFailedReleases();
+
+    expect(mediaRepository.finalizeReleasedUpload).toHaveBeenCalledTimes(2);
+  });
+
+  it('only looks at uploads idle for an hour, so an in-flight release is not raced', async () => {
+    mediaRepository.findOrphanedSingleImageUploads.mockResolvedValue([]);
+    const before = Date.now() - 60 * 60 * 1000;
+
+    await service.retryFailedReleases();
+
+    const [cutoff] = mediaRepository.findOrphanedSingleImageUploads.mock
+      .calls[0] as [Date];
+    expect(Math.abs(cutoff.getTime() - before)).toBeLessThan(5000);
   });
 });

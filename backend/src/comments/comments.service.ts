@@ -13,6 +13,7 @@ import { UserInterestService } from '../recommendation/user-interest.service';
 import { resolvePagination, toPaginated } from '../common/utils/paginated';
 import { EventPublisherPort } from '../domain-events/event-publisher.port';
 import { PrismaService } from '../prisma/prisma.service';
+import { MentionsService } from '../mentions/mentions.service';
 
 @Injectable()
 export class CommentsService {
@@ -22,6 +23,7 @@ export class CommentsService {
     private readonly userInterestService: UserInterestService,
     private readonly eventPublisher: EventPublisherPort,
     private readonly prisma: PrismaService,
+    private readonly mentions: MentionsService,
   ) {}
 
   async findByPost(postId: string, query: PaginationQueryDto, userId?: string) {
@@ -34,8 +36,14 @@ export class CommentsService {
       limit,
     });
 
+    const mentioned = await this.commentsRepository.findMentionedUsernames(
+      result.items.map((comment) => comment.id),
+    );
+
     return toPaginated(
-      result.items.map((comment) => this.formatComment(comment)),
+      result.items.map((comment) =>
+        this.formatComment(comment, mentioned.get(comment.id)),
+      ),
       { page, limit, total: result.total },
     );
   }
@@ -65,20 +73,32 @@ export class CommentsService {
       limit,
     });
 
+    const mentioned = await this.commentsRepository.findMentionedUsernames(
+      result.items.map((comment) => comment.id),
+    );
+
     return toPaginated(
-      result.items.map((comment) => this.formatComment(comment)),
+      result.items.map((comment) =>
+        this.formatComment(comment, mentioned.get(comment.id)),
+      ),
       { page, limit, total: result.total },
     );
   }
 
   async create(postId: string, dto: CreateCommentDto, userId: string) {
     const post = await this.ensurePostCanBeCommentedOn(postId, userId);
+    const content = dto.content.trim();
+    const mentionTargetIds = await this.resolveMentionTargets(
+      content,
+      post,
+      userId,
+    );
 
     const comment = await this.prisma.$transaction(async (transaction) => {
       const createdComment = await this.commentsRepository.create(transaction, {
         postId,
         authorId: userId,
-        content: dto.content.trim(),
+        content,
       });
 
       await this.eventPublisher.publish(
@@ -93,6 +113,16 @@ export class CommentsService {
             parentCommentId: null,
             parentCommentAuthorId: null,
           },
+        },
+        transaction,
+      );
+
+      await this.mentions.publishMentions(
+        {
+          targetIds: mentionTargetIds,
+          actorId: userId,
+          entityType: 'COMMENT',
+          entityId: createdComment.id,
         },
         transaction,
       );
@@ -121,13 +151,19 @@ export class CommentsService {
     }
 
     const post = await this.ensurePostCanBeCommentedOn(parent.postId, userId);
+    const content = dto.content.trim();
+    const mentionTargetIds = await this.resolveMentionTargets(
+      content,
+      post,
+      userId,
+    );
 
     const reply = await this.prisma.$transaction(async (transaction) => {
       const createdReply = await this.commentsRepository.create(transaction, {
         postId: parent.postId,
         authorId: userId,
         parentId: parent.id,
-        content: dto.content.trim(),
+        content,
       });
 
       await this.eventPublisher.publish(
@@ -142,6 +178,16 @@ export class CommentsService {
             parentCommentId: parent.id,
             parentCommentAuthorId: parent.authorId,
           },
+        },
+        transaction,
+      );
+
+      await this.mentions.publishMentions(
+        {
+          targetIds: mentionTargetIds,
+          actorId: userId,
+          entityType: 'COMMENT',
+          entityId: createdReply.id,
         },
         transaction,
       );
@@ -241,6 +287,19 @@ export class CommentsService {
    * Later this can also check locked posts, moderation,
    * follower-only visibility, blocked users, etc.
    */
+  /** Resolved before the transaction opens: visibility checks use their own connection. */
+  private resolveMentionTargets(
+    content: string,
+    post: Parameters<PostVisibilityService['canView']>[0],
+    actorId: string,
+  ) {
+    return this.mentions.resolveTargets({
+      text: content,
+      actorId,
+      canView: (mentionedId) => this.postVisibility.canView(post, mentionedId),
+    });
+  }
+
   private async ensurePostCanBeCommentedOn(postId: string, userId: string) {
     return this.ensurePostCanBeViewed(postId, userId);
   }
@@ -265,7 +324,7 @@ export class CommentsService {
         replies: number;
       };
     },
-  >(comment: T) {
+  >(comment: T, mentions: string[] = []) {
     const { _count, ...rest } = comment;
 
     return {
@@ -279,6 +338,8 @@ export class CommentsService {
           : comment.content,
 
       replyCount: _count?.replies ?? 0,
+
+      mentions,
     };
   }
 }

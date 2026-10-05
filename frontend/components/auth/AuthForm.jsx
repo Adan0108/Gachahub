@@ -9,12 +9,13 @@ import { BrandMark } from "../BrandMark";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { api } from "../../lib/api";
 import { queries } from "../../lib/queries";
+import { mustOnboard } from "../../lib/username";
 
 export function AuthForm({ mode }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const isRegister = mode === "register";
-  const { isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
+  const { user, isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -23,6 +24,7 @@ export function AuthForm({ mode }) {
   const [message, setMessage] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const redirectTimerRef = useRef(null);
+  const postAuthDestination = (authedUser) => (mustOnboard(authedUser) ? "/onboarding" : "/");
   const canSubmit =
     form.email.trim().length > 0 &&
     form.password.length >= 8 &&
@@ -31,13 +33,14 @@ export function AuthForm({ mode }) {
   const auth = useMutation({
     mutationFn: () => (isRegister ? api.signUp(form) : api.signIn(form)),
     onSuccess: async () => {
-      await queryClient.fetchQuery({
+      const freshUser = await queryClient.fetchQuery({
         ...queries.currentUser(),
         staleTime: 0,
       });
       setMessage(isRegister ? "Account created. Redirecting..." : "Logged in. Redirecting...");
       window.clearTimeout(redirectTimerRef.current);
-      redirectTimerRef.current = window.setTimeout(() => router.replace("/"), 650);
+      const destination = postAuthDestination(freshUser);
+      redirectTimerRef.current = window.setTimeout(() => router.replace(destination), 650);
     },
     onError: (error) => {
       setMessage(error.message || "Auth service is not ready yet.");
@@ -58,8 +61,9 @@ export function AuthForm({ mode }) {
   useEffect(() => () => window.clearTimeout(redirectTimerRef.current), []);
 
   useEffect(() => {
-    if (isAuthenticated && !auth.isPending) router.replace("/");
-  }, [auth.isPending, isAuthenticated, router]);
+    if (!isAuthenticated || auth.isPending) return;
+    router.replace(postAuthDestination(user));
+  }, [auth.isPending, isAuthenticated, router, user]);
 
   return (
     <main className="auth-page">

@@ -4,7 +4,8 @@ import { MessageActions } from "./MessageActions";
 import { HistoryBanner, MembershipEventLine, TimestampDivider } from "./ThreadNotices";
 import { useAttachmentBlobUrl } from "../../hooks/chat/useAttachmentBlobUrl";
 import { groupReactions } from "../../lib/chat/chatReactions";
-import { initialOf, participantUser } from "../../lib/chat/chatDisplay";
+import { AvatarFace } from "../AvatarFace";
+import { participantUser } from "../../lib/chat/chatDisplay";
 import {
   attachmentKind,
   envelopeView,
@@ -165,7 +166,7 @@ function MessageBubble({
       <div className={rowClass} id={`chat-message-${message.id}`}>
         {!mine && (
           <span className={`chat-avatar small ${groupedWithNext ? "placeholder" : ""}`}>
-            {!groupedWithNext && initialOf(sender?.name)}
+            {!groupedWithNext && <AvatarFace image={sender?.image} name={sender?.name} />}
           </span>
         )}
         <div className="chat-message-time-wrap">

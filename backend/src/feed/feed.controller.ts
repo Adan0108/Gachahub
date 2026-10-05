@@ -2,7 +2,12 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags, ApiCookieAuth } from '@nestjs/swagger';
 import { OptionalAuth, Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
-import { QueryFeedDto, QueryGameFeedDto } from './dto/query-feed.dto';
+import {
+  QueryForYouFeedDto,
+  QueryGameFeedDto,
+  QueryLatestFeedDto,
+  QueryTrendingFeedDto,
+} from './dto/query-feed.dto';
 import { FeedService } from './feed.service';
 
 @ApiTags('Feed')
@@ -15,7 +20,7 @@ export class FeedController {
   @ApiOperation({
     summary: 'Get personalized For You posts',
   })
-  forYou(@Query() query: QueryFeedDto, @Session() session: UserSession) {
+  forYou(@Query() query: QueryForYouFeedDto, @Session() session: UserSession) {
     return this.feedService.forYou(query, session.user.id);
   }
 
@@ -26,7 +31,7 @@ export class FeedController {
   })
   latest(
     @Query()
-    query: QueryFeedDto,
+    query: QueryLatestFeedDto,
 
     @Session()
     session?: UserSession,
@@ -39,7 +44,10 @@ export class FeedController {
   @ApiOperation({
     summary: 'Get global trending posts',
   })
-  trending(@Query() query: QueryFeedDto, @Session() session?: UserSession) {
+  trending(
+    @Query() query: QueryTrendingFeedDto,
+    @Session() session?: UserSession,
+  ) {
     return this.feedService.trending(query, session?.user.id);
   }
 }
