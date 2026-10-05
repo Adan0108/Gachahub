@@ -481,6 +481,7 @@ export class ChatRepository {
               select: {
                 id: true,
                 name: true,
+                username: true,
                 image: true,
               },
             },
