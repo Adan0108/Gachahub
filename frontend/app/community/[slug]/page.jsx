@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useCursorFeed } from "../../../hooks/useCursorFeed";
+import { useCurrentUser } from "../../../hooks/useCurrentUser";
 import { Art } from "../../../components/Art";
 import { BuildCard } from "../../../components/BuildCard";
 import { PostList } from "../../../components/PostList";
@@ -60,8 +62,9 @@ function CommunityContent() {
     ? undefined
     : selectedCategory?.slug;
   const shouldLoadFeed = activeTab === "Overview" || Boolean(categorySlug);
-  const feedQuery = useQuery({
-    ...queries.gameFeed(slug, categorySlug),
+  const { user } = useCurrentUser();
+  const feedQuery = useCursorFeed({
+    ...queries.gameFeed(slug, categorySlug, { userId: user?.id }),
     enabled: Boolean(slug) && shouldLoadFeed,
   });
   const fallbackCommunityPosts = api.usingMocks ? fallbacks.posts({ gameSlug: slug }) : [];
@@ -71,7 +74,7 @@ function CommunityContent() {
         return tag === categorySlug || `${tag}s` === categorySlug;
       })
     : fallbackCommunityPosts;
-  const communityPosts = feedQuery.data?.items || fallbackFeedPosts;
+  const communityPosts = feedQuery.items || fallbackFeedPosts;
   const categoryPosts = communityPosts;
 
   useEffect(() => {
@@ -198,9 +201,9 @@ function CommunityContent() {
                   isError={feedQuery.isError}
                   isEmpty={!communityPosts.length}
                   emptyText="No community discussions yet."
-                  onRetry={() => feedQuery.refetch()}
+                  onRetry={feedQuery.restart}
                 />
-                <PostList posts={communityPosts.slice(0, 3)} />
+                <PostList posts={feedQuery.data?.pages.length > 1 ? communityPosts : communityPosts.slice(0, 3)} />
               </div>
               <div>
                 <SectionTitle>Popular builds</SectionTitle>
@@ -254,7 +257,7 @@ function CommunityContent() {
               <QueryNotice
                 isLoading={feedQuery.isLoading}
                 isError={feedQuery.isError}
-                onRetry={() => feedQuery.refetch()}
+                onRetry={feedQuery.restart}
               />
               {categoryPosts.length ? (
                 <PostList posts={categoryPosts} />
@@ -266,6 +269,7 @@ function CommunityContent() {
               )}
             </>
           )}
+          {shouldLoadFeed && feedQuery.hasNextPage && <button className="soft-btn" type="button" disabled={feedQuery.isFetching} onClick={feedQuery.loadMore}>Load more</button>}
         </section>
         <aside className="panel highlights">
           <div className="panel-head">

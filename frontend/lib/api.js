@@ -55,6 +55,7 @@ export const backendRoutes = {
   post: (postId) => `/posts/${encodePathParam(postId)}`,
   latestFeed: "/feed/latest",
   trendingFeed: "/feed/trending",
+  forYouFeed: "/feed/for-you",
   gameFeed: (gameSlug) => `/games/${encodePathParam(gameSlug)}/feed`,
   postLike: (postId) => `/posts/${encodePathParam(postId)}/like`,
   userFollow: (userId) => `/users/${encodePathParam(userId)}/follow`,
@@ -381,9 +382,9 @@ async function mockResponse(path, options = {}) {
     const items = fallbackPosts();
     return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
   }
-  if (pathname === backendRoutes.latestFeed || pathname === backendRoutes.trendingFeed) {
-    const items = fallbackPosts();
-    return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
+  if (pathname === backendRoutes.latestFeed || pathname === backendRoutes.trendingFeed || pathname === backendRoutes.forYouFeed) {
+    const items = params.has("cursor") ? [] : fallbackPosts();
+    return { items, meta: { limit: Number(params.get("limit") || 20), hasMore: false, nextCursor: null, ...(pathname === backendRoutes.forYouFeed ? { personalized: false } : {}) } };
   }
   if (pathname === backendRoutes.posts && options.method === 'POST') {
     return { id: `mock-post-${Date.now()}`, ...JSON.parse(options.body || '{}') };
@@ -433,7 +434,7 @@ async function mockResponse(path, options = {}) {
       const tag = post.tag.toLowerCase();
       return tag === categorySlug || `${tag}s` === categorySlug;
     });
-    return { items, meta: { page: 1, limit: 20, total: items.length, totalPages: 1 } };
+    return { items: params.has("cursor") ? [] : items, meta: { limit: Number(params.get("limit") || 20), hasMore: false, nextCursor: null } };
   }
   if (pathname.startsWith('/games/')) {
     const slug = decodePathParam(pathname.split('/')[2]);
@@ -648,9 +649,11 @@ export const api = {
     };
   },
   getLatestFeed: (query = {}, options = {}) =>
-    api.getPostCollection(backendRoutes.latestFeed, query, options),
+    api.getFeedCollection(backendRoutes.latestFeed, query, options),
+  getForYouFeed: (query = {}, options = {}) =>
+    api.getFeedCollection(backendRoutes.forYouFeed, query, options),
   getTrendingFeed: (query = {}, options = {}) =>
-    api.getPostCollection(backendRoutes.trendingFeed, query, options),
+    api.getFeedCollection(backendRoutes.trendingFeed, query, options),
   getPosts: (query = {}, options = {}) =>
     api.getPostCollection(backendRoutes.posts, query, options),
   getPost: async (postId, options = {}) => {
@@ -658,7 +661,7 @@ export const api = {
     return normalizePostResponse(post);
   },
   getGameFeed: (gameSlug, query = {}, options = {}) =>
-    api.getPostCollection(backendRoutes.gameFeed(gameSlug), query, options),
+    api.getFeedCollection(backendRoutes.gameFeed(gameSlug), query, options),
   likePost: (postId) => mutation(backendRoutes.postLike(postId)),
   unlikePost: (postId) => mutation(backendRoutes.postLike(postId), undefined, { method: 'DELETE' }),
   getFollowStatus: (userId, options = {}) => request(backendRoutes.followStatus(userId), options),
@@ -716,6 +719,11 @@ export const api = {
     }
     return uploaded;
   },
+  /** @returns {Promise<import("./feedTypes").FeedResponse<ReturnType<typeof normalizePostResponse>>>} */
+  getFeedCollection: async (path, { limit = 20, cursor, type, sort, categorySlug } = {}, options = {}) => {
+    const response = await request(withQuery(path, { limit, cursor, type, sort, categorySlug }), options);
+    return { items: (response.items || []).map(normalizePostResponse), meta: response.meta };
+  },
   getPostCollection: async (path, query = {}, options = {}) => {
     const response = await request(withQuery(path, query), options);
     const items = Array.isArray(response) ? response : response.items || [];
@@ -727,14 +735,16 @@ export const api = {
   getHome: async ({ search = '' } = {}) => {
     const [games, latest, trending] = await Promise.all([
       api.getGames({ status: 'ACTIVE', search, limit: 20 }),
-      api.getLatestFeed({ page: 1, limit: 10 }),
-      api.getTrendingFeed({ page: 1, limit: 10 }),
+      api.getLatestFeed({ limit: 10 }),
+      api.getTrendingFeed({ limit: 10 }),
     ]);
     return {
       communities: games.items,
       forYouPosts: latest.items,
       posts: trending.items,
       meta: games.meta,
+      latestMeta: latest.meta,
+      trendingMeta: trending.meta,
     };
   },
   getAdminOverview: (options = {}) => request(backendRoutes.adminOverview, options),

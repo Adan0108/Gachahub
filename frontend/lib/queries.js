@@ -1,4 +1,5 @@
 import { keepPreviousData } from "@tanstack/react-query";
+import { cursorFeedOptions } from "./cursorFeed";
 import { api, fallbackCategories, fallbackGame, fallbackGames, fallbackPosts } from "./api";
 
 // Normalizes an unpaginated, bare-array admin endpoint (categories, moderators) into the same
@@ -33,7 +34,7 @@ export const queryKeys = {
   myPosts: ["posts", "mine"],
   posts: (search) => ["posts", { search }],
   post: (postId) => ["posts", "detail", postId],
-  gameFeed: (slug, categorySlug) => ["game-feed", slug, { categorySlug }],
+  gameFeed: (slug, categorySlug, { sort = "latest", type = "", userId = "" } = {}) => ["game-feed", slug, { categorySlug, sort, type, userId }],
   followStatus: (userId) => ["follow-status", userId],
   comments: (postId) => ["comments", postId],
   replies: (commentId) => ["comment-replies", commentId],
@@ -156,14 +157,13 @@ export const queries = {
     retry: 1,
     staleTime: 30_000,
   }),
-  gameFeed: (slug, categorySlug) => ({
-    queryKey: queryKeys.gameFeed(slug, categorySlug),
-    queryFn: ({ signal }) =>
-      api.getGameFeed(slug, { page: 1, limit: 20, sort: "latest", categorySlug }, { signal }),
-    enabled: Boolean(slug),
-    retry: 1,
-    staleTime: 30_000,
-  }),
+  feed: (sort = "latest", filters = {}, userId = "", scope = null) =>
+    cursorFeedOptions(["feed", sort, filters, userId, scope],
+      ({ cursor, signal }) => api[sort === "for-you" ? "getForYouFeed" : sort === "trending" ? "getTrendingFeed" : "getLatestFeed"]({ ...filters, cursor }, { signal }),
+      sort !== "for-you" || Boolean(userId)),
+  gameFeed: (slug, categorySlug, { sort = "latest", type = "", userId = "" } = {}) =>
+    cursorFeedOptions(queryKeys.gameFeed(slug, categorySlug, { sort, type, userId }),
+      ({ cursor, signal }) => api.getGameFeed(slug, { limit: 20, sort, type, categorySlug, cursor }, { signal }), Boolean(slug)),
   followStatus: (userId) => ({
     queryKey: queryKeys.followStatus(userId),
     queryFn: ({ signal }) => api.getFollowStatus(userId, { signal }),
@@ -265,3 +265,4 @@ export const fallbacks = {
   categories: fallbackCategories,
   posts: fallbackPosts,
 };
+
