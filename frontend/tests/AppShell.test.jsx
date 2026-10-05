@@ -4,7 +4,13 @@ import { AppShell } from "../components/AppShell";
 
 const mocks = vi.hoisted(() => ({ pathname: "/explore" }));
 
-vi.mock("next/navigation", () => ({ usePathname: () => mocks.pathname }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => mocks.pathname,
+  useRouter: () => ({ replace: vi.fn() }),
+}));
+vi.mock("../hooks/useCurrentUser", () => ({
+  useCurrentUser: () => ({ user: null, isAuthenticated: false, isLoading: false }),
+}));
 vi.mock("../hooks/useTheme", () => ({
   useTheme: () => ({ theme: "dark", toggleTheme: vi.fn() }),
 }));
