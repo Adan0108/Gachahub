@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { escapeLikePattern } from '../common/utils/like-pattern';
 import type { Prisma, UserRole, UserStatus } from '../generated/prisma/client';
+import { ME_SELECT } from './me-select';
 
 const PICKER_SELECT = {
   id: true,
@@ -60,6 +61,15 @@ export class UsersRepository {
     return this.prisma.user.findFirst({
       where: { id, NOT: { id: callerId }, ...pickableBy(callerId) },
       select: PICKER_SELECT,
+    });
+  }
+
+  /** Sets (or clears, with null) the user's profile banner design; returns the same shape as GET /users/me. */
+  setBannerPreset(id: string, bannerPresetId: string | null) {
+    return this.prisma.user.update({
+      where: { id },
+      data: { bannerPresetId },
+      select: ME_SELECT,
     });
   }
 

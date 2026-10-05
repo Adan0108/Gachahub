@@ -6,13 +6,17 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { FiCompass, FiEdit3, FiMessageCircle, FiShare2, FiX } from "react-icons/fi";
 import { Art } from "../../components/Art";
+import { AvatarFace } from "../../components/AvatarFace";
 import { BuildCard } from "../../components/BuildCard";
 import { PostList } from "../../components/PostList";
+import { AvatarEditor } from "../../components/profile/AvatarEditor";
+import { BannerPicker } from "../../components/profile/BannerPicker";
 import { QueryNotice } from "../../components/QueryNotice";
 import { SectionTitle } from "../../components/SectionTitle";
 import { builds, glyph } from "../../components/constants";
 import { useRequireAuth } from "../../hooks/useRequireAuth";
 import { useToast } from "../../hooks/useToast";
+import { bannerColor } from "../../lib/profileBanners";
 import { queries } from "../../lib/queries";
 
 const focusableSelector = [
@@ -156,6 +160,8 @@ export default function ProfilePage() {
     );
   }
 
+  const heroBannerColor = bannerColor(user.bannerPresetId);
+
   return (
     <div className="page profile-page">
       <div className="toast-slot" aria-live="polite">
@@ -163,14 +169,21 @@ export default function ProfilePage() {
       </div>
       <QueryNotice isLoading={isSessionLoading} isError={isError} />
       <div aria-hidden={editing ? "true" : undefined}>
-        <section className="profile-hero">
-          <Art tone="indigo">{glyph.sparkle}</Art>
+        <section className={`profile-hero ${heroBannerColor ? "profile-hero-solid" : ""}`}>
+          {heroBannerColor ? (
+            <div className="profile-banner-solid" style={{ backgroundColor: heroBannerColor }} />
+          ) : (
+            <Art tone="indigo">{glyph.sparkle}</Art>
+          )}
           <button ref={editButtonRef} className="edit-profile" onClick={openEditor} type="button">
             <FiEdit3 /> Edit Profile
           </button>
           <div className="profile-main">
             <div className="profile-avatar">
-              <Art tone="blue">{displayName.charAt(0).toUpperCase() || "R"}</Art>
+              <AvatarFace
+                fallback={<Art tone="blue">{displayName.charAt(0).toUpperCase() || "R"}</Art>}
+                image={user.image}
+              />
             </div>
             <div>
               <h1>
@@ -328,7 +341,7 @@ export default function ProfilePage() {
         <div className="modal-backdrop" onClick={closeEditor}>
           <form
             aria-modal="true"
-            className="modal"
+            className="modal profile-edit-modal"
             onClick={(event) => event.stopPropagation()}
             onSubmit={saveProfile}
             ref={modalRef}
@@ -340,6 +353,8 @@ export default function ProfilePage() {
                 <FiX />
               </button>
             </div>
+            <AvatarEditor user={user} />
+            <BannerPicker currentId={user.bannerPresetId} />
             <label>
               Display name
               <input

@@ -17,6 +17,7 @@ import {
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { api } from "../lib/api";
 import { queries, queryKeys } from "../lib/queries";
+import { AvatarFace } from "./AvatarFace";
 import { artTones, glyph } from "./constants";
 import { MentionInput } from "./MentionInput";
 import { MentionText } from "./MentionText";
@@ -261,7 +262,14 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
     >
       {!detail && !isFeed && <span className="rank">{index + 1}</span>}
       <div className={`post-thumb art-${artTones[index % artTones.length]}`}>
-        {isFeed ? (post.author || "G").charAt(0).toUpperCase() : glyph.sparkle}
+        {isFeed ? (
+          <AvatarFace
+            fallback={(post.author || "G").charAt(0).toUpperCase()}
+            image={post.authorImage}
+          />
+        ) : (
+          glyph.sparkle
+        )}
       </div>
       <Link className="post-content-link" href={`/post/${encodeURIComponent(post.id)}`}>
         <b>{post.title}</b>
