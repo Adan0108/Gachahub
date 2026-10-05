@@ -17,6 +17,9 @@ export const backendRoutes = {
   gameModerator: (gameSlug, userId) =>
     `/games/${encodePathParam(gameSlug)}/moderators/${encodePathParam(userId)}`,
   gamesModerated: '/games/moderated',
+  gamesJoined: '/games/joined',
+  gameJoin: (slug) => `/games/${encodePathParam(slug)}/join`,
+  gameJoinStatus: (slug) => `/games/${encodePathParam(slug)}/join-status`,
   gameBranding: (gameSlug) => `/games/${encodePathParam(gameSlug)}/branding`,
   gameArchive: (gameSlug) => `/games/${encodePathParam(gameSlug)}/archive`,
   gameRestore: (gameSlug) => `/games/${encodePathParam(gameSlug)}/restore`,
@@ -359,6 +362,8 @@ function mutationAuthHeaders(headers) {
   return headers || {};
 }
 
+const mockJoinedGames = new Set();
+
 async function mockResponse(path, options = {}) {
   await new Promise((resolve) => setTimeout(resolve, 120));
   const [pathname, queryString] = path.split('?');
@@ -406,6 +411,16 @@ async function mockResponse(path, options = {}) {
     return { items: [], meta: { page: 1, limit: 20, total: 0, totalPages: 0 } };
   }
   if (/^\/users\/[^/]+\/follow-status$/.test(pathname)) return { following: false };
+  if (pathname === backendRoutes.signOut) { mockJoinedGames.clear(); return { ok: true }; }
+  if (pathname === backendRoutes.gamesJoined) return { items: mockGames.filter((game) => mockJoinedGames.has(game.slug)) };
+  if (/^\/games\/[^/]+\/(join|join-status)$/.test(pathname)) {
+    const slug = decodePathParam(pathname.split('/')[2]);
+    if (pathname.endsWith('/join')) {
+      if (options.method === 'DELETE') mockJoinedGames.delete(slug);
+      else mockJoinedGames.add(slug);
+    }
+    return { joined: mockJoinedGames.has(slug) };
+  }
   if (pathname === backendRoutes.games) return fallbackGames(params.get("search") || "");
   if (/^\/games\/[^/]+\/moderators\/[^/]+$/.test(pathname) && options.method === "DELETE")
     return { message: "Moderator removed successfully" };
@@ -575,6 +590,17 @@ export const api = {
       items: items.map(normalizeGame),
       meta: response.meta || { total: items.length },
     };
+  },
+  /** Reads server-backed membership for the authenticated session. */
+  getGameJoinStatus: (slug, options = {}) => request(backendRoutes.gameJoinStatus(slug), options),
+  /** Idempotently joins the game as the authenticated session user. */
+  joinGame: (slug) => mutation(backendRoutes.gameJoin(slug)),
+  /** Idempotently leaves the game as the authenticated session user. */
+  leaveGame: (slug) => mutation(backendRoutes.gameJoin(slug), undefined, { method: 'DELETE' }),
+  /** Lists the session user's joined games using normal community shapes. */
+  getJoinedGames: async (options = {}) => {
+    const response = await request(backendRoutes.gamesJoined, options);
+    return { items: (response.items || []).map(normalizeGame) };
   },
   getCommunity: async (slug) => normalizeGame(await request(backendRoutes.game(slug))),
   getCategories: (gameSlug, query = {}, options = {}) =>

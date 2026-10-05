@@ -19,6 +19,8 @@ export const queryKeys = {
     list: (search, status) => ["admin", "games", { search, status }],
   },
   community: (slug) => ["community", slug],
+  gameJoinStatus: (slug, userId) => ["game-join-status", userId, slug],
+  joinedGames: (userId) => ["joined-games", userId],
   categories: (slug) => ["community-categories", slug],
   adminCategories: {
     all: (slug) => ["admin", "categories", slug],
@@ -95,6 +97,20 @@ export const queries = {
     queryFn: () => api.getCommunity(slug),
     retry: 1,
     staleTime: 30_000,
+  }),
+  gameJoinStatus: (slug, userId) => ({
+    queryKey: queryKeys.gameJoinStatus(slug, userId),
+    queryFn: ({ signal }) => api.getGameJoinStatus(slug, { signal }),
+    enabled: Boolean(slug && userId),
+    retry: false,
+    gcTime: 0,
+  }),
+  joinedGames: (userId) => ({
+    queryKey: queryKeys.joinedGames(userId),
+    queryFn: ({ signal }) => api.getJoinedGames({ signal }),
+    enabled: Boolean(userId),
+    retry: false,
+    gcTime: 0,
   }),
   categories: (slug) => ({
     queryKey: queryKeys.categories(slug),

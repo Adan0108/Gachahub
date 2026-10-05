@@ -1,5 +1,4 @@
 export const FEED_PREFERENCES_KEY = "gachahub-feed-preferences";
-export const JOINED_COMMUNITIES_KEY = "gachahub-joined-communities";
 
 export const defaultFeedPreferences = {
   games: [],

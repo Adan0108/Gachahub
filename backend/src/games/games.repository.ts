@@ -73,9 +73,8 @@ export class GamesRepository {
    * The most-populated active games, by live member count - for the admin
    * dashboard's communities snapshot. Counts the GameMember relation
    * directly rather than reading the denormalized Game.memberCount column,
-   * which nothing in the app ever writes (it's set once by the seed script
-   * and drifts from there). Tiebreaks on id so equal counts - everyone's at
-   * 0 on an unseeded database - still return in a stable, deterministic order.
+   * which membership mutations maintain atomically. Tiebreaks on id so equal
+   * counts still return in a stable, deterministic order.
    * Every row is ACTIVE by construction, so the caller has no use for the
    * status field - left out of the select rather than shown as constant noise.
    */

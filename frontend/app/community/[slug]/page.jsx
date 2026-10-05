@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { FeedLoadSentinel } from "../../../components/FeedLoadSentinel";
+import { useCommunityMembership } from "../../../hooks/useCommunityMembership";
 import { useCursorFeed } from "../../../hooks/useCursorFeed";
 import { useCurrentUser } from "../../../hooks/useCurrentUser";
 import { Art } from "../../../components/Art";
@@ -14,7 +16,6 @@ import { SectionTitle } from "../../../components/SectionTitle";
 import { artTones, builds, glyph } from "../../../components/constants";
 import { api } from "../../../lib/api";
 import { fallbacks, queries } from "../../../lib/queries";
-import { JOINED_COMMUNITIES_KEY, readStoredJson } from "../../../lib/preferences";
 
 const teamComps = [
   {
@@ -39,7 +40,6 @@ function CommunityContent() {
   const searchParams = useSearchParams();
   const slug = Array.isArray(params.slug) ? params.slug[0] : params.slug;
   const selectedTab = searchParams.get("tab") || "Overview";
-  const [joined, setJoined] = useState(false);
 
   const communityQuery = useQuery(queries.community(slug));
   const categoriesQuery = useQuery(queries.categories(slug));
@@ -62,7 +62,9 @@ function CommunityContent() {
     ? undefined
     : selectedCategory?.slug;
   const shouldLoadFeed = activeTab === "Overview" || Boolean(categorySlug);
-  const { user } = useCurrentUser();
+  const { user, isLoading: sessionLoading } = useCurrentUser();
+  const membership = useCommunityMembership(slug, user?.id);
+  const joined = membership.joined;
   const feedQuery = useCursorFeed({
     ...queries.gameFeed(slug, categorySlug, { userId: user?.id }),
     enabled: Boolean(slug) && shouldLoadFeed,
@@ -76,24 +78,6 @@ function CommunityContent() {
     : fallbackCommunityPosts;
   const communityPosts = feedQuery.items || fallbackFeedPosts;
   const categoryPosts = communityPosts;
-
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      const joinedCommunities = readStoredJson(JOINED_COMMUNITIES_KEY, []);
-      setJoined(joinedCommunities.includes(slug));
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [slug]);
-
-  const toggleJoined = () => {
-    const joinedCommunities = readStoredJson(JOINED_COMMUNITIES_KEY, []);
-    const nextJoined = !joined;
-    const nextCommunities = nextJoined
-      ? [...new Set([...joinedCommunities, slug])]
-      : joinedCommunities.filter((item) => item !== slug);
-    window.localStorage.setItem(JOINED_COMMUNITIES_KEY, JSON.stringify(nextCommunities));
-    setJoined(nextJoined);
-  };
 
   if (communityQuery.isLoading && !community) {
     return (
@@ -161,7 +145,8 @@ function CommunityContent() {
         <button
           className={`join-btn ${joined ? "joined" : ""}`}
           aria-pressed={joined}
-          onClick={toggleJoined}
+          onClick={membership.toggle}
+          disabled={sessionLoading || membership.isLoading || membership.isPending || membership.isError}
           type="button"
         >
           {joined ? `${glyph.check} Joined` : "+ Join"}
@@ -177,6 +162,7 @@ function CommunityContent() {
           </div>
         </div>
       </section>
+      <QueryNotice isError={membership.isError} errorText={membership.error?.message || "Could not update community membership."} onRetry={membership.retry} />
       <div className="tabs wide" aria-label="Community content" role="tablist">
         {categories.map((item) => (
           <Link
@@ -203,7 +189,7 @@ function CommunityContent() {
                   emptyText="No community discussions yet."
                   onRetry={feedQuery.restart}
                 />
-                <PostList posts={feedQuery.data?.pages.length > 1 ? communityPosts : communityPosts.slice(0, 3)} />
+                <PostList posts={communityPosts} />
               </div>
               <div>
                 <SectionTitle>Popular builds</SectionTitle>
@@ -269,7 +255,7 @@ function CommunityContent() {
               )}
             </>
           )}
-          {shouldLoadFeed && feedQuery.hasNextPage && <button className="soft-btn" type="button" disabled={feedQuery.isFetching} onClick={feedQuery.loadMore}>Load more</button>}
+          {shouldLoadFeed && <FeedLoadSentinel feed={feedQuery} />}
         </section>
         <aside className="panel highlights">
           <div className="panel-head">
