@@ -2,11 +2,8 @@
 
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { io } from 'socket.io-client';
-import { useCurrentUser } from '../useCurrentUser';
-import { API_BASE_URL } from '../../lib/api';
 import { queryKeys } from '../../lib/queries';
-import { MAX_RECONNECT_ATTEMPTS, reconnectDelayMs } from '../../lib/chat/socketReconnect';
+import { useSharedSocket } from '../../lib/socket/sharedSocket';
 import { typingSignal } from '../../lib/chat/chatTypingSignal';
 
 // How long a typing:start this tab sent stays valid without a fresh ping before it emits
@@ -36,47 +33,22 @@ const TYPING_REFRESH_MS = 2500;
  * improvement on top of it.
  */
 export function useChatSocket() {
-  const { user, isAuthenticated } = useCurrentUser();
+  const socket = useSharedSocket();
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (!isAuthenticated || !user?.id) {
+    if (!socket) {
       return undefined;
     }
 
-    const socket = io(API_BASE_URL, { withCredentials: true });
-    let reconnectAttempts = 0;
-    let reconnectTimer;
-
-    // This login was ended from another device: leave at once, with a full reload so nothing stays in memory.
-    const signOutHere = () => {
-      queryClient.setQueryData(queryKeys.currentUser, null);
-      window.location.assign('/login');
+    // The socket is shared, so only this hook's own listeners come off when it unmounts.
+    const removers = [];
+    const on = (event, handler) => {
+      socket.on(event, handler);
+      removers.push(() => socket.off(event, handler));
     };
-    // Only this explicit event signs the browser out - a reconnect with a dead login receives it
-    // again from the gateway, and a plain drop or backend hiccup must never log anyone out.
-    socket.on('session:revoked', signOutHere);
 
-    // A real, live connection resets the budget - only a run of CONSECUTIVE failures should ever
-    // exhaust it, not the cumulative count over a tab's whole lifetime.
-    socket.on('connect', () => {
-      reconnectAttempts = 0;
-    });
-
-    // socket.io does NOT auto-reconnect after a server-initiated disconnect (the gateway calls
-    // socket.disconnect() on both a backend hiccup and a dead login) - without this, that tab stays
-    // cut off from new messages and future sign-out events until the page is reloaded by hand. A dead
-    // login just gets session:revoked again on the reconnect the gateway sees.
-    socket.on('disconnect', (reason) => {
-      if (reason !== 'io server disconnect') return;
-      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return;
-
-      const delay = reconnectDelayMs(reconnectAttempts);
-      reconnectAttempts += 1;
-      reconnectTimer = setTimeout(() => socket.connect(), delay);
-    });
-
-    socket.on('message:created', (event) => {
+    on('message:created', (event) => {
       queryClient.setQueryData(queryKeys.chatMessages(event.conversationId), (old) => {
         if (!old || old.items.some((item) => item.id === event.messageId)) {
           return old;
@@ -112,14 +84,14 @@ export function useChatSocket() {
     const refetchConversationMessages = (event) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(event.conversationId) });
     };
-    socket.on('reaction:added', refetchConversationMessages);
-    socket.on('reaction:removed', refetchConversationMessages);
-    socket.on('message:deleted', refetchConversationMessages);
-    socket.on('message:edited', refetchConversationMessages);
+    on('reaction:added', refetchConversationMessages);
+    on('reaction:removed', refetchConversationMessages);
+    on('message:deleted', refetchConversationMessages);
+    on('message:edited', refetchConversationMessages);
 
     // The other side accepted a message request this tab sent - a one-shot notice, not steady
     // state, so the chat page reads it once via the same cache-write bridge and clears it.
-    socket.on('request:accepted', (event) => {
+    on('request:accepted', (event) => {
       queryClient.setQueryData(queryKeys.chatRequestAccepted(event.conversationId), event);
       queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
     });
@@ -164,7 +136,7 @@ export function useChatSocket() {
           : old.filter((id) => id !== userId),
       );
     };
-    socket.on('typing:start', (event) => {
+    on('typing:start', (event) => {
       const timerKey = `${event.conversationId}:${event.userId}`;
       clearTimeout(typingExpireTimers.get(timerKey));
       setTypingUser(event.conversationId, event.userId, true);
@@ -176,7 +148,7 @@ export function useChatSocket() {
         }, TYPING_EXPIRE_MS),
       );
     });
-    socket.on('typing:stop', (event) => {
+    on('typing:stop', (event) => {
       const timerKey = `${event.conversationId}:${event.userId}`;
       clearTimeout(typingExpireTimers.get(timerKey));
       typingExpireTimers.delete(timerKey);
@@ -184,11 +156,10 @@ export function useChatSocket() {
     });
 
     return () => {
-      clearTimeout(reconnectTimer);
       unsubscribeTyping();
       typingStopTimers.forEach(clearTimeout);
       typingExpireTimers.forEach(clearTimeout);
-      socket.disconnect();
+      removers.forEach((remove) => remove());
     };
-  }, [isAuthenticated, user?.id, queryClient]);
+  }, [socket, queryClient]);
 }

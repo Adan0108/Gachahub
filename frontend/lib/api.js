@@ -63,6 +63,11 @@ export const backendRoutes = {
   postComments: (postId) => `/posts/${encodePathParam(postId)}/comments`,
   commentReplies: (commentId) => `/comments/${encodePathParam(commentId)}/replies`,
   reports: "/reports",
+  notifications: '/notifications',
+  notificationsUnreadCount: '/notifications/unread-count',
+  notificationsReadAll: '/notifications/read-all',
+  notificationRead: (notificationId) =>
+    `/notifications/${encodePathParam(notificationId)}/read`,
   mediaSignatures: '/media/uploads/signatures',
   mediaConfirm: '/media/uploads/confirm',
   chatConversations: '/chat/conversations',
@@ -780,6 +785,15 @@ export const api = {
     ),
   getChatConversations: () => request(backendRoutes.chatConversations),
   getArchivedChatConversations: () => request(backendRoutes.chatArchivedConversations),
+  /** @param {{ limit?: number, cursor?: string }} [query] @param {{ signal?: AbortSignal }} [options] */
+  getNotifications: (query = {}, options = {}) =>
+    request(withQuery(backendRoutes.notifications, query), { signal: options.signal }),
+  getNotificationUnreadCount: ({ signal } = {}) =>
+    request(backendRoutes.notificationsUnreadCount, { signal }),
+  markNotificationRead: (notificationId) =>
+    mutation(backendRoutes.notificationRead(notificationId), undefined, { method: 'PATCH' }),
+  markAllNotificationsRead: () =>
+    mutation(backendRoutes.notificationsReadAll, undefined, { method: 'PATCH' }),
   getChatRequests: () => request(backendRoutes.chatRequests),
   getChatMessages: (conversationId, query = {}) =>
     request(withQuery(backendRoutes.chatMessages(conversationId), query)),

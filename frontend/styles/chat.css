@@ -612,11 +612,11 @@
 }
 
 .notification-list,
-.notification-list button > div {
+.notification-list .notification-row > div {
   display: grid;
 }
 
-.notification-list button {
+.notification-list .notification-row {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) auto;
   gap: 10px;
@@ -629,15 +629,15 @@
   text-align: left;
 }
 
-.notification-list button:last-child {
+.notification-list .notification-row:last-child {
   border-bottom: 0;
 }
 
-.notification-list button.unread {
+.notification-list .notification-row.unread {
   background: color-mix(in srgb, var(--purple), transparent 91%);
 }
 
-.notification-list button > span {
+.notification-list .notification-row > span {
   color: var(--purple);
   font-size: 18px;
 }
@@ -651,6 +651,55 @@
 .notification-list time {
   color: var(--muted);
   font-size: 11px;
+}
+
+.notification-list {
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+}
+
+.notification-list .notification-row > .notification-avatar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--purple), transparent 78%);
+  color: var(--purple);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.notification-status {
+  margin: 0;
+  padding: 18px 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.notification-status button {
+  border: 0;
+  background: none;
+  color: var(--purple);
+  font-weight: 800;
+}
+
+.notification-more {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--line);
+  padding: 12px;
+  background: transparent;
+  color: var(--purple);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.notification-more:disabled {
+  color: var(--muted);
+  cursor: progress;
 }
 
 .post-content-link,
