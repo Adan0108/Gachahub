@@ -1,29 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FiChevronRight, FiCompass, FiEdit3, FiSettings, FiX } from "react-icons/fi";
+import { FiChevronRight, FiCompass, FiEdit3 } from "react-icons/fi";
 import { CommunityGrid } from "../components/CommunityGrid";
 import { PostList } from "../components/PostList";
 import { QueryNotice } from "../components/QueryNotice";
 import { SectionTitle } from "../components/SectionTitle";
 import { glyph } from "../components/constants";
-import { useToast } from "../hooks/useToast";
+import { useCurrentUser } from "../hooks/useCurrentUser";
 import { api } from "../lib/api";
 import { fallbacks, queries } from "../lib/queries";
 import { defaultFeedPreferences, FEED_PREFERENCES_KEY, readStoredJson } from "../lib/preferences";
 
-const feedCategories = ["Guide", "Build", "Lore", "Teams", "Strategy"];
-
 export default function HomePage() {
-  const { notice, showNotice } = useToast();
-  const [customizing, setCustomizing] = useState(false);
   const [preferences, setPreferences] = useState(defaultFeedPreferences);
-  const [draftPreferences, setDraftPreferences] = useState(defaultFeedPreferences);
-  const customizerButtonRef = useRef(null);
-  const customizerRef = useRef(null);
-  const wasCustomizingRef = useRef(false);
+  const { user } = useCurrentUser();
   const home = useQuery(queries.home(""));
   const data =
     home.data ||
@@ -42,27 +35,6 @@ export default function HomePage() {
     return matchesGame && matchesCategory;
   });
 
-  const openCustomizer = () => {
-    setDraftPreferences(preferences);
-    setCustomizing(true);
-  };
-
-  const togglePreference = (group, value) => {
-    setDraftPreferences((current) => ({
-      ...current,
-      [group]: current[group].includes(value)
-        ? current[group].filter((item) => item !== value)
-        : [...current[group], value],
-    }));
-  };
-
-  const savePreferences = () => {
-    window.localStorage.setItem(FEED_PREFERENCES_KEY, JSON.stringify(draftPreferences));
-    setPreferences(draftPreferences);
-    setCustomizing(false);
-    showNotice("Feed preferences saved");
-  };
-
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       setPreferences(readStoredJson(FEED_PREFERENCES_KEY, defaultFeedPreferences));
@@ -70,68 +42,25 @@ export default function HomePage() {
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  useEffect(() => {
-    if (!customizing) return undefined;
-    wasCustomizingRef.current = true;
-    customizerRef.current?.querySelector("button")?.focus();
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") {
-        setCustomizing(false);
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const items = Array.from(
-        customizerRef.current?.querySelectorAll(
-          "button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])",
-        ) || [],
-      ).filter((element) => element.offsetParent !== null);
-      const first = items[0];
-      const last = items.at(-1);
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first?.focus();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [customizing]);
-
-  useEffect(() => {
-    if (!customizing && wasCustomizingRef.current) {
-      customizerButtonRef.current?.focus();
-      wasCustomizingRef.current = false;
-    }
-  }, [customizing]);
+  const displayName = user?.name?.trim()?.split(/\s+/)[0];
+  const avatarInitial = (displayName || user?.email || "G").charAt(0).toUpperCase();
 
   return (
     <div className="page home-page">
-      <div className="toast-slot" aria-live="polite">
-        {notice}
-      </div>
       <section className="welcome hero-polish">
         <div>
           <h1>
-            Welcome back, Rover <span>{glyph.sparkle}</span>
+            {displayName ? `Welcome back, ${displayName}` : "Welcome back"}{" "}
+            <span>{glyph.sparkle}</span>
           </h1>
           <p>Explore communities, discover builds, and uncover the lore.</p>
         </div>
-        <button
-          className="soft-btn"
-          onClick={openCustomizer}
-          ref={customizerButtonRef}
-          type="button"
-        >
-          <FiSettings /> Customize Feed
-        </button>
       </section>
 
       <div className="home-feed-layout">
         <main className="home-feed-column">
           <section className="panel home-create-card">
-            <div className="home-create-avatar">R</div>
+            <div className="home-create-avatar">{avatarInitial}</div>
             <Link href="/create">Share a build, theory, or discovery...</Link>
             <Link aria-label="Create a post" className="home-create-action" href="/create">
               <FiEdit3 />
@@ -144,9 +73,9 @@ export default function HomePage() {
                 <span className="eyebrow">Your feed</span>
                 <h2>Latest from your communities</h2>
               </div>
-              <button className="text-btn" onClick={openCustomizer} type="button">
+              <Link className="text-btn" href="/settings#feed-preferences">
                 Tune Feed <FiChevronRight />
-              </button>
+              </Link>
             </div>
             <QueryNotice
               isLoading={home.isLoading}
@@ -200,66 +129,6 @@ export default function HomePage() {
           </section>
         </aside>
       </div>
-      {customizing && (
-        <div className="modal-backdrop" onClick={() => setCustomizing(false)}>
-          <section
-            aria-label="Customize feed"
-            aria-modal="true"
-            className="modal feed-customizer"
-            onClick={(event) => event.stopPropagation()}
-            ref={customizerRef}
-            role="dialog"
-          >
-            <div className="panel-head">
-              <div>
-                <span className="eyebrow">Preferences</span>
-                <h2>Customize your feed</h2>
-              </div>
-              <button
-                aria-label="Close feed customizer"
-                onClick={() => setCustomizing(false)}
-                type="button"
-              >
-                <FiX />
-              </button>
-            </div>
-            <fieldset>
-              <legend>Games</legend>
-              <div className="preference-grid">
-                {data.communities.map((community) => (
-                  <label key={community.slug}>
-                    <input
-                      checked={draftPreferences.games.includes(community.slug)}
-                      onChange={() => togglePreference("games", community.slug)}
-                      type="checkbox"
-                    />
-                    <span>{community.name}</span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            <fieldset>
-              <legend>Topics</legend>
-              <div className="preference-grid compact">
-                {feedCategories.map((category) => (
-                  <label key={category}>
-                    <input
-                      checked={draftPreferences.categories.includes(category)}
-                      onChange={() => togglePreference("categories", category)}
-                      type="checkbox"
-                    />
-                    <span>{category}</span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            <p className="preference-hint">Leave a section empty to include everything.</p>
-            <button className="primary" onClick={savePreferences} type="button">
-              Save preferences
-            </button>
-          </section>
-        </div>
-      )}
     </div>
   );
 }
