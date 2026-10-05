@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { betterAuth } from 'better-auth';
+import { APIError } from 'better-auth/api';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { PrismaClient } from '../generated/prisma/client';
 import { createPrismaSessionLoader } from './session-loader';
@@ -33,6 +34,44 @@ export const auth = betterAuth({
 
   emailAndPassword: {
     enabled: true,
+  },
+
+  // Ending current sessions on a ban/suspend only covers logins that already exist - without this,
+  // the same account signs in again a moment later with a fresh session. Catches every sign-in path
+  // (email/password now, any provider added later) at the one place they all create a session.
+  databaseHooks: {
+    session: {
+      create: {
+        before: async (session) => {
+          const user = await prisma.user.findUnique({
+            where: { id: session.userId },
+            select: { status: true },
+          });
+
+          if (user?.status !== 'ACTIVE') {
+            throw new APIError('FORBIDDEN', {
+              message: 'This account is not active',
+            });
+          }
+
+          return { data: session };
+        },
+      },
+    },
+  },
+
+  // AdminGuard already re-checks role live against the DB for every guarded request - this is
+  // only so the frontend can decide whether to show admin nav/pages at all. input: false so a
+  // client can never set its own role/status through a profile update.
+  user: {
+    additionalFields: {
+      role: { type: 'string', input: false },
+      status: { type: 'string', input: false },
+      // input: false - only UsersController's dedicated onboarding endpoint may set these,
+      // never better-auth's own generic user-update path.
+      username: { type: 'string', required: false, input: false },
+      onboarded: { type: 'boolean', input: false },
+    },
   },
 
   // Logins are looked up in this server-side cache, not the database, and deleting one takes effect

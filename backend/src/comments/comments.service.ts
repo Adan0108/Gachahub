@@ -4,44 +4,48 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { CommentsRepository } from './comments.repository';
-import { FollowsService } from '../follows/follows.service';
+import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import { UserInterestService } from '../recommendation/user-interest.service';
+import { resolvePagination, toPaginated } from '../common/utils/paginated';
 import { EventPublisherPort } from '../domain-events/event-publisher.port';
 import { PrismaService } from '../prisma/prisma.service';
+import { MentionsService } from '../mentions/mentions.service';
 
 @Injectable()
 export class CommentsService {
   constructor(
     private readonly commentsRepository: CommentsRepository,
-    private readonly followsService: FollowsService,
+    private readonly postVisibility: PostVisibilityService,
     private readonly userInterestService: UserInterestService,
     private readonly eventPublisher: EventPublisherPort,
     private readonly prisma: PrismaService,
+    private readonly mentions: MentionsService,
   ) {}
 
   async findByPost(postId: string, query: PaginationQueryDto, userId?: string) {
     await this.ensurePostCanBeViewed(postId, userId);
 
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const { page, limit } = resolvePagination(query);
 
     const result = await this.commentsRepository.findByPostId(postId, {
       page,
       limit,
     });
 
-    return {
-      items: result.items.map((comment) => this.formatComment(comment)),
-      meta: {
-        page,
-        limit,
-        total: result.total,
-        totalPages: Math.ceil(result.total / limit),
-      },
-    };
+    const mentioned = await this.commentsRepository.findMentionedUsernames(
+      result.items.map((comment) => comment.id),
+    );
+
+    return toPaginated(
+      result.items.map((comment) =>
+        this.formatComment(comment, mentioned.get(comment.id)),
+      ),
+      { page, limit, total: result.total },
+    );
   }
 
   async findReplies(
@@ -62,33 +66,39 @@ export class CommentsService {
 
     await this.ensurePostCanBeViewed(parent.postId, userId);
 
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const { page, limit } = resolvePagination(query);
 
     const result = await this.commentsRepository.findReplies(commentId, {
       page,
       limit,
     });
 
-    return {
-      items: result.items.map((comment) => this.formatComment(comment)),
-      meta: {
-        page,
-        limit,
-        total: result.total,
-        totalPages: Math.ceil(result.total / limit),
-      },
-    };
+    const mentioned = await this.commentsRepository.findMentionedUsernames(
+      result.items.map((comment) => comment.id),
+    );
+
+    return toPaginated(
+      result.items.map((comment) =>
+        this.formatComment(comment, mentioned.get(comment.id)),
+      ),
+      { page, limit, total: result.total },
+    );
   }
 
   async create(postId: string, dto: CreateCommentDto, userId: string) {
     const post = await this.ensurePostCanBeCommentedOn(postId, userId);
+    const content = dto.content.trim();
+    const mentionTargetIds = await this.resolveMentionTargets(
+      content,
+      post,
+      userId,
+    );
 
     const comment = await this.prisma.$transaction(async (transaction) => {
       const createdComment = await this.commentsRepository.create(transaction, {
         postId,
         authorId: userId,
-        content: dto.content.trim(),
+        content,
       });
 
       await this.eventPublisher.publish(
@@ -103,6 +113,16 @@ export class CommentsService {
             parentCommentId: null,
             parentCommentAuthorId: null,
           },
+        },
+        transaction,
+      );
+
+      await this.mentions.publishMentions(
+        {
+          targetIds: mentionTargetIds,
+          actorId: userId,
+          entityType: 'COMMENT',
+          entityId: createdComment.id,
         },
         transaction,
       );
@@ -122,7 +142,7 @@ export class CommentsService {
   async reply(commentId: string, dto: CreateCommentDto, userId: string) {
     const parent = await this.commentsRepository.findById(commentId);
 
-    if (!parent || parent.deletedAt) {
+    if (!parent || parent.deletedAt || parent.status === 'HIDDEN') {
       throw new NotFoundException('Comment thread not found');
     }
 
@@ -131,13 +151,19 @@ export class CommentsService {
     }
 
     const post = await this.ensurePostCanBeCommentedOn(parent.postId, userId);
+    const content = dto.content.trim();
+    const mentionTargetIds = await this.resolveMentionTargets(
+      content,
+      post,
+      userId,
+    );
 
     const reply = await this.prisma.$transaction(async (transaction) => {
       const createdReply = await this.commentsRepository.create(transaction, {
         postId: parent.postId,
         authorId: userId,
         parentId: parent.id,
-        content: dto.content.trim(),
+        content,
       });
 
       await this.eventPublisher.publish(
@@ -152,6 +178,16 @@ export class CommentsService {
             parentCommentId: parent.id,
             parentCommentAuthorId: parent.authorId,
           },
+        },
+        transaction,
+      );
+
+      await this.mentions.publishMentions(
+        {
+          targetIds: mentionTargetIds,
+          actorId: userId,
+          entityType: 'COMMENT',
+          entityId: createdReply.id,
         },
         transaction,
       );
@@ -177,6 +213,10 @@ export class CommentsService {
 
     if (comment.authorId !== userId) {
       throw new ForbiddenException('You can only update your own comment');
+    }
+
+    if (comment.status === 'HIDDEN') {
+      throw new ForbiddenException('This comment was hidden by a moderator');
     }
 
     const updatedComment = await this.commentsRepository.update(
@@ -229,33 +269,17 @@ export class CommentsService {
   private async ensurePostCanBeViewed(postId: string, userId?: string) {
     const post = await this.commentsRepository.findPostById(postId);
 
-    if (!post || post.deletedAt || post.status !== 'PUBLISHED') {
+    if (!post) {
       throw new NotFoundException('Post not found');
     }
 
-    // Anonymous và logged-in đều đọc PUBLIC được.
-    if (post.visibility === 'PUBLIC') {
-      return post;
+    const viewable = await this.postVisibility.canView(post, userId);
+
+    if (!viewable) {
+      throw new NotFoundException('Post not found');
     }
 
-    // FOLLOWERS_ONLY cần đăng nhập.
-    if (post.visibility === 'FOLLOWERS_ONLY' && userId) {
-      // Author luôn đọc được post của mình.
-      if (post.authorId === userId) {
-        return post;
-      }
-
-      const followStatus = await this.followsService.isFollowing(
-        userId,
-        post.authorId,
-      );
-
-      if (followStatus.following) {
-        return post;
-      }
-    }
-
-    throw new NotFoundException('Post not found');
+    return post;
   }
 
   /**
@@ -263,6 +287,19 @@ export class CommentsService {
    * Later this can also check locked posts, moderation,
    * follower-only visibility, blocked users, etc.
    */
+  /** Resolved before the transaction opens: visibility checks use their own connection. */
+  private resolveMentionTargets(
+    content: string,
+    post: Parameters<PostVisibilityService['canView']>[0],
+    actorId: string,
+  ) {
+    return this.mentions.resolveTargets({
+      text: content,
+      actorId,
+      canView: (mentionedId) => this.postVisibility.canView(post, mentionedId),
+    });
+  }
+
   private async ensurePostCanBeCommentedOn(postId: string, userId: string) {
     return this.ensurePostCanBeViewed(postId, userId);
   }
@@ -274,6 +311,7 @@ export class CommentsService {
       authorId: string;
       parentId: string | null;
       content: string;
+      status: string;
       createdAt: Date;
       updatedAt: Date;
       deletedAt: Date | null;
@@ -286,17 +324,22 @@ export class CommentsService {
         replies: number;
       };
     },
-  >(comment: T) {
+  >(comment: T, mentions: string[] = []) {
     const { _count, ...rest } = comment;
 
     return {
       ...rest,
 
-      // Preserve the thread when a parent comment is deleted,
+      // Preserve the thread when a parent comment is deleted or hidden,
       // but do not expose its old content.
-      content: comment.deletedAt ? null : comment.content,
+      content:
+        comment.deletedAt || comment.status === 'HIDDEN'
+          ? null
+          : comment.content,
 
       replyCount: _count?.replies ?? 0,
+
+      mentions,
     };
   }
 }

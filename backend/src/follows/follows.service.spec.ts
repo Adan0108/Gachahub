@@ -22,6 +22,7 @@ describe('FollowsService', () => {
 
   const eventPublisher = {
     publish: jest.fn(),
+    publishMany: jest.fn(),
   };
 
   const transaction = {} as Prisma.TransactionClient;

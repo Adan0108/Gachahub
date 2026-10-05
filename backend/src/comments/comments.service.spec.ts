@@ -3,9 +3,11 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import type { CommentsRepository } from './comments.repository';
 import type { FollowsService } from '../follows/follows.service';
+import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import type { UserInterestService } from '../recommendation/user-interest.service';
 import { EventPublisherPort } from '../domain-events/event-publisher.port';
 import { PrismaService } from '../prisma/prisma.service';
+import type { MentionsService } from '../mentions/mentions.service';
 
 /*
  * These dependencies are mocked at module level so Jest does not load their
@@ -31,6 +33,7 @@ describe('CommentsService', () => {
     findById: jest.fn(),
     findByPostId: jest.fn(),
     findReplies: jest.fn(),
+    findMentionedUsernames: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     softDelete: jest.fn(),
@@ -46,6 +49,12 @@ describe('CommentsService', () => {
 
   const eventPublisher = {
     publish: jest.fn(),
+    publishMany: jest.fn(),
+  };
+
+  const mentions = {
+    resolveTargets: jest.fn(),
+    publishMentions: jest.fn(),
   };
 
   const transaction = {} as Prisma.TransactionClient;
@@ -58,6 +67,8 @@ describe('CommentsService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mentions.resolveTargets.mockResolvedValue(['mentioned-1']);
+    commentsRepository.findMentionedUsernames.mockResolvedValue(new Map());
 
     prisma.$transaction.mockImplementation(
       async (
@@ -67,10 +78,11 @@ describe('CommentsService', () => {
 
     service = new CommentsService(
       commentsRepository as unknown as CommentsRepository,
-      followsService as unknown as FollowsService,
+      new PostVisibilityService(followsService as unknown as FollowsService),
       userInterestService as unknown as UserInterestService,
       eventPublisher as EventPublisherPort,
       prisma as unknown as PrismaService,
+      mentions as unknown as MentionsService,
     );
   });
 
@@ -131,6 +143,46 @@ describe('CommentsService', () => {
         total: 1,
         totalPages: 1,
       });
+    });
+
+    it('attaches the handles each comment actually mentioned', async () => {
+      commentsRepository.findPostById.mockResolvedValue({
+        id: 'post-1',
+        authorId: 'author-1',
+        status: 'PUBLISHED',
+        visibility: 'PUBLIC',
+        deletedAt: null,
+      });
+      const row = (id: string) => ({
+        id,
+        postId: 'post-1',
+        authorId: 'user-1',
+        parentId: null,
+        content: 'hi @iamme',
+        status: 'VISIBLE',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+        author: { id: 'user-1', name: 'User 1', image: null },
+      });
+      commentsRepository.findByPostId.mockResolvedValue({
+        items: [row('c1'), row('c2')],
+        total: 2,
+      });
+      commentsRepository.findMentionedUsernames.mockResolvedValue(
+        new Map([['c1', ['iamme']]]),
+      );
+
+      const result = await service.findByPost('post-1', {});
+
+      expect(commentsRepository.findMentionedUsernames).toHaveBeenCalledWith([
+        'c1',
+        'c2',
+      ]);
+      expect(result.items.map((item) => item.mentions)).toEqual([
+        ['iamme'],
+        [],
+      ]);
     });
 
     it('uses provided pagination', async () => {
@@ -381,6 +433,19 @@ describe('CommentsService', () => {
             parentCommentId: null,
             parentCommentAuthorId: null,
           },
+        },
+        transaction,
+      );
+
+      expect(mentions.resolveTargets).toHaveBeenCalledWith(
+        expect.objectContaining({ text: 'Nice post', actorId: 'user-1' }),
+      );
+      expect(mentions.publishMentions).toHaveBeenCalledWith(
+        {
+          targetIds: ['mentioned-1'],
+          actorId: 'user-1',
+          entityType: 'COMMENT',
+          entityId: 'comment-1',
         },
         transaction,
       );

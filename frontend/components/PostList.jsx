@@ -2,19 +2,37 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FiCornerUpLeft, FiHeart, FiMessageCircle, FiSend, FiUserPlus } from "react-icons/fi";
+import {
+  FiCornerUpLeft,
+  FiEye,
+  FiHeart,
+  FiMessageCircle,
+  FiSend,
+  FiUserPlus,
+  FiX,
+} from "react-icons/fi";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { api } from "../lib/api";
 import { queries, queryKeys } from "../lib/queries";
+import { AvatarFace } from "./AvatarFace";
 import { artTones, glyph } from "./constants";
+import { MentionInput } from "./MentionInput";
+import { MentionText } from "./MentionText";
 
 function relativeTime(value) {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.valueOf())) return "Recently";
   const hours = Math.max(1, Math.floor((Date.now() - date.valueOf()) / 3_600_000));
   return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
+}
+
+function videoMimeType(format) {
+  if (!format) return undefined;
+  const normalizedFormat = format.toLowerCase().replace(/^\./, "");
+  return normalizedFormat === "mov" ? "video/quicktime" : `video/${normalizedFormat}`;
 }
 
 function CommentItem({ comment }) {
@@ -38,6 +56,11 @@ function CommentItem({ comment }) {
     },
   });
 
+  const submitReply = () => {
+    if (!reply.trim() || createReply.isPending) return;
+    createReply.mutate();
+  };
+
   const startReply = () => {
     if (!isAuthenticated) {
       router.push("/login");
@@ -49,10 +72,17 @@ function CommentItem({ comment }) {
   return (
     <article className="post-comment">
       <div className="post-comment-head">
-        <b>{comment.author?.name || "GachaHub user"}</b>
+        <span className="post-comment-author">
+          <b>{comment.author?.name || "GachaHub user"}</b>
+          {comment.author?.username && (
+            <span className="post-comment-handle">@{comment.author.username}</span>
+          )}
+        </span>
         <small>{relativeTime(comment.createdAt)}</small>
       </div>
-      <p>{comment.content}</p>
+      <p>
+        <MentionText content={comment.content} usernames={comment.mentions} />
+      </p>
       <div className="post-comment-actions">
         <button onClick={startReply} type="button">
           <FiCornerUpLeft /> Reply
@@ -68,14 +98,19 @@ function CommentItem({ comment }) {
           className="post-reply-form"
           onSubmit={(event) => {
             event.preventDefault();
-            if (reply.trim()) createReply.mutate();
+            submitReply();
           }}
         >
-          <input
+          <MentionInput
             aria-label={`Reply to ${comment.author?.name || "comment"}`}
             maxLength={2000}
-            onChange={(event) => setReply(event.target.value)}
-            placeholder="Write a reply..."
+            onChange={setReply}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+              event.preventDefault();
+              submitReply();
+            }}
+            placeholder="Write a reply... use @handle to mention"
             value={reply}
           />
           <button disabled={!reply.trim() || createReply.isPending} type="submit">
@@ -92,8 +127,15 @@ function CommentItem({ comment }) {
           {replies.isError && <small className="post-action-error">Could not load replies.</small>}
           {(replies.data?.items || []).map((item) => (
             <div className="post-reply" key={item.id}>
-              <b>{item.author?.name || "GachaHub user"}</b>
-              <p>{item.content}</p>
+              <span className="post-comment-author">
+                <b>{item.author?.name || "GachaHub user"}</b>
+                {item.author?.username && (
+                  <span className="post-comment-handle">@{item.author.username}</span>
+                )}
+              </span>
+              <p>
+                <MentionText content={item.content} usernames={item.mentions} />
+              </p>
             </div>
           ))}
         </div>
@@ -102,19 +144,56 @@ function CommentItem({ comment }) {
   );
 }
 
-function PostItem({ post, index }) {
+function PostMedia({ media, title, onOpenImage }) {
+  if (!media.length) return null;
+
+  return (
+    <div className={`post-media-grid media-count-${Math.min(media.length, 4)}`}>
+      {media.map((item) =>
+        item.mediaType === "VIDEO" ? (
+          <video controls key={item.id || item.url} preload="metadata">
+            <source src={item.url} type={videoMimeType(item.format)} />
+            Your browser does not support this video.
+          </video>
+        ) : (
+          <button
+            aria-label={`Enlarge ${item.altText || `${title} attachment`}`}
+            className="post-image-button"
+            key={item.id || item.url}
+            onClick={() => onOpenImage(item)}
+            type="button"
+          >
+            <img
+              alt={item.altText || `${title} attachment`}
+              height={item.height || undefined}
+              loading="lazy"
+              src={item.url}
+              width={item.width || undefined}
+            />
+          </button>
+        ),
+      )}
+    </div>
+  );
+}
+
+export function PostItem({ post, index = 0, detail = false, variant = "compact" }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, isAuthenticated } = useCurrentUser();
-  const [threadOpen, setThreadOpen] = useState(false);
+  const [threadOpen, setThreadOpen] = useState(detail);
   const [comment, setComment] = useState("");
   const [likeOverride, setLikeOverride] = useState(null);
+  const [spoilerRevealed, setSpoilerRevealed] = useState(false);
+  const [expandedImage, setExpandedImage] = useState(null);
+  const media = Array.isArray(post.media) ? post.media : [];
+  const isFeed = variant === "feed";
   const liked = likeOverride?.liked ?? Boolean(post.likedByCurrentUser);
   const likeCount = likeOverride?.likeCount ?? Number(post.likeCount || 0);
   const canFollow = Boolean(post.authorId && post.authorId !== user?.id);
   const followStatus = useQuery({
     ...queries.followStatus(post.authorId),
-    enabled: isAuthenticated && canFollow,
+    enabled: detail && isAuthenticated && canFollow,
   });
   const comments = useQuery({
     ...queries.comments(post.id),
@@ -140,7 +219,10 @@ function PostItem({ post, index }) {
     onError: (_error, _variables, previous) => {
       setLikeOverride(previous);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["posts"] }),
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["posts"] });
+      setLikeOverride(null);
+    },
   });
 
   const toggleFollow = useMutation({
@@ -160,11 +242,36 @@ function PostItem({ post, index }) {
     },
   });
 
+  useEffect(() => {
+    if (!expandedImage) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setExpandedImage(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [expandedImage]);
+
   return (
-    <article className="post">
-      <span className="rank">{index + 1}</span>
-      <div className={`post-thumb art-${artTones[index % artTones.length]}`}>{glyph.sparkle}</div>
-      <Link className="post-content-link" href={`/explore?q=${encodeURIComponent(post.title)}`}>
+    <article
+      className={`post ${detail ? "post-detail-card" : ""} ${isFeed ? "post-feed-card" : ""}`}
+    >
+      {!detail && !isFeed && <span className="rank">{index + 1}</span>}
+      <div className={`post-thumb art-${artTones[index % artTones.length]}`}>
+        {isFeed ? (
+          <AvatarFace
+            fallback={(post.author || "G").charAt(0).toUpperCase()}
+            image={post.authorImage}
+          />
+        ) : (
+          glyph.sparkle
+        )}
+      </div>
+      <Link className="post-content-link" href={`/post/${encodeURIComponent(post.id)}`}>
         <b>{post.title}</b>
         <small>
           {post.gameName ? `${post.gameName} - ` : ""}
@@ -172,6 +279,31 @@ function PostItem({ post, index }) {
         </small>
       </Link>
       <span className="tag">{post.tag}</span>
+      {(detail || isFeed) && (post.content || media.length > 0) && (
+        <div className={`post-body ${detail ? "full" : ""}`}>
+          {post.content && <p>{post.content}</p>}
+          {media.length > 0 && (
+            <div
+              className={`post-media-wrap ${post.isSpoiler && !spoilerRevealed ? "hidden" : ""}`}
+            >
+              <PostMedia
+                media={detail || isFeed ? media : media.slice(0, 4)}
+                onOpenImage={setExpandedImage}
+                title={post.title}
+              />
+              {post.isSpoiler && !spoilerRevealed && (
+                <button
+                  className="post-spoiler-cover"
+                  onClick={() => setSpoilerRevealed(true)}
+                  type="button"
+                >
+                  <FiEye /> Reveal spoiler
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <div className="post-social" aria-label={`Actions for ${post.title}`}>
         <button
           aria-pressed={liked}
@@ -189,7 +321,7 @@ function PostItem({ post, index }) {
         >
           <FiMessageCircle /> {post.commentCount || 0}
         </button>
-        {canFollow && (
+        {detail && canFollow && (
           <button
             aria-pressed={Boolean(followStatus.data?.following)}
             className={followStatus.data?.following ? "active" : ""}
@@ -224,11 +356,11 @@ function PostItem({ post, index }) {
                 if (comment.trim()) createComment.mutate();
               }}
             >
-              <input
+              <MentionInput
                 aria-label={`Comment on ${post.title}`}
                 maxLength={2000}
-                onChange={(event) => setComment(event.target.value)}
-                placeholder="Add a comment..."
+                onChange={setComment}
+                placeholder="Add a comment... use @handle to mention"
                 value={comment}
               />
               <button disabled={!comment.trim() || createComment.isPending} type="submit">
@@ -245,15 +377,40 @@ function PostItem({ post, index }) {
           )}
         </section>
       )}
+      {expandedImage &&
+        createPortal(
+          <div
+            aria-label={`${post.title} image preview`}
+            aria-modal="true"
+            className="post-lightbox"
+            onClick={() => setExpandedImage(null)}
+            role="dialog"
+          >
+            <button
+              aria-label="Close image preview"
+              className="post-lightbox-close"
+              onClick={() => setExpandedImage(null)}
+              type="button"
+            >
+              <FiX />
+            </button>
+            <img
+              alt={expandedImage.altText || `${post.title} attachment`}
+              onClick={(event) => event.stopPropagation()}
+              src={expandedImage.url}
+            />
+          </div>,
+          document.body,
+        )}
     </article>
   );
 }
 
-export function PostList({ posts }) {
+export function PostList({ posts, variant = "compact" }) {
   return (
-    <div className="post-list">
+    <div className={`post-list post-list-${variant}`}>
       {posts.map((post, index) => (
-        <PostItem index={index} key={post.id} post={post} />
+        <PostItem index={index} key={post.id} post={post} variant={variant} />
       ))}
     </div>
   );

@@ -27,4 +27,10 @@ export abstract class EventPublisherPort {
     input: PublishDomainEventInput<T>,
     transaction: Prisma.TransactionClient,
   ): Promise<void>;
+
+  /** Batched version of `publish` for a fan-out (e.g. one event per group member) - avoids N sequential inserts in one transaction. */
+  abstract publishMany<T extends DomainEventType>(
+    inputs: ReadonlyArray<PublishDomainEventInput<T>>,
+    transaction: Prisma.TransactionClient,
+  ): Promise<void>;
 }

@@ -7,6 +7,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ChatMessageContentType, Prisma } from '../generated/prisma/client';
+import { EventPublisherPort } from '../domain-events/event-publisher.port';
+import { PrismaService } from '../prisma/prisma.service';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import { MESSAGE_ENCRYPTION_PORT } from './ports/message-encryption.port';
 import { ChatRepository } from './chat.repository';
@@ -35,6 +37,8 @@ export class ChatMessagingService {
     private readonly chatDelivery: ChatDeliveryPort,
     private readonly chatMessageRateLimiter: ChatMessageRateLimiterService,
     private readonly chatDevicesService: ChatDevicesService,
+    private readonly eventPublisher: EventPublisherPort,
+    private readonly prisma: PrismaService,
   ) {}
 
   /** Creates or reuses a direct convo and sends a first encrypted message; clientMessageId dedupes retries, needs an active linked device. New convos start PENDING unless the users mutually follow (then ACTIVE). */
@@ -140,20 +144,42 @@ export class ChatMessagingService {
     >;
 
     try {
-      result = await this.chatRepository.createDirectConversationWithMessage({
-        senderId,
-        recipientUserId: dto.recipientUserId,
-        userIdA,
-        userIdB,
-        recipientState,
-        ciphertext: preparedPayload.ciphertext,
-        encryptionMeta: preparedPayload.encryptionMeta as
-          | Prisma.InputJsonValue
-          | undefined,
-        contentType: this.resolveContentType(dto.message.contentType),
-        clientMessageId: dto.message.clientMessageId,
-        replyToId: dto.message.replyToId,
-        media,
+      result = await this.prisma.$transaction(async (tx) => {
+        const created =
+          await this.chatRepository.createDirectConversationWithMessage(tx, {
+            senderId,
+            recipientUserId: dto.recipientUserId,
+            userIdA,
+            userIdB,
+            recipientState,
+            ciphertext: preparedPayload.ciphertext,
+            encryptionMeta: preparedPayload.encryptionMeta as
+              | Prisma.InputJsonValue
+              | undefined,
+            contentType: this.resolveContentType(dto.message.contentType),
+            clientMessageId: dto.message.clientMessageId,
+            replyToId: dto.message.replyToId,
+            media,
+          });
+
+        await this.eventPublisher.publish(
+          {
+            type: 'chat.message.sent',
+            aggregateId: created.conversation.id,
+            payload: {
+              messageId: created.message.id,
+              conversationId: created.conversation.id,
+              senderId,
+              // A brand-new conversation's first message can never be a reply (checked above).
+              replyToMessageId: null,
+              replyToSenderId: null,
+              recipientUserIds: shouldNotify ? [dto.recipientUserId] : [],
+            },
+          },
+          tx,
+        );
+
+        return created;
       });
     } catch (error) {
       const isPairConflict = this.isDuplicateDirectPairConflict(error);
@@ -317,7 +343,7 @@ export class ChatMessagingService {
       throw new ForbiddenException('Recipient is not accepting messages');
     }
 
-    await this.chatAccessService.assertValidReplyTarget(
+    const replyTarget = await this.chatAccessService.assertValidReplyTarget(
       conversationId,
       dto.message.replyToId,
     );
@@ -361,46 +387,12 @@ export class ChatMessagingService {
       (participant) => participant.userId !== senderId,
     );
 
-    // Independent of the message row; fired early so it overlaps the insert.
-    const notifiableFlagsPromise = Promise.all(
+    // Resolved before opening the transaction below - awaiting it from inside would hold that connection open.
+    const notifiableFlags = await Promise.all(
       recipientParticipants.map((participant) =>
         this.chatAccessService.isRecipientNotifiable(senderId, participant),
       ),
     );
-
-    let message: Awaited<ReturnType<typeof this.chatRepository.createMessage>>;
-    try {
-      message = await this.chatRepository.createMessage({
-        conversationId,
-        senderId,
-        participantUserIds: deliverableParticipants.map(
-          (participant) => participant.userId,
-        ),
-        ciphertext: payload.ciphertext,
-        encryptionMeta: payload.encryptionMeta as
-          | Prisma.InputJsonValue
-          | undefined,
-        contentType: this.resolveContentType(dto.message.contentType),
-        clientMessageId: dto.message.clientMessageId,
-        replyToId: dto.message.replyToId,
-        media,
-      });
-    } catch (error) {
-      if (!this.isDuplicateMessageConflict(error)) {
-        throw error;
-      }
-
-      // Unneeded for a duplicate; acknowledged so the eager promise cannot become an unhandled rejection.
-      notifiableFlagsPromise.catch(() => undefined);
-
-      return this.recoverDuplicateMessage(
-        senderId,
-        conversationId,
-        dto.message.clientMessageId,
-      );
-    }
-
-    const notifiableFlags = await notifiableFlagsPromise;
 
     const notifiableRecipientIds = recipientParticipants
       .filter((_, index) => notifiableFlags[index])
@@ -409,6 +401,72 @@ export class ChatMessagingService {
     const silentRecipientIds = recipientParticipants
       .filter((_, index) => !notifiableFlags[index])
       .map((participant) => participant.userId);
+
+    let message: Awaited<ReturnType<typeof this.chatRepository.createMessage>>;
+    try {
+      message = await this.prisma.$transaction(async (tx) => {
+        // Authoritative re-check under the same lock a membership change takes:
+        // the participant list read above, outside this transaction, can be
+        // stale by the time this insert runs.
+        const freshParticipants = await this.chatRepository.lockAndFindParticipants(
+          tx,
+          conversationId,
+        );
+        const freshSender = freshParticipants.find(
+          (participant) => participant.userId === senderId,
+        );
+
+        if (!freshSender || freshSender.state !== 'ACTIVE') {
+          throw new ForbiddenException('You cannot send messages here');
+        }
+
+        this.chatAccessService.assertNoMembershipChangePending(freshParticipants);
+
+        const created = await this.chatRepository.createMessage(tx, {
+          conversationId,
+          senderId,
+          participantUserIds: deliverableParticipants.map(
+            (participant) => participant.userId,
+          ),
+          ciphertext: payload.ciphertext,
+          encryptionMeta: payload.encryptionMeta as
+            | Prisma.InputJsonValue
+            | undefined,
+          contentType: this.resolveContentType(dto.message.contentType),
+          clientMessageId: dto.message.clientMessageId,
+          replyToId: dto.message.replyToId,
+          media,
+        });
+
+        await this.eventPublisher.publish(
+          {
+            type: 'chat.message.sent',
+            aggregateId: conversationId,
+            payload: {
+              messageId: created.id,
+              conversationId,
+              senderId,
+              replyToMessageId: dto.message.replyToId ?? null,
+              replyToSenderId: replyTarget?.senderId ?? null,
+              recipientUserIds: notifiableRecipientIds,
+            },
+          },
+          tx,
+        );
+
+        return created;
+      });
+    } catch (error) {
+      if (!this.isDuplicateMessageConflict(error)) {
+        throw error;
+      }
+
+      return this.recoverDuplicateMessage(
+        senderId,
+        conversationId,
+        dto.message.clientMessageId,
+      );
+    }
 
     const messagePayload = {
       conversationId,

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { FiCompass, FiSettings } from "react-icons/fi";
@@ -8,6 +8,7 @@ import { CommunityGrid } from "../../components/CommunityGrid";
 import { PostList } from "../../components/PostList";
 import { QueryNotice } from "../../components/QueryNotice";
 import { SectionTitle } from "../../components/SectionTitle";
+import { useToast } from "../../hooks/useToast";
 import { api } from "../../lib/api";
 import { fallbacks, queries } from "../../lib/queries";
 import {
@@ -20,17 +21,16 @@ function ExploreContent() {
   const searchParams = useSearchParams();
   const search = searchParams.get("q") || "";
   const [activeFilter, setActiveFilter] = useState("All");
-  const [notice, setNotice] = useState("");
+  const { notice, showNotice } = useToast();
   const [smartGames, setSmartGames] = useState([]);
   const [smartMode, setSmartMode] = useState(false);
-  const noticeTimerRef = useRef(null);
   const games = useQuery(queries.games(search));
   const postsQuery = useQuery(queries.posts(search));
   const canUseLocalSearch = api.usingMocks;
   const gameData =
     games.data ||
     (canUseLocalSearch || smartMode ? fallbacks.games(search) : { items: [], meta: {} });
-  const posts = postsQuery.data?.items || fallbacks.posts({ search });
+  const posts = postsQuery.data?.items || (canUseLocalSearch ? fallbacks.posts({ search }) : []);
   const filteredPosts = posts.filter((post) => {
     if (smartGames.length && !smartGames.includes(post.gameSlug)) return false;
     if (activeFilter === "All") return true;
@@ -66,20 +66,16 @@ function ExploreContent() {
       Teams: "Teams",
     };
     setActiveFilter(filterByCategory[preferredCategory] || "All");
-    window.clearTimeout(noticeTimerRef.current);
-    setNotice(
+    showNotice(
       preferences.games.length || preferences.categories.length
         ? "Smart recommendations applied from your feed preferences"
         : "Choose feed preferences on Home for tailored recommendations",
     );
-    noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
   };
 
   const updateFilter = (filter) => {
     setActiveFilter(filter);
   };
-
-  useEffect(() => () => window.clearTimeout(noticeTimerRef.current), []);
 
   return (
     <div className="page explore-page">

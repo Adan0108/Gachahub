@@ -88,6 +88,14 @@ export class ChatTypingGateway implements OnGatewayDisconnect {
     payload: TypingPayload,
     event: TypingEventName,
   ) {
+    if (!socket.data.userId) {
+      // This handler shares WebsocketGateway's socket but not its connection lifecycle - a
+      // typing:start sent right after connecting can arrive before that gateway's async auth has
+      // set socket.data.userId. Wait for it instead of silently dropping what looks like, but
+      // isn't, an unauthenticated event.
+      await socket.data.authReady;
+    }
+
     const userId = socket.data.userId;
 
     if (

@@ -85,6 +85,8 @@ describe('createDomainEvent', () => {
         conversationId: 'conversation-1',
         senderId: 'user-1',
         replyToMessageId: null,
+        replyToSenderId: null,
+        recipientUserIds: ['user-2'],
       },
     });
 
@@ -93,6 +95,8 @@ describe('createDomainEvent', () => {
       conversationId: 'conversation-1',
       senderId: 'user-1',
       replyToMessageId: null,
+      replyToSenderId: null,
+      recipientUserIds: ['user-2'],
     });
 
     expect('ciphertext' in event.payload).toBe(false);

@@ -24,6 +24,9 @@ jest.mock('../blocks/blocks.service', () => ({
 jest.mock('../media/media.service', () => ({
   MediaService: class {},
 }));
+jest.mock('../prisma/prisma.service', () => ({
+  PrismaService: class {},
+}));
 // real Prisma namespace, not a stub - the code under test checks `instanceof`
 // Prisma.PrismaClientKnownRequestError, which only works against the same class
 function loadActualPrisma() {
@@ -103,11 +106,25 @@ describe('ChatGroupService', () => {
     removeMembers: jest.fn(),
   };
 
+  const eventPublisher = {
+    publish: jest.fn(),
+    publishMany: jest.fn(),
+  };
+
+  const prisma = {
+    $transaction: jest.fn((callback: (tx: unknown) => Promise<unknown>) =>
+      callback('fake-tx'),
+    ),
+  };
+
   let chatAccessService: ChatAccessService;
   let service: ChatGroupService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.$transaction.mockImplementation(
+      (callback: (tx: unknown) => Promise<unknown>) => callback('fake-tx'),
+    );
     chatAccessService = new ChatAccessService(
       repository as any,
       followsService as any,
@@ -118,6 +135,8 @@ describe('ChatGroupService', () => {
       repository as any,
       chatAccessService,
       membershipService as any,
+      eventPublisher,
+      prisma as any,
     );
     blocksService.getBlockedIdsAmong.mockResolvedValue(new Set());
     blocksService.isBlocked.mockResolvedValue(false);
@@ -182,15 +201,18 @@ describe('ChatGroupService', () => {
         'user-2',
         'user-3',
       ]);
-      expect(repository.createGroupConversation).toHaveBeenCalledWith({
-        creatorId: 'user-1',
-        title: 'Team Chat',
-        photoUrl: 'https://cdn.example.com/photo.png',
-        members: [
-          { userId: 'user-2', state: 'PENDING' },
-          { userId: 'user-3', state: 'PENDING' },
-        ],
-      });
+      expect(repository.createGroupConversation).toHaveBeenCalledWith(
+        'fake-tx',
+        {
+          creatorId: 'user-1',
+          title: 'Team Chat',
+          photoUrl: 'https://cdn.example.com/photo.png',
+          members: [
+            { userId: 'user-2', state: 'PENDING' },
+            { userId: 'user-3', state: 'PENDING' },
+          ],
+        },
+      );
     });
 
     it('lets mutual followers join directly and asks everyone else to accept an invite', async () => {
@@ -215,6 +237,7 @@ describe('ChatGroupService', () => {
       });
 
       expect(repository.createGroupConversation).toHaveBeenCalledWith(
+        'fake-tx',
         expect.objectContaining({
           members: [
             { userId: 'user-2', state: 'ACTIVE' },
@@ -274,9 +297,51 @@ describe('ChatGroupService', () => {
       });
 
       expect(repository.createGroupConversation).toHaveBeenCalledWith(
+        'fake-tx',
         expect.objectContaining({
           members: [{ userId: 'user-2', state: 'PENDING' }],
         }),
+      );
+    });
+
+    it('publishes one chat.participant.added event per new member via publishMany, in the same transaction as the write', async () => {
+      repository.findActiveUsersByIds.mockResolvedValue([
+        { id: 'user-2' },
+        { id: 'user-3' },
+      ]);
+      repository.createGroupConversation.mockResolvedValue({
+        id: 'conversation-1',
+      });
+
+      await service.createGroupChat('user-1', {
+        title: 'Team Chat',
+        memberUserIds: ['user-2', 'user-3'],
+      });
+
+      expect(eventPublisher.publishMany).toHaveBeenCalledWith(
+        [
+          {
+            type: 'chat.participant.added',
+            aggregateId: 'conversation-1',
+            payload: {
+              conversationId: 'conversation-1',
+              addedUserId: 'user-2',
+              actorId: 'user-1',
+              state: 'PENDING',
+            },
+          },
+          {
+            type: 'chat.participant.added',
+            aggregateId: 'conversation-1',
+            payload: {
+              conversationId: 'conversation-1',
+              addedUserId: 'user-3',
+              actorId: 'user-1',
+              state: 'PENDING',
+            },
+          },
+        ],
+        'fake-tx',
       );
     });
   });
@@ -407,6 +472,7 @@ describe('ChatGroupService', () => {
           { userId: 'user-2', entitlement: 'INVITE' },
           { userId: 'user-3', entitlement: 'INVITE' },
         ],
+        'user-1',
       );
     });
 
@@ -434,6 +500,7 @@ describe('ChatGroupService', () => {
           { userId: 'user-2', entitlement: 'INVITE' },
           { userId: 'user-3', entitlement: 'DIRECT' },
         ],
+        'user-1',
       );
     });
 

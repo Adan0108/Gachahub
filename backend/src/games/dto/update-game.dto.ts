@@ -2,7 +2,6 @@ import {
   IsEnum,
   IsOptional,
   IsString,
-  IsUrl,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -20,12 +19,13 @@ export enum GameStatusDto {
   HIDDEN = 'HIDDEN',
 }
 
-/**
- * DTO used when updating a game community.
- *
- * All fields are optional because PATCH requests only update
- * the fields that the client sends.
- */
+// Status values the generic PATCH /games/:id route may set directly - ARCHIVED is excluded, that only happens through GameModerationService.archive/restore.
+export enum UpdatableGameStatusDto {
+  ACTIVE = 'ACTIVE',
+  HIDDEN = 'HIDDEN',
+}
+
+// DTO used when updating a game community; branding (iconUrl/bannerUrl) is excluded, set only at creation or via GameModerationService.updateBranding.
 export class UpdateGameDto {
   @ApiPropertyOptional({
     example: 'Wuthering Waves',
@@ -54,20 +54,6 @@ export class UpdateGameDto {
   description?: string;
 
   @ApiPropertyOptional({
-    example: 'https://example.com/icon.png',
-  })
-  @IsOptional()
-  @IsUrl()
-  iconUrl?: string;
-
-  @ApiPropertyOptional({
-    example: 'https://example.com/banner.png',
-  })
-  @IsOptional()
-  @IsUrl()
-  bannerUrl?: string;
-
-  @ApiPropertyOptional({
     example: 'Kuro Games',
   })
   @IsOptional()
@@ -84,10 +70,10 @@ export class UpdateGameDto {
   publisher?: string;
 
   @ApiPropertyOptional({
-    enum: GameStatusDto,
-    example: GameStatusDto.ACTIVE,
+    enum: UpdatableGameStatusDto,
+    example: UpdatableGameStatusDto.ACTIVE,
   })
   @IsOptional()
-  @IsEnum(GameStatusDto)
-  status?: GameStatusDto;
+  @IsEnum(UpdatableGameStatusDto)
+  status?: UpdatableGameStatusDto;
 }

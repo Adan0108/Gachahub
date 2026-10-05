@@ -21,4 +21,15 @@ export class OutboxEventPublisher implements EventPublisherPort {
 
     await this.outboxRepository.create(transaction, event);
   }
+
+  async publishMany<T extends DomainEventType>(
+    inputs: ReadonlyArray<PublishDomainEventInput<T>>,
+    transaction: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (inputs.length === 0) return;
+
+    const events = inputs.map((input) => createDomainEvent(input));
+
+    await this.outboxRepository.createMany(transaction, events);
+  }
 }

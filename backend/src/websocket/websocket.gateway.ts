@@ -16,6 +16,13 @@ import { auth } from '../auth/auth';
 // only custom bit is userId, rest stay default event maps
 interface SocketData {
   userId?: string;
+  /**
+   * Resolves once this connection's auth attempt has settled (success or not). Sibling gateways on
+   * this same socket (e.g. ChatTypingGateway) can be reached before handleConnection's async auth
+   * finishes - awaiting this instead of reading userId directly avoids treating "not authenticated
+   * yet" the same as "genuinely unauthenticated".
+   */
+  authReady?: Promise<void>;
 }
 
 export type AppSocket = Socket<
@@ -57,6 +64,15 @@ export class WebsocketGateway
    * No session means no room and a straight disconnect — no anonymous sockets.
    */
   async handleConnection(socket: AppSocket) {
+    // Assigned before any other await so a sibling gateway's handler for this same socket - which
+    // Socket.IO can already dispatch to while this is still pending - has something to wait on
+    // instead of reading a not-yet-set socket.data.userId.
+    const ready = this.authenticateAndJoin(socket);
+    socket.data.authReady = ready;
+    await ready;
+  }
+
+  private async authenticateAndJoin(socket: AppSocket): Promise<void> {
     const identity = await this.authenticate(socket);
 
     if (identity === 'error') {

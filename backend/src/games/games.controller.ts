@@ -18,6 +18,7 @@ import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { Public } from '../common/decorators/public.decorator';
+import { GameModeratorsService } from '../game-moderators/game-moderators.service';
 import { CreateGameDto } from './dto/create-game.dto';
 import { QueryGamesDto } from './dto/query-games.dto';
 import { UpdateGameDto } from './dto/update-game.dto';
@@ -34,7 +35,10 @@ import { GamesService } from './games.service';
 @ApiTags('Games')
 @Controller('games')
 export class GamesController {
-  constructor(private readonly gamesService: GamesService) {}
+  constructor(
+    private readonly gamesService: GamesService,
+    private readonly gameModeratorsService: GameModeratorsService,
+  ) {}
 
   /**
    * Public endpoint for listing all games.
@@ -51,6 +55,14 @@ export class GamesController {
   @ApiOperation({ summary: 'List games' })
   findAll(@Query() query: QueryGamesDto) {
     return this.gamesService.findAll(query);
+  }
+
+  // The current user's own moderated games; declared before :slug so "moderated" isn't swallowed as a slug value.
+  @Get('moderated')
+  @ApiCookieAuth('better-auth.session_token')
+  @ApiOperation({ summary: 'List games the current user moderates' })
+  findModerated(@Session() session: UserSession) {
+    return this.gameModeratorsService.listModerated(session.user.id);
   }
 
   /**
@@ -85,12 +97,7 @@ export class GamesController {
   create(@Body() dto: CreateGameDto, @Session() session: UserSession) {
     return this.gamesService.create(dto, session.user.id);
   }
-  /**
-   * Admin-only endpoint for updating a game.
-   *
-   * This protects important game metadata such as name, slug, banner,
-   * icon, developer, publisher, and status.
-   */
+  // Admin-only; covers name/slug/description/developer/publisher - branding and ARCHIVED go through GameModerationService's dedicated endpoints instead.
   @Patch(':id')
   @UseGuards(AdminGuard)
   @ApiCookieAuth('better-auth.session_token')

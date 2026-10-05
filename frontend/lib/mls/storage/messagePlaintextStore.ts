@@ -1,6 +1,7 @@
 import type { ConversationId, DeviceId, Epoch, PlaintextEnvelope } from '../contract/types';
 import {
   openMlsDatabase,
+  deleteRecord,
   encryptAndStore,
   listRecordIds,
   loadAndDecryptOrMissing,
@@ -20,6 +21,8 @@ export interface MessagePlaintextStore {
   /** Stores without firing onMessageSaved, for messages that came from somewhere else (a restore). */
   saveWithoutNotify(message: DecryptedMessage): Promise<void>;
   listIds(): Promise<string[]>;
+  /** Drops a message's cached plaintext - called once it's seen as unsent, so a quote of it can't keep showing the text. */
+  remove(messageId: string): Promise<void>;
 }
 
 type MessageSavedListener = (message: DecryptedMessage) => void;
@@ -49,6 +52,10 @@ export class InMemoryMessagePlaintextStore implements MessagePlaintextStore {
   async listIds(): Promise<string[]> {
     return [...this.values.keys()];
   }
+
+  async remove(messageId: string): Promise<void> {
+    this.values.delete(messageId);
+  }
 }
 
 const MESSAGE_PLAINTEXT_STORE = 'decryptedMessages';
@@ -77,5 +84,9 @@ export class EncryptedIndexedDbMessagePlaintextStore implements MessagePlaintext
 
   async listIds(): Promise<string[]> {
     return listRecordIds(await openMlsDatabase(), MESSAGE_PLAINTEXT_STORE);
+  }
+
+  async remove(messageId: string): Promise<void> {
+    await deleteRecord(await openMlsDatabase(), MESSAGE_PLAINTEXT_STORE, messageId);
   }
 }

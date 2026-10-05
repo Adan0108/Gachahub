@@ -5,6 +5,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -39,8 +40,18 @@ const VIDEO_FORMATS = new Set(['mp4', 'webm', 'mov']);
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 
+// Purposes that always mean "exactly one image, no video" - a single-slot profile/branding picture.
+const SINGLE_IMAGE_PURPOSES = new Set([
+  MediaPurposeDto.AVATAR,
+  MediaPurposeDto.BANNER,
+  MediaPurposeDto.GAME_ICON,
+  MediaPurposeDto.GAME_BANNER,
+]);
+
 @Injectable()
 export class MediaService {
+  private readonly logger = new Logger(MediaService.name);
+
   constructor(
     private readonly mediaRepository: MediaRepository,
     private readonly cloudinaryService: CloudinaryService,
@@ -49,7 +60,7 @@ export class MediaService {
 
   async createUploadSignatures(dto: CreateUploadSignaturesDto, userId: string) {
     this.validateBatchPolicy(dto);
-    await this.enforceSignatureRateLimit(userId, dto.items.length);
+    await this.enforceSignatureRateLimit(userId, dto.items);
     await this.enforcePendingOpaqueCap(userId, dto);
 
     const items = await Promise.all(
@@ -268,6 +279,18 @@ export class MediaService {
       throw new ConflictException('Only unused media uploads can be removed');
     }
 
+    // Reserve the upload atomically before touching Cloudinary: a concurrent
+    // attach (claimUploadsForAttachment) requires status UPLOADED, so once this
+    // claim succeeds the upload can no longer be claimed by a message send -
+    // without it, a send could claim ATTACHED between this read and the
+    // Cloudinary delete below, leaving a committed message pointing at a
+    // destroyed asset.
+    const claimed = await this.mediaRepository.claimForCleanup(upload.id);
+
+    if (claimed.count === 0) {
+      throw new ConflictException('Only unused media uploads can be removed');
+    }
+
     if (upload.status === 'UPLOADED') {
       await this.destroyCloudinaryAsset(upload);
     }
@@ -285,6 +308,22 @@ export class MediaService {
 
     if (released) {
       await this.mediaRepository.markDeleted(mediaUploadId);
+    }
+  }
+
+  /** Releases an upload a caller just replaced; never throws - a failure is flagged RELEASE_FAILED for the retry job. */
+  async releaseReplacedUpload(mediaUploadId: string): Promise<void> {
+    try {
+      await this.releaseAttachedUpload(mediaUploadId);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to release replaced media ${mediaUploadId}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+
+      await this.markReleaseFailed(mediaUploadId).catch(() => {
+        // Already RELEASE_FAILED or gone; the next sweep handles it.
+      });
     }
   }
 
@@ -451,6 +490,26 @@ export class MediaService {
     return uploads;
   }
 
+  /** Resolves one attachable image for a single-image slot (avatar, game icon, ...). */
+  async resolveSingleImage(params: {
+    id: string;
+    userId: string;
+    purpose: MediaPurpose;
+    entityLabel: string;
+  }) {
+    const [upload] = await this.resolveAttachableMedia({
+      ids: [params.id],
+      userId: params.userId,
+      purpose: params.purpose,
+      maxImages: 1,
+      maxVideos: 0,
+      entityLabel: params.entityLabel,
+    });
+
+    // resolveAttachableMedia only returns UPLOADED rows, which always carry a secureUrl.
+    return { id: upload.id, secureUrl: upload.secureUrl! };
+  }
+
   private assertOpaquePolicy(
     kinds: Array<OpaqueBlobKind | null>,
     params: { maxOpaqueBlobs?: number; entityLabel: string },
@@ -558,11 +617,11 @@ export class MediaService {
     }
 
     if (
-      [MediaPurposeDto.AVATAR, MediaPurposeDto.BANNER].includes(dto.purpose) &&
+      SINGLE_IMAGE_PURPOSES.has(dto.purpose) &&
       (dto.items.length !== 1 || videos > 0)
     ) {
       throw new BadRequestException(
-        'Avatar and banner uploads require exactly one image',
+        `${dto.purpose} uploads require exactly one image`,
       );
     }
   }
@@ -693,8 +752,15 @@ export class MediaService {
     }
   }
 
-  // counts items, not requests, so a full batch costs what its uploads cost
-  private async enforceSignatureRateLimit(userId: string, items: number) {
+  // Counts items, not requests, so a full batch costs what its uploads cost - but a THUMB is
+  // never a separate upload the user asked for, only the encrypted preview that rides along with
+  // its own BLOB, so it doesn't consume its own unit. Without this, one ordinary image (BLOB +
+  // THUMB) already cost 2 units, so a handful of normal multi-image chat sends in the same
+  // window could trip the limit well before the user had sent anywhere near `limit` images.
+  private async enforceSignatureRateLimit(
+    userId: string,
+    items: { opaqueKind?: string }[],
+  ) {
     const limit = Number(process.env.MEDIA_SIGNATURE_RATE_LIMIT ?? 30);
 
     const windowSeconds = Number(
@@ -712,8 +778,11 @@ export class MediaService {
     }
 
     const key = `media:signature-rate:${userId}`;
+    const billableCount = items.filter(
+      (item) => item.opaqueKind !== 'THUMB',
+    ).length;
 
-    for (let i = 0; i < items; i++) {
+    for (let i = 0; i < billableCount; i++) {
       const count = await this.redisService.incrementWithExpiry(
         key,
         windowSeconds,

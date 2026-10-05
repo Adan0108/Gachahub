@@ -8,9 +8,19 @@ const commentInclude = {
       id: true,
       image: true,
       name: true,
+      username: true,
     },
   },
 } as const;
+
+/**
+ * A comment the public can see: not soft-deleted and not hidden by a
+ * moderator. Named so every place that decides "is this comment visible"
+ * uses the exact same two-field predicate - findByPostId's OR branches,
+ * its reply _count, and findReplies all have to agree, or a hidden reply
+ * disappears from one and still gets counted by another.
+ */
+const VISIBLE_COMMENT = { deletedAt: null, status: 'PUBLISHED' } as const;
 
 @Injectable()
 export class CommentsRepository {
@@ -45,6 +55,217 @@ export class CommentsRepository {
     });
   }
 
+  /** Handles of the users each comment actually pinged, so the UI only highlights real mentions. */
+  async findMentionedUsernames(
+    commentIds: string[],
+  ): Promise<Map<string, string[]>> {
+    const byComment = new Map<string, string[]>();
+
+    if (commentIds.length === 0) {
+      return byComment;
+    }
+
+    const rows = await this.prisma.mention.findMany({
+      where: { entityType: 'COMMENT', entityId: { in: commentIds } },
+      select: { entityId: true, user: { select: { username: true } } },
+    });
+
+    for (const { entityId, user } of rows) {
+      if (user.username) {
+        byComment.set(entityId, [
+          ...(byComment.get(entityId) ?? []),
+          user.username,
+        ]);
+      }
+    }
+
+    return byComment;
+  }
+
+  /**
+   * Comments have no gameId of their own (unlike Post), so the moderation
+   * preamble can't use GameModeratorsService.loadModeratableResource
+   * generically - the caller cross-checks post.gameId by hand instead.
+   */
+  findByIdForModeration(id: string) {
+    return this.prisma.comment.findUnique({
+      where: {
+        id,
+      },
+      select: {
+        id: true,
+        content: true,
+        authorId: true,
+        status: true,
+        deletedAt: true,
+        createdAt: true,
+        updatedAt: true,
+        parentId: true,
+        author: {
+          select: {
+            id: true,
+            image: true,
+            name: true,
+          },
+        },
+        post: {
+          select: {
+            id: true,
+            gameId: true,
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Moves a comment from one status to another only if it's still at `from`
+   * when the write happens - same race protection as
+   * PostsRepository.transitionStatus. Returns null when the row was no
+   * longer at `from`.
+   *
+   * Takes the caller's transaction client rather than opening its own, so
+   * CommentModerationService can write the audit entry in the same
+   * transaction (recordOrThrow) - a moderation action can't land with no
+   * trail.
+   */
+  async transitionStatus(
+    tx: Prisma.TransactionClient,
+    params: {
+      id: string;
+      postId: string;
+      from: Prisma.CommentWhereInput['status'];
+      to: Prisma.CommentUpdateInput['status'];
+    },
+  ) {
+    const result = await tx.comment.updateMany({
+      where: {
+        id: params.id,
+        status: params.from,
+      },
+      data: {
+        status: params.to,
+      },
+    });
+
+    if (result.count === 0) {
+      return null;
+    }
+
+    // Post.commentCount is a denormalized count of visible comments (see
+    // create()/softDelete()) - hiding/restoring has to keep it in step the
+    // same way deleting does, or a hidden comment keeps being counted.
+    const delta =
+      params.to === 'PUBLISHED' ? 1 : params.from === 'PUBLISHED' ? -1 : 0;
+
+    if (delta !== 0) {
+      await tx.post.update({
+        where: {
+          id: params.postId,
+        },
+        data: {
+          commentCount: {
+            increment: delta,
+          },
+        },
+      });
+    }
+
+    return tx.comment.findUniqueOrThrow({
+      where: {
+        id: params.id,
+      },
+      include: commentInclude,
+    });
+  }
+
+  /**
+   * Comments a moderator hid in their game, for the "restore" workflow -
+   * mirrors PostsRepository.findHiddenByGame.
+   */
+  async findHiddenByGame(
+    gameId: string,
+    params: {
+      page: number;
+      limit: number;
+    },
+  ) {
+    const skip = (params.page - 1) * params.limit;
+
+    const where: Prisma.CommentWhereInput = {
+      status: 'HIDDEN',
+      deletedAt: null,
+      post: {
+        gameId,
+      },
+    };
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.comment.findMany({
+        where,
+        include: commentInclude,
+        orderBy: [
+          {
+            updatedAt: 'desc',
+          },
+          {
+            id: 'desc',
+          },
+        ],
+        skip,
+        take: params.limit,
+      }),
+
+      this.prisma.comment.count({
+        where,
+      }),
+    ]);
+
+    return {
+      items,
+      total,
+    };
+  }
+
+  /**
+   * Hydrates the comment side of the cross-game flagged-content listing -
+   * ContentModerationService already knows which ids it needs from the
+   * report counts, so this is a plain batch fetch, not a search.
+   */
+  async findManyByIdsForModeration(ids: string[]) {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    return this.prisma.comment.findMany({
+      where: {
+        id: {
+          in: ids,
+        },
+      },
+      select: {
+        id: true,
+        content: true,
+        status: true,
+        deletedAt: true,
+        author: {
+          select: {
+            name: true,
+          },
+        },
+        post: {
+          select: {
+            game: {
+              select: {
+                slug: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
   /**
    * Returns root comments only.
    * Replies are retrieved seperately so a post with many replies
@@ -69,14 +290,10 @@ export class CommentsRepository {
       postId,
       parentId: null,
       OR: [
-        {
-          deletedAt: null,
-        },
+        VISIBLE_COMMENT,
         {
           replies: {
-            some: {
-              deletedAt: null,
-            },
+            some: VISIBLE_COMMENT,
           },
         },
       ],
@@ -92,9 +309,7 @@ export class CommentsRepository {
           _count: {
             select: {
               replies: {
-                where: {
-                  deletedAt: null,
-                },
+                where: VISIBLE_COMMENT,
               },
             },
           },
@@ -137,7 +352,7 @@ export class CommentsRepository {
 
     const where = {
       parentId,
-      deletedAt: null,
+      ...VISIBLE_COMMENT,
     };
 
     const [items, total] = await this.prisma.$transaction([

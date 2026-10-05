@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { slugify } from '../common/utils/slugify';
-import { GamesRepository } from '../games/games.repository';
+import { GamesService } from '../games/games.service';
 import { CreateGameCategoryDto } from './dto/create-game-category.dto';
 import { QueryGameCategoriesDto } from './dto/query-game-categories.dto';
 import { UpdateGameCategoryDto } from './dto/update-game-category.dto';
@@ -23,23 +23,19 @@ import { GameCategoriesRepository } from './game-categories.repository';
 export class GameCategoriesService {
   constructor(
     private readonly gameCategoriesRepository: GameCategoriesRepository,
-    private readonly gamesRepository: GamesRepository,
+    private readonly gamesService: GamesService,
   ) {}
 
   /**
    * Lists categories for a game by game slug.
    *
    * Business behavior:
-   * - First checks the game exists
+   * - First checks the game exists and is reachable (via GamesService.findBySlug, so an archived game's categories aren't a side door around its soft-delete)
    * - Then returns categories for that game
    * - Optional isActive filter is supported
    */
   async findByGameSlug(gameSlug: string, query: QueryGameCategoriesDto) {
-    const game = await this.gamesRepository.findBySlug(gameSlug);
-
-    if (!game) {
-      throw new NotFoundException('Game not found');
-    }
+    const game = await this.gamesService.findBySlug(gameSlug);
 
     return this.gameCategoriesRepository.findManyByGameId(game.id, {
       ...(query.isActive !== undefined ? { isActive: query.isActive } : {}),
@@ -55,11 +51,7 @@ export class GameCategoriesService {
    * - Prevents duplicate category slug inside the same game
    */
   async create(gameSlug: string, dto: CreateGameCategoryDto) {
-    const game = await this.gamesRepository.findBySlug(gameSlug);
-
-    if (!game) {
-      throw new NotFoundException('Game not found');
-    }
+    const game = await this.gamesService.findBySlug(gameSlug);
 
     const slug = dto.slug ? slugify(dto.slug) : slugify(dto.name);
 

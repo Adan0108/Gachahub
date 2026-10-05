@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FiArchive,
   FiCheck,
+  FiCheckCircle,
   FiEdit2,
+  FiInfo,
   FiLock,
   FiMessageCircle,
   FiDatabase,
@@ -21,37 +23,50 @@ import {
   FiX,
 } from "react-icons/fi";
 import { QueryNotice } from "../../components/QueryNotice";
-import { GroupSettingsModal } from "../../components/GroupSettingsModal";
-import { SafetyNumberModal } from "../../components/SafetyNumberModal";
-import { SafetyBadge, SafetyChangedBanner } from "../../components/SafetyStatus";
-import { UserPicker } from "../../components/UserPicker";
-import { DevicesModal } from "../../components/DevicesModal";
-import { ChatBackupModal } from "../../components/ChatBackupModal";
-import { ThreadRow } from "../../components/ThreadRow";
-import { AttachmentComposerTray } from "../../components/AttachmentComposerTray";
-import { PendingContent } from "../../components/EnvelopeContent";
+import { ConversationInfoPanel } from "../../components/chat/ConversationInfoPanel";
+import { GroupSettingsModal } from "../../components/chat/GroupSettingsModal";
+import { SafetyNumberModal } from "../../components/chat/SafetyNumberModal";
+import { SafetyChangedBanner } from "../../components/chat/SafetyStatus";
+import { UserPicker } from "../../components/chat/UserPicker";
+import { DevicesModal } from "../../components/chat/DevicesModal";
+import { ChatBackupModal } from "../../components/chat/ChatBackupModal";
+import { ThreadRow } from "../../components/chat/ThreadRow";
+import { AttachmentComposerTray } from "../../components/chat/AttachmentComposerTray";
+import { AttachmentLightbox } from "../../components/chat/AttachmentLightbox";
+import { AvatarFace } from "../../components/AvatarFace";
+import { PendingContent } from "../../components/chat/EnvelopeContent";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
-import { useAttachmentPicker } from "../../hooks/useAttachmentPicker";
-import { useDeviceIdentity } from "../../hooks/useDeviceIdentity";
-import { useSyncEngine } from "../../hooks/useSyncEngine";
-import { useChatBackup } from "../../hooks/useChatBackup";
-import { useThreadData } from "../../hooks/useThreadData";
+import { useAttachmentPicker } from "../../hooks/chat/useAttachmentPicker";
+import { useDeviceIdentity } from "../../hooks/chat/useDeviceIdentity";
+import { useSyncEngine } from "../../hooks/chat/useSyncEngine";
+import { useChatBackup } from "../../hooks/chat/useChatBackup";
+import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
+import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
+import { useThreadData } from "../../hooks/chat/useThreadData";
 import { sendEncryptedChatMessage } from "../../lib/mls/messaging/sendEncryptedMessage";
 import { sendAttachmentsWithCache } from "../../lib/mls/messaging/sendEncryptedAttachment";
-import { pendingStatusLabel } from "../../lib/mls/media/attachmentView";
+import {
+  flattenOtherAttachments,
+  flattenVisualAttachments,
+  pendingStatusLabel,
+} from "../../lib/mls/media/attachmentView";
+import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightboxContext";
 import { api } from "../../lib/api";
 import { queries, queryKeys } from "../../lib/queries";
+import { typingSignal } from "../../lib/chat/chatTypingSignal";
 import {
   activeMembers,
   conversationDisplayName,
+  conversationImage,
   conversationPeer,
-  initialOf,
   myParticipant,
   otherActiveMemberIds,
   participantUser,
-  relativeTime,
-} from "../../lib/chatDisplay";
-import { threadItemKey } from "../../lib/chatThread";
+} from "../../lib/chat/chatDisplay";
+import { relativeTime } from "../../lib/time";
+import { threadItemKey, withOptimisticDelete } from "../../lib/chat/chatThread";
+import { withOptimisticReaction } from "../../lib/chat/chatReactions";
+import { getHiddenMessageIds, hideMessageForMe, unhideMessageForMe } from "../../lib/chat/chatHiddenMessages";
 
 function ChatSkeletonRow() {
   return (
@@ -89,32 +104,6 @@ function ChatSkeleton() {
   );
 }
 
-/** Closes an open dropdown on Escape or a click outside its button+panel. */
-function useMenuDismiss(isOpen, onClose, buttonRef, menuRef) {
-  useEffect(() => {
-    if (!isOpen) return undefined;
-    const handle = (event) => {
-      if (event.key === "Escape") {
-        onClose();
-        return;
-      }
-      if (
-        event.type === "mousedown" &&
-        !menuRef.current?.contains(event.target) &&
-        !buttonRef.current?.contains(event.target)
-      ) {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handle);
-    window.addEventListener("mousedown", handle);
-    return () => {
-      window.removeEventListener("keydown", handle);
-      window.removeEventListener("mousedown", handle);
-    };
-  }, [isOpen, onClose, buttonRef, menuRef]);
-}
-
 export default function ChatPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -149,6 +138,18 @@ export default function ChatPage() {
     ...queries.chatMessages(activeId),
     enabled: isAuthenticated && Boolean(activeId),
   });
+  // Cache is only ever written to by useChatSocket's typing:start/typing:stop handlers - nothing
+  // here ever fetches it, this just observes whatever's currently in it for this conversation.
+  const typingUserIds = useQuery({
+    queryKey: queryKeys.chatTyping(activeId),
+    queryFn: () => [],
+    enabled: Boolean(activeId),
+    staleTime: Infinity,
+  }).data;
+  const typingNames = (typingUserIds || [])
+    .filter((id) => id !== user?.id)
+    .map((id) => participantUser(activeConversation, id)?.name)
+    .filter(Boolean);
   const {
     displayMessages,
     isLoadingOlder,
@@ -159,6 +160,8 @@ export default function ChatPage() {
     containerRef: messagesContainerRef,
     handleScroll: handleMessagesScroll,
     decrypted: decryptedMessages,
+    messagesById,
+    neighbors,
     groupProblem,
     safety,
     safetyPeerIds,
@@ -166,6 +169,7 @@ export default function ChatPage() {
     readableMessageIds,
     announcement,
     now: threadNow,
+    patchOlder,
   } = useThreadData(activeId, messages.data, activeConversation, user?.id);
 
   const {
@@ -180,14 +184,20 @@ export default function ChatPage() {
   const readableMessageIdsKey = readableMessageIds.join(",");
   const messagesEndRef = useRef(null);
   const [draft, setDraft] = useState("");
+  // { id, senderName, preview } of the message being replied to, or null.
+  const [replyTarget, setReplyTarget] = useState(null);
   // Sent messages awaiting the network, keyed by a client-side id.
   const [pendingMessages, setPendingMessages] = useState([]);
   const attachmentPicker = useAttachmentPicker();
   const fileInputRef = useRef(null);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  // Counts nested dragenter/dragleave pairs as the pointer crosses child elements, so only the
+  // outermost dragleave (count back to 0) actually clears the overlay.
+  const dragDepthRef = useRef(0);
   // Uploaded attachment entries by clientId, so a retry re-sends without re-uploading.
   const uploadedAttachmentsRef = useRef(new Map());
   const sendMessage = useMutation({
-    mutationFn: async ({ text, clientId, files }) => {
+    mutationFn: async ({ text, clientId, files, replyToId }) => {
       const recipientIds =
         activeConversation?.type === "GROUP"
           ? otherActiveMemberIds(activeConversation, user?.id)
@@ -216,6 +226,7 @@ export default function ChatPage() {
           recipientIds,
           text,
           clientId,
+          replyToId,
         );
       } catch (error) {
         if (error?.code !== "DEVICE_REVOKED" && error?.code !== "SESSION_NOT_LINKED") throw error;
@@ -237,12 +248,20 @@ export default function ChatPage() {
         prev.filter((pending) => pending.clientId !== variables.clientId),
       );
       // Merge the sent message into the cache instead of refetching.
+      const hadCachedMessages = Boolean(
+        queryClient.getQueryData(queryKeys.chatMessages(activeId)),
+      );
       queryClient.setQueryData(queryKeys.chatMessages(activeId), (old) => {
         if (!old || old.items.some((item) => item.id === response.message.id)) {
           return old;
         }
         return { ...old, items: [...old.items, response.message] };
       });
+      if (!hadCachedMessages) {
+        // A brand-new conversation (this group's first-ever message) has no cached page to merge
+        // into, so the write above was a silent no-op - fetch it instead of losing the message.
+        queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(activeId) });
+      }
       queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
     },
     onError: (error, variables) => {
@@ -260,9 +279,103 @@ export default function ChatPage() {
     sendMessage.mutate({ text: pending.text, clientId: pending.clientId, files: pending.files });
   };
 
+  // Reactions are plaintext metadata, not part of the encrypted envelope. A socket event (handled
+  // in useChatSocket) refetches this same query for everyone else once the write lands.
+  const refetchMessages = () =>
+    queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(activeId) });
+  // Patches both the live-window query cache and any older messages already loaded into
+  // useConversationHistory's own state - they're never the same array, so an edit on a message
+  // you scrolled back to would otherwise silently miss the query cache entirely.
+  const patchMessages = async (updater) => {
+    const key = queryKeys.chatMessages(activeId);
+    await queryClient.cancelQueries({ queryKey: key });
+    const previousQueryData = queryClient.getQueryData(key);
+    queryClient.setQueryData(key, (old) => (old ? { ...old, items: updater(old.items) } : old));
+    const previousOlder = patchOlder(updater);
+    return { key, previousQueryData, previousOlder };
+  };
+  const rollbackOptimisticUpdate = (_error, _variables, context) => {
+    if (!context) return;
+    queryClient.setQueryData(context.key, context.previousQueryData);
+    patchOlder(() => context.previousOlder);
+  };
+  const reactMutation = useMutation({
+    mutationFn: ({ messageId, emoji }) => api.reactToMessage(messageId, emoji),
+    onMutate: ({ messageId, emoji }) =>
+      patchMessages((items) => withOptimisticReaction(items, messageId, user?.id, emoji)),
+    onError: rollbackOptimisticUpdate,
+    onSettled: refetchMessages,
+  });
+  const removeReactionMutation = useMutation({
+    mutationFn: ({ messageId }) => api.removeReaction(messageId),
+    onMutate: ({ messageId }) =>
+      patchMessages((items) => withOptimisticReaction(items, messageId, user?.id, null)),
+    onError: rollbackOptimisticUpdate,
+    onSettled: refetchMessages,
+  });
+  const handleReact = (messageId, emoji, mineAlready) =>
+    (mineAlready ? removeReactionMutation : reactMutation).mutate({ messageId, emoji });
+  const deleteMessageMutation = useMutation({
+    mutationFn: (messageId) => api.deleteChatMessage(messageId),
+    onMutate: (messageId) => patchMessages((items) => withOptimisticDelete(items, messageId)),
+    onError: rollbackOptimisticUpdate,
+    onSettled: refetchMessages,
+  });
+  const handleDelete = (messageId) => {
+    if (window.confirm("Unsend this message? This can't be undone.")) {
+      deleteMessageMutation.mutate(messageId);
+    }
+  };
+  const handleCopy = (text) => {
+    if (text) navigator.clipboard?.writeText(text).catch(() => {});
+  };
+
+  const [lightboxKey, setLightboxKey] = useState(null);
+  const flatAttachments = useMemo(
+    () => flattenVisualAttachments(displayMessages, decryptedMessages),
+    [displayMessages, decryptedMessages],
+  );
+  // Same "loaded so far" scope as flatAttachments - the info panel's Media/Files tabs only cover
+  // messages already fetched into this window, not the conversation's full history.
+  const flatOtherAttachments = useMemo(
+    () => flattenOtherAttachments(displayMessages, decryptedMessages),
+    [displayMessages, decryptedMessages],
+  );
+  const lightboxIndex = flatAttachments.findIndex((item) => item.cacheKey === lightboxKey);
+
   const [isComposingNewChat, setIsComposingNewChat] = useState(false);
   const [newChatRecipients, setNewChatRecipients] = useState([]);
   const [newChatNotice, setNewChatNotice] = useState(null);
+  const [acceptedNotice, setAcceptedNotice] = useState(null);
+  // Tracks the exact message text dismissed, not just a boolean, so a fresh error (even one that
+  // happens to repeat the same text) shows again - cleared on every new send attempt below.
+  const [dismissedErrorMessage, setDismissedErrorMessage] = useState(null);
+  // Cache is only ever written to by useChatSocket's request:accepted handler.
+  const requestAcceptedEvent = useQuery({
+    queryKey: queryKeys.chatRequestAccepted(activeId),
+    queryFn: () => null,
+    enabled: Boolean(activeId),
+    staleTime: Infinity,
+  }).data;
+  // Turns the pushed event into a dismissable notice exactly once, then clears it from the cache
+  // so re-selecting this conversation later doesn't replay the same acceptance.
+  useEffect(() => {
+    if (!requestAcceptedEvent) return undefined;
+    const name = participantUser(activeConversation, requestAcceptedEvent.userId)?.name || "They";
+    const notice = {
+      conversationId: requestAcceptedEvent.conversationId,
+      text: `${name} accepted your message request!`,
+    };
+    queryClient.setQueryData(queryKeys.chatRequestAccepted(requestAcceptedEvent.conversationId), null);
+    // Deferred, not called straight from the effect body, so this doesn't fire during React's own
+    // commit phase for this render.
+    const showTimer = setTimeout(() => setAcceptedNotice(notice), 0);
+    const hideTimer = setTimeout(() => setAcceptedNotice(null), 5000);
+    return () => {
+      clearTimeout(showTimer);
+      clearTimeout(hideTimer);
+    };
+  }, [requestAcceptedEvent, activeConversation, queryClient]);
   const newChatRecipientId = newChatRecipients[0]?.id;
   const newChatFollowStatus = useQuery({
     ...queries.followStatus(newChatRecipientId),
@@ -307,6 +420,45 @@ export default function ChatPage() {
     api.markChatDelivered(readableMessageIds).catch(() => {});
     api.markChatRead(activeId, readableMessageIds.at(-1)).catch(() => {});
   }, [activeId, readableMessageIds, readableMessageIdsKey]);
+
+  const [replyLightboxOwnerId, setReplyLightboxOwnerId] = useState(activeId);
+  const [hiddenMessageIds, setHiddenMessageIds] = useState(() => getHiddenMessageIds(activeId));
+  const [hiddenNotice, setHiddenNotice] = useState(null);
+  // None of these carry over to a different conversation - reset during render, not an effect,
+  // so it lands in the same paint instead of flashing the stale value first.
+  if (activeId !== replyLightboxOwnerId) {
+    typingSignal.stop(replyLightboxOwnerId);
+    setReplyLightboxOwnerId(activeId);
+    setReplyTarget(null);
+    setLightboxKey(null);
+    setHiddenMessageIds(getHiddenMessageIds(activeId));
+    setHiddenNotice(null);
+  }
+  const handleDeleteForMe = (messageId) => {
+    if (!window.confirm("Hide this message on this device? You can undo it right after.")) return;
+    hideMessageForMe(activeId, messageId);
+    setHiddenMessageIds((current) => new Set(current).add(messageId));
+    setHiddenNotice({ conversationId: activeId, messageId });
+  };
+  const undoDeleteForMe = () => {
+    if (!hiddenNotice) return;
+    unhideMessageForMe(hiddenNotice.conversationId, hiddenNotice.messageId);
+    if (hiddenNotice.conversationId === activeId) {
+      setHiddenMessageIds((current) => {
+        const next = new Set(current);
+        next.delete(hiddenNotice.messageId);
+        return next;
+      });
+    }
+    setHiddenNotice(null);
+  };
+  const jumpToMessage = (messageId) => {
+    const row = document.getElementById(`chat-message-${messageId}`);
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    row.classList.add("jump-highlight");
+    setTimeout(() => row.classList.remove("jump-highlight"), 1200);
+  };
 
   const decryptedCount = Object.keys(decryptedMessages).length;
   const activePendingCount = pendingMessages.filter(
@@ -379,6 +531,7 @@ export default function ChatPage() {
   const moreMenuButtonRef = useRef(null);
   const moreMenuRef = useRef(null);
   useMenuDismiss(isMoreMenuOpen, () => setIsMoreMenuOpen(false), moreMenuButtonRef, moreMenuRef);
+  const moreMenuStyle = useFloatingPosition(isMoreMenuOpen, moreMenuButtonRef, moreMenuRef);
 
   const [isComposeMenuOpen, setIsComposeMenuOpen] = useState(false);
   const composeMenuButtonRef = useRef(null);
@@ -389,6 +542,9 @@ export default function ChatPage() {
     composeMenuButtonRef,
     composeMenuRef,
   );
+  const composeMenuStyle = useFloatingPosition(isComposeMenuOpen, composeMenuButtonRef, composeMenuRef);
+
+  const [isConversationInfoOpen, setIsConversationInfoOpen] = useState(false);
 
   if (isSessionLoading || !isAuthenticated) {
     return <ChatSkeleton />;
@@ -403,7 +559,22 @@ export default function ChatPage() {
       : "Setting up encryption...";
   const shownError =
     actionError || sendMessage.error || (isDeviceReady ? deviceError : undefined);
+  // Verifying a safety number is only meaningful for a specific peer, so it's DM-only here too.
+  const verifyPeerCandidate = safetyPeerIds[0];
+  const verifyPeerSafety = safety.byUser[verifyPeerCandidate];
+  const canVerify =
+    Boolean(activeConversation) &&
+    activeConversation.type !== "GROUP" &&
+    Boolean(verifyPeerCandidate) &&
+    Boolean(verifyPeerSafety?.pairNumber);
+  const verifyLabel =
+    verifyPeerSafety?.status === "verified"
+      ? "Verified"
+      : verifyPeerSafety?.status === "new-device"
+        ? "New device"
+        : "Verify end-to-end encryption";
   const activeConversationName = conversationDisplayName(activeConversation, user?.id);
+  const activeConversationImage = conversationImage(activeConversation, user?.id);
   const activeGroupMembers = activeMembers(activeConversation);
   const myGroupParticipant = myParticipant(activeConversation, user?.id);
   // Sending is rejected unless ACTIVE (pending, removed, declined, blocked).
@@ -413,10 +584,45 @@ export default function ChatPage() {
     canSendMessages &&
     activeConversation?.type === "GROUP" &&
     otherActiveMemberIds(activeConversation, user?.id).length === 0;
+  const composerReady =
+    canSendMessages && !isGroupAwaitingAcceptance && isDeviceReady && Boolean(syncEngine);
+
+  const handleThreadDragEnter = (event) => {
+    if (!composerReady || !event.dataTransfer?.types?.includes("Files")) return;
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDraggingFile(true);
+  };
+  const handleThreadDragOver = (event) => {
+    if (!composerReady || !event.dataTransfer?.types?.includes("Files")) return;
+    event.preventDefault();
+  };
+  const handleThreadDragLeave = (event) => {
+    if (!composerReady || !event.dataTransfer?.types?.includes("Files")) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDraggingFile(false);
+  };
+  const handleThreadDrop = (event) => {
+    if (!composerReady || !event.dataTransfer?.types?.includes("Files")) return;
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDraggingFile(false);
+    attachmentPicker.add([...event.dataTransfer.files]);
+  };
+  const handleDraftPaste = (event) => {
+    const items = [...(event.clipboardData?.items || [])];
+    const imageFiles = items
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+    if (imageFiles.length === 0) return;
+    event.preventDefault();
+    attachmentPicker.add(imageFiles);
+  };
 
   return (
     <div className="page chat-page">
-      <div className="chat-layout">
+      <div className={`chat-layout ${isConversationInfoOpen && activeConversation ? "info-open" : ""}`}>
         <aside className="panel chat-sidebar">
           <div className="chat-sidebar-head">
             <span>Conversations</span>
@@ -434,53 +640,59 @@ export default function ChatPage() {
                 >
                   <FiMoreHorizontal />
                 </button>
-                {isMoreMenuOpen && (
-                  <div className="chat-menu" ref={moreMenuRef} role="menu">
-                    <button
-                      onClick={() => {
-                        setIsMoreMenuOpen(false);
-                        setIsDevicesOpen(true);
-                      }}
-                      ref={devicesButtonRef}
-                      role="menuitem"
-                      type="button"
+                {isMoreMenuOpen &&
+                  floatingPortal(
+                    <div
+                      className="chat-menu"
+                      ref={moreMenuRef}
+                      role="menu"
+                      style={floatingStyle(moreMenuStyle)}
                     >
-                      <FiMonitor /> Your devices
-                    </button>
-                    <button
-                      onClick={() => {
-                        setIsMoreMenuOpen(false);
-                        setIsBackupOpen(true);
-                      }}
-                      ref={backupButtonRef}
-                      role="menuitem"
-                      type="button"
-                    >
-                      <FiDatabase /> Backup
-                    </button>
-                    <button
-                      onClick={() => {
-                        setIsMoreMenuOpen(false);
-                        setView((current) => (current === "requests" ? "inbox" : "requests"));
-                      }}
-                      role="menuitem"
-                      type="button"
-                    >
-                      <FiShield /> Requests
-                      {requests.data?.length > 0 && <b>{requests.data.length}</b>}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setIsMoreMenuOpen(false);
-                        setView((current) => (current === "archived" ? "inbox" : "archived"));
-                      }}
-                      role="menuitem"
-                      type="button"
-                    >
-                      <FiArchive /> Archived
-                    </button>
-                  </div>
-                )}
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          setIsDevicesOpen(true);
+                        }}
+                        ref={devicesButtonRef}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <FiMonitor /> Your devices
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          setIsBackupOpen(true);
+                        }}
+                        ref={backupButtonRef}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <FiDatabase /> Backup
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          setView((current) => (current === "requests" ? "inbox" : "requests"));
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <FiShield /> Requests
+                        {requests.data?.length > 0 && <b>{requests.data.length}</b>}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          setView((current) => (current === "archived" ? "inbox" : "archived"));
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <FiArchive /> Archived
+                      </button>
+                    </div>,
+                  )}
               </div>
               <div className="chat-menu-wrap">
                 <button
@@ -495,33 +707,39 @@ export default function ChatPage() {
                 >
                   <FiEdit2 />
                 </button>
-                {isComposeMenuOpen && (
-                  <div className="chat-menu" ref={composeMenuRef} role="menu">
-                    <button
-                      onClick={() => {
-                        setIsComposeMenuOpen(false);
-                        setIsComposingNewChat(true);
-                        setIsCreatingGroup(false);
-                        setNewChatNotice(null);
-                      }}
-                      role="menuitem"
-                      type="button"
+                {isComposeMenuOpen &&
+                  floatingPortal(
+                    <div
+                      className="chat-menu"
+                      ref={composeMenuRef}
+                      role="menu"
+                      style={floatingStyle(composeMenuStyle)}
                     >
-                      <FiPlus /> New Chat
-                    </button>
-                    <button
-                      onClick={() => {
-                        setIsComposeMenuOpen(false);
-                        setIsCreatingGroup(true);
-                        setIsComposingNewChat(false);
-                      }}
-                      role="menuitem"
-                      type="button"
-                    >
-                      <FiUsers /> New Group
-                    </button>
-                  </div>
-                )}
+                      <button
+                        onClick={() => {
+                          setIsComposeMenuOpen(false);
+                          setIsComposingNewChat(true);
+                          setIsCreatingGroup(false);
+                          setNewChatNotice(null);
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <FiPlus /> New Chat
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsComposeMenuOpen(false);
+                          setIsCreatingGroup(true);
+                          setIsComposingNewChat(false);
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <FiUsers /> New Group
+                      </button>
+                    </div>,
+                  )}
               </div>
             </div>
           </div>
@@ -554,6 +772,7 @@ export default function ChatPage() {
               </div>
               <label htmlFor="new-chat-recipient">Recipient</label>
               <UserPicker
+                currentUser={user}
                 disabled={startNewChat.isPending}
                 id="new-chat-recipient"
                 onChange={setNewChatRecipients}
@@ -598,6 +817,7 @@ export default function ChatPage() {
               />
               <label htmlFor="new-group-members">Members</label>
               <UserPicker
+                currentUser={user}
                 disabled={createGroup.isPending}
                 id="new-group-members"
                 multiple
@@ -647,7 +867,12 @@ export default function ChatPage() {
                   onClick={() => setSelectedId(conversation.id)}
                   type="button"
                 >
-                  <span className="chat-avatar">{initialOf(displayName)}</span>
+                  <span className="chat-avatar">
+                    <AvatarFace
+                      image={conversationImage(conversation, user?.id)}
+                      name={displayName}
+                    />
+                  </span>
                   <span>
                     <b>{displayName}</b>
                     <small>
@@ -672,12 +897,26 @@ export default function ChatPage() {
           </div>
         </aside>
 
-        <section className="panel chat-thread">
+        <section
+          className="panel chat-thread"
+          onDragEnter={handleThreadDragEnter}
+          onDragLeave={handleThreadDragLeave}
+          onDragOver={handleThreadDragOver}
+          onDrop={handleThreadDrop}
+        >
+          {isDraggingFile && (
+            <div className="chat-dropzone-overlay">
+              <FiPaperclip />
+              <span>Drop to attach</span>
+            </div>
+          )}
           {activeConversation ? (
             <>
               <header className="chat-thread-head">
                 <div>
-                  <span className="chat-avatar">{initialOf(activeConversationName)}</span>
+                  <span className="chat-avatar">
+                    <AvatarFace image={activeConversationImage} name={activeConversationName} />
+                  </span>
                   <span>
                     <b>{activeConversationName}</b>
                     <small>
@@ -694,22 +933,6 @@ export default function ChatPage() {
                   </span>
                 </div>
                 <div className="chat-thread-actions">
-                  {activeConversation.type !== "GROUP" && safetyPeerIds[0] && (
-                    <SafetyBadge
-                      onVerify={() => setVerifyPeerId(safetyPeerIds[0])}
-                      safety={safety.byUser[safetyPeerIds[0]]}
-                    />
-                  )}
-                  {activeConversation.type === "GROUP" && (
-                    <button
-                      aria-label="Group settings"
-                      onClick={() => setIsGroupSettingsOpen(true)}
-                      ref={groupSettingsButtonRef}
-                      type="button"
-                    >
-                      <FiUsers /> Manage
-                    </button>
-                  )}
                   {view === "requests" && (
                     <>
                       <button
@@ -730,12 +953,14 @@ export default function ChatPage() {
                     </>
                   )}
                   <button
-                    className="danger"
-                    disabled={blockConversation.isPending}
-                    onClick={() => blockConversation.mutate()}
+                    aria-expanded={isConversationInfoOpen}
+                    aria-label="Conversation info"
+                    className="chat-icon-button"
+                    onClick={() => setIsConversationInfoOpen((current) => !current)}
+                    title="Conversation info"
                     type="button"
                   >
-                    <FiShield /> Block
+                    <FiInfo />
                   </button>
                 </div>
               </header>
@@ -748,6 +973,7 @@ export default function ChatPage() {
                 ref={messagesContainerRef}
                 onScroll={handleMessagesScroll}
               >
+                <AttachmentLightboxContext.Provider value={setLightboxKey}>
                 <QueryNotice isLoading={messages.isLoading} isError={messages.isError} />
                 {groupProblem && (
                   <div className="chat-history-ceiling" role="alert">
@@ -777,17 +1003,26 @@ export default function ChatPage() {
                     </button>
                   </div>
                 )}
-                {threadItems.map((item) => (
-                  <ThreadRow
-                    allMessages={displayMessages}
-                    conversation={activeConversation}
-                    decryptedById={decryptedMessages}
-                    item={item}
-                    key={threadItemKey(item)}
-                    now={threadNow}
-                    userId={user?.id}
-                  />
-                ))}
+                {threadItems
+                  .filter((item) => item.kind !== "message" || !hiddenMessageIds.has(item.message.id))
+                  .map((item) => (
+                    <ThreadRow
+                      conversation={activeConversation}
+                      decryptedById={decryptedMessages}
+                      item={item}
+                      key={threadItemKey(item)}
+                      messagesById={messagesById}
+                      neighbors={neighbors}
+                      now={threadNow}
+                      onCopy={handleCopy}
+                      onDelete={handleDelete}
+                      onDeleteForMe={handleDeleteForMe}
+                      onJumpToMessage={jumpToMessage}
+                      onReact={handleReact}
+                      onReply={setReplyTarget}
+                      userId={user?.id}
+                    />
+                  ))}
                 {pendingMessages
                   .filter((pending) => pending.conversationId === activeId)
                   .map((pending) => (
@@ -824,12 +1059,73 @@ export default function ChatPage() {
                     </div>
                   )}
                 <div className="chat-messages-end" ref={messagesEndRef} />
+                </AttachmentLightboxContext.Provider>
               </div>
+              {lightboxIndex >= 0 && (
+                <AttachmentLightbox
+                  index={lightboxIndex}
+                  items={flatAttachments}
+                  onClose={() => setLightboxKey(null)}
+                  onNavigate={(delta) =>
+                    setLightboxKey(
+                      flatAttachments[lightboxIndex + delta]?.cacheKey ?? lightboxKey,
+                    )
+                  }
+                />
+              )}
 
               {newChatNotice && newChatNotice.conversationId === activeId && (
                 <div className="chat-new-chat-notice">
                   <small>{newChatNotice.text}</small>
                   <button aria-label="Dismiss" onClick={() => setNewChatNotice(null)} type="button">
+                    <FiX />
+                  </button>
+                </div>
+              )}
+              {acceptedNotice && acceptedNotice.conversationId === activeId && (
+                <div className="chat-new-chat-notice chat-request-accepted-notice">
+                  <FiCheckCircle aria-hidden="true" />
+                  <small>{acceptedNotice.text}</small>
+                  <button aria-label="Dismiss" onClick={() => setAcceptedNotice(null)} type="button">
+                    <FiX />
+                  </button>
+                </div>
+              )}
+              {hiddenNotice && hiddenNotice.conversationId === activeId && (
+                <div className="chat-new-chat-notice">
+                  <small>Message hidden on this device.</small>
+                  <button className="chat-new-chat-notice-action" onClick={undoDeleteForMe} type="button">
+                    Undo
+                  </button>
+                  <button aria-label="Dismiss" onClick={() => setHiddenNotice(null)} type="button">
+                    <FiX />
+                  </button>
+                </div>
+              )}
+              {typingNames.length > 0 && (
+                <div className="chat-typing-indicator">
+                  <span className="chat-typing-pill">
+                    <span className="chat-typing-dots">
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                    {typingNames.length === 1
+                      ? `${typingNames[0]} is typing...`
+                      : typingNames.length === 2
+                        ? `${typingNames[0]} and ${typingNames[1]} are typing...`
+                        : `${typingNames[0]} and ${typingNames.length - 1} others are typing...`}
+                  </span>
+                </div>
+              )}
+              {shownError && shownError.message !== dismissedErrorMessage && (
+                <div className="chat-composer-error">
+                  <span>{shownError.message}</span>
+                  <button
+                    aria-label="Dismiss"
+                    onClick={() => setDismissedErrorMessage(shownError.message)}
+                    type="button"
+                  >
                     <FiX />
                   </button>
                 </div>
@@ -860,24 +1156,43 @@ export default function ChatPage() {
                   </div>
                 </div>
               ) : isDeviceReady && syncEngine ? (
-                <form
-                  className="chat-composer"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const text = draft.trim();
-                    const files = attachmentPicker.files;
-                    if (!text && files.length === 0) return;
-                    const clientId = crypto.randomUUID();
-                    // Show the bubble and free the input; the send reconciles in the background.
-                    setPendingMessages((prev) => [
-                      ...prev,
-                      { clientId, text, files, conversationId: activeId },
-                    ]);
-                    setDraft("");
-                    attachmentPicker.clear();
-                    sendMessage.mutate({ text, clientId, files });
-                  }}
-                >
+                <>
+                  {replyTarget && (
+                    <div className="chat-reply-banner">
+                      <small>
+                        Replying to <b>{replyTarget.senderName}</b>: {replyTarget.preview}
+                      </small>
+                      <button
+                        aria-label="Cancel reply"
+                        onClick={() => setReplyTarget(null)}
+                        type="button"
+                      >
+                        <FiX />
+                      </button>
+                    </div>
+                  )}
+                  <form
+                    className="chat-composer"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const text = draft.trim();
+                      const files = attachmentPicker.files;
+                      if (!text && files.length === 0) return;
+                      const clientId = crypto.randomUUID();
+                      // Show the bubble and free the input; the send reconciles in the background.
+                      setPendingMessages((prev) => [
+                        ...prev,
+                        { clientId, text, files, conversationId: activeId },
+                      ]);
+                      setDraft("");
+                      attachmentPicker.clear();
+                      setDismissedErrorMessage(null);
+                      typingSignal.stop(activeId);
+                      const replyToId = replyTarget?.id;
+                      setReplyTarget(null);
+                      sendMessage.mutate({ text, clientId, files, replyToId });
+                    }}
+                  >
                   <AttachmentComposerTray
                     error={attachmentPicker.error}
                     files={attachmentPicker.files}
@@ -902,7 +1217,11 @@ export default function ChatPage() {
                     <FiPaperclip />
                   </button>
                   <input
-                    onChange={(event) => setDraft(event.target.value)}
+                    onChange={(event) => {
+                      setDraft(event.target.value);
+                      if (event.target.value.trim()) typingSignal.ping(activeId);
+                    }}
+                    onPaste={handleDraftPaste}
                     placeholder="Send an encrypted message..."
                     value={draft}
                   />
@@ -913,7 +1232,8 @@ export default function ChatPage() {
                   >
                     <FiSend />
                   </button>
-                </form>
+                  </form>
+                </>
               ) : deviceError ? (
                 <div className="chat-composer-disabled error">
                   <FiLock />
@@ -934,7 +1254,6 @@ export default function ChatPage() {
                   </div>
                 </div>
               )}
-              {shownError && <small className="post-action-error">{shownError.message}</small>}
             </>
           ) : (
             <div className="chat-empty-thread">
@@ -944,6 +1263,26 @@ export default function ChatPage() {
             </div>
           )}
         </section>
+
+        <ConversationInfoPanel
+          canVerify={canVerify}
+          displayImage={activeConversationImage}
+          displayName={activeConversationName}
+          encryptionStatus={encryptionStatus}
+          fileAttachments={flatOtherAttachments}
+          isBlockPending={blockConversation.isPending}
+          isGroup={activeConversation?.type === "GROUP"}
+          isOpen={isConversationInfoOpen && Boolean(activeConversation)}
+          key={activeId || "no-conversation"}
+          manageButtonRef={groupSettingsButtonRef}
+          onBlock={() => blockConversation.mutate()}
+          onClose={() => setIsConversationInfoOpen(false)}
+          onManageGroup={() => setIsGroupSettingsOpen(true)}
+          onOpenAttachment={setLightboxKey}
+          onVerify={() => setVerifyPeerId(verifyPeerCandidate)}
+          verifyLabel={verifyLabel}
+          visualAttachments={flatAttachments}
+        />
       </div>
 
       <DevicesModal

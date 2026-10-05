@@ -13,7 +13,8 @@ export type DomainEventType =
 
 export type MentionTargetType = 'POST' | 'COMMENT' | 'MESSAGE';
 
-export type ChatParticipantAddedState = 'ACTIVE' | 'PENDING';
+/** JOINING: added but not yet in the MLS group, can't decrypt until a Commit lands (see membership-state-machine.ts). */
+export type ChatParticipantAddedState = 'ACTIVE' | 'JOINING' | 'PENDING';
 
 /**
  * Payload contract for every domain event.
@@ -63,26 +64,23 @@ export interface DomainEventPayloadMap {
   };
 
   /**
-   * Important for MLS/E2EE:
-   *
-   * Never put plaintext message content in this event.
-   * The backend only needs message/conversation metadata.
-   *
-   * replyToMessageId allows NotificationConsumer to distinguish
-   * MESSAGE_RECEIVED from MESSAGE_REPLIED later.
+   * No plaintext message content - metadata only. recipientUserIds and replyToSenderId are
+   * pre-resolved by the chat module (mute/block/state rules, reply-target lookup).
    */
   'chat.message.sent': {
     messageId: string;
     conversationId: string;
     senderId: string;
     replyToMessageId: string | null;
+    replyToSenderId: string | null;
+    recipientUserIds: string[];
   };
 
   /**
    * ChatParticipant.state determines whether this becomes:
    *
-   * ACTIVE  -> GROUP_ADDED
-   * PENDING -> GROUP_INVITE_PENDING
+   * ACTIVE / JOINING -> GROUP_ADDED
+   * PENDING          -> GROUP_INVITE_PENDING
    */
   'chat.participant.added': {
     conversationId: string;

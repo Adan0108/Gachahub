@@ -2,10 +2,16 @@ import { describe, expect, it } from 'vitest';
 import type { AttachmentFile } from '../contract/types';
 import {
   attachmentKind,
+  autoLoadsWithoutTap,
+  chunkVisualAttachments,
   envelopeView,
+  flattenOtherAttachments,
+  flattenVisualAttachments,
   formatBytes,
   groupAttachments,
+  isMediaOnlyView,
   pendingStatusLabel,
+  resolveAttachmentSources,
   safeBlobType,
   safeFileName,
 } from './attachmentView';
@@ -24,6 +30,7 @@ const file = (name: string, mime: string): AttachmentFile => ({
 describe('attachmentKind / safeBlobType', () => {
   it('classifies renderable images and videos only', () => {
     expect(attachmentKind('image/PNG')).toBe('image');
+    expect(attachmentKind('image/avif')).toBe('image');
     expect(attachmentKind('video/mp4')).toBe('video');
     expect(attachmentKind('image/svg+xml')).toBe('file');
     expect(attachmentKind('text/html')).toBe('file');
@@ -95,6 +102,25 @@ describe('groupAttachments', () => {
   });
 });
 
+describe('chunkVisualAttachments', () => {
+  it('keeps everything in one section when at or under the limit', () => {
+    expect(chunkVisualAttachments([1, 2, 3])).toEqual([[1, 2, 3]]);
+    expect(chunkVisualAttachments([1, 2, 3, 4, 5, 6])).toEqual([[1, 2, 3, 4, 5, 6]]);
+  });
+
+  it('spills a 7th item into its own second section', () => {
+    expect(chunkVisualAttachments([1, 2, 3, 4, 5, 6, 7])).toEqual([[1, 2, 3, 4, 5, 6], [7]]);
+  });
+
+  it('handles no attachments', () => {
+    expect(chunkVisualAttachments([])).toEqual([]);
+  });
+
+  it('honors a custom section size', () => {
+    expect(chunkVisualAttachments([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+  });
+});
+
 describe('envelopeView', () => {
   it('shows text and valid attachments', () => {
     expect(envelopeView({ v: 1, type: 'text', body: 'hi' })).toEqual({ kind: 'text', text: 'hi' });
@@ -121,5 +147,153 @@ describe('pendingStatusLabel', () => {
     expect(pendingStatusLabel('encrypting')).toBe('Encrypting...');
     expect(pendingStatusLabel('uploading')).toBe('Uploading...');
     expect(pendingStatusLabel()).toBe('Sending...');
+  });
+});
+
+describe('autoLoadsWithoutTap', () => {
+  it('is true only for gif, case-insensitively', () => {
+    expect(autoLoadsWithoutTap('image/gif')).toBe(true);
+    expect(autoLoadsWithoutTap('IMAGE/GIF')).toBe(true);
+    expect(autoLoadsWithoutTap('image/png')).toBe(false);
+    expect(autoLoadsWithoutTap('video/mp4')).toBe(false);
+  });
+});
+
+describe('isMediaOnlyView', () => {
+  it('is true for an uncaptioned attachment made only of images/video', () => {
+    expect(
+      isMediaOnlyView({ kind: 'attachment', caption: '', files: [file('a.png', 'image/png')] }),
+    ).toBe(true);
+  });
+
+  it('is false with a caption, a non-visual file, no files, or a text view', () => {
+    expect(
+      isMediaOnlyView({ kind: 'attachment', caption: 'hi', files: [file('a.png', 'image/png')] }),
+    ).toBe(false);
+    expect(
+      isMediaOnlyView({ kind: 'attachment', caption: '', files: [file('a.pdf', 'application/pdf')] }),
+    ).toBe(false);
+    expect(isMediaOnlyView({ kind: 'attachment', caption: '', files: [] })).toBe(false);
+    expect(isMediaOnlyView({ kind: 'text', text: 'hi' })).toBe(false);
+    expect(isMediaOnlyView(null)).toBe(false);
+  });
+});
+
+describe('resolveAttachmentSources', () => {
+  it('splits visual from file attachments and resolves each url from the upload id', () => {
+    const image = file('a.png', 'image/png');
+    const pdf = file('b.pdf', 'application/pdf');
+    const urlByUploadId = new Map([
+      ['a.png', 'https://res.cloudinary.com/a'],
+      ['b.pdf', 'https://res.cloudinary.com/b'],
+    ]);
+    const { visual, others } = resolveAttachmentSources('m1', [image, pdf], urlByUploadId);
+    expect(visual).toEqual([
+      {
+        file: image,
+        index: 0,
+        source: { cacheKey: 'm1:0:file', url: 'https://res.cloudinary.com/a', ref: image, mime: 'image/png', size: 10 },
+        thumbSource: null,
+      },
+    ]);
+    expect(others[0]).toMatchObject({ file: pdf, source: { cacheKey: 'm1:1:file' } });
+  });
+
+  it('leaves the source null when the upload id has no url yet', () => {
+    const image = file('a.png', 'image/png');
+    const { visual } = resolveAttachmentSources('m1', [image], new Map());
+    expect(visual[0]!.source).toBeNull();
+  });
+});
+
+describe('flattenVisualAttachments', () => {
+  it('collects visual attachments only from ok-decrypted attachment messages, in order', () => {
+    const attachmentEnvelope = {
+      v: 1,
+      type: 'attachment',
+      files: [file('a.png', 'image/png')],
+    };
+    const messages = [
+      { id: 'm1', media: [{ mediaUploadId: 'a.png', url: 'https://res.cloudinary.com/a' }] },
+      { id: 'm2' }, // not decrypted
+      { id: 'm3', media: [{ mediaUploadId: 'a.png', url: 'https://res.cloudinary.com/b' }] },
+    ];
+    const decryptedById = {
+      m1: { status: 'ok', envelope: attachmentEnvelope },
+      m2: { status: 'pending' },
+      m3: { status: 'ok', envelope: { v: 1, type: 'text', body: 'hi' } },
+    };
+    const flat = flattenVisualAttachments(messages, decryptedById);
+    expect(flat).toEqual([
+      {
+        cacheKey: 'm1:0:file',
+        messageId: 'm1',
+        file: attachmentEnvelope.files[0],
+        source: {
+          cacheKey: 'm1:0:file',
+          url: 'https://res.cloudinary.com/a',
+          ref: attachmentEnvelope.files[0],
+          mime: 'image/png',
+          size: 10,
+        },
+        thumbSource: null,
+      },
+    ]);
+  });
+});
+
+describe('flattenOtherAttachments', () => {
+  it('collects only the non-visual (file-chip) attachments, in order', () => {
+    const image = file('a.png', 'image/png');
+    const pdf = file('b.pdf', 'application/pdf');
+    const messages = [
+      {
+        id: 'm1',
+        media: [
+          { mediaUploadId: 'a.png', url: 'https://res.cloudinary.com/a' },
+          { mediaUploadId: 'b.pdf', url: 'https://res.cloudinary.com/b' },
+        ],
+      },
+    ];
+    const decryptedById = {
+      m1: {
+        status: 'ok',
+        envelope: { v: 1, type: 'attachment', files: [image, pdf] },
+      },
+    };
+
+    const flat = flattenOtherAttachments(messages, decryptedById);
+
+    expect(flat).toEqual([
+      {
+        cacheKey: 'm1:1:file',
+        messageId: 'm1',
+        file: pdf,
+        source: {
+          cacheKey: 'm1:1:file',
+          url: 'https://res.cloudinary.com/b',
+          ref: pdf,
+          mime: 'application/pdf',
+          size: 10,
+        },
+        thumbSource: null,
+      },
+    ]);
+  });
+
+  it('skips messages that are not ok-decrypted attachment envelopes, and files with no resolved url', () => {
+    const pdf = file('b.pdf', 'application/pdf');
+    const messages = [
+      { id: 'm1', media: [] }, // no url for b.pdf yet
+      { id: 'm2' }, // not decrypted
+      { id: 'm3' },
+    ];
+    const decryptedById = {
+      m1: { status: 'ok', envelope: { v: 1, type: 'attachment', files: [pdf] } },
+      m2: { status: 'pending' },
+      m3: { status: 'ok', envelope: { v: 1, type: 'text', body: 'hi' } },
+    };
+
+    expect(flattenOtherAttachments(messages, decryptedById)).toEqual([]);
   });
 });

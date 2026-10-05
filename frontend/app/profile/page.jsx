@@ -1,15 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { FiCompass, FiEdit3, FiMessageCircle, FiShare2, FiX } from "react-icons/fi";
 import { Art } from "../../components/Art";
+import { AvatarFace } from "../../components/AvatarFace";
 import { BuildCard } from "../../components/BuildCard";
 import { PostList } from "../../components/PostList";
+import { AvatarEditor } from "../../components/profile/AvatarEditor";
+import { BannerPicker } from "../../components/profile/BannerPicker";
 import { QueryNotice } from "../../components/QueryNotice";
 import { SectionTitle } from "../../components/SectionTitle";
 import { builds, glyph } from "../../components/constants";
+import { useRequireAuth } from "../../hooks/useRequireAuth";
+import { useToast } from "../../hooks/useToast";
+import { bannerColor } from "../../lib/profileBanners";
 import { queries } from "../../lib/queries";
 
 const focusableSelector = [
@@ -37,46 +44,39 @@ const achievements = [
 
 export default function ProfilePage() {
   const router = useRouter();
+  const { user, isAuthenticated, isLoading: isSessionLoading, isError } = useRequireAuth();
   const [tab, setTab] = useState("Builds");
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [bio, setBio] = useState("We ride the waves, chasing the unknown.");
   const [draftName, setDraftName] = useState("");
   const [draftBio, setDraftBio] = useState("");
-  const [notice, setNotice] = useState("");
+  const { notice, showNotice } = useToast();
   const editButtonRef = useRef(null);
   const modalRef = useRef(null);
   const nameInputRef = useRef(null);
-  const noticeTimerRef = useRef(null);
   const wasEditingRef = useRef(false);
-  const profile = useQuery(queries.profile());
-  const myPosts = useQuery({ ...queries.myPosts(), enabled: Boolean(profile.data) });
-  const displayName = name || profile.data?.name || "";
+  const myPosts = useQuery({ ...queries.myPosts(), enabled: isAuthenticated });
+  const displayName = name || user?.name || "";
   const recentPosts = myPosts.data?.items || [];
   const postCount = myPosts.data?.meta?.total ?? recentPosts.length;
   const activeTab = tab === "Posts" ? { ...profileTabs.Posts, count: postCount } : profileTabs[tab];
 
-  const flashNotice = (message) => {
-    window.clearTimeout(noticeTimerRef.current);
-    setNotice(message);
-    noticeTimerRef.current = window.setTimeout(() => setNotice(""), 1800);
-  };
-
   const shareProfile = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
-      flashNotice("Profile link copied");
+      showNotice("Profile link copied");
     } catch {
-      flashNotice("Could not copy the profile link");
+      showNotice("Could not copy the profile link");
     }
   };
 
   const copyUserId = async () => {
     try {
-      await navigator.clipboard.writeText(profile.data.id);
-      flashNotice("User ID copied");
+      await navigator.clipboard.writeText(user.id);
+      showNotice("User ID copied");
     } catch {
-      flashNotice("Could not copy your user ID");
+      showNotice("Could not copy your user ID");
     }
   };
 
@@ -92,7 +92,7 @@ export default function ProfilePage() {
     event.preventDefault();
     setName(draftName.trim());
     setBio(draftBio.trim() || "We ride the waves, chasing the unknown.");
-    flashNotice("Profile saved locally");
+    showNotice("Profile saved locally");
     setEditing(false);
   };
 
@@ -144,20 +144,14 @@ export default function ProfilePage() {
     }
   }, [editing]);
 
-  useEffect(() => () => window.clearTimeout(noticeTimerRef.current), []);
-
-  useEffect(() => {
-    if (!profile.isLoading && !profile.data) router.replace("/login");
-  }, [profile.data, profile.isLoading, router]);
-
-  if (!profile.data) {
+  if (!user) {
     return (
       <div className="page profile-page">
-        <QueryNotice isLoading={profile.isLoading} isError={profile.isError} />
+        <QueryNotice isLoading={isSessionLoading} isError={isError} />
         <div className="state-card profile-empty-state">
-          <b>{profile.isLoading ? "Loading your profile" : "Sign in required"}</b>
+          <b>{isSessionLoading ? "Loading your profile" : "Sign in required"}</b>
           <span>
-            {profile.isLoading
+            {isSessionLoading
               ? "Checking your GachaHub session..."
               : "Redirecting you to the login page..."}
           </span>
@@ -166,29 +160,45 @@ export default function ProfilePage() {
     );
   }
 
+  const heroBannerColor = bannerColor(user.bannerPresetId);
+
   return (
     <div className="page profile-page">
       <div className="toast-slot" aria-live="polite">
         {notice}
       </div>
-      <QueryNotice isLoading={profile.isLoading} isError={profile.isError} />
+      <QueryNotice isLoading={isSessionLoading} isError={isError} />
       <div aria-hidden={editing ? "true" : undefined}>
-        <section className="profile-hero">
-          <Art tone="indigo">{glyph.sparkle}</Art>
+        <section className={`profile-hero ${heroBannerColor ? "profile-hero-solid" : ""}`}>
+          {heroBannerColor ? (
+            <div className="profile-banner-solid" style={{ backgroundColor: heroBannerColor }} />
+          ) : (
+            <Art tone="indigo">{glyph.sparkle}</Art>
+          )}
           <button ref={editButtonRef} className="edit-profile" onClick={openEditor} type="button">
             <FiEdit3 /> Edit Profile
           </button>
           <div className="profile-main">
             <div className="profile-avatar">
-              <Art tone="blue">{displayName.charAt(0).toUpperCase() || "R"}</Art>
+              <AvatarFace
+                fallback={<Art tone="blue">{displayName.charAt(0).toUpperCase() || "R"}</Art>}
+                image={user.image}
+              />
             </div>
             <div>
               <h1>
                 {displayName} <span className="verified">{glyph.check}</span>
               </h1>
-              <p>{profile.data.email}</p>
+              {user.username ? (
+                <p className="profile-handle">@{user.username}</p>
+              ) : (
+                <p className="profile-handle">
+                  <Link href="/onboarding">Claim your @handle</Link>
+                </p>
+              )}
+              <p>{user.email}</p>
               <p className="profile-user-id">
-                User ID: <code>{profile.data.id}</code>
+                User ID: <code>{user.id}</code>
                 <button onClick={copyUserId} type="button">
                   Copy
                 </button>
@@ -331,7 +341,7 @@ export default function ProfilePage() {
         <div className="modal-backdrop" onClick={closeEditor}>
           <form
             aria-modal="true"
-            className="modal"
+            className="modal profile-edit-modal"
             onClick={(event) => event.stopPropagation()}
             onSubmit={saveProfile}
             ref={modalRef}
@@ -343,6 +353,8 @@ export default function ProfilePage() {
                 <FiX />
               </button>
             </div>
+            <AvatarEditor user={user} />
+            <BannerPicker currentId={user.bannerPresetId} />
             <label>
               Display name
               <input

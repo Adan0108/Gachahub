@@ -6,12 +6,18 @@ import {
 } from '@nestjs/common';
 import { RateLimitedException } from '../common/exceptions/rate-limited.exception';
 import { MAX_BLOB_BYTES, USER_QUOTA_BYTES } from './chat-backup.constants';
-import { computeBackupProof } from './replace-proof';
+import { computeBackupProof, proofMatches } from './replace-proof';
 import {
   ChatBackupService,
   decodeCursor,
   encodeCursor,
 } from './chat-backup.service';
+
+/** Stand-in for the Prisma transaction client the real repository would hand `mutate`. */
+const fakeTx = {
+  chatBackupBlob: { deleteMany: jest.fn() },
+  chatBackupKey: { update: jest.fn(), deleteMany: jest.fn() },
+};
 
 const b64 = (size: number) => Buffer.alloc(size, 7).toString('base64');
 const item = (messageId: string, size = 32, conversationId = 'c1') => ({
@@ -56,7 +62,7 @@ describe('ChatBackupService', () => {
     createKey: jest.fn(),
     issueChallenge: jest.fn(),
     consumeChallenge: jest.fn(),
-    replaceKey: jest.fn(),
+    verifyProofAndMutate: jest.fn(),
     scheduleDeletion: jest.fn(),
     cancelDeletion: jest.fn(),
     deleteAll: jest.fn(),
@@ -89,6 +95,52 @@ describe('ChatBackupService', () => {
     repository.createKey.mockResolvedValue(true);
     repository.consumeChallenge.mockResolvedValue(true);
     repository.issueChallenge.mockResolvedValue(true);
+    // Mirrors the real repository method closely enough to exercise the
+    // service's own logic (which params it passes, what its `mutate`
+    // callback writes) without re-testing the lock/re-read ordering itself -
+    // that's covered directly in chat-backup.repository.spec.ts.
+    repository.verifyProofAndMutate.mockImplementation(
+      async (userId: string, params: Record<string, unknown>, mutate) => {
+        const keyRow = await repository.findKey(userId);
+        const secret = keyRow?.replaceSecret as Uint8Array | undefined;
+
+        if (!secret) {
+          throw new ForbiddenException(
+            'This backup has no proof secret: schedule its deletion instead',
+          );
+        }
+
+        const consumed = await repository.consumeChallenge(
+          userId,
+          Buffer.from(params.nonce as string, 'base64'),
+          params.now,
+        );
+
+        if (!consumed) {
+          throw new ForbiddenException(
+            'The challenge is missing, used or expired',
+          );
+        }
+
+        const expected = computeBackupProof(
+          secret,
+          params.action as 'replace' | 'delete',
+          {
+            userId,
+            nonce: params.nonce as string,
+            ...(params.bound as object),
+          },
+        );
+
+        if (
+          !proofMatches(expected, Buffer.from(params.proof as string, 'base64'))
+        ) {
+          throw new ForbiddenException('The proof does not match the current key');
+        }
+
+        return mutate(fakeTx, secret);
+      },
+    );
     repository.storeWithinQuota.mockImplementation((_u, blobs: unknown[]) =>
       Promise.resolve({ status: 'stored', stored: blobs.length }),
     );
@@ -145,7 +197,7 @@ describe('ChatBackupService', () => {
         expect.any(Buffer),
         expect.any(Buffer),
       );
-      expect(repository.replaceKey).not.toHaveBeenCalled();
+      expect(repository.verifyProofAndMutate).not.toHaveBeenCalled();
     });
 
     it('reports a lost create race as a conflict', async () => {
@@ -191,7 +243,7 @@ describe('ChatBackupService', () => {
         await expect(service.putKey('u1', putDto())).rejects.toBeInstanceOf(
           ConflictException,
         );
-        expect(repository.replaceKey).not.toHaveBeenCalled();
+        expect(repository.verifyProofAndMutate).not.toHaveBeenCalled();
         expect(repository.consumeChallenge).not.toHaveBeenCalled();
       });
 
@@ -199,7 +251,7 @@ describe('ChatBackupService', () => {
         await expect(
           service.putKey('u1', { ...putDto(), replace: true }),
         ).rejects.toBeInstanceOf(ForbiddenException);
-        expect(repository.replaceKey).not.toHaveBeenCalled();
+        expect(repository.verifyProofAndMutate).not.toHaveBeenCalled();
       });
 
       it('replaces with a valid nonce and proof', async () => {
@@ -212,7 +264,10 @@ describe('ChatBackupService', () => {
           Buffer.from(NONCE, 'base64'),
           expect.any(Date),
         );
-        expect(repository.replaceKey).toHaveBeenCalled();
+        expect(fakeTx.chatBackupKey.update).toHaveBeenCalled();
+        expect(fakeTx.chatBackupBlob.deleteMany).toHaveBeenCalledWith({
+          where: { userId: 'u1' },
+        });
       });
 
       it('refuses a wrong proof but still burns the nonce', async () => {
@@ -223,7 +278,7 @@ describe('ChatBackupService', () => {
           ),
         ).rejects.toBeInstanceOf(ForbiddenException);
         expect(repository.consumeChallenge).toHaveBeenCalled();
-        expect(repository.replaceKey).not.toHaveBeenCalled();
+        expect(fakeTx.chatBackupKey.update).not.toHaveBeenCalled();
       });
 
       it('refuses a proof made for different new values', async () => {
@@ -235,7 +290,7 @@ describe('ChatBackupService', () => {
             replaceDto(proof, putDto({ keyCheck: b64(41) })),
           ),
         ).rejects.toBeInstanceOf(ForbiddenException);
-        expect(repository.replaceKey).not.toHaveBeenCalled();
+        expect(fakeTx.chatBackupKey.update).not.toHaveBeenCalled();
       });
 
       it('refuses a replayed, expired or unknown nonce', async () => {
@@ -244,7 +299,7 @@ describe('ChatBackupService', () => {
         await expect(service.putKey('u1', replaceDto())).rejects.toBeInstanceOf(
           ForbiddenException,
         );
-        expect(repository.replaceKey).not.toHaveBeenCalled();
+        expect(fakeTx.chatBackupKey.update).not.toHaveBeenCalled();
       });
 
       it('refuses when the stored key predates proofs', async () => {
@@ -327,7 +382,12 @@ describe('ChatBackupService', () => {
         ),
       ).resolves.toEqual({ enabled: false, deletionScheduledFor: null });
 
-      expect(repository.deleteAll).toHaveBeenCalledWith('u1');
+      expect(fakeTx.chatBackupBlob.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'u1' },
+      });
+      expect(fakeTx.chatBackupKey.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'u1' },
+      });
       expect(repository.scheduleDeletion).not.toHaveBeenCalled();
     });
 
@@ -342,7 +402,7 @@ describe('ChatBackupService', () => {
         ),
       ).rejects.toBeInstanceOf(ForbiddenException);
 
-      expect(repository.deleteAll).not.toHaveBeenCalled();
+      expect(fakeTx.chatBackupBlob.deleteMany).not.toHaveBeenCalled();
       expect(repository.scheduleDeletion).not.toHaveBeenCalled();
     });
 
@@ -355,13 +415,14 @@ describe('ChatBackupService', () => {
           deleteDto({ nonce: NONCE, proof: actionProof('delete') }),
         ),
       ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(repository.deleteAll).not.toHaveBeenCalled();
+      expect(fakeTx.chatBackupBlob.deleteMany).not.toHaveBeenCalled();
     });
 
     it('refuses a half proof instead of falling back to scheduling', async () => {
       await expect(
         service.disable('u1', deleteDto({ nonce: NONCE })),
       ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(repository.verifyProofAndMutate).not.toHaveBeenCalled();
       expect(repository.scheduleDeletion).not.toHaveBeenCalled();
     });
 
@@ -372,7 +433,7 @@ describe('ChatBackupService', () => {
           deleteDto({ nonce: NONCE, proof: actionProof('cancel-delete') }),
         ),
       ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(repository.deleteAll).not.toHaveBeenCalled();
+      expect(fakeTx.chatBackupBlob.deleteMany).not.toHaveBeenCalled();
     });
 
     it('does nothing when there is no backup', async () => {
@@ -393,7 +454,7 @@ describe('ChatBackupService', () => {
       await expect(service.disable('u1', deleteDto())).rejects.toBeInstanceOf(
         RateLimitedException,
       );
-      expect(repository.deleteAll).not.toHaveBeenCalled();
+      expect(repository.verifyProofAndMutate).not.toHaveBeenCalled();
       expect(repository.scheduleDeletion).not.toHaveBeenCalled();
     });
   });

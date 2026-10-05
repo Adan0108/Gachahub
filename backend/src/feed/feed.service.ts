@@ -3,6 +3,7 @@ import type { PostType, Prisma } from '../generated/prisma/client';
 import { FollowsService } from '../follows/follows.service';
 import { formatPost } from '../posts/post.mapper';
 import { PostsRepository } from '../posts/posts.repository';
+import { viewablePostWhere } from '../post-visibility/visibility-where';
 import {
   GameFeedSortDto,
   QueryForYouFeedDto,
@@ -598,47 +599,9 @@ export class FeedService {
     };
   }
 
-  /**
-   * Visibility policy for Latest.
-   */
+  // Visibility policy for Latest - delegates to the platform's single viewable-post-where definition.
   private buildLatestVisibilityWhere(userId?: string): Prisma.PostWhereInput {
-    if (!userId) {
-      return {
-        visibility: 'PUBLIC',
-      };
-    }
-
-    return {
-      OR: [
-        {
-          visibility: 'PUBLIC',
-        },
-
-        /*
-         * Allow the user's own followers-only posts.
-         */
-        {
-          authorId: userId,
-          visibility: 'FOLLOWERS_ONLY',
-        },
-
-        /*
-         * Allow FOLLOWERS_ONLY content
-         * from authors the current user follows.
-         */
-        {
-          visibility: 'FOLLOWERS_ONLY',
-
-          author: {
-            followers: {
-              some: {
-                followerId: userId,
-              },
-            },
-          },
-        },
-      ],
-    };
+    return viewablePostWhere(userId);
   }
 
   /**

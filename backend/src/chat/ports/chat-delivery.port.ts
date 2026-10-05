@@ -36,6 +36,18 @@ export interface ChatMessageActionEvent {
 }
 
 /**
+ * Event emitted after a pending message request is accepted.
+ *
+ * Lets the request's original sender(s) know right away, instead of only
+ * finding out on the next unrelated refetch.
+ */
+export interface ChatRequestAcceptedEvent {
+  conversationId: string;
+  userId: string;
+  recipientUserIds: string[];
+}
+
+/**
  * Port for chat delivery side effects.
  *
  * REST persistence works without this doing anything today. Later, a WebSocket,
@@ -48,4 +60,5 @@ export interface ChatDeliveryPort {
   publishMessageDeleted(event: ChatMessageActionEvent): Promise<void>;
   publishReactionAdded(event: ChatMessageActionEvent): Promise<void>;
   publishReactionRemoved(event: ChatMessageActionEvent): Promise<void>;
+  publishRequestAccepted(event: ChatRequestAcceptedEvent): Promise<void>;
 }

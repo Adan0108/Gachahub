@@ -125,88 +125,100 @@ export class ChatRepository {
     });
   }
 
-  /** Creates a direct convo and its first message in one transaction. */
-  async createDirectConversationWithMessage(params: {
-    senderId: string;
-    recipientUserId: string;
-    userIdA: string;
-    userIdB: string;
-    recipientState: ChatParticipantState;
-    ciphertext: string;
-    encryptionMeta?: Prisma.InputJsonValue;
-    contentType?: ChatMessageContentType;
-    clientMessageId?: string;
-    replyToId?: string;
-    media?: ChatMessageMediaInput[];
-  }) {
-    return this.prisma.$transaction(async (tx) => {
-      const conversation = await tx.chatConversation.create({
-        data: {
-          type: 'DIRECT',
-          createdBy: params.senderId,
-          directPair: {
-            create: {
-              userIdA: params.userIdA,
-              userIdB: params.userIdB,
+  /**
+   * Creates a direct convo and its first message. Runs against the caller's own transaction (see
+   * ChatMessagingService.createDirectMessage) so a domain event published from the same tx either
+   * commits alongside the conversation/message or not at all, never one without the other.
+   */
+  async createDirectConversationWithMessage(
+    tx: PrismaTransaction,
+    params: {
+      senderId: string;
+      recipientUserId: string;
+      userIdA: string;
+      userIdB: string;
+      recipientState: ChatParticipantState;
+      ciphertext: string;
+      encryptionMeta?: Prisma.InputJsonValue;
+      contentType?: ChatMessageContentType;
+      clientMessageId?: string;
+      replyToId?: string;
+      media?: ChatMessageMediaInput[];
+    },
+  ) {
+    const conversation = await tx.chatConversation.create({
+      data: {
+        type: 'DIRECT',
+        createdBy: params.senderId,
+        directPair: {
+          create: {
+            userIdA: params.userIdA,
+            userIdB: params.userIdB,
+          },
+        },
+        participants: {
+          create: [
+            {
+              userId: params.senderId,
+              state: 'ACTIVE',
             },
-          },
-          participants: {
-            create: [
-              {
-                userId: params.senderId,
-                state: 'ACTIVE',
-              },
-              {
-                userId: params.recipientUserId,
-                state: params.recipientState,
-                ...pendingSinceChange(null, params.recipientState, new Date()),
-              },
-            ],
-          },
+            {
+              userId: params.recipientUserId,
+              state: params.recipientState,
+              ...pendingSinceChange(null, params.recipientState, new Date()),
+            },
+          ],
         },
-        include: {
-          participants: true,
-        },
-      });
-
-      const message = await this.createMessageInTransaction(tx, {
-        conversationId: conversation.id,
-        senderId: params.senderId,
-        participantUserIds: conversation.participants.map(
-          (participant) => participant.userId,
-        ),
-        ciphertext: params.ciphertext,
-        encryptionMeta: params.encryptionMeta,
-        contentType: params.contentType,
-        clientMessageId: params.clientMessageId,
-        replyToId: params.replyToId,
-        media: params.media,
-      });
-
-      await tx.chatConversation.update({
-        where: { id: conversation.id },
-        data: {
-          lastMessageId: message.id,
-        },
-      });
-
-      return {
-        conversation,
-        message,
-      };
+      },
+      include: {
+        participants: true,
+      },
     });
+
+    const message = await this.createMessageInTransaction(tx, {
+      conversationId: conversation.id,
+      senderId: params.senderId,
+      participantUserIds: conversation.participants.map(
+        (participant) => participant.userId,
+      ),
+      ciphertext: params.ciphertext,
+      encryptionMeta: params.encryptionMeta,
+      contentType: params.contentType,
+      clientMessageId: params.clientMessageId,
+      replyToId: params.replyToId,
+      media: params.media,
+    });
+
+    await tx.chatConversation.update({
+      where: { id: conversation.id },
+      data: {
+        lastMessageId: message.id,
+      },
+    });
+
+    return {
+      conversation,
+      message,
+    };
   }
 
-  /** Creates a group and participant rows; the creator is OWNER and ACTIVE, others get the state ChatService resolved. */
-  createGroupConversation(params: {
-    creatorId: string;
-    title: string;
-    photoUrl?: string;
-    members: Array<{ userId: string; state: 'ACTIVE' | 'PENDING' }>;
-  }) {
+  /**
+   * Creates a group and participant rows; the creator is OWNER and ACTIVE, others get the state
+   * ChatGroupService resolved. Runs against the caller's own transaction - see
+   * createDirectConversationWithMessage above for why.
+   */
+  async createGroupConversation(
+    tx: PrismaTransaction,
+    params: {
+      creatorId: string;
+      title: string;
+      photoUrl?: string;
+      members: Array<{ userId: string; state: 'ACTIVE' | 'PENDING' }>;
+    },
+  ) {
     const now = new Date();
 
-    return this.prisma.chatConversation.create({
+    return tx.chatConversation.create({
       data: {
         type: 'GROUP',
         title: params.title,
@@ -313,30 +325,50 @@ export class ChatRepository {
     });
   }
 
-  /** Creates an encrypted message in an existing conversation and updates lastMessageId. */
-  async createMessage(params: {
-    conversationId: string;
-    senderId: string;
-    participantUserIds: string[];
-    ciphertext: string;
-    encryptionMeta?: Prisma.InputJsonValue;
-    contentType?: ChatMessageContentType;
-    clientMessageId?: string;
-    replyToId?: string;
-    media?: ChatMessageMediaInput[];
-  }) {
-    return this.prisma.$transaction(async (tx) => {
-      const message = await this.createMessageInTransaction(tx, params);
+  /**
+   * Locks the conversation row and returns a fresh participant list - the same
+   * lock a membership change takes (see lockConversation), so the two can
+   * never interleave. Call this inside the same transaction that inserts a
+   * message, right before the insert, and re-check sender/participant state
+   * against its result instead of an earlier unlocked read: otherwise a
+   * removal can flip a participant to LEAVING after the caller's own
+   * (unlocked) check but before the message commits, landing ciphertext that
+   * participant's still-present device can read.
+   */
+  async lockAndFindParticipants(tx: PrismaTransaction, conversationId: string) {
+    await lockConversation(tx, conversationId);
 
-      await tx.chatConversation.update({
-        where: { id: params.conversationId },
-        data: {
-          lastMessageId: message.id,
-        },
-      });
+    return tx.chatParticipant.findMany({ where: { conversationId } });
+  }
 
-      return message;
+  /**
+   * Creates an encrypted message in an existing conversation and updates lastMessageId. Runs
+   * against the caller's own transaction - see createDirectConversationWithMessage above for why.
+   */
+  async createMessage(
+    tx: PrismaTransaction,
+    params: {
+      conversationId: string;
+      senderId: string;
+      participantUserIds: string[];
+      ciphertext: string;
+      encryptionMeta?: Prisma.InputJsonValue;
+      contentType?: ChatMessageContentType;
+      clientMessageId?: string;
+      replyToId?: string;
+      media?: ChatMessageMediaInput[];
+    },
+  ) {
+    const message = await this.createMessageInTransaction(tx, params);
+
+    await tx.chatConversation.update({
+      where: { id: params.conversationId },
+      data: {
+        lastMessageId: message.id,
+      },
     });
+
+    return message;
   }
 
   /** Inserts a message in a transaction; sender receipts start delivered/read, others unread, and media is claimed here too. */

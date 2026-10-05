@@ -15,8 +15,12 @@ describe('fitWithin', () => {
     expect(fitWithin(10000, 1, 320)).toEqual({ width: 320, height: 1 });
   });
 
-  it('defaults to the shared thumbnail edge', () => {
+  it('defaults to the grouped (small grid tile) edge', () => {
     expect(fitWithin(3200, 3200)).toEqual({ width: 320, height: 320 });
+  });
+
+  it('honors a larger edge for a solo image', () => {
+    expect(fitWithin(3200, 3200, 640)).toEqual({ width: 640, height: 640 });
   });
 });
 

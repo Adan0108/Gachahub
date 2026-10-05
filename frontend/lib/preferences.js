@@ -7,11 +7,11 @@ export const defaultFeedPreferences = {
 };
 
 export function readStoredJson(key, fallback) {
+  if (typeof window === "undefined") return fallback;
   try {
     const value = JSON.parse(window.localStorage.getItem(key) || "null");
     return value ?? fallback;
   } catch {
-    window.localStorage.removeItem(key);
     return fallback;
   }
 }

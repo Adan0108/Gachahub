@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { claimUploadsForAttachment } from '../media/media.repository';
+import { viewablePostWhere } from '../post-visibility/visibility-where';
 
 const postInclude = {
   author: {
@@ -136,34 +137,22 @@ export class PostsRepository {
     });
   }
 
+  // No optional visibility/status with a permissive default - a caller must state whose eyes these posts are for.
   async findByAuthorId(
     authorId: string,
     params: {
       page: number;
       limit: number;
-      visibility?: Prisma.PostWhereInput['visibility'];
-      status?: Prisma.PostWhereInput['status'];
+      audience: 'self' | 'public';
       userId?: string;
     },
   ) {
     const skip = (params.page - 1) * params.limit;
 
-    const where: Prisma.PostWhereInput = {
-      authorId,
-      deletedAt: null,
-
-      ...(params.visibility
-        ? {
-            visibility: params.visibility,
-          }
-        : {}),
-
-      ...(params.status
-        ? {
-            status: params.status,
-          }
-        : {}),
-    };
+    const where: Prisma.PostWhereInput =
+      params.audience === 'public'
+        ? { authorId, ...viewablePostWhere(params.userId) }
+        : { authorId, deletedAt: null };
 
     const [items, total] = await this.prisma.$transaction([
       this.prisma.post.findMany({
@@ -184,6 +173,53 @@ export class PostsRepository {
         orderBy: [
           {
             createdAt: 'desc',
+          },
+          {
+            id: 'desc',
+          },
+        ],
+        skip,
+        take: params.limit,
+      }),
+
+      this.prisma.post.count({
+        where,
+      }),
+    ]);
+
+    return {
+      items,
+      total,
+    };
+  }
+
+  /**
+   * Posts a moderator hid in their game, for the "restore" workflow -
+   * mirrors findByAuthorId's shape (where/pagination owned here, not by the
+   * caller) rather than having callers hand-build a Prisma where clause.
+   */
+  async findHiddenByGame(
+    gameId: string,
+    params: {
+      page: number;
+      limit: number;
+    },
+  ) {
+    const skip = (params.page - 1) * params.limit;
+
+    const where: Prisma.PostWhereInput = {
+      gameId,
+      status: 'HIDDEN',
+      deletedAt: null,
+    };
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.post.findMany({
+        where,
+        include: postInclude,
+        orderBy: [
+          {
+            updatedAt: 'desc',
           },
           {
             id: 'desc',
@@ -256,214 +292,269 @@ export class PostsRepository {
     });
   }
 
-  create(params: {
-    authorId: string;
-    gameId: string;
-    categoryId?: string;
-    title: string;
-    content: string;
-    type?: Prisma.PostCreateInput['type'];
-    status?: Prisma.PostCreateInput['status'];
-    visibility?: Prisma.PostCreateInput['visibility'];
-    isSpoiler?: boolean;
-    media?: Array<{
-      mediaUploadId: string;
-      assetId: string;
-      publicId: string;
-      url: string;
-      mediaType: 'IMAGE' | 'GIF' | 'VIDEO';
-      altText?: string;
-      sortOrder: number;
-      width: number | null;
-      height: number | null;
-      duration: number | null;
-      bytes: number | null;
-      format: string | null;
-    }>;
-    tags?: Array<{
-      name: string;
-      slug: string;
-    }>;
-  }) {
-    return this.prisma.$transaction(
-      async (tx) => {
-        const post = await tx.post.create({
-          data: {
-            author: {
-              connect: {
-                id: params.authorId,
+  async create(
+    tx: Prisma.TransactionClient,
+    params: {
+      authorId: string;
+      gameId: string;
+      categoryId?: string;
+      title: string;
+      content: string;
+      type?: Prisma.PostCreateInput['type'];
+      status?: Prisma.PostCreateInput['status'];
+      visibility?: Prisma.PostCreateInput['visibility'];
+      isSpoiler?: boolean;
+      media?: Array<{
+        mediaUploadId: string;
+        assetId: string;
+        publicId: string;
+        url: string;
+        mediaType: 'IMAGE' | 'GIF' | 'VIDEO';
+        altText?: string;
+        sortOrder: number;
+        width: number | null;
+        height: number | null;
+        duration: number | null;
+        bytes: number | null;
+        format: string | null;
+      }>;
+      tags?: Array<{
+        name: string;
+        slug: string;
+      }>;
+    },
+  ) {
+    const post = await tx.post.create({
+      data: {
+        author: {
+          connect: {
+            id: params.authorId,
+          },
+        },
+        game: {
+          connect: {
+            id: params.gameId,
+          },
+        },
+        ...(params.categoryId
+          ? {
+              category: {
+                connect: {
+                  id: params.categoryId,
+                },
               },
-            },
-            game: {
-              connect: {
-                id: params.gameId,
-              },
-            },
-            ...(params.categoryId
-              ? {
-                  category: {
-                    connect: {
-                      id: params.categoryId,
+            }
+          : {}),
+        title: params.title,
+        content: params.content,
+        type: params.type,
+        status: params.status,
+        visibility: params.visibility,
+        isSpoiler: params.isSpoiler,
+        tags: params.tags?.length
+          ? {
+              create: params.tags.map((tag) => ({
+                tag: {
+                  connectOrCreate: {
+                    where: {
+                      slug: tag.slug,
                     },
+                    create: tag,
                   },
-                }
-              : {}),
-            title: params.title,
-            content: params.content,
-            type: params.type,
-            status: params.status,
-            visibility: params.visibility,
-            isSpoiler: params.isSpoiler,
-            tags: params.tags?.length
-              ? {
-                  create: params.tags.map((tag) => ({
-                    tag: {
-                      connectOrCreate: {
-                        where: {
-                          slug: tag.slug,
-                        },
-                        create: tag,
-                      },
-                    },
-                  })),
-                }
-              : undefined,
-          },
-        });
-
-        if (params.media?.length) {
-          const mediaUploadIds = params.media.map(
-            (media) => media.mediaUploadId,
-          );
-
-          await claimUploadsForAttachment(tx, {
-            ids: mediaUploadIds,
-            userId: params.authorId,
-            purpose: 'POST',
-          });
-
-          await tx.postMedia.createMany({
-            data: params.media.map((media) => ({
-              postId: post.id,
-              mediaUploadId: media.mediaUploadId,
-              assetId: media.assetId,
-              publicId: media.publicId,
-              url: media.url,
-              mediaType: media.mediaType,
-              altText: media.altText,
-              sortOrder: media.sortOrder,
-              width: media.width,
-              height: media.height,
-              duration: media.duration,
-              bytes: media.bytes,
-              format: media.format,
-            })),
-          });
-        }
-
-        if (post.status === 'PUBLISHED') {
-          await tx.game.update({
-            where: {
-              id: params.gameId,
-            },
-            data: {
-              postCount: {
-                increment: 1,
-              },
-            },
-          });
-        }
-
-        return tx.post.findUniqueOrThrow({
-          where: {
-            id: post.id,
-          },
-          include: postInclude,
-        });
+                },
+              })),
+            }
+          : undefined,
       },
-      {
-        maxWait: 5_000,
-        timeout: 15_000,
-      },
-    );
-  }
+    });
 
-  update(params: {
-    id: string;
-    data: Prisma.PostUpdateInput;
-    tags?: Array<{
-      name: string;
-      slug: string;
-    }>;
-  }) {
-    return this.prisma.$transaction(async (tx) => {
-      const before = await tx.post.findUniqueOrThrow({
-        where: {
-          id: params.id,
-        },
-        select: {
-          status: true,
-          gameId: true,
-        },
+    if (params.media?.length) {
+      const mediaUploadIds = params.media.map((media) => media.mediaUploadId);
+
+      await claimUploadsForAttachment(tx, {
+        ids: mediaUploadIds,
+        userId: params.authorId,
+        purpose: 'POST',
       });
 
-      if (params.tags !== undefined) {
-        await tx.postTag.deleteMany({
-          where: {
-            postId: params.id,
-          },
-        });
-      }
+      await tx.postMedia.createMany({
+        data: params.media.map((media) => ({
+          postId: post.id,
+          mediaUploadId: media.mediaUploadId,
+          assetId: media.assetId,
+          publicId: media.publicId,
+          url: media.url,
+          mediaType: media.mediaType,
+          altText: media.altText,
+          sortOrder: media.sortOrder,
+          width: media.width,
+          height: media.height,
+          duration: media.duration,
+          bytes: media.bytes,
+          format: media.format,
+        })),
+      });
+    }
 
-      const updated = await tx.post.update({
+    if (post.status === 'PUBLISHED') {
+      await tx.game.update({
         where: {
-          id: params.id,
+          id: params.gameId,
         },
         data: {
-          ...params.data,
-          ...(params.tags !== undefined
-            ? {
-                tags: {
-                  create: params.tags.map((tag) => ({
-                    tag: {
-                      connectOrCreate: {
-                        where: {
-                          slug: tag.slug,
-                        },
-                        create: tag,
-                      },
-                    },
-                  })),
-                },
-              }
-            : {}),
+          postCount: {
+            increment: 1,
+          },
         },
-        include: postInclude,
       });
+    }
 
-      if (before.status !== updated.status) {
-        const delta =
-          updated.status === 'PUBLISHED'
-            ? 1
-            : before.status === 'PUBLISHED'
-              ? -1
-              : 0;
+    return tx.post.findUniqueOrThrow({
+      where: {
+        id: post.id,
+      },
+      include: postInclude,
+    });
+  }
 
-        if (delta !== 0) {
-          await tx.game.update({
-            where: {
-              id: before.gameId,
-            },
-            data: {
-              postCount: {
-                increment: delta,
+  async update(
+    tx: Prisma.TransactionClient,
+    params: {
+      id: string;
+      data: Prisma.PostUpdateInput;
+      tags?: Array<{
+        name: string;
+        slug: string;
+      }>;
+    },
+  ) {
+    const before = await tx.post.findUniqueOrThrow({
+      where: {
+        id: params.id,
+      },
+      select: {
+        status: true,
+        gameId: true,
+      },
+    });
+
+    if (params.tags !== undefined) {
+      await tx.postTag.deleteMany({
+        where: {
+          postId: params.id,
+        },
+      });
+    }
+
+    const updated = await tx.post.update({
+      where: {
+        id: params.id,
+      },
+      data: {
+        ...params.data,
+        ...(params.tags !== undefined
+          ? {
+              tags: {
+                create: params.tags.map((tag) => ({
+                  tag: {
+                    connectOrCreate: {
+                      where: {
+                        slug: tag.slug,
+                      },
+                      create: tag,
+                    },
+                  },
+                })),
               },
-            },
-          });
-        }
-      }
+            }
+          : {}),
+      },
+      include: postInclude,
+    });
 
-      return updated;
+    if (before.status !== updated.status) {
+      const delta =
+        updated.status === 'PUBLISHED'
+          ? 1
+          : before.status === 'PUBLISHED'
+            ? -1
+            : 0;
+
+      if (delta !== 0) {
+        await tx.game.update({
+          where: {
+            id: before.gameId,
+          },
+          data: {
+            postCount: {
+              increment: delta,
+            },
+          },
+        });
+      }
+    }
+
+    return updated;
+  }
+
+  /**
+   * Moves a post from one status to another only if it's still at `from`
+   * when the write happens - unlike update(), which reads then writes with
+   * no guarantee the row hasn't changed in between. Used by moderation
+   * hide/restore, where two moderators (or a moderator and the author)
+   * racing the same post would otherwise silently lose one side's change.
+   * Returns null when the row was no longer at `from` (someone else moved
+   * it first), instead of throwing, so the caller decides what that means.
+   *
+   * Takes the caller's transaction client rather than opening its own, so
+   * PostModerationService can write the audit entry in the same transaction
+   * (recordOrThrow) - a moderation action can't land with no trail.
+   */
+  async transitionStatus(
+    tx: Prisma.TransactionClient,
+    params: {
+      id: string;
+      gameId: string;
+      from: Prisma.PostWhereInput['status'];
+      to: Prisma.PostUpdateInput['status'];
+    },
+  ) {
+    const result = await tx.post.updateMany({
+      where: {
+        id: params.id,
+        gameId: params.gameId,
+        status: params.from,
+      },
+      data: {
+        status: params.to,
+      },
+    });
+
+    if (result.count === 0) {
+      return null;
+    }
+
+    const delta =
+      params.to === 'PUBLISHED' ? 1 : params.from === 'PUBLISHED' ? -1 : 0;
+
+    if (delta !== 0) {
+      await tx.game.update({
+        where: {
+          id: params.gameId,
+        },
+        data: {
+          postCount: {
+            increment: delta,
+          },
+        },
+      });
+    }
+
+    return tx.post.findUniqueOrThrow({
+      where: {
+        id: params.id,
+      },
+      include: postInclude,
     });
   }
 
@@ -690,6 +781,42 @@ export class PostsRepository {
           },
           select: {
             userId: true,
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Hydrates the post side of the cross-game flagged-content listing -
+   * ContentModerationService already knows which ids it needs from the
+   * report counts, so this is a plain batch fetch, not a search. Unlike
+   * findManyByIds, this is not restricted to PUBLISHED - a moderator needs
+   * to see hidden posts too.
+   */
+  async findManyByIdsForModeration(ids: string[]) {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    return this.prisma.post.findMany({
+      where: {
+        id: {
+          in: ids,
+        },
+      },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        author: {
+          select: {
+            name: true,
+          },
+        },
+        game: {
+          select: {
+            slug: true,
           },
         },
       },

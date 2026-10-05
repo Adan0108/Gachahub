@@ -27,6 +27,22 @@ export class OutboxRepository {
     });
   }
 
+  createMany<T extends DomainEventType>(
+    transaction: Prisma.TransactionClient,
+    events: ReadonlyArray<DomainEventOf<T>>,
+  ) {
+    return transaction.outboxEvent.createMany({
+      data: events.map((event) => ({
+        id: event.eventId,
+        type: event.type,
+        version: event.version,
+        aggregateId: event.aggregateId,
+        payload: event.payload,
+        occurredAt: new Date(event.occurredAt),
+      })),
+    });
+  }
+
   findReady(limit: number) {
     return this.prisma.outboxEvent.findMany({
       where: {

@@ -7,7 +7,6 @@ import {
 import {
   ChatParticipantState,
   MessageRequestSetting,
-  UserRole,
 } from '../generated/prisma/client';
 import { MembershipChangePendingException } from '../common/exceptions/membership-change-pending.exception';
 import { ChatRepository } from './chat.repository';
@@ -283,14 +282,13 @@ export class ChatAccessService {
     return !recipientBlockedSender;
   }
 
-  /**
-   * Verifies a reply target message belongs to this conversation.
-   *
-   * No-op when replyToId isn't set, replies are optional.
-   */
-  async assertValidReplyTarget(conversationId: string, replyToId?: string) {
+  /** Verifies the reply target exists, is still SENT, and belongs to this conversation; returns its sender. Undefined when replyToId isn't set. */
+  async assertValidReplyTarget(
+    conversationId: string,
+    replyToId?: string,
+  ): Promise<{ senderId: string } | undefined> {
     if (!replyToId) {
-      return;
+      return undefined;
     }
 
     const replyTarget = await this.chatRepository.findSentMessageInConversation(
@@ -301,6 +299,8 @@ export class ChatAccessService {
     if (!replyTarget) {
       throw new BadRequestException('Reply target message was not found');
     }
+
+    return { senderId: replyTarget.senderId };
   }
 
   /**
@@ -375,20 +375,7 @@ export class ChatAccessService {
    * assigned game.
    */
   async assertCanManageGameEmotes(userId: string, gameId: string) {
-    const user = await this.chatRepository.findUserById(userId);
-
-    if (user?.role === UserRole.ADMIN) {
-      return;
-    }
-
-    const isModerator = await this.gameModeratorsService.isModerator(
-      gameId,
-      userId,
-    );
-
-    if (!isModerator) {
-      throw new ForbiddenException('You cannot manage emotes for this game');
-    }
+    await this.gameModeratorsService.assertCanModerateGame(gameId, userId);
   }
 
   /**
