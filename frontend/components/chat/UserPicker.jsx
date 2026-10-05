@@ -43,7 +43,7 @@ export function UserPicker({
       currentUser.name?.toLowerCase().includes(trimmedQuery.toLowerCase()));
 
   const pick = (user) => {
-    const picked = { id: user.id, name: user.name };
+    const picked = { id: user.id, name: user.name, username: user.username };
     focusChipAfterPick.current = !multiple;
     onChange(multiple ? [...value, picked] : [picked]);
     setQuery("");
