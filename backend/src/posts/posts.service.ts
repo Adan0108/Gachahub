@@ -18,6 +18,7 @@ import { PostVisibilityService } from '../post-visibility/post-visibility.servic
 import { UserInterestService } from '../recommendation/user-interest.service';
 import { resolvePagination, toPaginated } from '../common/utils/paginated';
 import { EventPublisherPort } from '../domain-events/event-publisher.port';
+import { MentionsService } from '../mentions/mentions.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -29,6 +30,7 @@ export class PostsService {
     private readonly userInterestService: UserInterestService,
     private readonly eventPublisher: EventPublisherPort,
     private readonly prisma: PrismaService,
+    private readonly mentions: MentionsService,
   ) {}
 
   async findAll(query: QueryPostsDto, userId?: string) {
@@ -262,19 +264,51 @@ export class PostsService {
       };
     });
 
-    const post = await this.postsRepository.create({
+    const title = dto.title.trim();
+    const content = dto.content.trim();
+    const mentionTargetIds = await this.resolveMentionTargets(
+      `${title}
+${content}`,
       authorId,
-      gameId: dto.gameId,
-      categoryId: dto.categoryId,
-      title: dto.title.trim(),
-      content: dto.content.trim(),
-      type: dto.type,
-      status: dto.status,
-      visibility: dto.visibility,
-      isSpoiler: dto.isSpoiler,
-      media,
-      tags: this.normalizeTags(dto.tags),
-    });
+      {
+        authorId,
+        deletedAt: null,
+        // The schema defaults, since the row doesn't exist yet.
+        status: dto.status ?? 'PUBLISHED',
+        visibility: dto.visibility ?? 'PUBLIC',
+      },
+    );
+
+    const post = await this.prisma.$transaction(
+      async (transaction) => {
+        const created = await this.postsRepository.create(transaction, {
+          authorId,
+          gameId: dto.gameId,
+          categoryId: dto.categoryId,
+          title,
+          content,
+          type: dto.type,
+          status: dto.status,
+          visibility: dto.visibility,
+          isSpoiler: dto.isSpoiler,
+          media,
+          tags: this.normalizeTags(dto.tags),
+        });
+
+        await this.mentions.publishMentions(
+          {
+            targetIds: mentionTargetIds,
+            actorId: authorId,
+            entityType: 'POST',
+            entityId: created.id,
+          },
+          transaction,
+        );
+
+        return created;
+      },
+      { maxWait: 5_000, timeout: 15_000 },
+    );
 
     return formatPost(post);
   }
@@ -368,11 +402,43 @@ export class PostsService {
         : {}),
     };
 
-    const post = await this.postsRepository.update({
-      id,
-      data,
-      tags: dto.tags !== undefined ? this.normalizeTags(dto.tags) : undefined,
-    });
+    // Pings for a mention added by this edit, or for everything mentioned when a draft is published;
+    // the `mentions` table keeps anyone already pinged for this post from being pinged again.
+    const mentionTargetIds = await this.resolveMentionTargets(
+      `${dto.title?.trim() ?? existingPost.title}
+${dto.content?.trim() ?? existingPost.content}`,
+      userId,
+      {
+        authorId: existingPost.authorId,
+        deletedAt: null,
+        status: dto.status ?? existingPost.status,
+        visibility: dto.visibility ?? existingPost.visibility,
+      },
+    );
+
+    const post = await this.prisma.$transaction(
+      async (transaction) => {
+        const updated = await this.postsRepository.update(transaction, {
+          id,
+          data,
+          tags:
+            dto.tags !== undefined ? this.normalizeTags(dto.tags) : undefined,
+        });
+
+        await this.mentions.publishMentions(
+          {
+            targetIds: mentionTargetIds,
+            actorId: userId,
+            entityType: 'POST',
+            entityId: id,
+          },
+          transaction,
+        );
+
+        return updated;
+      },
+      { maxWait: 5_000, timeout: 15_000 },
+    );
 
     return formatPost(post);
   }
@@ -465,6 +531,23 @@ export class PostsService {
       liked: result.liked,
       likeCount: result.likeCount,
     };
+  }
+
+  /** Resolved before the transaction opens: visibility checks use their own connection. Drafts ping nobody. */
+  private async resolveMentionTargets(
+    text: string,
+    actorId: string,
+    post: Parameters<PostVisibilityService['canView']>[0],
+  ): Promise<string[]> {
+    if (post.status !== 'PUBLISHED') {
+      return [];
+    }
+
+    return this.mentions.resolveTargets({
+      text,
+      actorId,
+      canView: (mentionedId) => this.postVisibility.canView(post, mentionedId),
+    });
   }
 
   private normalizeTags(tags?: string[]) {

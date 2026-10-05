@@ -8,6 +8,7 @@ import type {
 import type { UserInterestProfile } from '../recommendation/recommendation.types';
 
 const FOLLOWING_LATEST_BOOST_HOURS = 1.5;
+const FOR_YOU_ENGAGEMENT_SATURATION = 75;
 
 @Injectable()
 export class FeedRankerService {
@@ -64,8 +65,9 @@ export class FeedRankerService {
    * Cold-start users without interest signals fall back to
    * engagement, freshness, and social signals.
    *
-   * Engagement is normalized within the current candidate pool so
-   * raw engagement counts do not dominate the other 0..1 signals.
+   * Engagement uses a candidate-independent exponential saturation curve so
+   * the same counters always produce the same bounded score. Diminishing
+   * returns prevent large engagement counts from dominating other signals.
    */
   rankForYou(
     candidates: ForYouFeedCandidate[],
@@ -76,19 +78,13 @@ export class FeedRankerService {
       return [];
     }
 
-    const engagementScores = candidates.map((candidate) =>
-      this.rawEngagement(candidate),
-    );
-
-    const maxEngagement = Math.max(1, ...engagementScores);
-
     return candidates
-      .map((candidate, index) => {
+      .map((candidate) => {
         const interest = profile.hasSignals
           ? this.interestScore(candidate, profile)
           : 0;
 
-        const engagement = engagementScores[index] / maxEngagement;
+        const engagement = this.engagementScore(candidate);
 
         const freshness = this.freshnessScore(candidate.createdAt);
 
@@ -240,22 +236,26 @@ export class FeedRankerService {
   }
 
   /**
-   * Calculates the post's raw engagement strength.
+   * Calculates the post's bounded engagement strength independently of every
+   * other candidate in the current retrieval pool.
    *
    * Higher-intent interactions receive larger weights:
    * reaction < comment < save < share.
    *
-   * log1p compresses large engagement values so viral posts
-   * do not dominate the recommendation score.
+   * Exponential saturation keeps the score in the 0..1 range and applies
+   * diminishing returns as weighted engagement grows.
    */
-  private rawEngagement(post: ForYouFeedCandidate) {
-    const engagement =
+  private engagementScore(post: ForYouFeedCandidate) {
+    const weightedEngagement =
       post.reactionCount +
       post.commentCount * 2 +
       post.saveCount * 3 +
       post.shareCount * 4;
 
-    return Math.log1p(engagement);
+    return Math.min(
+      1 - Number.EPSILON,
+      1 - Math.exp(-weightedEngagement / FOR_YOU_ENGAGEMENT_SATURATION),
+    );
   }
 
   /**

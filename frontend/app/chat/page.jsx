@@ -33,6 +33,7 @@ import { ChatBackupModal } from "../../components/chat/ChatBackupModal";
 import { ThreadRow } from "../../components/chat/ThreadRow";
 import { AttachmentComposerTray } from "../../components/chat/AttachmentComposerTray";
 import { AttachmentLightbox } from "../../components/chat/AttachmentLightbox";
+import { AvatarFace } from "../../components/AvatarFace";
 import { PendingContent } from "../../components/chat/EnvelopeContent";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useAttachmentPicker } from "../../hooks/chat/useAttachmentPicker";
@@ -56,8 +57,8 @@ import { typingSignal } from "../../lib/chat/chatTypingSignal";
 import {
   activeMembers,
   conversationDisplayName,
+  conversationImage,
   conversationPeer,
-  initialOf,
   myParticipant,
   otherActiveMemberIds,
   participantUser,
@@ -573,6 +574,7 @@ export default function ChatPage() {
         ? "New device"
         : "Verify end-to-end encryption";
   const activeConversationName = conversationDisplayName(activeConversation, user?.id);
+  const activeConversationImage = conversationImage(activeConversation, user?.id);
   const activeGroupMembers = activeMembers(activeConversation);
   const myGroupParticipant = myParticipant(activeConversation, user?.id);
   // Sending is rejected unless ACTIVE (pending, removed, declined, blocked).
@@ -865,7 +867,12 @@ export default function ChatPage() {
                   onClick={() => setSelectedId(conversation.id)}
                   type="button"
                 >
-                  <span className="chat-avatar">{initialOf(displayName)}</span>
+                  <span className="chat-avatar">
+                    <AvatarFace
+                      image={conversationImage(conversation, user?.id)}
+                      name={displayName}
+                    />
+                  </span>
                   <span>
                     <b>{displayName}</b>
                     <small>
@@ -907,7 +914,9 @@ export default function ChatPage() {
             <>
               <header className="chat-thread-head">
                 <div>
-                  <span className="chat-avatar">{initialOf(activeConversationName)}</span>
+                  <span className="chat-avatar">
+                    <AvatarFace image={activeConversationImage} name={activeConversationName} />
+                  </span>
                   <span>
                     <b>{activeConversationName}</b>
                     <small>
@@ -1257,6 +1266,7 @@ export default function ChatPage() {
 
         <ConversationInfoPanel
           canVerify={canVerify}
+          displayImage={activeConversationImage}
           displayName={activeConversationName}
           encryptionStatus={encryptionStatus}
           fileAttachments={flatOtherAttachments}

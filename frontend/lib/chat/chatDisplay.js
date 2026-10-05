@@ -28,6 +28,12 @@ export function conversationDisplayName(conversation, userId) {
   return conversationPeer(conversation, userId)?.name || "GachaHub member";
 }
 
+/** The peer's picture for a direct chat; groups have none. */
+export function conversationImage(conversation, userId) {
+  if (conversation?.type === "GROUP") return null;
+  return conversationPeer(conversation, userId)?.image ?? null;
+}
+
 export function initialOf(name) {
   return name?.trim()?.charAt(0).toUpperCase() || "?";
 }

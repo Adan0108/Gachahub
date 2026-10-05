@@ -157,6 +157,22 @@
   color: #ffbf8a;
 }
 
+/* Live @handle availability feedback on the onboarding form. */
+.auth-field-hint {
+  margin-top: -2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #8089a8;
+}
+
+.auth-field-hint.available {
+  color: #9ce7c3;
+}
+
+.auth-field-hint.taken {
+  color: #ffbf8a;
+}
+
 .auth-switch {
   margin-top: 22px;
   font-size: 14px;
@@ -166,5 +182,20 @@
   color: #a98bff;
   font-weight: 850;
   text-decoration: none;
+}
+
+.onboarding-signout {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #a98bff;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.onboarding-signout:disabled {
+  opacity: 0.65;
+  cursor: wait;
 }
 
