@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { PostList } from "../components/PostList";
 
@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   createReply: vi.fn(),
   likePost: vi.fn(),
   getFollowStatus: vi.fn(() => Promise.resolve({ following: false })),
+  createReport: vi.fn(() => Promise.resolve({ id: "report-1" })),
+  share: vi.fn(() => Promise.resolve()),
   push: vi.fn(),
 }));
 
@@ -54,6 +56,7 @@ vi.mock("../lib/api", () => ({
     getReplies: vi.fn(),
     createComment: vi.fn(),
     createReply: mocks.createReply,
+    createReport: mocks.createReport,
   },
   fallbackCategories: vi.fn(),
   fallbackGame: vi.fn(),
@@ -62,6 +65,50 @@ vi.mock("../lib/api", () => ({
 }));
 
 describe("PostList", () => {
+  it("shares a feed post with the browser share sheet", async () => {
+    mocks.share.mockClear();
+    Object.defineProperty(navigator, "share", { configurable: true, value: mocks.share });
+
+    render(
+      <PostList
+        posts={[{ id: "post-share", title: "Share me", author: "Author", content: "Body" }]}
+        variant="feed"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^share$/i }));
+    await waitFor(() =>
+      expect(mocks.share).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Share me", url: expect.stringContaining("/post/post-share") }),
+      ),
+    );
+  });
+
+  it("opens the post menu and submits a report", async () => {
+    mocks.createReport.mockClear();
+    render(
+      <PostList
+        posts={[{ id: "post-report", title: "Report me", author: "Author" }]}
+        variant="feed"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /more options for report me/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^report$/i }));
+    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: "COMMERCIAL_SPAM" } });
+    fireEvent.change(screen.getByLabelText(/details/i), { target: { value: "Repeated ads" } });
+    fireEvent.click(screen.getByRole("button", { name: /submit report/i }));
+
+    await waitFor(() =>
+      expect(mocks.createReport).toHaveBeenCalledWith({
+        targetType: "POST",
+        targetId: "post-report",
+        reasonCode: "COMMERCIAL_SPAM",
+        details: "Repeated ads",
+      }),
+    );
+  });
+
   it("uses the QuickTime MIME type for MOV videos", () => {
     const { container } = render(
       <PostList

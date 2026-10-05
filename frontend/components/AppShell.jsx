@@ -47,7 +47,14 @@ function Sidebar({ open, close, closeButtonRef }) {
               ? pathname === href
               : pathname === href || pathname.startsWith(match || href);
             return (
-              <Link key={href} href={href} onClick={close} className={active ? "active" : ""}>
+              <Link
+                aria-current={active ? "page" : undefined}
+                key={href}
+                href={href}
+                onClick={close}
+                className={active ? "active" : ""}
+              >
+                {active && <span className="sr-only">Current page:</span>}
                 <Icon />
                 <span>{label}</span>
               </Link>
@@ -110,12 +117,17 @@ export function AppShell({ children, initialTheme = "dark" }) {
   useEffect(() => {
     if (menu) {
       wasMenuOpenRef.current = true;
+      const previousOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
       menuCloseButtonRef.current?.focus();
       const closeOnEscape = (event) => {
         if (event.key === "Escape") setMenu(false);
       };
       window.addEventListener("keydown", closeOnEscape);
-      return () => window.removeEventListener("keydown", closeOnEscape);
+      return () => {
+        document.body.style.overflow = previousOverflow;
+        window.removeEventListener("keydown", closeOnEscape);
+      };
     }
 
     if (wasMenuOpenRef.current) {
@@ -138,6 +150,7 @@ export function AppShell({ children, initialTheme = "dark" }) {
 
   return (
     <div className={`app-shell ${studio ? "studio-shell" : ""}`}>
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <Sidebar open={menu} close={() => setMenu(false)} closeButtonRef={menuCloseButtonRef} />
       <div className="main-column">
         {!studio && (
@@ -149,7 +162,7 @@ export function AppShell({ children, initialTheme = "dark" }) {
             showGlobalActions={!chat}
           />
         )}
-        {children}
+        <div id="main-content" tabIndex={-1}>{children}</div>
       </div>
       {process.env.NODE_ENV !== "production" && <DevToolsPanel />}
     </div>

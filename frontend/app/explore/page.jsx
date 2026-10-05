@@ -112,6 +112,7 @@ function ExploreContent() {
             isLoading={games.isLoading}
             isError={games.isError}
             isEmpty={!recommendedCommunities.length}
+            onRetry={() => games.refetch()}
             errorText={
               offlineSearch
                 ? "Search needs the backend. Start the API or enable mock mode to preview results."
@@ -127,6 +128,7 @@ function ExploreContent() {
               isLoading={postsQuery.isLoading}
               isError={postsQuery.isError}
               isEmpty={!filteredPosts.length}
+              onRetry={() => postsQuery.refetch()}
               emptyText={`No ${activeFilter === "All" ? "posts" : activeFilter.toLowerCase()} match this search yet.`}
             />
             <PostList posts={filteredPosts} />
