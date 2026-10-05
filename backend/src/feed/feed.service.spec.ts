@@ -1,4 +1,5 @@
 import { BadRequestException, GoneException } from '@nestjs/common';
+import { PostTypeDto } from '../posts/dto/create-post.dto';
 import type { UserInterestProfile } from '../recommendation/recommendation.types';
 import type {
   ForYouFeedCandidate,
@@ -677,7 +678,7 @@ describe('FeedService - For You', () => {
       personalized: true,
     });
 
-    await service.forYou({ limit: 20, type: 'GUIDE' }, 'user-1');
+    await service.forYou({ limit: 20, type: PostTypeDto.GUIDE }, 'user-1');
 
     expect(postsRepository.findForYouManyByIds).toHaveBeenCalledWith(
       ['post-1'],
