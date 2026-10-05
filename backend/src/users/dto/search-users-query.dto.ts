@@ -14,7 +14,7 @@ export const SEARCH_DEFAULT_LIMIT = 8;
 
 export class SearchUsersQueryDto {
   @ApiProperty({
-    description: 'Display-name text, 2-50 chars',
+    description: 'Display-name text, or an exact @handle, 2-50 chars',
     minLength: 2,
     maxLength: 50,
   })

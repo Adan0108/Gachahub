@@ -3,7 +3,6 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { MediaService } from '../media/media.service';
@@ -48,8 +47,6 @@ const BRANDING_SLOT_KEYS = Object.keys(BRANDING_SLOTS) as BrandingSlotKey[];
 // Moderator/admin actions on a game itself (branding, flagging, archive/restore) - split from GamesService since these use a different auth model.
 @Injectable()
 export class GameModerationService {
-  private readonly logger = new Logger(GameModerationService.name);
-
   constructor(
     private readonly gamesRepository: GamesRepository,
     private readonly gameModeratorsService: GameModeratorsService,
@@ -83,20 +80,14 @@ export class GameModerationService {
     const resolved = await Promise.all(
       requestedSlots.map(async (key) => {
         const slot = BRANDING_SLOTS[key];
-        const [upload] = await this.mediaService.resolveAttachableMedia({
-          ids: [dto[slot.idField]!],
+        const upload = await this.mediaService.resolveSingleImage({
+          id: dto[slot.idField]!,
           userId: actorId,
           purpose: slot.purpose,
-          maxImages: 1,
-          maxVideos: 0,
           entityLabel: slot.label,
         });
 
-        return [
-          key,
-          // Validated non-null by resolveAttachableMedia for every UPLOADED row.
-          { id: upload.id, secureUrl: upload.secureUrl! },
-        ] as const;
+        return [key, upload] as const;
       }),
     );
 
@@ -118,7 +109,7 @@ export class GameModerationService {
     await Promise.all(
       BRANDING_SLOT_KEYS.map((key) => result.previousUploadIds[key])
         .filter((id): id is string => Boolean(id))
-        .map((id) => this.releaseOldUpload(id)),
+        .map((id) => this.mediaService.releaseReplacedUpload(id)),
     );
 
     return formatGame(result.game);
@@ -215,21 +206,6 @@ export class GameModerationService {
   private assertReachable(status: GameStatus): void {
     if (status === 'ARCHIVED') {
       throw new NotFoundException('Game not found');
-    }
-  }
-
-  private async releaseOldUpload(mediaUploadId: string) {
-    try {
-      await this.mediaService.releaseAttachedUpload(mediaUploadId);
-    } catch (error) {
-      this.logger.warn(
-        `Failed to release media ${mediaUploadId} after game branding replace`,
-        error instanceof Error ? error.stack : undefined,
-      );
-
-      await this.mediaService.markReleaseFailed(mediaUploadId).catch(() => {
-        // Already RELEASE_FAILED or gone; the next sweep handles it.
-      });
     }
   }
 }

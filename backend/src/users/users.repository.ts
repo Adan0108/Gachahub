@@ -2,8 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { escapeLikePattern } from '../common/utils/like-pattern';
 import type { Prisma, UserRole, UserStatus } from '../generated/prisma/client';
+import { ME_SELECT } from './me-select';
 
-const PICKER_SELECT = { id: true, name: true, image: true } as const;
+const PICKER_SELECT = {
+  id: true,
+  name: true,
+  image: true,
+  username: true,
+} as const;
 
 /** Active users the caller has no block with, in either direction. */
 const pickableBy = (callerId: string) =>
@@ -42,11 +48,28 @@ export class UsersRepository {
     });
   }
 
+  /** Exact handle (citext, so case-insensitive), served by the unique index - same rules as a name search. */
+  findPickableByUsername(callerId: string, username: string) {
+    return this.prisma.user.findFirst({
+      where: { username, NOT: { id: callerId }, ...pickableBy(callerId) },
+      select: PICKER_SELECT,
+    });
+  }
+
   /** Exact user id, so a pasted id finds its owner under the same rules as a name search. */
   findPickableById(callerId: string, id: string) {
     return this.prisma.user.findFirst({
       where: { id, NOT: { id: callerId }, ...pickableBy(callerId) },
       select: PICKER_SELECT,
+    });
+  }
+
+  /** Sets (or clears, with null) the user's profile banner design; returns the same shape as GET /users/me. */
+  setBannerPreset(id: string, bannerPresetId: string | null) {
+    return this.prisma.user.update({
+      where: { id },
+      data: { bannerPresetId },
+      select: ME_SELECT,
     });
   }
 

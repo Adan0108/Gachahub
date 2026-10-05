@@ -40,7 +40,7 @@ describe('UsersRepository.searchByName', () => {
         blockedUsers: { none: { blockedId: 'me' } },
         blockedBy: { none: { blockerId: 'me' } },
       },
-      select: { id: true, name: true, image: true },
+      select: { id: true, name: true, image: true, username: true },
     });
   });
 
@@ -57,7 +57,7 @@ describe('UsersRepository.searchByName', () => {
       },
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
       take: 5,
-      select: { id: true, name: true, image: true },
+      select: { id: true, name: true, image: true, username: true },
     });
   });
 
@@ -69,6 +69,21 @@ describe('UsersRepository.searchByName', () => {
       name: { startsWith: 'ma', mode: 'insensitive' },
     });
     expect(args().take).toBe(2);
+  });
+
+  it('finds an exact handle only when active, not the caller and not blocked either way', async () => {
+    await repository.findPickableByUsername('me', 'Bob-1');
+
+    expect(prisma.user.findFirst).toHaveBeenCalledWith({
+      where: {
+        username: 'Bob-1',
+        NOT: { id: 'me' },
+        status: 'ACTIVE',
+        blockedUsers: { none: { blockedId: 'me' } },
+        blockedBy: { none: { blockerId: 'me' } },
+      },
+      select: { id: true, name: true, image: true, username: true },
+    });
   });
 
   it('sends the escaped text to both the prefix and the contains filter', async () => {
@@ -172,4 +187,29 @@ describe('UsersRepository admin moderation', () => {
 
     expect(result).toEqual({ id: 'user-1', status: 'BANNED' });
   });
+});
+
+describe('UsersRepository.setBannerPreset', () => {
+  const prisma = { user: { update: jest.fn() } };
+  const repository = new UsersRepository(prisma as unknown as PrismaService);
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it.each([['violet'], [null]])(
+    'writes bannerPresetId=%s and returns the me-shaped row',
+    async (preset) => {
+      prisma.user.update.mockResolvedValue({ id: 'user-1' });
+
+      await repository.setBannerPreset('user-1', preset);
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { bannerPresetId: preset },
+        select: expect.objectContaining({
+          id: true,
+          bannerPresetId: true,
+        }) as unknown,
+      });
+    },
+  );
 });
