@@ -11,3 +11,17 @@ export function relativeTime(value) {
   const hours = Math.floor(minutes / 60);
   return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
 }
+
+/** "Just now", "5m", "3h", "2d", "1w" - the short form for a list row, where the time sits right beside the message. */
+export function compactRelativeTime(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.valueOf())) return "";
+
+  const minutes = Math.max(0, Math.floor((Date.now() - date.valueOf()) / 60_000));
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return days < 7 ? `${days}d` : `${Math.floor(days / 7)}w`;
+}

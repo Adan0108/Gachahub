@@ -2019,6 +2019,43 @@
   font-size: 11px;
 }
 
+.chat-conversation-list > button > span:nth-child(2) {
+  min-width: 0;
+}
+
+.chat-conversation-list .chat-list-preview {
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.chat-list-preview-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-list-preview-time {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.chat-list-preview.unread {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.chat-list-preview.typing {
+  color: var(--purple);
+  font-weight: 600;
+}
+
+.chat-list-preview.typing .chat-typing-dots span {
+  width: 4px;
+  height: 4px;
+  background: currentColor;
+}
+
 .chat-avatar {
   display: grid;
   place-items: center;
@@ -2454,6 +2491,63 @@
   animation: chat-request-accepted-pop 0.2s ease-out;
 }
 
+/* Anchors the jump-to-latest button to the list's own area; the list stays the one that scrolls. */
+.chat-messages-wrap {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.chat-jump-bottom {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel2);
+  color: var(--purple);
+  font-size: 18px;
+  box-shadow: 0 6px 18px #00000055;
+  cursor: pointer;
+  /* Hidden: parked below its resting spot and invisible; leaving visibility off until the slide ends keeps it from being clicked or focused. */
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(-50%, 28px);
+  transition:
+    transform 0.25s ease,
+    opacity 0.25s ease,
+    visibility 0s linear 0.25s;
+}
+
+.chat-jump-bottom.visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+  transition:
+    transform 0.25s ease,
+    opacity 0.25s ease,
+    visibility 0s;
+}
+
+.chat-jump-bottom:hover {
+  background: color-mix(in srgb, var(--purple), var(--panel2) 85%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-jump-bottom,
+  .chat-jump-bottom.visible {
+    transition: none;
+  }
+}
+
 .chat-messages {
   display: flex;
   flex-direction: column;
@@ -2505,18 +2599,11 @@
   margin-top: 10px;
 }
 
+/* The last item inside the message list, so it takes real space and pushes the messages up like a new message. */
 .chat-typing-indicator {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  /* This is its own grid row of .chat-thread, sized to content (auto) same as the header/composer
-     rows above and below it - but unlike them it has no background of its own, so the leftover
-     space beside the pill (everything to the right of it, the whole row is full width) showed
-     .chat-thread's own panel background through, a third color sandwiched between .chat-messages
-     above and .chat-composer below, i.e. exactly the "wide rectangle" this was reported as. Filling
-     the full row with .chat-messages's own background instead makes it read as part of that same
-     surface, with only the actual pill (.chat-typing-pill) visible as a distinct bubble. */
-  background: var(--bg);
-  padding: 6px 12px 10px;
 }
 
 .chat-typing-pill {

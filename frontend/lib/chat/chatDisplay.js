@@ -43,3 +43,10 @@ export function conversationImage(conversation, userId) {
 export function initialOf(name) {
   return name?.trim()?.charAt(0).toUpperCase() || "?";
 }
+
+/** "Mado is typing...", "Mado and Rover are typing...", "Mado and 2 others are typing..." */
+export function typingLabel(names) {
+  if (names.length === 1) return `${names[0]} is typing...`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing...`;
+  return `${names[0]} and ${names.length - 1} others are typing...`;
+}

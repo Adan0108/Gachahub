@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FiArchive,
-  FiBellOff,
   FiCheck,
   FiCheckCircle,
   FiEdit2,
@@ -32,6 +31,8 @@ import { UserPicker } from "../../components/chat/UserPicker";
 import { DevicesModal } from "../../components/chat/DevicesModal";
 import { ChatBackupModal } from "../../components/chat/ChatBackupModal";
 import { ThreadRow } from "../../components/chat/ThreadRow";
+import { ConversationListItem } from "../../components/chat/ConversationListItem";
+import { JumpToBottomButton } from "../../components/chat/JumpToBottomButton";
 import { AttachmentComposerTray } from "../../components/chat/AttachmentComposerTray";
 import { AttachmentLightbox } from "../../components/chat/AttachmentLightbox";
 import { AvatarFace } from "../../components/AvatarFace";
@@ -41,6 +42,9 @@ import { useAttachmentPicker } from "../../hooks/chat/useAttachmentPicker";
 import { useDeviceIdentity } from "../../hooks/chat/useDeviceIdentity";
 import { useSyncEngine } from "../../hooks/chat/useSyncEngine";
 import { useChatBackup } from "../../hooks/chat/useChatBackup";
+import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
+import { useStickToBottom } from "../../hooks/chat/useStickToBottom";
+import { useTypingNames } from "../../hooks/chat/useTypingNames";
 import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
 import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
 import { useThreadData } from "../../hooks/chat/useThreadData";
@@ -59,13 +63,12 @@ import {
   activeMembers,
   conversationDisplayName,
   conversationImage,
-  conversationMute,
   conversationPeer,
   myParticipant,
   otherActiveMemberIds,
   participantUser,
+  typingLabel,
 } from "../../lib/chat/chatDisplay";
-import { relativeTime } from "../../lib/time";
 import { threadItemKey, withOptimisticDelete } from "../../lib/chat/chatThread";
 import { withOptimisticReaction } from "../../lib/chat/chatReactions";
 import { getHiddenMessageIds, hideMessageForMe, unhideMessageForMe } from "../../lib/chat/chatHiddenMessages";
@@ -140,18 +143,8 @@ export default function ChatPage() {
     ...queries.chatMessages(activeId),
     enabled: isAuthenticated && Boolean(activeId),
   });
-  // Cache is only ever written to by useChatSocket's typing:start/typing:stop handlers - nothing
-  // here ever fetches it, this just observes whatever's currently in it for this conversation.
-  const typingUserIds = useQuery({
-    queryKey: queryKeys.chatTyping(activeId),
-    queryFn: () => [],
-    enabled: Boolean(activeId),
-    staleTime: Infinity,
-  }).data;
-  const typingNames = (typingUserIds || [])
-    .filter((id) => id !== user?.id)
-    .map((id) => participantUser(activeConversation, id)?.name)
-    .filter(Boolean);
+  const typingNames = useTypingNames(activeConversation, user?.id);
+  const conversationPreviews = useConversationPreviews(listQuery.data, user?.id);
   const {
     displayMessages,
     isLoadingOlder,
@@ -184,7 +177,12 @@ export default function ChatPage() {
   const syncEngine = useSyncEngine();
   const [verifyPeerId, setVerifyPeerId] = useState("");
   const readableMessageIdsKey = readableMessageIds.join(",");
-  const messagesEndRef = useRef(null);
+  const {
+    onScroll: trackMessagesScroll,
+    scrollToBottom,
+    followIfNearBottom,
+    showJumpToBottom,
+  } = useStickToBottom(messagesContainerRef);
   const [draft, setDraft] = useState("");
   // { id, senderName, preview } of the message being replied to, or null.
   const [replyTarget, setReplyTarget] = useState(null);
@@ -466,10 +464,21 @@ export default function ChatPage() {
   const activePendingCount = pendingMessages.filter(
     (pending) => pending.conversationId === activeId,
   ).length;
-  // Follows the latest message, including optimistic bubbles.
+  const someoneTyping = typingNames.length > 0;
+  const previousPendingCount = useRef(0);
+  // Opening a conversation starts at its newest message.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ block: "end" });
-  }, [activeId, messages.data?.items?.length, decryptedCount, activePendingCount]);
+    scrollToBottom();
+  }, [activeId, scrollToBottom]);
+  // New messages, and the typing indicator, only follow you while you're already at the bottom.
+  useEffect(() => {
+    followIfNearBottom();
+  }, [messages.data?.items?.length, decryptedCount, someoneTyping, followIfNearBottom]);
+  // Sending a message always takes you to it, wherever you were.
+  useEffect(() => {
+    if (activePendingCount > previousPendingCount.current) scrollToBottom();
+    previousPendingCount.current = activePendingCount;
+  }, [activePendingCount, scrollToBottom]);
 
   const refreshChat = async () => {
     await Promise.all([
@@ -859,49 +868,16 @@ export default function ChatPage() {
             }
           />
           <div className="chat-conversation-list">
-            {currentList.map((conversation) => {
-              const isGroup = conversation.type === "GROUP";
-              const displayName = conversationDisplayName(conversation, user?.id);
-              const isMuted = conversationMute(conversation, user?.id).isMuted;
-              return (
-                <button
-                  className={activeId === conversation.id ? "active" : ""}
-                  key={conversation.id}
-                  onClick={() => setSelectedId(conversation.id)}
-                  type="button"
-                >
-                  <span className="chat-avatar">
-                    <AvatarFace
-                      image={conversationImage(conversation, user?.id)}
-                      name={displayName}
-                    />
-                  </span>
-                  <span>
-                    <b>{displayName}</b>
-                    <small>
-                      {isGroup ? (
-                        <>
-                          <FiUsers /> {activeMembers(conversation).length} members
-                        </>
-                      ) : (
-                        <>
-                          <FiLock /> Encrypted message
-                        </>
-                      )}
-                    </small>
-                  </span>
-                  <span className="chat-list-meta">
-                    <small>
-                      {isMuted && <FiBellOff aria-label="Muted" />}
-                      {relativeTime(conversation.updatedAt)}
-                    </small>
-                    {conversation.unreadCount > 0 && (
-                      <b className={isMuted ? "muted" : undefined}>{conversation.unreadCount}</b>
-                    )}
-                  </span>
-                </button>
-              );
-            })}
+            {currentList.map((conversation) => (
+              <ConversationListItem
+                active={activeId === conversation.id}
+                conversation={conversation}
+                key={conversation.id}
+                onSelect={setSelectedId}
+                preview={conversationPreviews[conversation.lastMessage?.id]}
+                userId={user?.id}
+              />
+            ))}
           </div>
         </aside>
 
@@ -976,10 +952,14 @@ export default function ChatPage() {
               <div className="sr-only" aria-live="polite" aria-atomic="true">
                 <p key={announcement.seq}>{announcement.text}</p>
               </div>
+              <div className="chat-messages-wrap">
               <div
                 className="chat-messages"
                 ref={messagesContainerRef}
-                onScroll={handleMessagesScroll}
+                onScroll={(event) => {
+                  trackMessagesScroll(event);
+                  handleMessagesScroll(event);
+                }}
               >
                 <AttachmentLightboxContext.Provider value={setLightboxKey}>
                 <QueryNotice isLoading={messages.isLoading} isError={messages.isError} />
@@ -1066,8 +1046,21 @@ export default function ChatPage() {
                       <b>No messages in this conversation</b>
                     </div>
                   )}
-                <div className="chat-messages-end" ref={messagesEndRef} />
+                {typingNames.length > 0 && (
+                  <div className="chat-typing-indicator">
+                    <span className="chat-typing-pill">
+                      <span className="chat-typing-dots">
+                        <span />
+                        <span />
+                        <span />
+                      </span>
+                      {typingLabel(typingNames)}
+                    </span>
+                  </div>
+                )}
                 </AttachmentLightboxContext.Provider>
+              </div>
+              <JumpToBottomButton onClick={() => scrollToBottom("smooth")} visible={showJumpToBottom} />
               </div>
               {lightboxIndex >= 0 && (
                 <AttachmentLightbox
@@ -1108,22 +1101,6 @@ export default function ChatPage() {
                   <button aria-label="Dismiss" onClick={() => setHiddenNotice(null)} type="button">
                     <FiX />
                   </button>
-                </div>
-              )}
-              {typingNames.length > 0 && (
-                <div className="chat-typing-indicator">
-                  <span className="chat-typing-pill">
-                    <span className="chat-typing-dots">
-                      <span />
-                      <span />
-                      <span />
-                    </span>
-                    {typingNames.length === 1
-                      ? `${typingNames[0]} is typing...`
-                      : typingNames.length === 2
-                        ? `${typingNames[0]} and ${typingNames[1]} are typing...`
-                        : `${typingNames[0]} and ${typingNames.length - 1} others are typing...`}
-                  </span>
                 </div>
               )}
               {shownError && shownError.message !== dismissedErrorMessage && (
