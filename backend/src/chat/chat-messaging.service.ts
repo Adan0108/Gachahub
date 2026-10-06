@@ -371,10 +371,8 @@ export class ChatMessagingService {
         // Authoritative re-check under the same lock a membership change takes:
         // the participant list read above, outside this transaction, can be
         // stale by the time this insert runs.
-        const freshParticipants = await this.chatRepository.lockAndFindParticipants(
-          tx,
-          conversationId,
-        );
+        const freshParticipants =
+          await this.chatRepository.lockAndFindParticipants(tx, conversationId);
         const freshSender = freshParticipants.find(
           (participant) => participant.userId === senderId,
         );
@@ -383,7 +381,9 @@ export class ChatMessagingService {
           throw new ForbiddenException('You cannot send messages here');
         }
 
-        this.chatAccessService.assertNoMembershipChangePending(freshParticipants);
+        this.chatAccessService.assertNoMembershipChangePending(
+          freshParticipants,
+        );
 
         const created = await this.chatRepository.createMessage(tx, {
           conversationId,

@@ -21,6 +21,7 @@ import { ChatGroupService } from './chat-group.service';
 import { ChatInboxService } from './chat-inbox.service';
 import { ChatMessageActionsService } from './chat-message-actions.service';
 import { ChatMessageEditService } from './chat-message-edit.service';
+import { ChatReceiptsService } from './chat-receipts.service';
 import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
 import { CreateGroupChatDto } from './dto/create-group-chat.dto';
@@ -54,6 +55,7 @@ export class ChatController {
     private readonly chatInboxService: ChatInboxService,
     private readonly chatMessageActionsService: ChatMessageActionsService,
     private readonly chatMessageEditService: ChatMessageEditService,
+    private readonly chatReceiptsService: ChatReceiptsService,
   ) {}
 
   /**
@@ -615,7 +617,7 @@ export class ChatController {
     @Session() session: UserSession,
     @Body() dto: MarkMessagesDeliveredDto,
   ) {
-    return this.chatInboxService.markDelivered(session.user.id, dto);
+    return this.chatReceiptsService.markDelivered(session.user.id, dto);
   }
 
   /**
@@ -637,7 +639,11 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: MarkConversationReadDto,
   ) {
-    return this.chatInboxService.markRead(session.user.id, conversationId, dto);
+    return this.chatReceiptsService.markRead(
+      session.user.id,
+      conversationId,
+      dto,
+    );
   }
 
   /**

@@ -48,6 +48,19 @@ export interface ChatRequestAcceptedEvent {
 }
 
 /**
+ * Someone's device received (`delivered`) or someone read up to a message (`read`), for the
+ * people who sent those messages. A read also counts as delivered for everything up to it.
+ */
+export type ChatReceiptsUpdatedEvent = {
+  conversationId: string;
+  readerId: string;
+  recipientUserIds: string[];
+} & (
+  | { kind: 'delivered'; messageIds: string[] }
+  | { kind: 'read'; upToMessageId: string; at: Date }
+);
+
+/**
  * Port for chat delivery side effects.
  *
  * REST persistence works without this doing anything today. Later, a WebSocket,
@@ -61,4 +74,5 @@ export interface ChatDeliveryPort {
   publishReactionAdded(event: ChatMessageActionEvent): Promise<void>;
   publishReactionRemoved(event: ChatMessageActionEvent): Promise<void>;
   publishRequestAccepted(event: ChatRequestAcceptedEvent): Promise<void>;
+  publishReceiptsUpdated(event: ChatReceiptsUpdatedEvent): Promise<void>;
 }

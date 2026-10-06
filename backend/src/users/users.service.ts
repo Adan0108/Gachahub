@@ -88,7 +88,11 @@ export class UsersService {
   updateProfile(userId: string, dto: UpdateProfileDto) {
     return this.prisma.user.update({
       where: { id: userId },
-      data: { messageRequestSetting: dto.messageRequestSetting },
+      data: {
+        messageRequestSetting: dto.messageRequestSetting,
+        sendReadReceipts: dto.sendReadReceipts,
+      },
+      select: ME_SELECT,
     });
   }
 

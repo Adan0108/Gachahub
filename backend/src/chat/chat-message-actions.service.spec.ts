@@ -113,6 +113,7 @@ describe('ChatMessageActionsService', () => {
     publishReactionAdded: jest.fn(),
     publishReactionRemoved: jest.fn(),
     publishRequestAccepted: jest.fn(),
+    publishReceiptsUpdated: jest.fn(),
   };
 
   let chatAccessService: ChatAccessService;

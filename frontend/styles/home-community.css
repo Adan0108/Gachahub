@@ -923,3 +923,38 @@
   }
 }
 
+
+.settings-toggle-row {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.settings-toggle-row label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  cursor: pointer;
+}
+
+.settings-toggle-row label span {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-toggle-row small {
+  color: var(--muted);
+}
+
+.settings-toggle-row input {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 22px;
+  accent-color: var(--purple);
+  cursor: pointer;
+}
+
+.settings-toggle-row .settings-toggle-error {
+  color: var(--pink);
+}

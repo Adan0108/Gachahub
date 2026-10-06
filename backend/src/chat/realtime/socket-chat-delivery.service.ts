@@ -5,6 +5,7 @@ import {
   ChatDeliveryPort,
   ChatMessageCreatedEvent,
   ChatMessageActionEvent,
+  ChatReceiptsUpdatedEvent,
   ChatRequestAcceptedEvent,
 } from '../ports/chat-delivery.port';
 
@@ -14,7 +15,8 @@ type ChatSocketEventName =
   | 'message:deleted'
   | 'reaction:added'
   | 'reaction:removed'
-  | 'request:accepted';
+  | 'request:accepted'
+  | 'receipts:updated';
 
 // real ChatDeliveryPort now, was noop before, ChatService untouched either way
 @Injectable()
@@ -58,6 +60,19 @@ export class SocketChatDeliveryService implements ChatDeliveryPort {
     return this.emitToRecipients('request:accepted', event.recipientUserIds, {
       conversationId: event.conversationId,
       userId: event.userId,
+    });
+  }
+
+  publishReceiptsUpdated(event: ChatReceiptsUpdatedEvent): Promise<void> {
+    const { kind, conversationId, readerId } = event;
+    return this.emitToRecipients('receipts:updated', event.recipientUserIds, {
+      conversationId,
+      userId: readerId,
+      kind,
+      // delivery carries no time (see SharedReceipt); a read does, to those allowed to see it
+      ...(event.kind === 'delivered'
+        ? { messageIds: event.messageIds }
+        : { upToMessageId: event.upToMessageId, at: event.at }),
     });
   }
 

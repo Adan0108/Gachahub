@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FiBell, FiLock, FiSettings, FiSliders } from "react-icons/fi";
 import { QueryNotice } from "../../components/QueryNotice";
+import { ReadReceiptsSetting } from "../../components/settings/ReadReceiptsSetting";
 import { useToast } from "../../hooks/useToast";
 import { api } from "../../lib/api";
 import { defaultFeedPreferences, FEED_PREFERENCES_KEY, readStoredJson } from "../../lib/preferences";
@@ -111,6 +112,7 @@ export default function SettingsPage() {
               <div><span className="eyebrow">Privacy and safety</span><h2>Manage your account controls</h2></div>
               <FiLock />
             </div>
+            <ReadReceiptsSetting />
             <button className="settings-placeholder" onClick={notAvailable} type="button"><span><b>Blocked accounts</b><small>Review people you have blocked.</small></span><span>Coming soon</span></button>
           </section>
         </main>

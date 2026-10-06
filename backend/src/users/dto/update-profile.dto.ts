@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, ValidateIf } from 'class-validator';
+import { IsBoolean, IsEnum, ValidateIf } from 'class-validator';
 import { MessageRequestSetting } from '../../generated/prisma/client';
 
 export class UpdateProfileDto {
@@ -10,4 +10,12 @@ export class UpdateProfileDto {
   @ValidateIf((_, value) => value !== undefined)
   @IsEnum(MessageRequestSetting)
   messageRequestSetting?: MessageRequestSetting;
+
+  @ApiPropertyOptional({
+    description:
+      'Whether others see when you read their messages, and you see when they read yours.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsBoolean()
+  sendReadReceipts?: boolean;
 }

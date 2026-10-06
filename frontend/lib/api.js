@@ -872,6 +872,8 @@ export const api = {
   removeReaction: (messageId) =>
     mutation(backendRoutes.chatMessageReactions(messageId), undefined, { method: 'DELETE' }),
   // Own message only; soft delete (server clears the ciphertext, the row stays for history).
+  /** Changes the signed-in user's settings (for now: sendReadReceipts, messageRequestSetting); answers with the /users/me shape. */
+  updateProfile: (changes) => mutation(backendRoutes.currentUser, changes, { method: 'PATCH' }),
   /** The new text goes as a new encrypted message; `clientMessageId` makes a retry safe. */
   editChatMessage: (messageId, { ciphertext, encryptionMeta, clientMessageId }) =>
     mutation(backendRoutes.chatMessageEdits(messageId), { ciphertext, encryptionMeta, clientMessageId }),
