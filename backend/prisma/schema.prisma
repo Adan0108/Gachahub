@@ -39,6 +39,7 @@ model User {
   postLikes    PostLike[]
   comments     Comment[]
   interests    UserInterest[]
+  postSaves    PostSave[]
 
   followers            UserFollow[]          @relation("UserFollowers")
   following            UserFollow[]          @relation("UserFollowing")
@@ -626,6 +627,7 @@ model Post {
   tags      PostTag[]
   postLikes PostLike[]
   comments  Comment[]
+  postSaves PostSave[]
 
   @@index([gameId, status, createdAt])
   @@index([categoryId, status, createdAt])
@@ -1271,4 +1273,18 @@ model Mention {
   @@id([entityType, entityId, userId])
   @@index([userId])
   @@map("mentions")
+}
+
+model PostSave {
+  userId    String
+  postId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@id([userId, postId])
+  @@index([userId, createdAt, postId])
+  @@index([postId])
+  @@map("post_saves")
 }
