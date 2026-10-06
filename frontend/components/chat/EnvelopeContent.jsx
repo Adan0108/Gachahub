@@ -7,13 +7,35 @@ import {
   envelopeView,
   formatBytes,
 } from "../../lib/mls/media/attachmentView";
+import { readLinkPreviews } from "../../lib/mls/messaging/linkPreviewEnvelope";
 import { ChatAttachments } from "./ChatAttachments";
+import { DraftLinkPreviewCard, ReceivedLinkPreviewCard } from "./LinkPreviewCard";
+import { LinkifiedText } from "./LinkifiedText";
 import "./ChatAttachments.css";
 
 /** The body of one decrypted message bubble; envelope types this build can't show get a plain note. */
 export function EnvelopeContent({ envelope, messageId, media }) {
   const view = envelopeView(envelope);
-  if (view?.kind === "text") return <p>{view.text}</p>;
+  if (view?.kind === "text") {
+    const previews = readLinkPreviews(envelope);
+    if (previews.length === 0) {
+      return (
+        <p>
+          <LinkifiedText text={view.text} />
+        </p>
+      );
+    }
+    return (
+      <div className="chat-text-with-preview">
+        <p>
+          <LinkifiedText text={view.text} />
+        </p>
+        {previews.map((preview) => (
+          <ReceivedLinkPreviewCard key={preview.url} media={media} messageId={messageId} preview={preview} />
+        ))}
+      </div>
+    );
+  }
   if (view?.kind === "attachment") {
     return <ChatAttachments envelope={envelope} media={media} messageId={messageId} />;
   }
@@ -39,10 +61,27 @@ function PendingTile({ file }) {
  * grouped the same way a sent message would be. Shares ChatAttachments's own root class so the
  * same CSS (flush-to-the-edges grid, inset caption/chips) applies to both without duplicating it.
  */
-export function PendingContent({ text, files = [] }) {
+export function PendingContent({ text, files = [], preview }) {
   // A plain text message (no files) skips the .chat-attachments treatment entirely - that class
   // is what strips the bubble's own padding/border, which a text-only bubble still needs.
-  if (files.length === 0) return text ? <p>{text}</p> : null;
+  if (files.length === 0) {
+    if (!text) return null;
+    if (!preview) {
+      return (
+        <p>
+          <LinkifiedText text={text} />
+        </p>
+      );
+    }
+    return (
+      <div className="chat-text-with-preview">
+        <p>
+          <LinkifiedText text={text} />
+        </p>
+        <DraftLinkPreviewCard linked preview={preview} />
+      </div>
+    );
+  }
 
   const visualFiles = files.filter((file) => attachmentKind(file.type) !== "file");
   const otherFiles = files.filter((file) => attachmentKind(file.type) === "file");

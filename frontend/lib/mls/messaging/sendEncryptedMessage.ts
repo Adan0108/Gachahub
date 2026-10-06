@@ -2,10 +2,11 @@ import { api } from '../../api';
 import { bytesToBase64 } from '../storage/base64';
 import { ensureConversationGroup } from './ensureConversationGroup';
 import { buildEditEnvelope } from './editEnvelope';
+import { buildTextEnvelope, previewBlobIds } from './linkPreviewEnvelope';
 import { senderMeta } from './messageOrigin';
 import type { SyncEngine } from '../sync/syncEngine';
 import { EncryptedIndexedDbMessagePlaintextStore } from '../storage/messagePlaintextStore';
-import type { ConversationId, DeviceId, PlaintextEnvelope, UserId } from '../contract/types';
+import type { ConversationId, DeviceId, LinkPreviewRef, PlaintextEnvelope, UserId } from '../contract/types';
 
 const plaintextStore = new EncryptedIndexedDbMessagePlaintextStore();
 
@@ -18,15 +19,16 @@ export function sendEncryptedChatMessage(
   text: string,
   clientMessageId: string,
   replyToId?: string,
+  preview?: LinkPreviewRef,
 ) {
   return sendEncryptedEnvelope(
     syncEngine,
     deviceId,
     conversationId,
     recipientUserId,
-    { v: 1, type: 'text', body: text },
+    buildTextEnvelope(text, preview),
     clientMessageId,
-    [],
+    previewBlobIds(preview),
     replyToId,
   );
 }

@@ -19,6 +19,8 @@ export interface BodyEnvelope {
   v: 1;
   type: 'text' | 'delete' | 'reaction';
   body: unknown;
+  /** Link preview cards for a text message; only ever read through readLinkPreviews, since the sender is a peer. */
+  previews?: LinkPreviewRef[];
 }
 
 /** A new body for an earlier text message by the same author; `n` is which edit of that message this is (1 for the first). */
@@ -42,6 +44,16 @@ export interface EncryptedBlobRef {
 export interface AttachmentThumb extends EncryptedBlobRef {
   width: number;
   height: number;
+}
+
+/** What a link preview card shows. It travels inside the encrypted message, so recipients never contact the linked site. */
+export interface LinkPreviewRef {
+  /** The link the card is for; it must appear in the message text. */
+  url: string;
+  title?: string;
+  description?: string;
+  siteName?: string;
+  thumb?: AttachmentThumb;
 }
 
 export interface AttachmentFile extends EncryptedBlobRef {

@@ -61,6 +61,63 @@ describe('sendEncryptedChatMessage', () => {
     expect(result.message.id).toBe('msg-1');
   });
 
+  it('sends a link preview card inside the encrypted message and attaches its picture', async () => {
+    const { api } = await import('../../api');
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockResolvedValue(2);
+    engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
+    vi.mocked(api.sendChatMessage).mockResolvedValue({ message: { id: 'msg-3' } });
+    const preview = {
+      url: 'https://example.com/post',
+      title: 'A post',
+      thumb: { blob: 'upload-9', key: 'k', iv: 'i', sha256: 's', width: 320, height: 180 },
+    };
+
+    await sendEncryptedChatMessage(
+      engine as any,
+      'device-1',
+      'conv-1',
+      'user-bob',
+      'look https://example.com/post',
+      'client-1',
+      undefined,
+      preview,
+    );
+
+    expect(engine.encryptMessage).toHaveBeenCalledWith('conv-1', {
+      v: 1,
+      type: 'text',
+      body: 'look https://example.com/post',
+      previews: [preview],
+    });
+    expect(api.sendChatMessage).toHaveBeenCalledWith(
+      'conv-1',
+      expect.objectContaining({ media: [{ mediaUploadId: 'upload-9', sortOrder: 0 }] }),
+    );
+  });
+
+  it('attaches nothing for a card with no picture', async () => {
+    const { api } = await import('../../api');
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockResolvedValue(2);
+    engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
+    vi.mocked(api.sendChatMessage).mockResolvedValue({ message: { id: 'msg-4' } });
+
+    await sendEncryptedChatMessage(
+      engine as any,
+      'device-1',
+      'conv-1',
+      'user-bob',
+      'look https://example.com/post',
+      'client-1',
+      undefined,
+      { url: 'https://example.com/post', title: 'A post' },
+    );
+
+    const [, body] = vi.mocked(api.sendChatMessage).mock.calls[0]!;
+    expect(body).not.toHaveProperty('media');
+  });
+
   it('sets up the group first when this device has never established one', async () => {
     const { api } = await import('../../api');
     const engine = fakeSyncEngine();
