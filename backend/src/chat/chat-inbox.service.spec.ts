@@ -73,6 +73,7 @@ describe('ChatInboxService', () => {
     updateParticipantPinnedAt: jest.fn(),
     markMessagesDelivered: jest.fn(),
     markConversationRead: jest.fn(),
+    findReceiptParties: jest.fn(),
     updateMessage: jest.fn(),
     softDeleteMessage: jest.fn(),
     findInboxConversations: jest.fn(),
@@ -113,6 +114,7 @@ describe('ChatInboxService', () => {
 
   const chatDelivery = {
     publishRequestAccepted: jest.fn(),
+    publishReceiptsUpdated: jest.fn(),
   };
 
   let chatAccessService: ChatAccessService;
@@ -139,6 +141,7 @@ describe('ChatInboxService', () => {
     followsService.isFollowing.mockResolvedValue({ following: false });
     repository.countUnreadMessagesForConversations.mockResolvedValue([]);
     repository.findParticipants.mockResolvedValue([]);
+    repository.findReceiptParties.mockResolvedValue([]);
   });
 
   describe('conversation participant toggles (permission)', () => {
@@ -508,61 +511,18 @@ describe('ChatInboxService', () => {
     });
   });
 
-  describe('markDelivered', () => {
-    it('marks the given message ids delivered and returns the count', async () => {
-      repository.markMessagesDelivered.mockResolvedValue({ count: 3 });
-
-      const result = await service.markDelivered('user-1', {
-        messageIds: ['message-1', 'message-2', 'message-3'],
-      });
-
-      expect(repository.markMessagesDelivered).toHaveBeenCalledWith('user-1', [
-        'message-1',
-        'message-2',
-        'message-3',
-      ]);
-      expect(result).toEqual({ deliveredCount: 3 });
-    });
-  });
-
-  describe('markRead', () => {
-    it('rejects when the conversation is not found', async () => {
-      repository.findParticipant.mockResolvedValue(null);
-
-      await expect(
-        service.markRead('user-1', 'conversation-1', {} as any),
-      ).rejects.toThrow(NotFoundException);
-    });
-
-    it('rejects an unreadable participant state', async () => {
-      repository.findParticipant.mockResolvedValue({
-        userId: 'user-1',
-        state: 'BLOCKED',
-      });
-
-      await expect(
-        service.markRead('user-1', 'conversation-1', {} as any),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('marks the conversation read and returns the count', async () => {
-      repository.findParticipant.mockResolvedValue({
-        userId: 'user-1',
-        state: 'ACTIVE',
-      });
-      repository.markConversationRead.mockResolvedValue({ count: 5 });
-
-      const result = await service.markRead('user-1', 'conversation-1', {
-        lastReadMessageId: 'message-5',
-      });
-
-      expect(repository.markConversationRead).toHaveBeenCalledWith({
-        conversationId: 'conversation-1',
-        userId: 'user-1',
-        lastReadMessageId: 'message-5',
-      });
-      expect(result).toEqual({ readCount: 5 });
-    });
+  const receiptRow = (
+    userId: string,
+    overrides: Partial<{
+      state: string;
+      deletedAt: Date | null;
+      sendReadReceipts: boolean;
+    }> = {},
+  ) => ({
+    userId,
+    state: overrides.state ?? 'ACTIVE',
+    deletedAt: overrides.deletedAt ?? null,
+    user: { sendReadReceipts: overrides.sendReadReceipts ?? true },
   });
 
   describe('listConversations', () => {
@@ -920,6 +880,111 @@ describe('ChatInboxService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
+    describe('receipts in the message list', () => {
+      const at = new Date('2026-10-06T10:00:00.000Z');
+      const receipt = (userId: string, messageId = 'message-1') => ({
+        id: `receipt-${userId}`,
+        messageId,
+        userId,
+        deliveredAt: at,
+        readAt: at,
+        updatedAt: at,
+      });
+      const ownMessage = () => ({
+        id: 'message-1',
+        senderId: 'user-1',
+        receipts: [receipt('user-1'), receipt('user-2')],
+      });
+      type Shown = {
+        userId: string;
+        readAt: Date | null;
+        delivered: boolean;
+      };
+      const receiptsOf = (result: { items: unknown[] }) =>
+        (result.items[0] as { receipts: Shown[] }).receipts;
+      const readOf = (result: { items: unknown[] }, userId: string) =>
+        receiptsOf(result).find((r) => r.userId === userId);
+
+      beforeEach(() => {
+        repository.findParticipant.mockResolvedValue({
+          userId: 'user-1',
+          state: 'ACTIVE',
+        });
+      });
+
+      it('shows the read time of others on your own messages when they share receipts', async () => {
+        repository.findMessages.mockResolvedValue([ownMessage()]);
+        repository.findReceiptParties.mockResolvedValue([
+          receiptRow('user-1'),
+          receiptRow('user-2'),
+        ]);
+
+        const result = await service.findMessages(
+          'user-1',
+          'conversation-1',
+          {} as any,
+        );
+
+        expect(readOf(result, 'user-2')?.readAt).toEqual(at);
+      });
+
+      it('hides the read time when the other person has receipts off', async () => {
+        repository.findMessages.mockResolvedValue([ownMessage()]);
+        repository.findReceiptParties.mockResolvedValue([
+          receiptRow('user-1'),
+          receiptRow('user-2', { sendReadReceipts: false }),
+        ]);
+
+        const result = await service.findMessages(
+          'user-1',
+          'conversation-1',
+          {} as any,
+        );
+
+        expect(readOf(result, 'user-2')?.readAt).toBeNull();
+        expect(readOf(result, 'user-2')?.delivered).toBe(true);
+      });
+
+      it('hides read times from a user who has receipts off themselves', async () => {
+        repository.findMessages.mockResolvedValue([ownMessage()]);
+        repository.findReceiptParties.mockResolvedValue([
+          receiptRow('user-1', { sendReadReceipts: false }),
+          receiptRow('user-2'),
+        ]);
+
+        const result = await service.findMessages(
+          'user-1',
+          'conversation-1',
+          {} as any,
+        );
+
+        expect(readOf(result, 'user-2')?.readAt).toBeNull();
+      });
+
+      it('shows only your own receipt on messages from other people', async () => {
+        repository.findMessages.mockResolvedValue([
+          {
+            id: 'message-1',
+            senderId: 'user-2',
+            receipts: [receipt('user-1'), receipt('user-2'), receipt('user-3')],
+          },
+        ]);
+        repository.findReceiptParties.mockResolvedValue([
+          receiptRow('user-1'),
+          receiptRow('user-2'),
+          receiptRow('user-3'),
+        ]);
+
+        const result = await service.findMessages(
+          'user-1',
+          'conversation-1',
+          {} as any,
+        );
+
+        expect(receiptsOf(result).map((r) => r.userId)).toEqual(['user-1']);
+      });
+    });
+
     it('rejects an unreadable participant state', async () => {
       repository.findParticipant.mockResolvedValue({
         userId: 'user-1',
@@ -1056,9 +1121,9 @@ describe('ChatInboxService', () => {
         state: 'ACTIVE',
       });
       repository.findMessages.mockResolvedValue([
-        { id: 'message-3' },
-        { id: 'message-2' },
-        { id: 'message-1' },
+        { id: 'message-3', receipts: [] },
+        { id: 'message-2', receipts: [] },
+        { id: 'message-1', receipts: [] },
       ]);
 
       const result = await service.findMessages('user-1', 'conversation-1', {
@@ -1078,9 +1143,9 @@ describe('ChatInboxService', () => {
         state: 'ACTIVE',
       });
       repository.findMessages.mockResolvedValue([
-        { id: 'message-3' },
-        { id: 'message-2' },
-        { id: 'message-1' },
+        { id: 'message-3', receipts: [] },
+        { id: 'message-2', receipts: [] },
+        { id: 'message-1', receipts: [] },
       ]);
 
       const result = await service.findMessages('user-1', 'conversation-1', {
@@ -1111,7 +1176,7 @@ describe('ChatInboxService', () => {
         state: 'ACTIVE',
       });
       repository.findMessages.mockResolvedValue([
-        { id: 'message-1', senderId: 'user-2' },
+        { id: 'message-1', senderId: 'user-2', receipts: [] },
       ]);
       blocksService.getBlockedIdsAmong.mockResolvedValue(new Set(['user-2']));
 

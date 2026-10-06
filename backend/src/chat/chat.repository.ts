@@ -98,7 +98,8 @@ export class ChatRepository {
         },
       },
       include: {
-        receipts: true,
+        // Only the sender's own: a resend must not reveal read times the message list hides.
+        receipts: { where: { userId: senderId } },
         replyTo: true,
         media: {
           orderBy: { sortOrder: 'asc' },
@@ -698,18 +699,35 @@ export class ChatRepository {
   }
 
   /** Marks selected receipts delivered for a user; only empty deliveredAt is updated. */
-  markMessagesDelivered(userId: string, messageIds: string[]) {
-    return this.prisma.chatMessageReceipt.updateMany({
-      where: {
-        userId,
-        messageId: {
-          in: messageIds,
+  async markMessagesDelivered(userId: string, messageIds: string[]) {
+    return this.prisma.$transaction(async (tx) => {
+      const pending = await tx.chatMessageReceipt.findMany({
+        where: { userId, messageId: { in: messageIds }, deliveredAt: null },
+        select: {
+          id: true,
+          messageId: true,
+          message: { select: { conversationId: true } },
         },
-        deliveredAt: null,
-      },
-      data: {
-        deliveredAt: new Date(),
-      },
+      });
+      if (pending.length === 0) return [];
+
+      // Only what this call actually changed: another device may have got there first.
+      const updated = await tx.chatMessageReceipt.updateManyAndReturn({
+        where: {
+          id: { in: pending.map((receipt) => receipt.id) },
+          deliveredAt: null,
+        },
+        data: { deliveredAt: new Date() },
+        select: { id: true },
+      });
+      const updatedIds = new Set(updated.map((receipt) => receipt.id));
+
+      return pending
+        .filter((receipt) => updatedIds.has(receipt.id))
+        .map((receipt) => ({
+          messageId: receipt.messageId,
+          conversationId: receipt.message.conversationId,
+        }));
     });
   }
 
@@ -731,12 +749,13 @@ export class ChatRepository {
         : await tx.chatMessage.findFirst({
             where: {
               conversationId: params.conversationId,
+              contentType: { not: 'EDIT' },
             },
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           });
 
       if (!lastReadMessage) {
-        return { count: 0 };
+        return { count: 0, lastReadMessage: null };
       }
 
       const now = new Date();
@@ -774,7 +793,20 @@ export class ChatRepository {
         },
       });
 
-      return result;
+      return { count: result.count, lastReadMessage };
+    });
+  }
+
+  /** Everyone in a conversation with their read-receipt setting, to decide who may see whose reads. */
+  findReceiptParties(conversationId: string) {
+    return this.prisma.chatParticipant.findMany({
+      where: { conversationId },
+      select: {
+        userId: true,
+        state: true,
+        deletedAt: true,
+        user: { select: { sendReadReceipts: true } },
+      },
     });
   }
 

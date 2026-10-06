@@ -85,6 +85,90 @@ describe('SocketChatDeliveryService', () => {
     expect(to).not.toHaveBeenCalled();
   });
 
+  describe('publishReceiptsUpdated', () => {
+    const emitTo = () => {
+      const emit = jest.fn();
+      const to = jest.fn().mockReturnValue({ emit });
+      registry.server = { to } as unknown as Server;
+      return { emit, to };
+    };
+    const at = new Date('2026-10-06T10:00:00.000Z');
+
+    it('sends delivered messages to every recipient, saying who and which messages', async () => {
+      const { emit, to } = emitTo();
+
+      await service.publishReceiptsUpdated({
+        kind: 'delivered',
+        conversationId: 'conversation-1',
+        readerId: 'user-2',
+        recipientUserIds: ['user-1', 'user-3'],
+        messageIds: ['message-1', 'message-2'],
+      });
+
+      expect(to).toHaveBeenCalledWith('user:user-1');
+      expect(to).toHaveBeenCalledWith('user:user-3');
+      expect(emit).toHaveBeenCalledWith('receipts:updated', {
+        kind: 'delivered',
+        conversationId: 'conversation-1',
+        userId: 'user-2',
+        messageIds: ['message-1', 'message-2'],
+      });
+    });
+
+    it('sends how far someone has read, without a list of messages', async () => {
+      const { emit } = emitTo();
+
+      await service.publishReceiptsUpdated({
+        kind: 'read',
+        conversationId: 'conversation-1',
+        readerId: 'user-2',
+        recipientUserIds: ['user-1'],
+        upToMessageId: 'message-9',
+        at,
+      });
+
+      expect(emit).toHaveBeenCalledWith('receipts:updated', {
+        kind: 'read',
+        conversationId: 'conversation-1',
+        userId: 'user-2',
+        upToMessageId: 'message-9',
+        at,
+      });
+    });
+
+    it('does not say who else got the event', async () => {
+      const { emit } = emitTo();
+
+      await service.publishReceiptsUpdated({
+        kind: 'read',
+        conversationId: 'conversation-1',
+        readerId: 'user-2',
+        recipientUserIds: ['user-1', 'user-3'],
+        upToMessageId: 'message-9',
+        at,
+      });
+
+      expect(JSON.stringify(emit.mock.calls[0])).not.toContain(
+        'recipientUserIds',
+      );
+    });
+
+    it('does nothing when no server is registered yet', async () => {
+      registry.server = undefined;
+
+      await expect(
+        service.publishReceiptsUpdated({
+          kind: 'read',
+          conversationId: 'conversation-1',
+          readerId: 'user-2',
+          recipientUserIds: ['user-1'],
+          upToMessageId: 'message-9',
+          at,
+        }),
+      ).resolves.toBeUndefined();
+    });
+  });
+
   describe('publishRequestAccepted', () => {
     it('emits request:accepted to every recipient room with the accepter id', async () => {
       const emit = jest.fn();

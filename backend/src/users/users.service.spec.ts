@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
+import { ME_SELECT } from './me-select';
 import { UsersService } from './users.service';
 
 describe('UsersService', () => {
@@ -9,6 +10,7 @@ describe('UsersService', () => {
       findUnique: jest.fn(),
       findUniqueOrThrow: jest.fn(),
       updateManyAndReturn: jest.fn(),
+      update: jest.fn(),
     },
   };
 
@@ -101,6 +103,49 @@ describe('UsersService', () => {
 
       expect(blocksService.isBlocked).not.toHaveBeenCalled();
       expect(result.isBlockedByMe).toBe(false);
+    });
+  });
+
+  describe('updateProfile', () => {
+    it('saves the read receipts setting', async () => {
+      prisma.user.update.mockResolvedValue({
+        id: 'user-1',
+        sendReadReceipts: false,
+      });
+
+      await service.updateProfile('user-1', { sendReadReceipts: false });
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { messageRequestSetting: undefined, sendReadReceipts: false },
+        select: ME_SELECT,
+      });
+    });
+
+    it('answers with the same fields as the profile read, not the whole row', async () => {
+      prisma.user.update.mockResolvedValue({ id: 'user-1' });
+
+      await service.updateProfile('user-1', { sendReadReceipts: true });
+
+      const [{ select }] = prisma.user.update.mock.calls[0] as [
+        { select: Record<string, boolean> },
+      ];
+      expect(select).toBe(ME_SELECT);
+      expect(select).not.toHaveProperty('avatarMediaUploadId');
+    });
+
+    it('changes only what was sent', async () => {
+      prisma.user.update.mockResolvedValue({ id: 'user-1' });
+
+      await service.updateProfile('user-1', {
+        messageRequestSetting: 'NO_ONE',
+      });
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { messageRequestSetting: 'NO_ONE', sendReadReceipts: undefined },
+        select: ME_SELECT,
+      });
     });
   });
 
