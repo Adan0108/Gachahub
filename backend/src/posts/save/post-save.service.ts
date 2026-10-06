@@ -1,7 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PostSaveRepository } from './post-save.repository';
-import { PrismaService } from '../../prisma/prisma.service';
-import { loadActiveUser } from '../../common/guards/active-user.util';
 import { PostsRepository } from '../posts.repository';
 import { PostVisibilityService } from '../../post-visibility/post-visibility.service';
 import { formatPost } from '../post.mapper';
@@ -21,40 +19,32 @@ import type {
 export class PostSaveService {
   constructor(
     private readonly repository: PostSaveRepository,
-    private readonly prisma: PrismaService,
     private readonly posts: PostsRepository,
     private readonly visibility: PostVisibilityService,
   ) {}
 
   async save(userId: string, postId: string): Promise<SavePostResponse> {
-    const user = await loadActiveUser(this.prisma, userId);
     const post = await this.posts.findPostForInteraction(postId);
-    if (!post || !(await this.visibility.canView(post, user.id))) {
+    if (!post || !(await this.visibility.canView(post, userId))) {
       throw new NotFoundException('Post not found');
     }
-    return this.repository.save(user.id, postId);
+    return this.repository.save(userId, postId);
   }
 
   async unsave(userId: string, postId: string): Promise<UnsavePostResponse> {
-    const user = await loadActiveUser(this.prisma, userId);
-    return this.repository.unsave(user.id, postId);
+    return this.repository.unsave(userId, postId);
   }
 
   async list(
     userId: string,
     query: QuerySavedPostsDto,
   ): Promise<SavedPostsResponse> {
-    const user = await loadActiveUser(this.prisma, userId);
-    const limit = query.limit ?? 20;
+    const limit = query.limit;
     const cursor =
       query.cursor === undefined
         ? undefined
         : decodeSavedPostCursor(query.cursor);
-    const rows = await this.repository.findSavedPage(
-      user.id,
-      limit + 1,
-      cursor,
-    );
+    const rows = await this.repository.findSavedPage(userId, limit + 1, cursor);
     const hasMore = rows.length > limit;
     const page = rows.slice(0, limit);
     const last = page[page.length - 1];

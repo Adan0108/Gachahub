@@ -39,6 +39,15 @@ export const postInclude = {
   },
 } satisfies Prisma.PostInclude;
 
+/** The viewer's own like/save flags; `false` for an anonymous reader so Prisma skips the joins. */
+const viewerInteractions = (userId?: string) =>
+  userId
+    ? {
+        postLikes: { where: { userId }, select: { userId: true } },
+        postSaves: { where: { userId }, select: { userId: true } },
+      }
+    : { postLikes: false as const, postSaves: false as const };
+
 @Injectable()
 export class PostsRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -58,19 +67,7 @@ export class PostsRepository {
       ...query,
       include: {
         ...postInclude,
-        postSaves: userId
-          ? { where: { userId: userId }, select: { userId: true } }
-          : false,
-        postLikes: userId
-          ? {
-              where: {
-                userId,
-              },
-              select: {
-                userId: true,
-              },
-            }
-          : false,
+        ...viewerInteractions(userId),
       },
     });
   }
@@ -126,19 +123,7 @@ export class PostsRepository {
       take,
       include: {
         ...postInclude,
-        postSaves: userId
-          ? { where: { userId: userId }, select: { userId: true } }
-          : false,
-        postLikes: userId
-          ? {
-              where: {
-                userId,
-              },
-              select: {
-                userId: true,
-              },
-            }
-          : false,
+        ...viewerInteractions(userId),
       },
     });
   }
@@ -165,19 +150,7 @@ export class PostsRepository {
         where,
         include: {
           ...postInclude,
-          postSaves: params.userId
-            ? { where: { userId: params.userId }, select: { userId: true } }
-            : false,
-          postLikes: params.userId
-            ? {
-                where: {
-                  userId: params.userId,
-                },
-                select: {
-                  userId: true,
-                },
-              }
-            : false,
+          ...viewerInteractions(params.userId),
         },
         orderBy: [
           {
@@ -262,19 +235,7 @@ export class PostsRepository {
       },
       include: {
         ...postInclude,
-        postSaves: userId
-          ? { where: { userId: userId }, select: { userId: true } }
-          : false,
-        postLikes: userId
-          ? {
-              where: {
-                userId,
-              },
-              select: {
-                userId: true,
-              },
-            }
-          : false,
+        ...viewerInteractions(userId),
       },
     });
   }
@@ -747,19 +708,7 @@ export class PostsRepository {
 
       include: {
         ...postInclude,
-        postSaves: userId
-          ? { where: { userId: userId }, select: { userId: true } }
-          : false,
-        postLikes: userId
-          ? {
-              where: {
-                userId,
-              },
-              select: {
-                userId: true,
-              },
-            }
-          : false,
+        ...viewerInteractions(userId),
       },
     });
   }
@@ -790,15 +739,7 @@ export class PostsRepository {
       },
       include: {
         ...postInclude,
-        postSaves: { where: { userId }, select: { userId: true } },
-        postLikes: {
-          where: {
-            userId,
-          },
-          select: {
-            userId: true,
-          },
-        },
+        ...viewerInteractions(userId),
       },
     });
   }
@@ -867,19 +808,7 @@ export class PostsRepository {
       },
       include: {
         ...postInclude,
-        postSaves: userId
-          ? { where: { userId: userId }, select: { userId: true } }
-          : false,
-        postLikes: userId
-          ? {
-              where: {
-                userId,
-              },
-              select: {
-                userId: true,
-              },
-            }
-          : false,
+        ...viewerInteractions(userId),
       },
     });
   }

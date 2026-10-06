@@ -21,7 +21,8 @@ export class QuerySavedPostsDto {
   @IsInt()
   @Min(1)
   @Max(100)
-  limit?: number = 20;
+  // Not optional in the type: the initialiser always supplies it, so the service needs no fallback.
+  limit: number = 20;
 
   @ApiPropertyOptional({
     description: 'Opaque continuation cursor returned by the previous page',

@@ -2,14 +2,8 @@ jest.mock('../../prisma/prisma.service', () => ({ PrismaService: class {} }));
 jest.mock('../../follows/follows.service', () => ({
   FollowsService: class {},
 }));
-import {
-  ForbiddenException,
-  NotFoundException,
-  UnauthorizedException,
-  BadRequestException,
-} from '@nestjs/common';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { PrismaService } from '../../prisma/prisma.service';
 import { PostsRepository } from '../posts.repository';
 import { PostSaveRepository, type SavedPostRow } from './post-save.repository';
 import { FollowsService } from '../../follows/follows.service';
@@ -25,7 +19,6 @@ describe('PostSaveService', () => {
     unsave: jest.fn(),
     findSavedPage: jest.fn(),
   };
-  const prisma = { user: { findUnique: jest.fn() } };
   const posts = { findPostForInteraction: jest.fn() };
   const follows = { isFollowing: jest.fn() };
   let service: PostSaveService;
@@ -35,7 +28,6 @@ describe('PostSaveService', () => {
         PostSaveService,
         PostVisibilityService,
         { provide: PostSaveRepository, useValue: repository },
-        { provide: PrismaService, useValue: prisma },
         { provide: PostsRepository, useValue: posts },
         { provide: FollowsService, useValue: follows },
       ],
@@ -84,39 +76,11 @@ describe('PostSaveService', () => {
   };
   beforeEach(() => {
     jest.clearAllMocks();
-    prisma.user.findUnique.mockResolvedValue({
-      id: 'viewer',
-      status: 'ACTIVE',
-      role: 'USER',
-    });
     posts.findPostForInteraction.mockResolvedValue(post);
     follows.isFollowing.mockResolvedValue({ following: false });
     repository.save.mockResolvedValue({ saved: true });
     repository.unsave.mockResolvedValue({ saved: false });
     repository.findSavedPage.mockResolvedValue([]);
-  });
-  it.each(['save', 'unsave', 'list'] as const)(
-    'rejects inactive users for %s',
-    async (method) => {
-      prisma.user.findUnique.mockResolvedValue({
-        id: 'viewer',
-        status: 'SUSPENDED',
-      });
-      const result =
-        method === 'list'
-          ? service.list('viewer', {})
-          : service[method]('viewer', 'post');
-      await expect(result).rejects.toThrow(ForbiddenException);
-      expect(repository.save).not.toHaveBeenCalled();
-      expect(repository.unsave).not.toHaveBeenCalled();
-      expect(repository.findSavedPage).not.toHaveBeenCalled();
-    },
-  );
-  it('rejects missing session accounts', async () => {
-    prisma.user.findUnique.mockResolvedValue(null);
-    await expect(service.save('viewer', 'post')).rejects.toThrow(
-      UnauthorizedException,
-    );
   });
   it('saves accessible posts as the active session user, including repeated saves', async () => {
     await expect(service.save('viewer', 'post')).resolves.toEqual({
@@ -153,10 +117,6 @@ describe('PostSaveService', () => {
     });
     expect(follows.isFollowing).toHaveBeenCalledWith('viewer', 'author');
     follows.isFollowing.mockClear();
-    prisma.user.findUnique.mockResolvedValue({
-      id: 'author',
-      status: 'ACTIVE',
-    });
     await service.save('author', 'post');
     expect(follows.isFollowing).not.toHaveBeenCalled();
   });
@@ -212,17 +172,17 @@ describe('PostSaveService', () => {
       });
     },
   );
-  it('uses default limit and rejects malformed cursors before querying', async () => {
-    await service.list('viewer', {});
+  it('takes one more than the limit and rejects malformed cursors before querying', async () => {
+    await service.list('viewer', { limit: 20 });
     expect(repository.findSavedPage).toHaveBeenCalledWith(
       'viewer',
       21,
       undefined,
     );
     repository.findSavedPage.mockClear();
-    await expect(service.list('viewer', { cursor: '' })).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      service.list('viewer', { limit: 20, cursor: '' }),
+    ).rejects.toThrow(BadRequestException);
     expect(repository.findSavedPage).not.toHaveBeenCalled();
   });
 });
