@@ -88,7 +88,11 @@ export class ChatAccessService {
     const message =
       await this.chatRepository.findMessageWithParticipants(messageId);
 
-    if (!message || message.status !== 'SENT') {
+    if (
+      !message ||
+      message.status !== 'SENT' ||
+      message.contentType === 'EDIT'
+    ) {
       throw new NotFoundException('Message not found');
     }
 
@@ -117,7 +121,11 @@ export class ChatAccessService {
     const message =
       await this.chatRepository.findMessageWithParticipants(messageId);
 
-    if (!message || message.status !== 'SENT') {
+    if (
+      !message ||
+      message.status !== 'SENT' ||
+      message.contentType === 'EDIT'
+    ) {
       throw new NotFoundException('Message not found');
     }
 
@@ -160,6 +168,55 @@ export class ChatAccessService {
   ) {
     if (participants.some((participant) => participant.state === 'LEAVING')) {
       throw new MembershipChangePendingException();
+    }
+  }
+
+  /**
+   * Everything that must hold before `senderId` can put new encrypted content into a
+   * conversation (a message or an edit): they are in it and active, no member is mid-removal,
+   * and in a direct chat neither side has blocked, declined or been blocked out of it.
+   */
+  async assertSenderCanPost(
+    conversation: {
+      type: string;
+      participants: ReadonlyArray<{
+        userId: string;
+        state: ChatParticipantState;
+      }>;
+    },
+    senderId: string,
+  ) {
+    const participants = conversation.participants;
+    const senderParticipant = participants.find(
+      (participant) => participant.userId === senderId,
+    );
+
+    if (!senderParticipant) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    if (senderParticipant.state !== 'ACTIVE') {
+      throw new ForbiddenException('You cannot send messages here');
+    }
+
+    this.assertNoMembershipChangePending(participants);
+
+    if (conversation.type !== 'DIRECT') {
+      return;
+    }
+
+    const recipient = participants.find(
+      (participant) => participant.userId !== senderId,
+    );
+
+    if (!recipient) {
+      return;
+    }
+
+    await this.assertSenderHasNotBlockedRecipient(senderId, recipient.userId);
+
+    if (['BLOCKED', 'DECLINED'].includes(recipient.state)) {
+      throw new ForbiddenException('Recipient is not accepting messages');
     }
   }
 

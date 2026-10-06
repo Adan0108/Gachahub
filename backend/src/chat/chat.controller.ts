@@ -20,6 +20,7 @@ import { ChatMessagingService } from './chat-messaging.service';
 import { ChatGroupService } from './chat-group.service';
 import { ChatInboxService } from './chat-inbox.service';
 import { ChatMessageActionsService } from './chat-message-actions.service';
+import { ChatMessageEditService } from './chat-message-edit.service';
 import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
 import { CreateGroupChatDto } from './dto/create-group-chat.dto';
@@ -52,6 +53,7 @@ export class ChatController {
     private readonly chatGroupService: ChatGroupService,
     private readonly chatInboxService: ChatInboxService,
     private readonly chatMessageActionsService: ChatMessageActionsService,
+    private readonly chatMessageEditService: ChatMessageEditService,
   ) {}
 
   /**
@@ -718,12 +720,12 @@ export class ChatController {
   }
 
   /**
-   * Edits the current user's own encrypted message.
+   * Edits the current user's own recent text message.
    *
-   * The frontend must send a newly encrypted ciphertext payload. The backend
-   * replaces the stored ciphertext and marks editedAt.
+   * The frontend sends the new text as a newly encrypted message; the backend stores
+   * it as a hidden edit of this message and marks the message edited.
    */
-  @Patch('messages/:messageId')
+  @Post('messages/:messageId/edits')
   @ApiOperation({
     summary: 'Edit current user chat message',
   })
@@ -736,8 +738,9 @@ export class ChatController {
     @Param('messageId') messageId: string,
     @Body() dto: EditMessageDto,
   ) {
-    return this.chatMessageActionsService.editMessage(
+    return this.chatMessageEditService.editMessage(
       session.user.id,
+      session.session.id,
       messageId,
       dto,
     );

@@ -315,6 +315,8 @@ enum ChatMessageContentType {
   AUDIO
   VIDEO
   SYSTEM
+  /// A hidden message carrying a new encrypted body for an earlier message (editsMessageId); never shown, counted unread or notified.
+  EDIT
 }
 
 enum ChatMessageStatus {
@@ -433,6 +435,8 @@ model ChatMessage {
   contentType     ChatMessageContentType @default(TEXT)
   status          ChatMessageStatus      @default(SENT)
   replyToId       String?
+  /// Set only on EDIT messages: the message this one is a new version of.
+  editsMessageId  String?
 
   createdAt DateTime  @default(now())
   editedAt  DateTime?
@@ -442,6 +446,8 @@ model ChatMessage {
   sender       User                  @relation("ChatMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
   replyTo      ChatMessage?          @relation("ChatMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies      ChatMessage[]         @relation("ChatMessageReplies")
+  editsMessage ChatMessage?          @relation("ChatMessageEdits", fields: [editsMessageId], references: [id], onDelete: Cascade)
+  edits        ChatMessage[]         @relation("ChatMessageEdits")
   receipts     ChatMessageReceipt[]
   reactions    ChatMessageReaction[]
   media        ChatMessageMedia[]
@@ -451,6 +457,7 @@ model ChatMessage {
   @@index([conversationId, id])
   @@index([senderId])
   @@index([replyToId])
+  @@index([editsMessageId])
   @@map("chat_messages")
 }
 

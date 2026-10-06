@@ -15,6 +15,7 @@ import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
 import { ChatDevicesService } from '../chat-devices/chat-devices.service';
 import { ChatMessageRateLimiterService } from './chat-message-rate-limiter.service';
+import { isUniqueViolationOn } from './prisma-unique-violation';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { ChatMediaReferenceDto } from './dto/chat-media-reference.dto';
@@ -301,47 +302,9 @@ export class ChatMessagingService {
       throw new NotFoundException('Conversation not found');
     }
 
+    await this.chatAccessService.assertSenderCanPost(conversation, senderId);
+
     const participants = conversation.participants;
-
-    const senderParticipant = participants.find(
-      (participant) => participant.userId === senderId,
-    );
-
-    if (!senderParticipant) {
-      throw new NotFoundException('Conversation not found');
-    }
-
-    if (senderParticipant.state !== 'ACTIVE') {
-      throw new ForbiddenException('You cannot send messages here');
-    }
-
-    this.chatAccessService.assertNoMembershipChangePending(participants);
-
-    if (conversation.type === 'DIRECT') {
-      const recipient = participants.find(
-        (participant) => participant.userId !== senderId,
-      );
-
-      if (recipient) {
-        await this.chatAccessService.assertSenderHasNotBlockedRecipient(
-          senderId,
-          recipient.userId,
-        );
-      }
-    }
-
-    const blockedOrDeclinedRecipient =
-      conversation.type === 'DIRECT'
-        ? participants.find(
-            (participant) =>
-              participant.userId !== senderId &&
-              ['BLOCKED', 'DECLINED'].includes(participant.state),
-          )
-        : null;
-
-    if (blockedOrDeclinedRecipient) {
-      throw new ForbiddenException('Recipient is not accepting messages');
-    }
 
     const replyTarget = await this.chatAccessService.assertValidReplyTarget(
       conversationId,
@@ -556,42 +519,13 @@ export class ChatMessagingService {
     }));
   }
 
-  /** True for a Prisma unique-constraint violation (P2002). */
-  private isUniqueConstraintViolation(
-    error: unknown,
-  ): error is Prisma.PrismaClientKnownRequestError {
-    return (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === 'P2002'
-    );
-  }
-
-  /** Checks a unique-constraint error's target (array or string) for one field. */
-  private constraintTargetIncludes(
-    error: Prisma.PrismaClientKnownRequestError,
-    field: string,
-  ): boolean {
-    const conflictingFields = error.meta?.target;
-
-    return Array.isArray(conflictingFields)
-      ? conflictingFields.includes(field)
-      : typeof conflictingFields === 'string' &&
-          conflictingFields.includes(field);
-  }
-
   private isDuplicateMessageConflict(error: unknown): boolean {
-    return (
-      this.isUniqueConstraintViolation(error) &&
-      this.constraintTargetIncludes(error, 'clientMessageId')
-    );
+    return isUniqueViolationOn(error, 'clientMessageId');
   }
 
   /** Two first-ever messages between the same pair racing the ChatDirectPair unique constraint. */
   private isDuplicateDirectPairConflict(error: unknown): boolean {
-    return (
-      this.isUniqueConstraintViolation(error) &&
-      this.constraintTargetIncludes(error, 'userIdA')
-    );
+    return isUniqueViolationOn(error, 'userIdA');
   }
 
   /** The existing message for this sender and clientMessageId, only if it belongs to the expected conversation. */
