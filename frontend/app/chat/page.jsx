@@ -48,6 +48,7 @@ import { useSyncEngine } from "../../hooks/chat/useSyncEngine";
 import { useChatBackup } from "../../hooks/chat/useChatBackup";
 import { useBackgroundDecrypt } from "../../hooks/chat/useBackgroundDecrypt";
 import { useLinkPreviewDraft } from "../../hooks/chat/useLinkPreviewDraft";
+import { useConversationActions } from "../../hooks/chat/useConversationActions";
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
 import { useMarkChatRead } from "../../hooks/chat/useMarkChatRead";
@@ -591,13 +592,11 @@ export default function ChatPage() {
       await refreshChat();
     },
   });
-  const blockConversation = useMutation({
-    mutationFn: () => api.blockChatConversation(activeId),
-    onSuccess: async () => {
-      setSelectedId("");
-      await refreshChat();
-    },
-  });
+  // A chat that was blocked, archived or deleted is no longer in this list, so it cannot stay open.
+  const closeIfOpen = (conversationId) => {
+    if (conversationId === activeId) setSelectedId("");
+  };
+  const conversationActions = useConversationActions({ onGone: closeIfOpen });
 
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [groupTitle, setGroupTitle] = useState("");
@@ -661,7 +660,7 @@ export default function ChatPage() {
     return <ChatSkeleton />;
   }
 
-  const actionError = acceptRequest.error || declineRequest.error || blockConversation.error;
+  const actionError = acceptRequest.error || declineRequest.error || conversationActions.block.error;
   // Only claim end-to-end encryption when this device can actually use the group.
   const encryptionStatus = groupProblem
     ? "Encryption problem on this device"
@@ -983,9 +982,11 @@ export default function ChatPage() {
                 active={activeId === conversation.id}
                 conversation={conversation}
                 key={conversation.id}
+                onGone={closeIfOpen}
                 onSelect={selectConversation}
                 preview={conversationPreviews[conversation.lastMessage?.id]}
                 userId={user?.id}
+                view={view}
               />
             ))}
           </div>
@@ -1407,12 +1408,12 @@ export default function ChatPage() {
           displayName={activeConversationName}
           encryptionStatus={encryptionStatus}
           fileAttachments={flatOtherAttachments}
-          isBlockPending={blockConversation.isPending}
+          isBlockPending={conversationActions.block.isPending}
           isGroup={activeConversation?.type === "GROUP"}
           isOpen={isConversationInfoOpen && Boolean(activeConversation)}
           key={activeId || "no-conversation"}
           manageButtonRef={groupSettingsButtonRef}
-          onBlock={() => blockConversation.mutate()}
+          onBlock={() => conversationActions.block.mutate(activeId)}
           onClose={() => setIsConversationInfoOpen(false)}
           onManageGroup={() => setIsGroupSettingsOpen(true)}
           onOpenAttachment={setLightboxKey}
