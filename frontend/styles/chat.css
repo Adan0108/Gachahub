@@ -3072,6 +3072,8 @@
 .chat-message-row.mine .message-actions {
   left: auto;
   right: calc(100% + 8px);
+  /* Toolbar sits left of the bubble, so flip it to keep react (first) the closest button, as on the other side. */
+  flex-direction: row-reverse;
 }
 
 /* The reveal zone is the full-width band beside this message (.chat-message-hover-zone), not
@@ -3110,13 +3112,28 @@
 .message-actions-picker {
   /* top/left come from useFloatingPosition's inline style, not from here. */
   z-index: 40;
-  display: flex;
-  gap: 2px;
+  display: grid;
+  gap: 4px;
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--panel);
   box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+}
+
+.message-actions-picker-row {
+  display: flex;
+  gap: 2px;
+}
+
+/* Zero width of its own, so the note never widens the picker (which was centred before it appeared). */
+.message-actions-picker-note {
+  width: 0;
+  min-width: 100%;
+  padding: 0 6px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
 }
 
 .message-actions-picker button {
