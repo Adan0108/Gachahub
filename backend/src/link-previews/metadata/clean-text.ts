@@ -1,5 +1,4 @@
-// Control characters, zero-width characters and the bidirectional overrides used to make a title read backwards.
-// Tab, newline and carriage return are left for the whitespace collapsing below.
+// Control, zero-width and direction-override characters (tab, newline and return are left for whitespace collapsing).
 const INVISIBLE_RANGES: Array<[number, number]> = [
   [0x00, 0x08],
   [0x0b, 0x0c],

@@ -34,11 +34,7 @@ export class LinkPreviewService {
     private readonly resolver: LinkPreviewResolver,
   ) {}
 
-  /**
-   * What to show for a link the sender is about to post. Every way of not getting a preview from
-   * a well-formed public link gives the same answer, so this cannot be used to probe what the
-   * server can reach.
-   */
+  /** The preview for a link about to be sent; every failure for a public link answers the same, so it cannot probe what the server reaches. */
   async getPreview(userId: string, rawUrl: string): Promise<LinkPreview> {
     await loadActiveUser(this.prisma, userId);
     this.rateLimiter.assertNotRateLimited(userId);

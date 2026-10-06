@@ -56,14 +56,7 @@ function causedByUnsafeUrl(error: unknown): boolean {
   return false;
 }
 
-/**
- * Fetches a page on behalf of a user without becoming a way into our own network.
- *
- * Every address is checked twice: the link itself, and what its name resolves to at the moment of
- * connecting, so a name cannot be public for the check and internal for the connection. Redirects
- * are followed by hand so each hop is checked too. Time, redirects and size are all capped, and no
- * cookies or credentials are ever sent.
- */
+/** Fetches a page for a user without reaching our network: link and connect-time address checks, hand-followed redirects, time and size caps, no cookies. */
 @Injectable()
 export class SafeFetcher implements OnModuleDestroy {
   private readonly agent: Agent;

@@ -40,10 +40,7 @@ function absoluteHttpUrl(
   }
 }
 
-/**
- * Reads what a page says about itself from its <head>: Open Graph first, then Twitter cards, then
- * the plain tags. Nothing is executed or fetched; the text is only ever shown as text.
- */
+/** What a page says about itself in its <head>: Open Graph, then Twitter cards, then plain tags; nothing is run or fetched. */
 export function parseHeadMetadata(html: string, baseUrl: URL): PageMetadata {
   const headEnd = html.search(/<\/head\s*>/i);
   const head = headEnd === -1 ? html : html.slice(0, headEnd);

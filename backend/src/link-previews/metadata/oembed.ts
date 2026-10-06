@@ -1,9 +1,6 @@
 import { cleanText } from './clean-text';
 
-/**
- * Sites whose own oEmbed endpoint is asked about their links. The endpoints are fixed here on
- * purpose: one found in a page would let a stranger's page choose where the server goes next.
- */
+/** Sites asked through their own oEmbed endpoint; fixed here so a page cannot choose where the server goes next. */
 const PROVIDERS: Array<{ hosts: string[]; endpoint: string }> = [
   {
     hosts: [

@@ -8,11 +8,7 @@ const FAILURE_TTL_SECONDS = 10 * 60;
 
 export type CachedPreview = { ok: true; preview: LinkPreview } | { ok: false };
 
-/**
- * What was found for a link, kept briefly so the same link is not fetched again for everyone who
- * pastes it; a failure is kept for less time so a broken site is not retried on every keystroke.
- * Only a hash of the link is stored in the key. A Redis problem just means no caching.
- */
+/** Recent previews (6 h, failures 10 min) keyed by a hash of the link; a Redis problem just means no caching. */
 @Injectable()
 export class LinkPreviewCache {
   private readonly logger = new Logger(LinkPreviewCache.name);

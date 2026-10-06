@@ -20,11 +20,7 @@ export type SafeLookup = (
 const resolveAll: Resolver = (hostname) =>
   dnsLookup(hostname, { all: true, verbatim: true });
 
-/**
- * A DNS lookup for the connection itself: the address that was checked is the address that is
- * connected to, so a name cannot answer "public" to a check and "internal" to the connect.
- * One non-public answer among many refuses the whole name.
- */
+/** A lookup for the connection itself, so the checked address is the one connected to; one non-public answer refuses the name. */
 export function createSafeLookup(resolve: Resolver = resolveAll): SafeLookup {
   return (hostname, options, callback) => {
     resolve(hostname).then(

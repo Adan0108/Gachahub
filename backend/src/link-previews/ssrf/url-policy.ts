@@ -16,12 +16,7 @@ const INTERNAL_SUFFIXES = [
   '.home.arpa',
 ];
 
-/**
- * Parses a link a user wants previewed and refuses anything that is not a plain public web address:
- * other schemes, credentials, unusual ports, internal names, and IP literals in any encoding
- * (the URL parser turns decimal, octal and hex forms into dotted quads before they get here).
- * The fragment is dropped; it never reaches a server anyway.
- */
+/** Parses a link to preview and refuses anything but a plain public web address, including IP literals in any encoding. */
 export function parsePublicHttpUrl(raw: string): URL {
   if (
     typeof raw !== 'string' ||
