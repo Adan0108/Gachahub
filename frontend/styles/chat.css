@@ -881,14 +881,22 @@
 .post-sign-in {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
   border: 0;
-  border-radius: 6px;
-  padding: 5px 7px;
+  min-height: 42px;
+  border-radius: 9px;
+  padding: 9px 12px;
   background: transparent;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
+}
+
+.post-social button svg {
+  width: 19px;
+  height: 19px;
+  flex: 0 0 19px;
+  stroke-width: 2;
 }
 
 .post-social button:hover:not(:disabled),

@@ -223,6 +223,8 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
   };
 
   const toggleLike = useMutation({
+    // Derive the request from the state currently rendered on the button.
+    // Unliked posts use POST; liked posts use DELETE.
     mutationFn: () => (liked ? api.unlikePost(post.id) : api.likePost(post.id)),
     onMutate: () => {
       const previous = { liked, likeCount };
@@ -407,6 +409,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
       )}
       <div className="post-social" aria-label={`Actions for ${post.title}`}>
         <button
+          aria-label={`${liked ? "Unlike" : "Like"} ${post.title}`}
           aria-pressed={liked}
           className={liked ? "active" : ""}
           disabled={toggleLike.isPending}
@@ -416,6 +419,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
           <FiHeart /> {likeCount}
         </button>
         <button
+          aria-label={`${threadOpen ? "Hide comments on" : "Show comments on"} ${post.title}`}
           aria-expanded={threadOpen}
           onClick={() => setThreadOpen((open) => !open)}
           type="button"

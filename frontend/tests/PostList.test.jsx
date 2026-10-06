@@ -5,6 +5,7 @@ import { PostList } from "../components/PostList";
 const mocks = vi.hoisted(() => ({
   createReply: vi.fn(),
   likePost: vi.fn(),
+  unlikePost: vi.fn(),
   getFollowStatus: vi.fn(() => Promise.resolve({ following: false })),
   createReport: vi.fn(() => Promise.resolve({ id: "report-1" })),
   share: vi.fn(() => Promise.resolve()),
@@ -48,7 +49,7 @@ vi.mock("../hooks/useCurrentUser", () => ({
 vi.mock("../lib/api", () => ({
   api: {
     likePost: mocks.likePost,
-    unlikePost: vi.fn(),
+    unlikePost: mocks.unlikePost,
     getFollowStatus: mocks.getFollowStatus,
     followUser: vi.fn(),
     unfollowUser: vi.fn(),
@@ -65,6 +66,38 @@ vi.mock("../lib/api", () => ({
 }));
 
 describe("PostList", () => {
+  it("uses POST when liking an unliked post", () => {
+    mocks.likePost.mockClear();
+    mocks.unlikePost.mockClear();
+    render(
+      <PostList
+        posts={[{ id: "post-like", title: "Like me", author: "Author", likedByCurrentUser: false }]}
+        variant="feed"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Like Like me" }));
+
+    expect(mocks.likePost).toHaveBeenCalledWith("post-like");
+    expect(mocks.unlikePost).not.toHaveBeenCalled();
+  });
+
+  it("uses DELETE when unliking a liked post", () => {
+    mocks.likePost.mockClear();
+    mocks.unlikePost.mockClear();
+    render(
+      <PostList
+        posts={[{ id: "post-unlike", title: "Unlike me", author: "Author", likedByCurrentUser: true }]}
+        variant="feed"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Unlike Unlike me" }));
+
+    expect(mocks.unlikePost).toHaveBeenCalledWith("post-unlike");
+    expect(mocks.likePost).not.toHaveBeenCalled();
+  });
+
   it("shares a feed post with the browser share sheet", async () => {
     mocks.share.mockClear();
     Object.defineProperty(navigator, "share", { configurable: true, value: mocks.share });

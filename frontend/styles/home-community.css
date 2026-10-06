@@ -781,10 +781,10 @@
 
 .post-feed-card .post-social button {
   justify-content: center;
-  min-height: 38px;
+  min-height: 44px;
   min-width: 96px;
   flex: 0 1 132px;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .post-image-button {
