@@ -3,6 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GroupStateCorruptedError } from '../../lib/mls/contract/errors';
+import { claimDecrypt } from '../../lib/mls/messaging/decryptClaims';
 import { MAX_RETRY_ATTEMPTS, nextRetryDelayMs } from '../../lib/mls/messaging/decryptRetry';
 import { useDecryptedMessages } from './useDecryptedMessages';
 
@@ -122,6 +123,13 @@ describe('useDecryptedMessages', () => {
       envelope: { v: 1, type: 'text', body: 'second' },
     }));
 
+    // Like the real store: what was saved is there to read back, so the rescan after the release finds it.
+    const saved = new Map<string, unknown>();
+    plaintextSave.mockImplementation(async (record: { messageId: string }) => {
+      saved.set(record.messageId, record);
+    });
+    plaintextGet.mockImplementation(async (id: string) => saved.get(id));
+
     const msg1 = message('m1');
     const msg2 = message('m2');
     const hook = renderHook();
@@ -150,6 +158,54 @@ describe('useDecryptedMessages', () => {
     expect(plaintextSave).toHaveBeenCalledWith(
       expect.objectContaining({ messageId: 'm1', envelope: { v: 1, type: 'text', body: 'first' } }),
     );
+
+    hook.unmount();
+  });
+
+  // regression: the list decrypts new messages in the background and must never race the open chat for a key.
+  it('waits for a message the background is decrypting, then shows what it saved without decrypting it again', async () => {
+    const engine = fakeEngine();
+    engine.isAtCurrentEpoch.mockResolvedValue(true);
+    vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+    const saved = new Map<string, unknown>();
+    plaintextGet.mockImplementation(async (id: string) => saved.get(id));
+
+    const release = claimDecrypt('m1')!;
+    const hook = renderHook();
+
+    await hook.render({ conversationId: 'conv-1', messages: [message('m1')], currentUserId: 'me' });
+    expect(engine.processIncoming).not.toHaveBeenCalled();
+    expect(hook.value.m1).toBeUndefined();
+
+    saved.set('m1', { envelope: { v: 1, type: 'text', body: 'from the background' } });
+    release();
+    await flush();
+
+    expect(hook.value).toMatchObject({ m1: { status: 'ok', envelope: { body: 'from the background' } } });
+    expect(engine.processIncoming).not.toHaveBeenCalled();
+
+    hook.unmount();
+  });
+
+  it('decrypts the message itself when the background gave up on it', async () => {
+    const engine = fakeEngine();
+    engine.isAtCurrentEpoch.mockResolvedValue(true);
+    engine.processIncoming.mockResolvedValue({
+      kind: 'application',
+      senderDeviceId: 'device-2',
+      epoch: 0,
+      envelope: { v: 1, type: 'text', body: 'opened it myself' },
+    });
+    vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+
+    const release = claimDecrypt('m1')!;
+    const hook = renderHook();
+
+    await hook.render({ conversationId: 'conv-1', messages: [message('m1')], currentUserId: 'me' });
+    release();
+    await flush();
+
+    expect(hook.value).toMatchObject({ m1: { status: 'ok', envelope: { body: 'opened it myself' } } });
 
     hook.unmount();
   });

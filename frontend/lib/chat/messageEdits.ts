@@ -79,7 +79,17 @@ export function applyEdits(messages: EditableMessage[], decrypted: Record<string
         ...accepted.map(({ message, text }) => ({ text, at: Date.parse(message.createdAt) })),
       ],
     });
-    result[targetId] = { status: 'ok', envelope: { v: 1, type: 'text', body: accepted[accepted.length - 1]!.text } };
+    // The card stays with the message; whether it still shows is decided against the new text when it is drawn
+    const previews = originalState?.status === 'ok' ? (originalState.envelope as { previews?: unknown }).previews : undefined;
+    result[targetId] = {
+      status: 'ok',
+      envelope: {
+        v: 1,
+        type: 'text',
+        body: accepted[accepted.length - 1]!.text,
+        ...(previews ? { previews } : {}),
+      } as PlaintextEnvelope,
+    };
   }
 
   return { decrypted: result, edited };

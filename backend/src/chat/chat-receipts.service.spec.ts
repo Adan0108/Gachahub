@@ -18,6 +18,7 @@ describe('ChatReceiptsService', () => {
     findReceiptParties: jest.fn(),
   };
   const chatDelivery = { publishReceiptsUpdated: jest.fn() };
+  const notifications = { markMessageNotificationsAsRead: jest.fn() };
 
   let service: ChatReceiptsService;
 
@@ -47,8 +48,12 @@ describe('ChatReceiptsService', () => {
       repository as never,
       access,
       chatDelivery as never,
+      notifications as never,
     );
     repository.findReceiptParties.mockResolvedValue([]);
+    notifications.markMessageNotificationsAsRead.mockResolvedValue({
+      count: 0,
+    });
   });
 
   describe('markDelivered', () => {
@@ -237,7 +242,11 @@ describe('ChatReceiptsService', () => {
 
   describe('markRead', () => {
     const activeParticipant = { userId: 'user-1', state: 'ACTIVE' };
-    const readUpTo5 = { count: 1, lastReadMessage: { id: 'message-5' } };
+    const readUpTo5 = {
+      count: 1,
+      lastReadMessage: { id: 'message-5' },
+      readMessageIds: ['message-5'],
+    };
     const read = () =>
       service.markRead('user-1', 'conversation-1', {
         lastReadMessageId: 'message-5',
@@ -267,6 +276,7 @@ describe('ChatReceiptsService', () => {
       repository.markConversationRead.mockResolvedValue({
         count: 5,
         lastReadMessage: { id: 'message-5' },
+        readMessageIds: ['message-1', 'message-5'],
       });
 
       const result = await read();
@@ -299,11 +309,45 @@ describe('ChatReceiptsService', () => {
       });
     });
 
+    it('settles the notifications of the messages just read', async () => {
+      repository.findParticipant.mockResolvedValue(activeParticipant);
+      repository.markConversationRead.mockResolvedValue({
+        ...readUpTo5,
+        readMessageIds: ['message-4', 'message-5'],
+      });
+
+      await read();
+
+      expect(notifications.markMessageNotificationsAsRead).toHaveBeenCalledWith(
+        'user-1',
+        ['message-4', 'message-5'],
+      );
+    });
+
+    it('still succeeds and announces when the notifications cannot be settled', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      repository.findParticipant.mockResolvedValue(activeParticipant);
+      repository.markConversationRead.mockResolvedValue(readUpTo5);
+      repository.findReceiptParties.mockResolvedValue([
+        row('user-1'),
+        row('user-2'),
+      ]);
+      notifications.markMessageNotificationsAsRead.mockRejectedValue(
+        new Error('db blip'),
+      );
+
+      await expect(read()).resolves.toEqual({ readCount: 1 });
+
+      expect(chatDelivery.publishReceiptsUpdated).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalled();
+    });
+
     it('does not announce a read that changed nothing', async () => {
       repository.findParticipant.mockResolvedValue(activeParticipant);
       repository.markConversationRead.mockResolvedValue({
         count: 0,
         lastReadMessage: { id: 'message-5' },
+        readMessageIds: [],
       });
 
       await read();
@@ -316,6 +360,7 @@ describe('ChatReceiptsService', () => {
       repository.markConversationRead.mockResolvedValue({
         count: 0,
         lastReadMessage: null,
+        readMessageIds: [],
       });
 
       await service.markRead('user-1', 'conversation-1', {});

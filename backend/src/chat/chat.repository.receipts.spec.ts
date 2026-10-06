@@ -123,7 +123,11 @@ describe('ChatRepository receipts', () => {
 
     it('returns how many were newly read and up to which message', async () => {
       tx.chatMessage.findFirst.mockResolvedValue(lastRead);
-      tx.chatMessageReceipt.updateMany.mockResolvedValue({ count: 3 });
+      tx.chatMessageReceipt.updateManyAndReturn.mockResolvedValue([
+        { messageId: 'm3' },
+        { messageId: 'm4' },
+        { messageId: 'm5' },
+      ]);
 
       const result = await repository.markConversationRead({
         conversationId: 'c1',
@@ -131,7 +135,11 @@ describe('ChatRepository receipts', () => {
         lastReadMessageId: 'm5',
       });
 
-      expect(result).toEqual({ count: 3, lastReadMessage: lastRead });
+      expect(result).toEqual({
+        count: 3,
+        lastReadMessage: lastRead,
+        readMessageIds: ['m3', 'm4', 'm5'],
+      });
       expect(tx.chatParticipant.update).toHaveBeenCalled();
     });
 
@@ -144,13 +152,19 @@ describe('ChatRepository receipts', () => {
           userId: 'user-1',
           lastReadMessageId: 'gone',
         }),
-      ).resolves.toEqual({ count: 0, lastReadMessage: null });
-      expect(tx.chatMessageReceipt.updateMany).not.toHaveBeenCalled();
+      ).resolves.toEqual({
+        count: 0,
+        lastReadMessage: null,
+        readMessageIds: [],
+      });
+      expect(tx.chatMessageReceipt.updateManyAndReturn).not.toHaveBeenCalled();
     });
 
     it('never picks a hidden edit as the latest message to read up to', async () => {
       tx.chatMessage.findFirst.mockResolvedValue(lastRead);
-      tx.chatMessageReceipt.updateMany.mockResolvedValue({ count: 1 });
+      tx.chatMessageReceipt.updateManyAndReturn.mockResolvedValue([
+        { messageId: 'm5' },
+      ]);
 
       await repository.markConversationRead({
         conversationId: 'c1',

@@ -117,7 +117,30 @@ describe('UsersService', () => {
 
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1' },
-        data: { messageRequestSetting: undefined, sendReadReceipts: false },
+        data: {
+          messageRequestSetting: undefined,
+          sendReadReceipts: false,
+          sendLinkPreviews: undefined,
+        },
+        select: ME_SELECT,
+      });
+    });
+
+    it('saves the link previews setting', async () => {
+      prisma.user.update.mockResolvedValue({
+        id: 'user-1',
+        sendLinkPreviews: false,
+      });
+
+      await service.updateProfile('user-1', { sendLinkPreviews: false });
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: {
+          messageRequestSetting: undefined,
+          sendReadReceipts: undefined,
+          sendLinkPreviews: false,
+        },
         select: ME_SELECT,
       });
     });
@@ -143,7 +166,11 @@ describe('UsersService', () => {
 
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1' },
-        data: { messageRequestSetting: 'NO_ONE', sendReadReceipts: undefined },
+        data: {
+          messageRequestSetting: 'NO_ONE',
+          sendReadReceipts: undefined,
+          sendLinkPreviews: undefined,
+        },
         select: ME_SELECT,
       });
     });

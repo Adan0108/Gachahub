@@ -34,6 +34,9 @@ type NotificationRepositoryMock = {
   countUnread: jest.MockedFunction<NotificationRepository['countUnread']>;
   markAsRead: jest.MockedFunction<NotificationRepository['markAsRead']>;
   markAllAsRead: jest.MockedFunction<NotificationRepository['markAllAsRead']>;
+  markMessageNotificationsAsRead: jest.MockedFunction<
+    NotificationRepository['markMessageNotificationsAsRead']
+  >;
   findExisting: jest.MockedFunction<NotificationRepository['findExisting']>;
 };
 
@@ -50,6 +53,7 @@ describe('NotificationService', () => {
     countUnread: jest.fn(),
     markAsRead: jest.fn(),
     markAllAsRead: jest.fn(),
+    markMessageNotificationsAsRead: jest.fn(),
     findExisting: jest.fn(),
   };
 
@@ -691,6 +695,38 @@ describe('NotificationService', () => {
       await expect(service.getUnreadCount('')).rejects.toThrow(
         new BadRequestException('recipientId is required'),
       );
+    });
+  });
+
+  describe('markMessageNotificationsAsRead', () => {
+    it('marks the recipient notifications for those messages read', async () => {
+      repositoryMock.markMessageNotificationsAsRead.mockResolvedValue({
+        count: 2,
+      });
+
+      const result = await service.markMessageNotificationsAsRead('user-b', [
+        'message-1',
+        'message-2',
+      ]);
+
+      expect(result).toEqual({ count: 2 });
+      expect(
+        repositoryMock.markMessageNotificationsAsRead,
+      ).toHaveBeenCalledWith({
+        recipientId: 'user-b',
+        messageIds: ['message-1', 'message-2'],
+        readAt: expect.any(Date) as unknown,
+      });
+    });
+
+    it('does nothing when no message was read', async () => {
+      await expect(
+        service.markMessageNotificationsAsRead('user-b', []),
+      ).resolves.toEqual({ count: 0 });
+
+      expect(
+        repositoryMock.markMessageNotificationsAsRead,
+      ).not.toHaveBeenCalled();
     });
   });
 

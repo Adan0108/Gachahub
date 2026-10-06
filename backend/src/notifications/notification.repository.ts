@@ -158,6 +158,26 @@ export class NotificationRepository {
     });
   }
 
+  /** Marks a recipient's chat message notifications for these messages read. */
+  markMessageNotificationsAsRead(params: {
+    recipientId: string;
+    messageIds: string[];
+    readAt: Date;
+  }) {
+    const { recipientId, messageIds, readAt } = params;
+
+    return this.prisma.notification.updateMany({
+      where: {
+        recipientId,
+        type: { in: ['MESSAGE_RECEIVED', 'MESSAGE_REPLIED'] },
+        entityType: 'MESSAGE',
+        entityId: { in: messageIds },
+        readAt: null,
+      },
+      data: { readAt },
+    });
+  }
+
   markAllAsRead(params: { recipientId: string; readAt: Date }) {
     const { recipientId, readAt } = params;
 
