@@ -3,6 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { decryptPendingMessages, type PendingMessageRow } from "../../lib/chat/backgroundDecrypt";
+import { api } from "../../lib/api";
 import { queries } from "../../lib/queries";
 import { EncryptedIndexedDbMessagePlaintextStore } from "../../lib/mls/storage/messagePlaintextStore";
 import type { ConversationId } from "../../lib/mls/contract/types";
@@ -66,6 +67,11 @@ export function useBackgroundDecrypt(
             items: PendingMessageRow[];
           };
           if (!active.current) return;
+          // This device has them now, whether or not they decrypt: tell the senders, even if they sent while we were offline.
+          const received = page.items
+            .filter((message) => message.senderId !== userId && message.status !== "DELETED")
+            .map((message) => message.id);
+          if (received.length > 0) api.markChatDelivered(received).catch(() => {});
           await decryptPendingMessages({
             engine: syncEngine,
             store: plaintextStore,

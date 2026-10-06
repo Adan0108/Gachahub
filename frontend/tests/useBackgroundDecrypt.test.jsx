@@ -1,39 +1,38 @@
-// @vitest-environment jsdom
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   decryptPendingMessages: vi.fn(),
   getChatMessages: vi.fn(),
+  markChatDelivered: vi.fn(),
   plaintextGet: vi.fn(),
   engine: { name: "engine" },
 }));
 
-vi.mock("../../lib/chat/backgroundDecrypt", () => ({
+vi.mock("../lib/chat/backgroundDecrypt", () => ({
   decryptPendingMessages: mocks.decryptPendingMessages,
 }));
-vi.mock("../../lib/api", () => ({
-  api: { getChatMessages: mocks.getChatMessages },
+vi.mock("../lib/api", () => ({
+  api: { getChatMessages: mocks.getChatMessages, markChatDelivered: mocks.markChatDelivered },
   fallbackCategories: vi.fn(() => []),
   fallbackGame: vi.fn(),
   fallbackGames: vi.fn(() => ({ items: [] })),
   fallbackPosts: vi.fn(() => []),
 }));
-vi.mock("../../lib/mls/storage/messagePlaintextStore", () => ({
+vi.mock("../lib/mls/storage/messagePlaintextStore", () => ({
   EncryptedIndexedDbMessagePlaintextStore: vi.fn().mockImplementation(function FakeStore() {
     return { get: mocks.plaintextGet };
   }),
 }));
-vi.mock("./useSyncEngine", () => ({ useSyncEngine: vi.fn(() => mocks.engine) }));
-vi.mock("./useDeviceIdentity", () => ({
+vi.mock("../hooks/chat/useSyncEngine", () => ({ useSyncEngine: () => mocks.engine }));
+vi.mock("../hooks/chat/useDeviceIdentity", () => ({
   useDeviceIdentity: () => ({ credential: { deviceId: "device-me" } }),
 }));
 
-import { useBackgroundDecrypt } from "./useBackgroundDecrypt";
+import { useBackgroundDecrypt } from "../hooks/chat/useBackgroundDecrypt";
 
-const conversation = (id: string, extra: Record<string, unknown> = {}) => ({
+const conversation = (id, extra = {}) => ({
   id,
   participantState: "ACTIVE",
   unreadCount: 2,
@@ -43,16 +42,15 @@ const conversation = (id: string, extra: Record<string, unknown> = {}) => ({
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
-function setup(initial: unknown[], openId = "") {
+function setup(initial, openId = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const wrapper = ({ children }: { children: ReactNode }) => (
+  const wrapper = ({ children }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  return renderHook(
-    ({ list, open }: { list: unknown[]; open: string }) =>
-      useBackgroundDecrypt(list as never, "me", open),
-    { wrapper, initialProps: { list: initial, open: openId } },
-  );
+  return renderHook(({ list, open }) => useBackgroundDecrypt(list, "me", open), {
+    wrapper,
+    initialProps: { list: initial, open: openId },
+  });
 }
 
 describe("useBackgroundDecrypt", () => {
@@ -60,10 +58,11 @@ describe("useBackgroundDecrypt", () => {
     vi.clearAllMocks();
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mocks.plaintextGet.mockResolvedValue(undefined);
-    mocks.getChatMessages.mockImplementation(async (id: string) => ({
+    mocks.getChatMessages.mockImplementation(async (id) => ({
       items: [{ id: `${id}-last` }],
     }));
     mocks.decryptPendingMessages.mockResolvedValue(undefined);
+    mocks.markChatDelivered.mockResolvedValue({});
   });
 
   it("decrypts the messages of a conversation with something new from someone else", async () => {
@@ -82,7 +81,37 @@ describe("useBackgroundDecrypt", () => {
     );
   });
 
-  it.each<[string, Record<string, unknown>]>([
+  it("tells the senders this device has their messages, skipping your own and unsent ones", async () => {
+    mocks.getChatMessages.mockResolvedValue({
+      items: [
+        { id: "m1", senderId: "peer" },
+        { id: "m2", senderId: "me" },
+        { id: "m3", senderId: "peer", status: "DELETED" },
+        { id: "m4", senderId: "peer" },
+      ],
+    });
+    setup([conversation("c1")]);
+
+    await waitFor(() => expect(mocks.markChatDelivered).toHaveBeenCalledWith(["m1", "m4"]));
+    expect(mocks.markChatDelivered).toHaveBeenCalledTimes(1);
+  });
+
+  it("still decrypts when the delivery acknowledgement fails", async () => {
+    mocks.markChatDelivered.mockRejectedValue(new Error("offline"));
+    setup([conversation("c1")]);
+
+    await waitFor(() => expect(mocks.decryptPendingMessages).toHaveBeenCalledTimes(1));
+  });
+
+  it("sends no acknowledgement when nothing came from someone else", async () => {
+    mocks.getChatMessages.mockResolvedValue({ items: [{ id: "m1", senderId: "me" }] });
+    setup([conversation("c1")]);
+
+    await waitFor(() => expect(mocks.decryptPendingMessages).toHaveBeenCalledTimes(1));
+    expect(mocks.markChatDelivered).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ["nothing is unread", { unreadCount: 0 }],
     ["the last message is your own", { lastMessage: { id: "m", senderId: "me", ciphertext: "x" } }],
     [
@@ -132,9 +161,9 @@ describe("useBackgroundDecrypt", () => {
   });
 
   it("works through conversations one at a time", async () => {
-    let finishFirst: () => void = () => undefined;
+    let finishFirst = () => undefined;
     mocks.decryptPendingMessages.mockImplementationOnce(
-      () => new Promise<void>((resolve) => (finishFirst = resolve)),
+      () => new Promise((resolve) => (finishFirst = resolve)),
     );
     setup([conversation("c1"), conversation("c2")]);
 
@@ -147,10 +176,16 @@ describe("useBackgroundDecrypt", () => {
   });
 
   it("carries on with the next conversation when one fails", async () => {
-    mocks.getChatMessages.mockRejectedValueOnce(new Error("offline"));
+    mocks.getChatMessages.mockImplementation(async (id) => {
+      if (id === "c1") throw new Error("offline");
+      return { items: [{ id: `${id}-last` }] };
+    });
     setup([conversation("c1"), conversation("c2")]);
 
-    await waitFor(() => expect(mocks.decryptPendingMessages).toHaveBeenCalledTimes(1));
+    // The messages query retries once after a second before giving up on c1.
+    await waitFor(() => expect(mocks.decryptPendingMessages).toHaveBeenCalledTimes(1), {
+      timeout: 4000,
+    });
     expect(mocks.decryptPendingMessages).toHaveBeenCalledWith(
       expect.objectContaining({ conversationId: "c2" }),
     );
