@@ -2,6 +2,7 @@ import { FiCornerUpLeft, FiFile, FiLock } from "react-icons/fi";
 import { EnvelopeContent } from "./EnvelopeContent";
 import { EditedLabel } from "./EditedLabel";
 import { MessageActions } from "./MessageActions";
+import { MessageStatusLine } from "./MessageStatusLine";
 import { HistoryBanner, MembershipEventLine, TimestampDivider } from "./ThreadNotices";
 import { useAttachmentBlobUrl } from "../../hooks/chat/useAttachmentBlobUrl";
 import { groupReactions } from "../../lib/chat/chatReactions";
@@ -116,6 +117,7 @@ function MessageBubble({
   groupedWithNext,
   edited,
   pendingEdit,
+  receiptInfo,
   now,
   onReply,
   onReact,
@@ -133,6 +135,10 @@ function MessageBubble({
   const mediaOnly = isMediaOnlyView(view);
   const copyText = view?.kind === "text" ? view.text : view?.kind === "attachment" ? view.caption : "";
   const versions = edited?.get(message.id)?.versions;
+  const receiptStatus = mine ? receiptInfo?.statusFor.get(message.id) : undefined;
+  const receiptReaders = mine
+    ? (receiptInfo?.readersAt.get(message.id) ?? []).map((id) => participantUser(conversation, id)).filter(Boolean)
+    : [];
   const canEdit = canEditMessage({
     mine,
     isText: view?.kind === "text",
@@ -248,6 +254,7 @@ function MessageBubble({
             reactions={message.reactions}
             userId={userId}
           />
+          <MessageStatusLine readers={receiptReaders} status={receiptStatus} />
         </div>
       </div>
     </div>
@@ -265,6 +272,7 @@ export function ThreadRow({
   now,
   edited,
   pendingEdits,
+  receiptInfo,
   onReply,
   onReact,
   onCopy,
@@ -316,6 +324,7 @@ export function ThreadRow({
       neighbors={neighbors}
       now={now}
       pendingEdit={pendingEdit}
+      receiptInfo={receiptInfo}
       gapBefore={gapBefore}
       groupedWithNext={groupedWithNext}
       groupedWithPrevious={groupedWithPrevious}

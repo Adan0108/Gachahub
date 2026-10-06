@@ -4077,3 +4077,33 @@
   background: var(--purple);
   color: #fff;
 }
+
+.chat-message-receipts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 0 4px;
+}
+
+.chat-message-status {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chat-message-status.seen {
+  color: var(--muted-strong);
+}
+
+.chat-message-readers {
+  display: inline-flex;
+  flex-direction: row-reverse;
+  gap: 2px;
+}
+
+.chat-avatar.tiny {
+  width: 14px;
+  height: 14px;
+  border-width: 0;
+  font-size: 8px;
+}

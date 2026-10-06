@@ -7,7 +7,12 @@ vi.mock("../lib/api", () => ({
   api: { usingMocks: false },
 }));
 
+vi.mock("../hooks/useCurrentUser", () => ({
+  useCurrentUser: () => ({ user: { id: "me", sendReadReceipts: true } }),
+}));
+
 vi.mock("../lib/queries", () => ({
+  queryKeys: { currentUser: ["current-user"] },
   fallbacks: { home: () => ({ communities: [] }) },
   queries: {
     home: () => ({
@@ -49,5 +54,11 @@ describe("SettingsPage", () => {
     renderSettings();
     fireEvent.click(await screen.findByText("Email notifications"));
     expect(screen.getByText("This setting is not available yet")).toBeInTheDocument();
+  });
+
+  it("has the read receipts switch under privacy and safety", async () => {
+    renderSettings();
+
+    expect(await screen.findByRole("switch", { name: "Read receipts" })).toBeChecked();
   });
 });

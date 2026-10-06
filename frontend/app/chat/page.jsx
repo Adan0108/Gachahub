@@ -47,6 +47,7 @@ import { useSyncEngine } from "../../hooks/chat/useSyncEngine";
 import { useChatBackup } from "../../hooks/chat/useChatBackup";
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
+import { useReceiptDisplay } from "../../hooks/chat/useReceiptDisplay";
 import { useStickToBottom } from "../../hooks/chat/useStickToBottom";
 import { useTypingNames } from "../../hooks/chat/useTypingNames";
 import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
@@ -507,6 +508,14 @@ export default function ChatPage() {
   const activePendingCount = pendingMessages.filter(
     (pending) => pending.conversationId === activeId,
   ).length;
+  const receiptInfo = useReceiptDisplay({
+    messages: displayMessages,
+    hiddenMessageIds,
+    userId: user?.id,
+    conversation: activeConversation,
+    peerId: peer?.id,
+    hasPending: activePendingCount > 0,
+  });
   const someoneTyping = typingNames.length > 0;
   const previousPendingCount = useRef(0);
   // Opening a conversation starts at its newest message.
@@ -1077,6 +1086,7 @@ export default function ChatPage() {
                       onDiscardEdit={messageEdit.discard}
                       onRetryEdit={messageEdit.retry}
                       pendingEdits={messageEdit.pending}
+                      receiptInfo={receiptInfo}
                       key={threadItemKey(item)}
                       messagesById={messagesById}
                       neighbors={neighbors}

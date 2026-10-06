@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { api } from '../../lib/api';
+import { applyReceiptsEvent } from '../../lib/chat/receiptEvents';
 import { queryKeys } from '../../lib/queries';
 import { useSharedSocket } from '../../lib/socket/sharedSocket';
 import { typingSignal } from '../../lib/chat/chatTypingSignal';
@@ -19,6 +21,8 @@ const TYPING_EXPIRE_MS = 6000;
 // backend's own throttle floor (2s between repeats of the same event) or the re-announce gets
 // silently dropped server-side.
 const TYPING_REFRESH_MS = 2500;
+// How long after the latest incoming message this device waits before telling the server it got them.
+const DELIVERY_ACK_DELAY_MS = 250;
 
 /**
  * Live push for new chat messages, so one shows up as soon as it's sent
@@ -48,7 +52,22 @@ export function useChatSocket() {
       removers.push(() => socket.off(event, handler));
     };
 
+    // Tell the server this device got a message, shortly after the last one so a burst is one request.
+    const deliveredIds = new Set();
+    let deliveredTimer;
+    const acknowledgeDelivery = (messageId) => {
+      deliveredIds.add(messageId);
+      clearTimeout(deliveredTimer);
+      deliveredTimer = setTimeout(() => {
+        const messageIds = [...deliveredIds];
+        deliveredIds.clear();
+        api.markChatDelivered(messageIds).catch(() => {});
+      }, DELIVERY_ACK_DELAY_MS);
+    };
+    removers.push(() => clearTimeout(deliveredTimer));
+
     on('message:created', (event) => {
+      acknowledgeDelivery(event.messageId);
       queryClient.setQueryData(queryKeys.chatMessages(event.conversationId), (old) => {
         if (!old || old.items.some((item) => item.id === event.messageId)) {
           return old;
@@ -88,6 +107,23 @@ export function useChatSocket() {
     on('reaction:removed', refetchConversationMessages);
     on('message:deleted', refetchConversationMessages);
     on('message:edited', refetchConversationMessages);
+
+    // Someone's device got, or read up to, messages in a thread: put it straight on the cached messages.
+    on('receipts:updated', (event) => {
+      const key = queryKeys.chatMessages(event.conversationId);
+      let needsFetch = false;
+      queryClient.setQueryData(key, (old) => {
+        if (!old) return old;
+        const items = applyReceiptsEvent(old.items, event);
+        if (!items) {
+          needsFetch = true;
+          return old;
+        }
+        return { ...old, items };
+      });
+      // A read up to a message this list does not have: fetch fresh rather than guess.
+      if (needsFetch) queryClient.invalidateQueries({ queryKey: key });
+    });
 
     // The other side accepted a message request this tab sent - a one-shot notice, not steady
     // state, so the chat page reads it once via the same cache-write bridge and clears it.
