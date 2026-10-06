@@ -1,19 +1,21 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { FiCopy, FiCornerUpLeft, FiEyeOff, FiMoreHorizontal, FiSmile, FiTrash2 } from "react-icons/fi";
+import { FiCopy, FiCornerUpLeft, FiEdit2, FiEyeOff, FiMoreHorizontal, FiSmile, FiTrash2 } from "react-icons/fi";
 import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
 import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
-/** Hover toolbar on a message: react, reply, and a "..." menu (copy, unsend for your own messages). */
+/** Hover toolbar on a message: react, reply, and a "..." menu (copy, edit and unsend for your own messages). */
 export function MessageActions({
   isMine,
   canCopy,
+  canEdit = false,
   onReact,
   onReply,
   onCopy,
+  onEdit,
   onDelete,
   onDeleteForMe,
 }) {
@@ -93,6 +95,18 @@ export function MessageActions({
                   type="button"
                 >
                   <FiCopy /> Copy
+                </button>
+              )}
+              {canEdit && (
+                <button
+                  onClick={() => {
+                    onEdit();
+                    setIsMoreOpen(false);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <FiEdit2 /> Edit
                 </button>
               )}
               <button

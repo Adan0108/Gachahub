@@ -1,11 +1,13 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { sendEncryptedChatMessage } from './sendEncryptedMessage';
+import { sendEncryptedChatMessage, sendEncryptedEdit } from './sendEncryptedMessage';
+import { EncryptedIndexedDbMessagePlaintextStore } from '../storage/messagePlaintextStore';
 import { GroupStateUnavailableError } from '../contract/errors';
 
 vi.mock('../../api', () => ({
   api: {
     sendChatMessage: vi.fn(),
+    editChatMessage: vi.fn(),
   },
 }));
 
@@ -163,5 +165,90 @@ describe('sendEncryptedChatMessage', () => {
       expect(engine.reconcileMembership).not.toHaveBeenCalled();
       expect(api.sendChatMessage).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe('sendEncryptedEdit', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('encrypts an edit envelope, submits it for the message, and caches it under the edit id', async () => {
+    const { api } = await import('../../api');
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockResolvedValue(2);
+    engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1, 2, 3]), epoch: 2 });
+    vi.mocked(api.editChatMessage).mockResolvedValue({ message: { id: 'edit-9' } });
+
+    const result = await sendEncryptedEdit(
+      engine as any,
+      'device-1',
+      'conv-1',
+      'user-bob',
+      { targetMessageId: 'msg-1', text: 'fixed', n: 2 },
+      'client-edit-1',
+    );
+
+    expect(engine.encryptMessage).toHaveBeenCalledWith('conv-1', {
+      v: 1,
+      type: 'edit',
+      body: { targetMessageId: 'msg-1', text: 'fixed', n: 2 },
+    });
+    expect(api.editChatMessage).toHaveBeenCalledWith('msg-1', {
+      ciphertext: expect.any(String),
+      encryptionMeta: { senderDeviceId: 'device-1' },
+      clientMessageId: 'client-edit-1',
+    });
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+    expect(result.message.id).toBe('edit-9');
+
+    const cached = await new EncryptedIndexedDbMessagePlaintextStore().get('edit-9');
+    expect(cached?.envelope).toEqual({
+      v: 1,
+      type: 'edit',
+      body: { targetMessageId: 'msg-1', text: 'fixed', n: 2 },
+    });
+  });
+
+  it('catches up on a pending membership change and tries once more', async () => {
+    const { api } = await import('../../api');
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockResolvedValue(2);
+    engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
+    vi.mocked(api.editChatMessage)
+      .mockRejectedValueOnce(Object.assign(new Error('pending'), { code: 'MEMBERSHIP_CHANGE_PENDING' }))
+      .mockResolvedValueOnce({ message: { id: 'edit-10' } });
+
+    await sendEncryptedEdit(
+      engine as any,
+      'device-1',
+      'conv-1',
+      'user-bob',
+      { targetMessageId: 'msg-1', text: 'x', n: 1 },
+      'client-edit-2',
+    );
+
+    expect(engine.reconcileMembership).toHaveBeenCalledWith({ conversationId: 'conv-1' });
+    expect(api.editChatMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not hide other failures, such as the edit window having closed', async () => {
+    const { api } = await import('../../api');
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockResolvedValue(2);
+    engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
+    vi.mocked(api.editChatMessage).mockRejectedValue(Object.assign(new Error('too late'), { code: 'EDIT_WINDOW_CLOSED' }));
+
+    await expect(
+      sendEncryptedEdit(
+        engine as any,
+        'device-1',
+        'conv-1',
+        'user-bob',
+        { targetMessageId: 'msg-1', text: 'x', n: 1 },
+        'client-edit-3',
+      ),
+    ).rejects.toThrow('too late');
+    expect(engine.reconcileMembership).not.toHaveBeenCalled();
   });
 });

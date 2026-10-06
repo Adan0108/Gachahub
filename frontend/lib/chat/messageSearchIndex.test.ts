@@ -322,6 +322,81 @@ describe('MessageSearchIndex following the store', () => {
   });
 });
 
+const editOf = (target: string, body: string, n: number, conversationId = 'c1'): DecryptedMessage => ({
+  messageId: `edit-${target}-${n}`,
+  conversationId,
+  senderDeviceId: 'd1',
+  epoch: 1,
+  envelope: { v: 1, type: 'edit', body: { targetMessageId: target, text: body, n } },
+});
+
+describe('MessageSearchIndex with edited messages', () => {
+  let index: MessageSearchIndex;
+  beforeEach(() => {
+    index = new MessageSearchIndex();
+  });
+
+  it('finds an edited message by its new text and no longer by the old', () => {
+    index.add(text('m1', 'meet at the cafe'));
+
+    index.add(editOf('m1', 'meet at the library', 1));
+
+    expect(ids(index, 'library')).toEqual(['m1']);
+    expect(ids(index, 'cafe')).toEqual([]);
+    expect(index.size).toBe(1);
+  });
+
+  it('keeps the newest edit when they arrive out of order', () => {
+    index.add(text('m1', 'one'));
+
+    index.add(editOf('m1', 'three', 2));
+    index.add(editOf('m1', 'two', 1));
+
+    expect(ids(index, 'three')).toEqual(['m1']);
+    expect(ids(index, 'two')).toEqual([]);
+  });
+
+  it('keeps an edit that arrives before the original', () => {
+    index.add(editOf('m1', 'edited text', 1));
+    expect(ids(index, 'edited')).toEqual(['m1']);
+
+    index.add(text('m1', 'original text'));
+
+    expect(ids(index, 'edited')).toEqual(['m1']);
+    expect(ids(index, 'original')).toEqual([]);
+  });
+
+  it('ignores an edit that points at a message in another conversation', () => {
+    index.add(text('m1', 'mine', 'c1'));
+
+    index.add(editOf('m1', 'forged', 1, 'c2'));
+
+    expect(ids(index, 'mine')).toEqual(['m1']);
+    expect(ids(index, 'forged')).toEqual([]);
+  });
+
+  it('forgets the message, edits and all, when it is removed', () => {
+    index.add(text('m1', 'one'));
+    index.add(editOf('m1', 'two', 1));
+
+    index.remove('m1');
+
+    expect(ids(index, 'two')).toEqual([]);
+    expect(index.size).toBe(0);
+  });
+
+  it('indexes edits that were stored before the index was built', async () => {
+    const store = new InMemoryMessagePlaintextStore();
+    await store.save(editOf('m1', 'edited later', 1));
+    await store.save(text('m1', 'original'));
+
+    await index.syncWith(store);
+
+    expect(ids(index, 'edited')).toEqual(['m1']);
+    expect(ids(index, 'original')).toEqual([]);
+  });
+});
+
 describe('indexing progress text', () => {
   it('is a percentage once the total is known', () => {
     expect(indexProgressPercent({ indexed: 25, total: 100 })).toBe(25);

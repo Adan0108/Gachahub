@@ -93,4 +93,55 @@ describe("useConversationPreviews", () => {
 
     await waitFor(() => expect(result.current).toEqual({ m1: "now here" }));
   });
+
+  describe("edited messages", () => {
+    const edit = (target, body) => ({
+      messageId: `edit-of-${target}`,
+      envelope: { v: 1, type: "edit", body: { targetMessageId: target, text: body, n: 1 } },
+    });
+
+    it("shows the new text the moment an edit of the last message is saved", async () => {
+      mocks.get.mockResolvedValue(text("old text"));
+      const list = [convo("c1", msg("m1"))];
+      const { result } = renderHook(() => useConversationPreviews(list, "me"));
+      await waitFor(() => expect(result.current).toEqual({ m1: "old text" }));
+
+      act(() => mocks.listener(edit("m1", "new text")));
+
+      expect(result.current).toEqual({ m1: "new text" });
+    });
+
+    it("prefixes an edit of your own message like the original", async () => {
+      const list = [convo("c1", msg("m1", { senderId: "me" }))];
+      const { result } = renderHook(() => useConversationPreviews(list, "me"));
+      await waitFor(() => expect(mocks.listener).not.toBeNull());
+
+      act(() => mocks.listener(edit("m1", "fixed")));
+
+      expect(result.current).toEqual({ m1: "You: fixed" });
+    });
+
+    it("ignores an edit of a message that is not a conversation last", async () => {
+      const list = [convo("c1", msg("m1"))];
+      const { result } = renderHook(() => useConversationPreviews(list, "me"));
+      await waitFor(() => expect(mocks.listener).not.toBeNull());
+
+      act(() => mocks.listener(edit("older", "nope")));
+
+      expect(result.current).toEqual({});
+    });
+
+    it("keeps the edited text when the original is only read afterwards", async () => {
+      let finishRead;
+      mocks.get.mockImplementation(() => new Promise((resolve) => (finishRead = resolve)));
+      const list = [convo("c1", msg("m1"))];
+      const { result } = renderHook(() => useConversationPreviews(list, "me"));
+      await waitFor(() => expect(mocks.listener).not.toBeNull());
+
+      act(() => mocks.listener(edit("m1", "edited first")));
+      await act(async () => finishRead(text("original")));
+
+      expect(result.current).toEqual({ m1: "edited first" });
+    });
+  });
 });

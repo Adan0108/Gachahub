@@ -1,9 +1,11 @@
 import { FiCornerUpLeft, FiFile, FiLock } from "react-icons/fi";
 import { EnvelopeContent } from "./EnvelopeContent";
+import { EditedLabel } from "./EditedLabel";
 import { MessageActions } from "./MessageActions";
 import { HistoryBanner, MembershipEventLine, TimestampDivider } from "./ThreadNotices";
 import { useAttachmentBlobUrl } from "../../hooks/chat/useAttachmentBlobUrl";
 import { groupReactions } from "../../lib/chat/chatReactions";
+import { canEditMessage } from "../../lib/chat/editPolicy";
 import { AvatarFace } from "../AvatarFace";
 import { participantUser } from "../../lib/chat/chatDisplay";
 import {
@@ -112,9 +114,15 @@ function MessageBubble({
   gapBefore,
   groupedWithPrevious,
   groupedWithNext,
+  edited,
+  pendingEdit,
+  now,
   onReply,
   onReact,
   onCopy,
+  onEdit,
+  onRetryEdit,
+  onDiscardEdit,
   onDelete,
   onDeleteForMe,
   onJumpToMessage,
@@ -125,6 +133,14 @@ function MessageBubble({
   const view = decrypted.status === "ok" ? envelopeView(decrypted.envelope) : null;
   const mediaOnly = isMediaOnlyView(view);
   const copyText = view?.kind === "text" ? view.text : view?.kind === "attachment" ? view.caption : "";
+  const versions = edited?.get(message.id)?.versions;
+  const canEdit = canEditMessage({
+    mine,
+    isText: view?.kind === "text",
+    sentAt,
+    now,
+    editCount: versions ? versions.length - 1 : 0,
+  });
   const showSenderName = !mine && conversation.type === "GROUP" && !groupedWithPrevious;
   const rowClass = ["chat-message-row", mine && "mine"].filter(Boolean).join(" ");
   // The gap-before/grouped spacing lives on this wrapper, not rowClass - it's the actual
@@ -138,12 +154,13 @@ function MessageBubble({
     .filter(Boolean)
     .join(" ");
 
+  const pendingClass = pendingEdit ? `pending ${pendingEdit.failed ? "failed" : ""}` : "";
   const body =
     decrypted.status === "ok" ? (
       mediaOnly ? (
         <EnvelopeContent envelope={decrypted.envelope} media={message.media} messageId={message.id} />
       ) : (
-        <article className={`chat-message ${mine ? "mine" : ""}`}>
+        <article className={`chat-message ${mine ? "mine" : ""} ${pendingClass}`}>
           <EnvelopeContent envelope={decrypted.envelope} media={message.media} messageId={message.id} />
         </article>
       )
@@ -173,27 +190,31 @@ function MessageBubble({
           {showSenderName && (
             <small className="chat-message-sender">{sender?.name || "GachaHub member"}</small>
           )}
-          <MessageActions
-            canCopy={Boolean(copyText)}
-            isMine={mine}
-            onCopy={() => onCopy(copyText)}
-            onDelete={() => onDelete(message.id)}
-            onDeleteForMe={() => onDeleteForMe(message.id)}
-            onReact={(emoji) => onReact(message.id, emoji)}
-            onReply={() =>
-              onReply({
-                id: message.id,
-                senderName: mine ? "yourself" : sender?.name || "GachaHub member",
-                preview: copyText ? copyText.slice(0, 80) : "an attachment",
-              })
-            }
-          />
           <ReplyLabel
             conversation={conversation}
             message={message}
             messagesById={messagesById}
             userId={userId}
           />
+          {pendingEdit ? (
+            <small className="chat-message-edit-status">
+              {pendingEdit.failed ? (
+                <>
+                  <button className="chat-message-retry" onClick={() => onRetryEdit(message.id)} type="button">
+                    Failed to edit - tap to retry
+                  </button>
+                  {" · "}
+                  <button className="chat-message-retry" onClick={() => onDiscardEdit(message.id)} type="button">
+                    Discard
+                  </button>
+                </>
+              ) : (
+                "Editing message..."
+              )}
+            </small>
+          ) : (
+            versions && <EditedLabel versions={versions} />
+          )}
           <div className="chat-reply-and-bubble">
             <ReplyQuote
               decryptedById={decryptedById}
@@ -201,7 +222,26 @@ function MessageBubble({
               messagesById={messagesById}
               onJumpToMessage={onJumpToMessage}
             />
-            {body}
+            <div className="chat-message-bubble-anchor">
+            <MessageActions
+              canCopy={Boolean(copyText)}
+              canEdit={canEdit && !pendingEdit}
+              isMine={mine}
+              onCopy={() => onCopy(copyText)}
+              onEdit={() => onEdit({ id: message.id, text: copyText, editCount: versions ? versions.length - 1 : 0 })}
+              onDelete={() => onDelete(message.id)}
+              onDeleteForMe={() => onDeleteForMe(message.id)}
+              onReact={(emoji) => onReact(message.id, emoji)}
+              onReply={() =>
+                onReply({
+                  id: message.id,
+                  senderName: mine ? "yourself" : sender?.name || "GachaHub member",
+                  preview: copyText ? copyText.slice(0, 80) : "an attachment",
+                })
+              }
+            />
+              {body}
+            </div>
           </div>
           {!Number.isNaN(sentAt) && (
             <span className="chat-message-time-tip">{messageFullTimestamp(sentAt)}</span>
@@ -226,9 +266,14 @@ export function ThreadRow({
   decryptedById,
   neighbors,
   now,
+  edited,
+  pendingEdits,
   onReply,
   onReact,
   onCopy,
+  onEdit,
+  onRetryEdit,
+  onDiscardEdit,
   onDelete,
   onDeleteForMe,
   onJumpToMessage,
@@ -258,7 +303,11 @@ export function ThreadRow({
       </div>
     );
   }
-  const decrypted = decryptedById[message.id];
+  const pendingEdit = pendingEdits?.get(message.id);
+  // An edit still being saved shows its new text already.
+  const decrypted = pendingEdit
+    ? { status: "ok", envelope: { v: 1, type: "text", body: pendingEdit.text } }
+    : decryptedById[message.id];
   // Not decrypted yet (or still retrying) - render nothing so the bubble pops in fully formed.
   if (!decrypted || decrypted.status === "pending") return null;
   return (
@@ -267,18 +316,24 @@ export function ThreadRow({
       conversation={conversation}
       decrypted={decrypted}
       decryptedById={decryptedById}
+      edited={edited}
       neighbors={neighbors}
+      now={now}
+      pendingEdit={pendingEdit}
       gapBefore={gapBefore}
       groupedWithNext={groupedWithNext}
       groupedWithPrevious={groupedWithPrevious}
       index={index}
       message={message}
       onCopy={onCopy}
+      onDiscardEdit={onDiscardEdit}
+      onEdit={onEdit}
       onDelete={onDelete}
       onDeleteForMe={onDeleteForMe}
       onJumpToMessage={onJumpToMessage}
       onReact={onReact}
       onReply={onReply}
+      onRetryEdit={onRetryEdit}
       userId={userId}
     />
   );

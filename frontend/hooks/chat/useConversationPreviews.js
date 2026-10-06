@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { previewLine, unsentPreview } from "../../lib/chat/conversationPreview";
+import { isEditEnvelope } from "../../lib/mls/messaging/editEnvelope";
 import {
   EncryptedIndexedDbMessagePlaintextStore,
   onMessageSaved,
@@ -17,6 +18,8 @@ const plaintextStore = new EncryptedIndexedDbMessagePlaintextStore();
 export function useConversationPreviews(conversations, userId) {
   const [previews, setPreviews] = useState({});
   const loadedIds = useRef(new Set());
+  // The newest edited preview per message, so a slower read of the original cannot put the old text back.
+  const editedLines = useRef(new Map());
 
   useEffect(() => {
     const lastMessages = (conversations ?? []).map((conversation) => conversation.lastMessage).filter(Boolean);
@@ -44,13 +47,24 @@ export function useConversationPreviews(conversations, userId) {
             loadedIds.current.delete(message.id);
             return;
           }
-          remember(message.id, previewLine(saved.envelope, { mine: mineById.get(message.id) }));
+          remember(
+            message.id,
+            editedLines.current.get(message.id) ?? previewLine(saved.envelope, { mine: mineById.get(message.id) }),
+          );
         })
         .catch(() => loadedIds.current.delete(message.id));
     }
 
     // A message decrypted or sent while the list is showing gets its preview the moment it is saved.
     const stopListening = onMessageSaved((saved) => {
+      if (isEditEnvelope(saved.envelope)) {
+        const { targetMessageId, text } = saved.envelope.body;
+        if (!mineById.has(targetMessageId)) return;
+        const line = previewLine({ v: 1, type: "text", body: text }, { mine: mineById.get(targetMessageId) });
+        editedLines.current.set(targetMessageId, line);
+        remember(targetMessageId, line);
+        return;
+      }
       if (!mineById.has(saved.messageId)) return;
       remember(saved.messageId, previewLine(saved.envelope, { mine: mineById.get(saved.messageId) }));
     });

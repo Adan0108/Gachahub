@@ -10,6 +10,7 @@ import { useNowTick } from "../useNowTick";
 import { useSafetyNumbers } from "./useSafetyNumbers";
 import { otherActiveMemberIds, participantUser } from "../../lib/chat/chatDisplay";
 import { buildThreadItems, eventsForDisplay, readableNeighbors } from "../../lib/chat/chatThread";
+import { applyEdits, isEditMessage } from "../../lib/chat/messageEdits";
 
 interface ThreadMessage {
   id: string;
@@ -18,6 +19,7 @@ interface ThreadMessage {
   createdAt: string;
   contentType?: string;
   status?: string;
+  editsMessageId?: string | null;
 }
 
 interface NewestPage {
@@ -41,19 +43,37 @@ export function useThreadData(
       ),
     [displayMessages],
   );
-  const deletedMessageIds = useMemo(
-    () => displayMessages.filter((message) => message.status === "DELETED").map((message) => message.id),
+  // An unsent message takes its edits with it, so their cached text goes too.
+  const deletedMessageIds = useMemo(() => {
+    const unsent = new Set(
+      displayMessages.filter((message) => message.status === "DELETED").map((message) => message.id),
+    );
+    return displayMessages
+      .filter(
+        (message) =>
+          unsent.has(message.id) ||
+          (isEditMessage(message) && message.editsMessageId && unsent.has(message.editsMessageId)),
+      )
+      .map((message) => message.id);
+  }, [displayMessages]);
+  const decryptedRaw = useDecryptedMessages(conversationId, decryptable, userId, deletedMessageIds);
+  // Edits are hidden messages of their own: they change what the original says, but are never shown.
+  const { decrypted, edited } = useMemo(
+    () => applyEdits(displayMessages, decryptedRaw),
+    [displayMessages, decryptedRaw],
+  );
+  const visibleMessages = useMemo(
+    () => displayMessages.filter((message) => !isEditMessage(message)),
     [displayMessages],
   );
-  const decrypted = useDecryptedMessages(conversationId, decryptable, userId, deletedMessageIds);
   // Built once per change instead of every row re-deriving its own O(n) lookups.
   const messagesById = useMemo(
-    () => new Map(displayMessages.map((message) => [message.id, message])),
-    [displayMessages],
+    () => new Map(visibleMessages.map((message) => [message.id, message])),
+    [visibleMessages],
   );
   const neighbors = useMemo(
-    () => readableNeighbors(displayMessages, decrypted),
-    [displayMessages, decrypted],
+    () => readableNeighbors(visibleMessages, decrypted),
+    [visibleMessages, decrypted],
   );
   const groupProblem = useGroupProblem(conversationId);
   const safetyPeerIds: string[] = otherActiveMemberIds(conversation, userId);
@@ -67,23 +87,26 @@ export function useThreadData(
   const threadItems = useMemo(
     () =>
       buildThreadItems({
-        messages: displayMessages,
+        messages: visibleMessages,
         decrypted,
         events: membershipEvents,
         collapseLeading: !groupProblem,
       }),
-    [displayMessages, decrypted, membershipEvents, groupProblem],
+    [visibleMessages, decrypted, membershipEvents, groupProblem],
   );
   // Only what this device actually read is acknowledged: an undecryptable message was not delivered.
   const newestItems = newestPage?.items;
   const readableMessageIds = useMemo(
     () =>
       (newestItems ?? [])
-        .filter((message) => message.senderId !== userId && decrypted[message.id]?.status === "ok")
+        .filter(
+          (message) =>
+            !isEditMessage(message) && message.senderId !== userId && decrypted[message.id]?.status === "ok",
+        )
         .map((message) => message.id),
     [newestItems, userId, decrypted],
   );
-  const lastMessage = newestPage ? (displayMessages.at(-1) ?? null) : undefined;
+  const lastMessage = newestPage ? (visibleMessages.at(-1) ?? null) : undefined;
   const announcement = useNewMessageAnnouncement(
     conversationId,
     lastMessage,
@@ -96,7 +119,9 @@ export function useThreadData(
 
   return {
     ...history,
+    displayMessages: visibleMessages,
     decrypted,
+    edited,
     messagesById,
     neighbors,
     groupProblem,

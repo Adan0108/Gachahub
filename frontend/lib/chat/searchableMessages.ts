@@ -1,4 +1,5 @@
 import { envelopeView } from '../mls/media/attachmentView';
+import { isEditEnvelope } from '../mls/messaging/editEnvelope';
 import type { DecryptedMessage } from '../mls/storage/messagePlaintextStore';
 import { foldForSearch, matchesAllTerms, parseSearchQuery } from './searchFolding';
 
@@ -23,6 +24,8 @@ export interface MessageSearcher {
 
 interface Entry extends SearchHit {
   folded: string;
+  /** 0 while the text is the original, otherwise which edit of the message it came from. */
+  editNumber: number;
 }
 
 /** What search looks at in a message: its text, or an attachment's caption and file names. Null when the envelope cannot be read. */
@@ -62,6 +65,11 @@ export class SearchableMessages implements MessageSearcher {
   }
 
   put(message: DecryptedMessage): void {
+    if (isEditEnvelope(message.envelope)) {
+      this.putEdit(message.conversationId, message.envelope.body);
+      return;
+    }
+
     const text = searchableText(message.envelope);
     // an envelope that cannot be read leaves what is already indexed for it alone
     if (text === null) return;
@@ -69,12 +77,20 @@ export class SearchableMessages implements MessageSearcher {
       this.entries.delete(message.messageId);
       return;
     }
-    this.entries.set(message.messageId, {
-      messageId: message.messageId,
-      conversationId: message.conversationId,
-      text,
-      folded: foldForSearch(text),
-    });
+    // an edit that got here first is newer than the original
+    if ((this.entries.get(message.messageId)?.editNumber ?? 0) > 0) return;
+    this.set(message.messageId, message.conversationId, text, 0);
+  }
+
+  /** A message's text becomes its latest edit; an older edit, or one from another conversation, changes nothing. */
+  private putEdit(conversationId: string, edit: { targetMessageId: string; text: string; n: number }): void {
+    const existing = this.entries.get(edit.targetMessageId);
+    if (existing && (existing.conversationId !== conversationId || existing.editNumber >= edit.n)) return;
+    this.set(edit.targetMessageId, conversationId, edit.text, edit.n);
+  }
+
+  private set(messageId: string, conversationId: string, text: string, editNumber: number): void {
+    this.entries.set(messageId, { messageId, conversationId, text, folded: foldForSearch(text), editNumber });
   }
 
   search(query: string, { conversationId }: { conversationId?: string } = {}): SearchResult {

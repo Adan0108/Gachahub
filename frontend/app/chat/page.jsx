@@ -45,12 +45,14 @@ import { useDeviceIdentity } from "../../hooks/chat/useDeviceIdentity";
 import { useSyncEngine } from "../../hooks/chat/useSyncEngine";
 import { useChatBackup } from "../../hooks/chat/useChatBackup";
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
+import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
 import { useStickToBottom } from "../../hooks/chat/useStickToBottom";
 import { useTypingNames } from "../../hooks/chat/useTypingNames";
 import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
 import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
 import { useThreadData } from "../../hooks/chat/useThreadData";
-import { sendEncryptedChatMessage } from "../../lib/mls/messaging/sendEncryptedMessage";
+import { sendEncryptedChatMessage, sendEncryptedEdit } from "../../lib/mls/messaging/sendEncryptedMessage";
+
 import { sendAttachmentsWithCache } from "../../lib/mls/messaging/sendEncryptedAttachment";
 import {
   flattenOtherAttachments,
@@ -163,6 +165,7 @@ export default function ChatPage() {
     containerRef: messagesContainerRef,
     handleScroll: handleMessagesScroll,
     decrypted: decryptedMessages,
+    edited,
     messagesById,
     neighbors,
     groupProblem,
@@ -204,72 +207,74 @@ export default function ChatPage() {
   const dragDepthRef = useRef(0);
   // Uploaded attachment entries by clientId, so a retry re-sends without re-uploading.
   const uploadedAttachmentsRef = useRef(new Map());
-  const sendMessage = useMutation({
-    mutationFn: async ({ text, clientId, files, replyToId }) => {
-      const recipientIds =
-        activeConversation?.type === "GROUP"
-          ? otherActiveMemberIds(activeConversation, user?.id)
-          : peer?.id;
-      try {
-        if (files?.length) {
-          return await sendAttachmentsWithCache({
-            syncEngine,
-            deviceId: deviceCredential.deviceId,
-            conversationId: activeId,
-            recipientUserId: recipientIds,
-            files,
-            caption: text,
-            clientMessageId: clientId,
-            uploaded: uploadedAttachmentsRef.current,
-            onStage: (stage) =>
-              setPendingMessages((prev) =>
-                prev.map((item) => (item.clientId === clientId ? { ...item, stage } : item)),
-              ),
-          });
-        }
-        return await sendEncryptedChatMessage(
-          syncEngine,
-          deviceCredential.deviceId,
-          activeId,
-          recipientIds,
-          text,
-          clientId,
-          replyToId,
-        );
-      } catch (error) {
-        if (error?.code !== "DEVICE_REVOKED" && error?.code !== "SESSION_NOT_LINKED") throw error;
-        // Device retired or unlinked: reprovision for the next attempt, no retry of this send.
-        if (!(await reprovisionDevice())) {
-          throw new Error("Couldn't reconnect this device. Try again in a moment.", {
-            cause: error,
-          });
-        }
-        throw new Error(
-          "Your device needed to be reconnected. Give it a few seconds to rejoin your conversations, then try sending again.",
-          { cause: error },
-        );
+  const recipientIds = () =>
+    activeConversation?.type === "GROUP" ? otherActiveMemberIds(activeConversation, user?.id) : peer?.id;
+  // A retired or unlinked device is reprovisioned for the next attempt; this attempt is not retried.
+  const withDeviceRecovery = async (action) => {
+    try {
+      return await action();
+    } catch (error) {
+      if (error?.code !== "DEVICE_REVOKED" && error?.code !== "SESSION_NOT_LINKED") throw error;
+      if (!(await reprovisionDevice())) {
+        throw new Error("Couldn't reconnect this device. Try again in a moment.", {
+          cause: error,
+        });
       }
-    },
+      throw new Error(
+        "Your device needed to be reconnected. Give it a few seconds to rejoin your conversations, then try sending again.",
+        { cause: error },
+      );
+    }
+  };
+  // Merges a message the server just stored into the cache instead of refetching.
+  const mergeIntoMessageCache = (conversationId, message) => {
+    const hadCachedMessages = Boolean(queryClient.getQueryData(queryKeys.chatMessages(conversationId)));
+    queryClient.setQueryData(queryKeys.chatMessages(conversationId), (old) => {
+      if (!old || old.items.some((item) => item.id === message.id)) {
+        return old;
+      }
+      return { ...old, items: [...old.items, message] };
+    });
+    if (!hadCachedMessages) {
+      // A brand-new conversation (this group's first-ever message) has no cached page to merge
+      // into, so the write above was a silent no-op - fetch it instead of losing the message.
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(conversationId) });
+    }
+  };
+  const sendMessage = useMutation({
+    mutationFn: ({ text, clientId, files, replyToId }) =>
+      withDeviceRecovery(() =>
+        files?.length
+          ? sendAttachmentsWithCache({
+              syncEngine,
+              deviceId: deviceCredential.deviceId,
+              conversationId: activeId,
+              recipientUserId: recipientIds(),
+              files,
+              caption: text,
+              clientMessageId: clientId,
+              uploaded: uploadedAttachmentsRef.current,
+              onStage: (stage) =>
+                setPendingMessages((prev) =>
+                  prev.map((item) => (item.clientId === clientId ? { ...item, stage } : item)),
+                ),
+            })
+          : sendEncryptedChatMessage(
+              syncEngine,
+              deviceCredential.deviceId,
+              activeId,
+              recipientIds(),
+              text,
+              clientId,
+              replyToId,
+            ),
+      ),
     onSuccess: (response, variables) => {
       uploadedAttachmentsRef.current.delete(variables.clientId);
       setPendingMessages((prev) =>
         prev.filter((pending) => pending.clientId !== variables.clientId),
       );
-      // Merge the sent message into the cache instead of refetching.
-      const hadCachedMessages = Boolean(
-        queryClient.getQueryData(queryKeys.chatMessages(activeId)),
-      );
-      queryClient.setQueryData(queryKeys.chatMessages(activeId), (old) => {
-        if (!old || old.items.some((item) => item.id === response.message.id)) {
-          return old;
-        }
-        return { ...old, items: [...old.items, response.message] };
-      });
-      if (!hadCachedMessages) {
-        // A brand-new conversation (this group's first-ever message) has no cached page to merge
-        // into, so the write above was a silent no-op - fetch it instead of losing the message.
-        queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(activeId) });
-      }
+      mergeIntoMessageCache(response.conversationId ?? activeId, response.message);
       queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
     },
     onError: (error, variables) => {
@@ -285,6 +290,31 @@ export default function ChatPage() {
       prev.map((item) => (item.clientId === pending.clientId ? { ...item, failed: false } : item)),
     );
     sendMessage.mutate({ text: pending.text, clientId: pending.clientId, files: pending.files });
+  };
+
+  const composerInputRef = useRef(null);
+  const messageEdit = useMessageEdit({
+    draft,
+    setDraft,
+    edited,
+    messagesById,
+    send: ({ messageId, text, n, clientId }) =>
+      withDeviceRecovery(() =>
+        sendEncryptedEdit(
+          syncEngine,
+          deviceCredential.deviceId,
+          activeId,
+          recipientIds(),
+          { targetMessageId: messageId, text, n },
+          clientId,
+        ),
+      ),
+    onSent: (response) => mergeIntoMessageCache(response.conversationId ?? activeId, response.message),
+    focusInput: () => requestAnimationFrame(() => composerInputRef.current?.focus()),
+  });
+  const startEdit = (message) => {
+    setReplyTarget(null);
+    messageEdit.start(message);
   };
 
   // Reactions are plaintext metadata, not part of the encrypted envelope. A socket event (handled
@@ -438,6 +468,7 @@ export default function ChatPage() {
     typingSignal.stop(replyLightboxOwnerId);
     setReplyLightboxOwnerId(activeId);
     setReplyTarget(null);
+    if (messageEdit.target) messageEdit.leave();
     setLightboxKey(null);
     setHiddenMessageIds(getHiddenMessageIds(activeId));
     setHiddenNotice(null);
@@ -478,10 +509,13 @@ export default function ChatPage() {
   useEffect(() => {
     scrollToBottom();
   }, [activeId, scrollToBottom]);
-  // New messages, and the typing indicator, only follow you while you're already at the bottom.
+  // Reaction chips and "Edited" labels make the thread taller without adding a message.
+  const reactionCount = displayMessages.reduce((total, message) => total + (message.reactions?.length ?? 0), 0);
+  const editLabelCount = edited.size + messageEdit.pending.size;
+  // New messages, reactions, edits and the typing indicator only follow you while you're already at the bottom.
   useEffect(() => {
     followIfNearBottom();
-  }, [messages.data?.items?.length, decryptedCount, someoneTyping, followIfNearBottom]);
+  }, [messages.data?.items?.length, decryptedCount, someoneTyping, reactionCount, editLabelCount, followIfNearBottom]);
   // Sending a message always takes you to it, wherever you were.
   useEffect(() => {
     if (activePendingCount > previousPendingCount.current) scrollToBottom();
@@ -1034,7 +1068,11 @@ export default function ChatPage() {
                     <ThreadRow
                       conversation={activeConversation}
                       decryptedById={decryptedMessages}
+                      edited={edited}
                       item={item}
+                      onDiscardEdit={messageEdit.discard}
+                      onRetryEdit={messageEdit.retry}
+                      pendingEdits={messageEdit.pending}
                       key={threadItemKey(item)}
                       messagesById={messagesById}
                       neighbors={neighbors}
@@ -1042,6 +1080,7 @@ export default function ChatPage() {
                       onCopy={handleCopy}
                       onDelete={handleDelete}
                       onDeleteForMe={handleDeleteForMe}
+                      onEdit={startEdit}
                       onJumpToMessage={jumpToMessage}
                       onReact={handleReact}
                       onReply={setReplyTarget}
@@ -1193,10 +1232,27 @@ export default function ChatPage() {
                       </button>
                     </div>
                   )}
+                  {messageEdit.target && (
+                    <div className="chat-reply-banner chat-edit-banner">
+                      <small>
+                        <b>Editing message</b>
+                        {messageEdit.error && (
+                          <span className="chat-edit-error" role="alert">
+                            {" "}
+                            {messageEdit.error}
+                          </span>
+                        )}
+                      </small>
+                      <button aria-label="Cancel edit" onClick={messageEdit.leave} type="button">
+                        <FiX />
+                      </button>
+                    </div>
+                  )}
                   <form
                     className="chat-composer"
                     onSubmit={(event) => {
                       event.preventDefault();
+                      if (messageEdit.target) return messageEdit.submit();
                       const text = draft.trim();
                       const files = attachmentPicker.files;
                       if (!text && files.length === 0) return;
@@ -1233,6 +1289,7 @@ export default function ChatPage() {
                   <button
                     aria-label="Attach files"
                     className="chat-attach-button"
+                    disabled={Boolean(messageEdit.target)}
                     onClick={() => fileInputRef.current?.click()}
                     type="button"
                   >
@@ -1241,18 +1298,26 @@ export default function ChatPage() {
                   <input
                     onChange={(event) => {
                       setDraft(event.target.value);
-                      if (event.target.value.trim()) typingSignal.ping(activeId);
+                      if (!messageEdit.target && event.target.value.trim()) typingSignal.ping(activeId);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape" && messageEdit.target) messageEdit.leave();
                     }}
                     onPaste={handleDraftPaste}
-                    placeholder="Send an encrypted message..."
+                    placeholder={messageEdit.target ? "Edit your message..." : "Send an encrypted message..."}
+                    ref={composerInputRef}
                     value={draft}
                   />
                   <button
-                    aria-label="Send"
-                    disabled={!draft.trim() && attachmentPicker.files.length === 0}
+                    aria-label={messageEdit.target ? "Save edit" : "Send"}
+                    disabled={
+                      messageEdit.target
+                        ? !draft.trim()
+                        : !draft.trim() && attachmentPicker.files.length === 0
+                    }
                     type="submit"
                   >
-                    <FiSend />
+                    {messageEdit.target ? <FiCheck /> : <FiSend />}
                   </button>
                   </form>
                 </>

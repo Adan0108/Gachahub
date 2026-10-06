@@ -2959,7 +2959,7 @@
 
 .chat-message-time-wrap:hover .chat-message-time-tip {
   opacity: 1;
-  transition-delay: 1.5s;
+  transition-delay: 0.5s;
 }
 
 .chat-message {
@@ -3046,6 +3046,11 @@
 }
 
 /* Hidden until the row is hovered/focused, so the thread stays uncluttered otherwise. */
+/* The toolbar is centred on the bubble itself, not on the whole block with its name, label and reactions. */
+.chat-message-bubble-anchor {
+  position: relative;
+}
+
 .message-actions {
   position: absolute;
   top: 50%;
@@ -3885,3 +3890,64 @@
   font-size: 13px;
 }
 
+
+.chat-message-edited {
+  margin-bottom: 2px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chat-message-edited:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.chat-edit-history {
+  max-width: min(360px, calc(100vw - 32px));
+  max-height: 320px;
+  overflow-y: auto;
+  gap: 8px;
+  padding: 12px;
+}
+
+.chat-edit-history ol {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-edit-history small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chat-edit-history p {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-size: 13px;
+}
+
+.chat-edit-banner b {
+  color: var(--text);
+}
+
+.chat-edit-error {
+  color: var(--pink);
+}
+
+.chat-message-edit-status {
+  margin-bottom: 2px;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chat-message-edit-status .chat-message-retry {
+  font-size: 11px;
+}
