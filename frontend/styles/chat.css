@@ -1815,8 +1815,9 @@
 .chat-new-chat-notice button.chat-new-chat-notice-action {
   width: auto;
   height: auto;
-  padding: 4px 10px;
+  padding: 4px 14px;
   border: 1px solid var(--purple);
+  border-radius: 8px;
   color: var(--text);
   font-size: 12px;
   font-weight: 700;
@@ -3950,4 +3951,112 @@
 
 .chat-message-edit-status .chat-message-retry {
   font-size: 11px;
+}
+
+.remove-message-modal {
+  display: grid;
+  gap: 18px;
+  width: min(520px, calc(100vw - 32px));
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.remove-message-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.remove-message-head h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.remove-message-head button {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--panel2);
+  color: var(--muted-strong);
+}
+
+.remove-message-head button:hover {
+  color: var(--text);
+}
+
+.remove-message-options {
+  display: grid;
+  gap: 20px;
+}
+
+.remove-message-modal .remove-message-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-top: 0;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.remove-message-modal .remove-message-option input {
+  display: block;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: 1px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--purple);
+}
+
+.remove-message-option span {
+  display: grid;
+  gap: 4px;
+}
+
+.remove-message-option b {
+  font-size: 15px;
+}
+
+.remove-message-option small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.remove-message-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.remove-message-actions button {
+  padding: 8px 16px;
+  border: 0;
+  border-radius: var(--chat-radius);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.remove-message-cancel {
+  background: transparent;
+  color: var(--cyan);
+}
+
+.remove-message-cancel:hover {
+  background: var(--panel2);
+}
+
+.remove-message-confirm {
+  background: var(--purple);
+  color: #fff;
 }

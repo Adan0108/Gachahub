@@ -30,6 +30,7 @@ import { SafetyChangedBanner } from "../../components/chat/SafetyStatus";
 import { UserPicker } from "../../components/chat/UserPicker";
 import { DevicesModal } from "../../components/chat/DevicesModal";
 import { ChatBackupModal } from "../../components/chat/ChatBackupModal";
+import { RemoveMessageDialog } from "../../components/chat/RemoveMessageDialog";
 import { ThreadRow } from "../../components/chat/ThreadRow";
 import { ConversationListItem } from "../../components/chat/ConversationListItem";
 import { NoChatSelected } from "../../components/chat/NoChatSelected";
@@ -359,11 +360,8 @@ export default function ChatPage() {
     onError: rollbackOptimisticUpdate,
     onSettled: refetchMessages,
   });
-  const handleDelete = (messageId) => {
-    if (window.confirm("Unsend this message? This can't be undone.")) {
-      deleteMessageMutation.mutate(messageId);
-    }
-  };
+  // The message the remove dialog is asking about: { id, mine }.
+  const [removeTarget, setRemoveTarget] = useState(null);
   const handleCopy = (text) => {
     if (text) navigator.clipboard?.writeText(text).catch(() => {});
   };
@@ -469,15 +467,21 @@ export default function ChatPage() {
     setReplyLightboxOwnerId(activeId);
     setReplyTarget(null);
     if (messageEdit.target) messageEdit.leave();
+    setRemoveTarget(null);
     setLightboxKey(null);
     setHiddenMessageIds(getHiddenMessageIds(activeId));
     setHiddenNotice(null);
   }
-  const handleDeleteForMe = (messageId) => {
-    if (!window.confirm("Hide this message on this device? You can undo it right after.")) return;
+  const hideMessage = (messageId) => {
     hideMessageForMe(activeId, messageId);
     setHiddenMessageIds((current) => new Set(current).add(messageId));
     setHiddenNotice({ conversationId: activeId, messageId });
+  };
+  const confirmRemove = (scope) => {
+    const { id } = removeTarget;
+    setRemoveTarget(null);
+    if (scope === "everyone") deleteMessageMutation.mutate(id);
+    else hideMessage(id);
   };
   const undoDeleteForMe = () => {
     if (!hiddenNotice) return;
@@ -1078,8 +1082,7 @@ export default function ChatPage() {
                       neighbors={neighbors}
                       now={threadNow}
                       onCopy={handleCopy}
-                      onDelete={handleDelete}
-                      onDeleteForMe={handleDeleteForMe}
+                      onRemove={setRemoveTarget}
                       onEdit={startEdit}
                       onJumpToMessage={jumpToMessage}
                       onReact={handleReact}
@@ -1384,6 +1387,8 @@ export default function ChatPage() {
           visualAttachments={flatAttachments}
         />
       </div>
+
+      <RemoveMessageDialog onClose={() => setRemoveTarget(null)} onConfirm={confirmRemove} target={removeTarget} />
 
       <DevicesModal
         currentDeviceId={deviceCredential?.deviceId}

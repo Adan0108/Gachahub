@@ -123,8 +123,7 @@ function MessageBubble({
   onEdit,
   onRetryEdit,
   onDiscardEdit,
-  onDelete,
-  onDeleteForMe,
+  onRemove,
   onJumpToMessage,
 }) {
   const mine = message.senderId === userId;
@@ -226,11 +225,9 @@ function MessageBubble({
             <MessageActions
               canCopy={Boolean(copyText)}
               canEdit={canEdit && !pendingEdit}
-              isMine={mine}
               onCopy={() => onCopy(copyText)}
               onEdit={() => onEdit({ id: message.id, text: copyText, editCount: versions ? versions.length - 1 : 0 })}
-              onDelete={() => onDelete(message.id)}
-              onDeleteForMe={() => onDeleteForMe(message.id)}
+              onRemove={() => onRemove({ id: message.id, mine })}
               onReact={(emoji) => onReact(message.id, emoji)}
               onReply={() =>
                 onReply({
@@ -274,8 +271,7 @@ export function ThreadRow({
   onEdit,
   onRetryEdit,
   onDiscardEdit,
-  onDelete,
-  onDeleteForMe,
+  onRemove,
   onJumpToMessage,
 }) {
   if (item.kind === "history-banner") return <HistoryBanner />;
@@ -328,8 +324,7 @@ export function ThreadRow({
       onCopy={onCopy}
       onDiscardEdit={onDiscardEdit}
       onEdit={onEdit}
-      onDelete={onDelete}
-      onDeleteForMe={onDeleteForMe}
+      onRemove={onRemove}
       onJumpToMessage={onJumpToMessage}
       onReact={onReact}
       onReply={onReply}

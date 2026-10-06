@@ -14,10 +14,9 @@ const actions = (props = {}) => {
     onReply: vi.fn(),
     onCopy: vi.fn(),
     onEdit: vi.fn(),
-    onDelete: vi.fn(),
-    onDeleteForMe: vi.fn(),
+    onRemove: vi.fn(),
   };
-  render(<MessageActions canCopy isMine {...handlers} {...props} />);
+  render(<MessageActions canCopy {...handlers} {...props} />);
   fireEvent.click(screen.getByRole("button", { name: "More" }));
   return handlers;
 };
@@ -41,6 +40,17 @@ describe("MessageActions edit", () => {
     actions();
 
     expect(screen.queryByRole("menuitem", { name: /Edit/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("MessageActions remove", () => {
+  it("has one Remove item, which asks to remove", () => {
+    const { onRemove } = actions();
+
+    expect(screen.queryByRole("menuitem", { name: /Unsend|Delete for me/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: /Remove/ }));
+
+    expect(onRemove).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -131,6 +141,7 @@ describe("ThreadRow with edits", () => {
 
   function renderRow({ senderId = "me", sentAt = T0, now = minutes(1), edited, pendingEdits } = {}) {
     const onEdit = vi.fn();
+    const onRemove = vi.fn();
     const onRetryEdit = vi.fn();
     const onDiscardEdit = vi.fn();
     const msg = message(senderId, sentAt);
@@ -154,8 +165,7 @@ describe("ThreadRow with edits", () => {
         neighbors={[]}
         now={now}
         onCopy={vi.fn()}
-        onDelete={vi.fn()}
-        onDeleteForMe={vi.fn()}
+        onRemove={onRemove}
         onEdit={onEdit}
         onJumpToMessage={vi.fn()}
         onReact={vi.fn()}
@@ -164,7 +174,7 @@ describe("ThreadRow with edits", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "More" }));
-    return { onEdit, onRetryEdit, onDiscardEdit };
+    return { onEdit, onRemove, onRetryEdit, onDiscardEdit };
   }
 
   describe("while an edit is still being saved", () => {
@@ -239,6 +249,14 @@ describe("ThreadRow with edits", () => {
     renderRow({ edited: new Map([["m1", { versions }]]) });
 
     expect(screen.queryByRole("menuitem", { name: /Edit/ })).not.toBeInTheDocument();
+  });
+
+  it("asks to remove the message with whether it is yours", () => {
+    const { onRemove } = renderRow();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /Remove/ }));
+
+    expect(onRemove).toHaveBeenCalledWith({ id: "m1", mine: true });
   });
 
   it("marks an edited message Edited", () => {
