@@ -2297,6 +2297,12 @@
   visibility: hidden;
 }
 
+/* A picture needs no purple ring or fill behind it; only the initial does. */
+.chat-conversation-list .chat-avatar:has(> .avatar-img) {
+  border-color: transparent;
+  background: none;
+}
+
 .chat-list-meta {
   justify-items: end;
 }
