@@ -1981,12 +1981,17 @@
   width: 40%;
 }
 
-.chat-conversation-list > button {
+.chat-conversation-row {
+  position: relative;
+  margin: 0 8px 3px;
+}
+
+.chat-conversation-open {
   display: grid;
+  width: 100%;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  margin: 0 8px 3px;
   border: 1px solid transparent;
   border-radius: var(--chat-radius);
   padding: 11px;
@@ -1995,16 +2000,92 @@
   text-align: left;
 }
 
-.chat-conversation-list > button:hover {
+.chat-conversation-row:hover > .chat-conversation-open {
   background: var(--panel2);
 }
 
-.chat-conversation-list > button.active {
+.chat-conversation-row.active > .chat-conversation-open {
   border-color: color-mix(in srgb, var(--purple), transparent 55%);
   background: color-mix(in srgb, var(--purple), transparent 88%);
 }
 
-.chat-conversation-list > button > span:nth-child(2),
+/* The three-dot button takes the place of the unread count and mute icon while the row is hovered or focused. */
+.chat-row-more {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 16px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.chat-conversation-row:hover .chat-row-more,
+.chat-conversation-row:focus-within .chat-row-more,
+.chat-row-more.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.chat-conversation-row:hover .chat-list-meta > *,
+.chat-conversation-row:focus-within .chat-list-meta > * {
+  visibility: hidden;
+}
+
+.chat-row-more:hover,
+.chat-row-more.open {
+  background: var(--panel2);
+}
+
+/* No hover on a touch screen, so the button is always there, with room for it beside the unread count. */
+@media (hover: none) {
+  .chat-row-more {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .chat-conversation-open {
+    padding-right: 50px;
+  }
+}
+
+.chat-row-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  z-index: 60;
+  padding: 10px 16px;
+  border-radius: var(--chat-radius);
+  background: var(--text);
+  color: var(--bg);
+  font-size: 13px;
+  font-weight: 600;
+  transform: translateX(-50%);
+  animation: chat-request-accepted-pop 0.2s ease-out;
+}
+
+.confirm-chat-action-body {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.remove-message-confirm.danger {
+  background: var(--pink);
+  color: #1a1438;
+}
+
+.chat-conversation-open > span:nth-child(2),
 .chat-list-meta {
   display: grid;
   gap: 4px;
@@ -2020,7 +2101,7 @@
   font-size: 11px;
 }
 
-.chat-conversation-list > button > span:nth-child(2) {
+.chat-conversation-open > span:nth-child(2) {
   min-width: 0;
 }
 

@@ -88,6 +88,9 @@ export const backendRoutes = {
     `/chat/requests/${encodePathParam(conversationId)}/decline`,
   chatBlockConversation: (conversationId) =>
     `/chat/conversations/${encodePathParam(conversationId)}/block`,
+  chatConversation: (conversationId) => `/chat/conversations/${encodePathParam(conversationId)}`,
+  chatArchiveConversation: (conversationId) =>
+    `/chat/conversations/${encodePathParam(conversationId)}/archive`,
   chatNotificationLevel: (conversationId) =>
     `/chat/conversations/${encodePathParam(conversationId)}/notification-level`,
   chatGroups: '/chat/groups',
@@ -841,6 +844,13 @@ export const api = {
     mutation(backendRoutes.chatDeclineRequest(conversationId)),
   blockChatConversation: (conversationId) =>
     mutation(backendRoutes.chatBlockConversation(conversationId)),
+  archiveChatConversation: (conversationId) =>
+    mutation(backendRoutes.chatArchiveConversation(conversationId)),
+  unarchiveChatConversation: (conversationId) =>
+    mutation(backendRoutes.chatArchiveConversation(conversationId), undefined, { method: 'DELETE' }),
+  // Removes the chat for you only; the other people keep theirs.
+  deleteChatConversation: (conversationId) =>
+    mutation(backendRoutes.chatConversation(conversationId), undefined, { method: 'DELETE' }),
   /** `notificationLevel` is ALL or NOTHING (muted); `mutedUntil` is an ISO time, omitted for an open-ended mute. */
   setChatNotificationLevel: (conversationId, { notificationLevel, mutedUntil }) =>
     mutation(
