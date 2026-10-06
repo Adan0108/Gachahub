@@ -32,6 +32,7 @@ describe('NotificationConsumerService', () => {
   let createManyNotificationsMock: jest.Mock;
   let claimMock: jest.Mock;
   let transactionMock: Prisma.TransactionClient;
+  let findReceiptsMock: jest.Mock;
   let transactionRunnerMock: jest.Mock;
 
   const publishNotificationMock = jest.fn();
@@ -74,7 +75,10 @@ describe('NotificationConsumerService', () => {
     );
     claimMock = jest.fn();
 
-    transactionMock = {} as Prisma.TransactionClient;
+    findReceiptsMock = jest.fn().mockResolvedValue([]);
+    transactionMock = {
+      chatMessageReceipt: { findMany: findReceiptsMock },
+    } as unknown as Prisma.TransactionClient;
 
     transactionRunnerMock = jest.fn(
       async (callback: TransactionCallback): Promise<unknown> => {
@@ -537,6 +541,67 @@ describe('NotificationConsumerService', () => {
         transactionMock,
       );
       expect(publishNotificationMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not notify a recipient who already read the message as it arrived', async () => {
+      claimMock.mockResolvedValue(true);
+      findReceiptsMock.mockResolvedValue([{ userId: 'user-b' }]);
+
+      await handleEvent(service, {
+        eventId: 'chat-event-read-live',
+        type: 'chat.message.sent',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateId: 'conversation-1',
+        payload: {
+          messageId: 'message-1',
+          conversationId: 'conversation-1',
+          senderId: 'user-a',
+          replyToMessageId: null,
+          replyToSenderId: null,
+          recipientUserIds: ['user-b', 'user-c'],
+        },
+      });
+
+      expect(findReceiptsMock).toHaveBeenCalledWith({
+        where: {
+          messageId: 'message-1',
+          userId: { in: ['user-b', 'user-c'] },
+          readAt: { not: null },
+        },
+        select: { userId: true },
+      });
+      expect(createManyNotificationsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ recipientIds: ['user-c'] }),
+        transactionMock,
+      );
+    });
+
+    it('skips the reply notification too when the replied-to user already read the reply', async () => {
+      claimMock.mockResolvedValue(true);
+      findReceiptsMock.mockResolvedValue([{ userId: 'user-b' }]);
+
+      await handleEvent(service, {
+        eventId: 'chat-event-reply-read-live',
+        type: 'chat.message.sent',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateId: 'conversation-1',
+        payload: {
+          messageId: 'message-1',
+          conversationId: 'conversation-1',
+          senderId: 'user-a',
+          replyToMessageId: 'message-0',
+          replyToSenderId: 'user-b',
+          recipientUserIds: ['user-b'],
+        },
+      });
+
+      expect(createNotificationMock).not.toHaveBeenCalled();
+      expect(createManyNotificationsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ recipientIds: [] }),
+        transactionMock,
+      );
     });
 
     /**

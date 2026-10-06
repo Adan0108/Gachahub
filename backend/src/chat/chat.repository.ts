@@ -755,12 +755,12 @@ export class ChatRepository {
           });
 
       if (!lastReadMessage) {
-        return { count: 0, lastReadMessage: null };
+        return { count: 0, lastReadMessage: null, readMessageIds: [] };
       }
 
       const now = new Date();
 
-      const result = await tx.chatMessageReceipt.updateMany({
+      const read = await tx.chatMessageReceipt.updateManyAndReturn({
         where: {
           userId: params.userId,
           readAt: null,
@@ -779,6 +779,7 @@ export class ChatRepository {
           deliveredAt: now,
           readAt: now,
         },
+        select: { messageId: true },
       });
 
       await tx.chatParticipant.update({
@@ -793,7 +794,11 @@ export class ChatRepository {
         },
       });
 
-      return { count: result.count, lastReadMessage };
+      return {
+        count: read.length,
+        lastReadMessage,
+        readMessageIds: read.map((receipt) => receipt.messageId),
+      };
     });
   }
 
