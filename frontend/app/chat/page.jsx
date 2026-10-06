@@ -45,6 +45,7 @@ import { useAttachmentPicker } from "../../hooks/chat/useAttachmentPicker";
 import { useDeviceIdentity } from "../../hooks/chat/useDeviceIdentity";
 import { useSyncEngine } from "../../hooks/chat/useSyncEngine";
 import { useChatBackup } from "../../hooks/chat/useChatBackup";
+import { useBackgroundDecrypt } from "../../hooks/chat/useBackgroundDecrypt";
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
 import { useMarkChatRead } from "../../hooks/chat/useMarkChatRead";
@@ -157,6 +158,7 @@ export default function ChatPage() {
   });
   const typingNames = useTypingNames(activeConversation, user?.id);
   const conversationPreviews = useConversationPreviews(listQuery.data, user?.id);
+  useBackgroundDecrypt(listQuery.data, user?.id, activeId);
   const {
     displayMessages,
     isLoadingOlder,
