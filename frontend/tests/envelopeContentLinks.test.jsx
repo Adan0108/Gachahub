@@ -40,7 +40,6 @@ describe("EnvelopeContent with links", () => {
 
     expect(container.querySelector(".chat-text-with-preview")).not.toBeNull();
     expect(screen.getByText("A post")).toBeInTheDocument();
-    expect(screen.getByText("example.com")).toBeInTheDocument();
     expect(screen.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([URL_IN_TEXT, URL_IN_TEXT]);
   });
 

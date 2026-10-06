@@ -2,19 +2,22 @@
 
 import { FiX } from "react-icons/fi";
 import { useAttachmentBlobUrl } from "../../hooks/chat/useAttachmentBlobUrl";
-import { previewDomain, previewImageSrc, previewThumbSource } from "../../lib/chat/linkPreviewView";
+import {
+  previewDomain,
+  previewDomainLine,
+  previewImageSrc,
+  previewThumbSource,
+} from "../../lib/chat/linkPreviewView";
 import "./LinkPreview.css";
 
-/** One link preview card; the site shown is always the address the link goes to, never what the card says about itself. */
+/** One link preview card: picture, title and description; the site is only named when the link text itself could mislead. */
 export function LinkPreviewCardView({ href, domain, resolvedDomain, title, description, imageSrc, onDismiss }) {
+  const domainLine = previewDomainLine(domain, resolvedDomain);
   const body = (
     <>
       {imageSrc && <img alt="" className="chat-link-preview-image" src={imageSrc} />}
       <span className="chat-link-preview-text">
-        <small className="chat-link-preview-domain">
-          {domain}
-          {resolvedDomain && resolvedDomain !== domain && <> &rarr; {resolvedDomain}</>}
-        </small>
+        {domainLine && <small className="chat-link-preview-domain">{domainLine}</small>}
         {title && <b className="chat-link-preview-title">{title}</b>}
         {description && <span className="chat-link-preview-description">{description}</span>}
       </span>
@@ -66,5 +69,17 @@ export function DraftLinkPreviewCard({ preview, onDismiss, linked = false }) {
       resolvedDomain={preview.resolvedDomain}
       title={preview.title}
     />
+  );
+}
+
+/** A reply quote's small, dimmed copy of the quoted message's card: its picture and title. */
+export function QuotedLinkPreview({ preview, messageId, media }) {
+  const thumb = useAttachmentBlobUrl(previewThumbSource(messageId, preview, media), true);
+
+  return (
+    <span className="chat-reply-quote-preview">
+      {thumb.status === "ready" && <img alt="" src={thumb.url} />}
+      {preview.title && <span className="chat-reply-quote-preview-title">{preview.title}</span>}
+    </span>
   );
 }

@@ -1,12 +1,29 @@
-/* A message that has a preview card: the text, then the card under it. */
+/* A message with a link preview card: its text, then the card running to the bubble's edges, like an attachment does. */
+article.chat-message:has(.chat-text-with-preview) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+}
+
 .chat-text-with-preview {
   display: grid;
-  gap: 8px;
+  width: 320px;
+  max-width: 100%;
   min-width: 0;
 }
 
 .chat-text-with-preview > p {
   margin: 0;
+  padding: 11px 13px 9px;
+}
+
+/* The status line of a message still going out, glued to the card's edge without this. */
+.chat-message.pending:has(.chat-text-with-preview) small {
+  display: block;
+  padding: 4px 13px 8px;
 }
 
 .chat-message a {
@@ -23,14 +40,10 @@
 
 .chat-link-preview {
   position: relative;
-  width: 320px;
-  max-width: 100%;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, #000 22%, transparent);
-  color: inherit;
+  background: #171a21;
+  color: #f2f4f8;
 }
 
 .chat-link-preview-body {
@@ -47,22 +60,23 @@ a.chat-link-preview-body:hover .chat-link-preview-title {
 .chat-link-preview-image {
   display: block;
   width: 100%;
-  max-height: 180px;
+  height: auto;
+  max-height: 320px;
   object-fit: cover;
 }
 
 .chat-link-preview-text {
   display: grid;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
-  padding: 8px 10px 10px;
+  padding: 10px 13px 12px;
 }
 
 .chat-link-preview-domain {
   overflow: hidden;
+  color: #aeb6c6;
   font-size: 11px;
   letter-spacing: 0.02em;
-  opacity: 0.75;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -80,9 +94,9 @@ a.chat-link-preview-body:hover .chat-link-preview-title {
 .chat-link-preview-description {
   display: -webkit-box;
   overflow: hidden;
-  font-size: 12.5px;
+  color: #aeb6c6;
+  font-size: 13px;
   line-height: 1.35;
-  opacity: 0.85;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -108,16 +122,17 @@ a.chat-link-preview-body:hover .chat-link-preview-title {
   background: rgba(0, 0, 0, 0.85);
 }
 
-/* The card above the composer while it loads and before it is sent. */
+/* The card above the composer while it loads and before it is sent: a framed card of its own. */
 .chat-link-preview-tray {
   display: flex;
   flex: 1 0 100%;
-  color: var(--text);
 }
 
 .chat-link-preview-tray .chat-link-preview {
-  border-color: var(--line);
-  background: var(--panel);
+  width: 320px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
 }
 
 .chat-link-preview-loading {
@@ -156,4 +171,35 @@ a.chat-link-preview-body:hover .chat-link-preview-title {
   .chat-link-preview-loading span {
     animation: none;
   }
+}
+
+/* In a reply quote the quoted card shrinks to its picture and title, dimmed like the rest of the quote. */
+.chat-reply-quote:has(.chat-reply-quote-preview) {
+  width: 320px;
+  max-width: 100%;
+}
+
+.chat-reply-quote-preview {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.chat-reply-quote-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 200px;
+  border-radius: 6px;
+  object-fit: cover;
+  opacity: 0.6;
+  filter: grayscale(0.3);
+}
+
+.chat-reply-quote-preview-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-weight: 600;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
 }

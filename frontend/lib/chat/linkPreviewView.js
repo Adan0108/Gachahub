@@ -7,6 +7,12 @@ export function previewDomain(url) {
   }
 }
 
+/** The line under a card's picture naming the site, only when the message's own link text could mislead: a redirect to elsewhere, or a non-latin name. */
+export function previewDomainLine(domain, resolvedDomain) {
+  if (resolvedDomain && resolvedDomain !== domain) return `${domain} → ${resolvedDomain}`;
+  return domain.split(".").some((label) => label.startsWith("xn--")) ? domain : null;
+}
+
 /** Where to load a received card's picture from, found among the message's attachments; null when it has none. */
 export function previewThumbSource(messageId, preview, media) {
   if (!preview.thumb) return null;
