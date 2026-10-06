@@ -47,6 +47,8 @@ import { useSyncEngine } from "../../hooks/chat/useSyncEngine";
 import { useChatBackup } from "../../hooks/chat/useChatBackup";
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
+import { useMarkChatRead } from "../../hooks/chat/useMarkChatRead";
+import { useReadWhenSeen } from "../../hooks/chat/useReadWhenSeen";
 import { useReceiptDisplay } from "../../hooks/chat/useReceiptDisplay";
 import { useStickToBottom } from "../../hooks/chat/useStickToBottom";
 import { useTypingNames } from "../../hooks/chat/useTypingNames";
@@ -452,11 +454,18 @@ export default function ChatPage() {
     if (!isSessionLoading && !isAuthenticated) router.replace("/login");
   }, [isAuthenticated, isSessionLoading, router]);
 
+  // This device has the messages as soon as they are decrypted; they only count as read once they are on screen.
   useEffect(() => {
     if (!activeId || !readableMessageIdsKey) return;
     api.markChatDelivered(readableMessageIds).catch(() => {});
-    api.markChatRead(activeId, readableMessageIds.at(-1)).catch(() => {});
   }, [activeId, readableMessageIds, readableMessageIdsKey]);
+  const markChatRead = useMarkChatRead();
+  useReadWhenSeen({
+    containerRef: messagesContainerRef,
+    conversationId: activeId,
+    messageIds: readableMessageIds,
+    onRead: (messageId) => markChatRead(activeId, messageId, { isNewest: messageId === readableMessageIds.at(-1) }),
+  });
 
   const [replyLightboxOwnerId, setReplyLightboxOwnerId] = useState(activeId);
   const [hiddenMessageIds, setHiddenMessageIds] = useState(() => getHiddenMessageIds(activeId));
