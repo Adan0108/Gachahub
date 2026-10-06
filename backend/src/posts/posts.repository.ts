@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { claimUploadsForAttachment } from '../media/media.repository';
 import { viewablePostWhere } from '../post-visibility/visibility-where';
 
-const postInclude = {
+export const postInclude = {
   author: {
     select: {
       id: true,
@@ -58,6 +58,9 @@ export class PostsRepository {
       ...query,
       include: {
         ...postInclude,
+        postSaves: userId
+          ? { where: { userId: userId }, select: { userId: true } }
+          : false,
         postLikes: userId
           ? {
               where: {
@@ -123,6 +126,9 @@ export class PostsRepository {
       take,
       include: {
         ...postInclude,
+        postSaves: userId
+          ? { where: { userId: userId }, select: { userId: true } }
+          : false,
         postLikes: userId
           ? {
               where: {
@@ -159,6 +165,9 @@ export class PostsRepository {
         where,
         include: {
           ...postInclude,
+          postSaves: params.userId
+            ? { where: { userId: params.userId }, select: { userId: true } }
+            : false,
           postLikes: params.userId
             ? {
                 where: {
@@ -253,6 +262,9 @@ export class PostsRepository {
       },
       include: {
         ...postInclude,
+        postSaves: userId
+          ? { where: { userId: userId }, select: { userId: true } }
+          : false,
         postLikes: userId
           ? {
               where: {
@@ -735,6 +747,9 @@ export class PostsRepository {
 
       include: {
         ...postInclude,
+        postSaves: userId
+          ? { where: { userId: userId }, select: { userId: true } }
+          : false,
         postLikes: userId
           ? {
               where: {
@@ -775,6 +790,7 @@ export class PostsRepository {
       },
       include: {
         ...postInclude,
+        postSaves: { where: { userId }, select: { userId: true } },
         postLikes: {
           where: {
             userId,
@@ -851,6 +867,9 @@ export class PostsRepository {
       },
       include: {
         ...postInclude,
+        postSaves: userId
+          ? { where: { userId: userId }, select: { userId: true } }
+          : false,
         postLikes: userId
           ? {
               where: {
