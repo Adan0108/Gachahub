@@ -2,9 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import { FiX } from "react-icons/fi";
+import { floatingPortal } from "../../hooks/chat/useFloatingPosition";
 import { useModalFocusTrap } from "../../hooks/chat/useModalFocusTrap";
 
-/** Asks before something that cannot be taken back; it starts on Cancel so a stray Enter does nothing harmful. */
+/** Asks before something that cannot be taken back; it starts on Cancel so a stray Enter does nothing harmful, and sits on top of the whole page. */
 export function ConfirmChatActionDialog({ isOpen, title, body, confirmLabel, isPending, error, onConfirm, onClose }) {
   const openerRef = useRef(null);
   const cancelRef = useRef(null);
@@ -18,7 +19,7 @@ export function ConfirmChatActionDialog({ isOpen, title, body, confirmLabel, isP
 
   if (!isOpen) return null;
 
-  return (
+  return floatingPortal(
     <div className="modal-backdrop" onClick={onClose}>
       <div
         aria-describedby="confirm-chat-action-body"
@@ -59,6 +60,6 @@ export function ConfirmChatActionDialog({ isOpen, title, body, confirmLabel, isP
           </button>
         </div>
       </div>
-    </div>
+    </div>,
   );
 }
