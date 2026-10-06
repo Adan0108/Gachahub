@@ -22,6 +22,8 @@ model User {
   messageRequestSetting MessageRequestSetting @default(EVERYONE)
   /// Whether others can see when you read their messages, and you theirs; mutual, like Messenger's setting. Delivery always shows, as a yes or no; that still tells the sender roughly when your device was online.
   sendReadReceipts      Boolean               @default(true)
+  /// Whether links you send get a preview card. The server fetches the page when you paste a link, so turning it off keeps links from reaching the server at all.
+  sendLinkPreviews      Boolean               @default(true)
   // Claimed once during onboarding; case-insensitive (citext) so "Bob" and "bob" collide,
   // original casing kept for display. Null until the user completes onboarding.
   username              String?               @unique @db.Citext
