@@ -18,4 +18,8 @@ export class UpdateProfileDto {
   @ValidateIf((_, value) => value !== undefined)
   @IsBoolean()
   sendReadReceipts?: boolean;
+
+  @ValidateIf((_, value) => value !== undefined)
+  @IsBoolean()
+  sendLinkPreviews?: boolean;
 }

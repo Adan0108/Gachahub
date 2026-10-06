@@ -101,6 +101,7 @@ export const backendRoutes = {
   chatGroupLeave: (conversationId) =>
     `/chat/groups/${encodePathParam(conversationId)}/leave`,
   chatDelivered: '/chat/messages/delivered',
+  linkPreviews: '/link-previews',
   chatRead: (conversationId) => `/chat/conversations/${encodePathParam(conversationId)}/read`,
   chatBackup: '/chat-backup',
   chatBackupBlobs: '/chat-backup/blobs',
@@ -861,6 +862,8 @@ export const api = {
     mutation(backendRoutes.chatGroupMemberRole(conversationId, userId), { role }, { method: 'PATCH' }),
   leaveGroup: (conversationId) => mutation(backendRoutes.chatGroupLeave(conversationId)),
   markChatDelivered: (messageIds) => mutation(backendRoutes.chatDelivered, { messageIds }),
+  // The server fetches the page; the sender attaches the result to the encrypted message.
+  fetchLinkPreview: (url) => mutation(backendRoutes.linkPreviews, { url }),
   markChatRead: (conversationId, lastReadMessageId) =>
     mutation(
       backendRoutes.chatRead(conversationId),

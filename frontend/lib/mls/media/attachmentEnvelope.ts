@@ -42,7 +42,7 @@ function isBlobRef(value: Record<string, unknown>): boolean {
   );
 }
 
-function isThumb(value: unknown): value is AttachmentThumb {
+export function isThumb(value: unknown): value is AttachmentThumb {
   return (
     isRecord(value) &&
     isBlobRef(value) &&
