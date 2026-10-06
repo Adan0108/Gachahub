@@ -3,15 +3,15 @@ import {
   ConflictException,
   Injectable,
 } from '@nestjs/common';
-import { PostStatus } from '../generated/prisma/client';
-import { AuditLogService } from '../audit-log/audit-log.service';
-import type { PostAuditAction } from '../audit-log/audit-log.types';
-import { GameModeratorsService } from '../game-moderators/game-moderators.service';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
-import { PrismaService } from '../prisma/prisma.service';
-import { formatPost } from './post.mapper';
-import { PostsRepository } from './posts.repository';
-import { resolvePagination, toPaginated } from '../common/utils/paginated';
+import { PostStatus } from '../../generated/prisma/client';
+import { AuditLogService } from '../../audit-log/audit-log.service';
+import type { PostAuditAction } from '../../audit-log/audit-log.types';
+import { GameModeratorsService } from '../../game-moderators/game-moderators.service';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { PrismaService } from '../../prisma/prisma.service';
+import { formatPost } from '../post.mapper';
+import { PostsRepository } from '../posts.repository';
+import { resolvePagination, toPaginated } from '../../common/utils/paginated';
 
 /**
  * Moderator/admin actions on posts: hide, restore, and list what's hidden

@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
 import { pendingSinceChange } from './membership/apply-participant-transitions';
 import { lockConversation } from './membership/lock-conversation';
+import { notMutedParticipantWhere } from './notification-mute';
 import {
   claimUploadsForAttachment,
   type PrismaTransaction,
@@ -97,7 +98,8 @@ export class ChatRepository {
         },
       },
       include: {
-        receipts: true,
+        // Only the sender's own: a resend must not reveal read times the message list hides.
+        receipts: { where: { userId: senderId } },
         replyTo: true,
         media: {
           orderBy: { sortOrder: 'asc' },
@@ -480,12 +482,15 @@ export class ChatRepository {
               select: {
                 id: true,
                 name: true,
+                username: true,
                 image: true,
               },
             },
           },
         },
         messages: {
+          // an edit is never the "last message" of a conversation
+          where: { contentType: { not: 'EDIT' } },
           orderBy: {
             createdAt: 'desc',
           },
@@ -533,7 +538,7 @@ export class ChatRepository {
     });
   }
 
-  /** Counts unread messages in the accepted inbox, excluding own messages, pending requests and archived chats. */
+  /** Unread messages in the accepted inbox, excluding own messages, pending requests, archived and muted chats (a muted chat keeps its own per-conversation count). No client reads the total yet. */
   countUnreadMessagesForUser(userId: string) {
     return this.prisma.chatMessageReceipt.count({
       where: {
@@ -550,6 +555,7 @@ export class ChatRepository {
                 userId,
                 state: 'ACTIVE',
                 deletedAt: null,
+                ...notMutedParticipantWhere(),
               },
             },
           },
@@ -558,7 +564,7 @@ export class ChatRepository {
     });
   }
 
-  /** Counts main-inbox convos with at least one unread message. */
+  /** Main-inbox conversations with an unread message, excluding muted ones, like countUnreadMessagesForUser. No client reads the total yet. */
   countUnreadConversationsForUser(userId: string) {
     return this.prisma.chatConversation.count({
       where: {
@@ -567,6 +573,7 @@ export class ChatRepository {
             userId,
             state: 'ACTIVE',
             deletedAt: null,
+            ...notMutedParticipantWhere(),
           },
         },
         messages: {
@@ -629,6 +636,8 @@ export class ChatRepository {
         id: messageId,
         conversationId,
         status: 'SENT',
+        // an edit is not a message anyone sees, so nothing can reply to it
+        contentType: { not: 'EDIT' },
       },
     });
   }
@@ -690,18 +699,35 @@ export class ChatRepository {
   }
 
   /** Marks selected receipts delivered for a user; only empty deliveredAt is updated. */
-  markMessagesDelivered(userId: string, messageIds: string[]) {
-    return this.prisma.chatMessageReceipt.updateMany({
-      where: {
-        userId,
-        messageId: {
-          in: messageIds,
+  async markMessagesDelivered(userId: string, messageIds: string[]) {
+    return this.prisma.$transaction(async (tx) => {
+      const pending = await tx.chatMessageReceipt.findMany({
+        where: { userId, messageId: { in: messageIds }, deliveredAt: null },
+        select: {
+          id: true,
+          messageId: true,
+          message: { select: { conversationId: true } },
         },
-        deliveredAt: null,
-      },
-      data: {
-        deliveredAt: new Date(),
-      },
+      });
+      if (pending.length === 0) return [];
+
+      // Only what this call actually changed: another device may have got there first.
+      const updated = await tx.chatMessageReceipt.updateManyAndReturn({
+        where: {
+          id: { in: pending.map((receipt) => receipt.id) },
+          deliveredAt: null,
+        },
+        data: { deliveredAt: new Date() },
+        select: { id: true },
+      });
+      const updatedIds = new Set(updated.map((receipt) => receipt.id));
+
+      return pending
+        .filter((receipt) => updatedIds.has(receipt.id))
+        .map((receipt) => ({
+          messageId: receipt.messageId,
+          conversationId: receipt.message.conversationId,
+        }));
     });
   }
 
@@ -723,12 +749,13 @@ export class ChatRepository {
         : await tx.chatMessage.findFirst({
             where: {
               conversationId: params.conversationId,
+              contentType: { not: 'EDIT' },
             },
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           });
 
       if (!lastReadMessage) {
-        return { count: 0 };
+        return { count: 0, lastReadMessage: null };
       }
 
       const now = new Date();
@@ -766,7 +793,20 @@ export class ChatRepository {
         },
       });
 
-      return result;
+      return { count: result.count, lastReadMessage };
+    });
+  }
+
+  /** Everyone in a conversation with their read-receipt setting, to decide who may see whose reads. */
+  findReceiptParties(conversationId: string) {
+    return this.prisma.chatParticipant.findMany({
+      where: { conversationId },
+      select: {
+        userId: true,
+        state: true,
+        deletedAt: true,
+        user: { select: { sendReadReceipts: true } },
+      },
     });
   }
 
@@ -808,50 +848,85 @@ export class ChatRepository {
     ]);
   }
 
-  /** Updates an existing encrypted message payload; the service checks permissions first. */
-  updateMessage(params: {
-    messageId: string;
-    ciphertext: string;
-    encryptionMeta?: Prisma.InputJsonValue;
-    contentType?: ChatMessageContentType;
-  }) {
-    return this.prisma.chatMessage.update({
-      where: {
-        id: params.messageId,
-      },
+  /** Stamps a still-sent message as edited; false when it is gone or unsent. Also locks its row, so concurrent edits and an unsend take turns. */
+  async markMessageEdited(
+    tx: PrismaTransaction,
+    messageId: string,
+    editedAt: Date,
+  ): Promise<boolean> {
+    const result = await tx.chatMessage.updateMany({
+      where: { id: messageId, status: 'SENT' },
+      data: { editedAt },
+    });
+
+    return result.count > 0;
+  }
+
+  /** How many edits a message already has. */
+  countEditsOfMessage(tx: PrismaTransaction, messageId: string) {
+    return tx.chatMessage.count({
+      where: { editsMessageId: messageId, status: 'SENT' },
+    });
+  }
+
+  /** Creates the hidden EDIT message holding a message's new encrypted body. Its receipts start read for everyone, so it is never unread. */
+  createEditMessage(
+    tx: PrismaTransaction,
+    params: {
+      conversationId: string;
+      senderId: string;
+      participantUserIds: string[];
+      editsMessageId: string;
+      ciphertext: string;
+      encryptionMeta?: Prisma.InputJsonValue;
+      clientMessageId: string;
+    },
+  ) {
+    const now = new Date();
+
+    return tx.chatMessage.create({
       data: {
+        conversationId: params.conversationId,
+        senderId: params.senderId,
         ciphertext: params.ciphertext,
         encryptionMeta: params.encryptionMeta,
-        contentType: params.contentType,
-        editedAt: new Date(),
-      },
-      include: {
-        receipts: true,
-        reactions: {
-          include: {
-            emote: true,
-          },
-        },
-        media: {
-          orderBy: { sortOrder: 'asc' },
+        contentType: 'EDIT',
+        editsMessageId: params.editsMessageId,
+        clientMessageId: params.clientMessageId,
+        receipts: {
+          create: params.participantUserIds.map((userId) => ({
+            userId,
+            deliveredAt: now,
+            readAt: now,
+          })),
         },
       },
+      include: { receipts: true },
     });
   }
 
   /** Soft deletes a message, keeping the row but clearing its ciphertext. */
-  softDeleteMessage(messageId: string) {
-    return this.prisma.chatMessage.update({
-      where: {
-        id: messageId,
-      },
-      data: {
-        ciphertext: '',
-        encryptionMeta: Prisma.JsonNull,
-        status: 'DELETED',
-        deletedAt: new Date(),
-      },
-    });
+  async softDeleteMessage(messageId: string) {
+    const cleared = {
+      ciphertext: '',
+      encryptionMeta: Prisma.JsonNull,
+      status: 'DELETED' as const,
+      deletedAt: new Date(),
+    };
+
+    // Its edits go with it: an unsent message leaves no earlier versions behind.
+    const [message] = await this.prisma.$transaction([
+      this.prisma.chatMessage.update({
+        where: { id: messageId },
+        data: cleared,
+      }),
+      this.prisma.chatMessage.updateMany({
+        where: { editsMessageId: messageId },
+        data: cleared,
+      }),
+    ]);
+
+    return message;
   }
 
   /** Stores a custom game-community emote's final asset metadata. */

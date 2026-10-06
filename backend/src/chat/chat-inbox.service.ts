@@ -6,11 +6,11 @@ import {
 } from '@nestjs/common';
 import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
+import { isNotificationMuted } from './notification-mute';
+import { maskReceiptsForViewer } from './receipt.mapper';
 import { BlocksService } from '../blocks/blocks.service';
 import { ChatMembershipService } from './membership/chat-membership.service';
 import { ChatHistoryFetchRateLimiterService } from './chat-history-fetch-rate-limiter.service';
-import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
-import { MarkMessagesDeliveredDto } from './dto/mark-messages-delivered.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import type { ChatDeliveryPort } from './ports/chat-delivery.port';
@@ -151,13 +151,14 @@ export class ChatInboxService {
       ),
     );
 
-    const blockedUserIds = await this.blocksService.getBlockedIdsAmong(
-      userId,
-      senderIds,
-    );
+    const [blockedUserIds, receiptParties] = await Promise.all([
+      this.blocksService.getBlockedIdsAmong(userId, senderIds),
+      this.chatRepository.findReceiptParties(conversationId),
+    ]);
 
     return {
-      items: messages.reverse(),
+      // Receipts go out trimmed to what this user may know (see receipt-visibility.ts).
+      items: maskReceiptsForViewer(messages.reverse(), userId, receiptParties),
       meta: {
         limit,
         nextBeforeMessageId,
@@ -311,13 +312,20 @@ export class ChatInboxService {
       userId,
     );
 
+    const mutedUntilDate =
+      notificationLevel === 'NOTHING' && mutedUntil
+        ? new Date(mutedUntil)
+        : null;
+
+    if (mutedUntilDate && mutedUntilDate <= new Date()) {
+      throw new BadRequestException('mutedUntil must be in the future');
+    }
+
     return this.chatRepository.updateParticipantNotificationLevel(
       conversationId,
       userId,
       notificationLevel,
-      notificationLevel === 'NOTHING' && mutedUntil
-        ? new Date(mutedUntil)
-        : null,
+      mutedUntilDate,
     );
   }
 
@@ -428,50 +436,6 @@ export class ChatInboxService {
   }
 
   /**
-   * Marks messages as delivered to the current user's device.
-   *
-   * This supports offline users: messages can be SENT in the database before
-   * the recipient comes online and acknowledge delivery.
-   */
-  async markDelivered(userId: string, dto: MarkMessagesDeliveredDto) {
-    const result = await this.chatRepository.markMessagesDelivered(
-      userId,
-      dto.messageIds,
-    );
-
-    return {
-      deliveredCount: result.count,
-    };
-  }
-
-  /**
-   * Marks messages as read by the current user.
-   *
-   * Read state is stored per recipient. This works for direct messages now and
-   * still works if the convo later grows into group/admin chat.
-   */
-  async markRead(
-    userId: string,
-    conversationId: string,
-    dto: MarkConversationReadDto,
-  ) {
-    await this.chatAccessService.assertReadableParticipant(
-      conversationId,
-      userId,
-    );
-
-    const result = await this.chatRepository.markConversationRead({
-      conversationId,
-      userId,
-      lastReadMessageId: dto.lastReadMessageId,
-    });
-
-    return {
-      readCount: result.count,
-    };
-  }
-
-  /**
    * One block list query for the whole batch, not one per convo.
    *
    * collects every other participant across all convos first, one lookup
@@ -578,6 +542,8 @@ export class ChatInboxService {
       pinnedAt: isViewer ? participant.pinnedAt : null,
       notificationLevel: isViewer ? participant.notificationLevel : null,
       mutedUntil: isViewer ? participant.mutedUntil : null,
+      // Branch on this, not notificationLevel: an expired mute keeps NOTHING in the row forever.
+      isMuted: isViewer ? isNotificationMuted(participant) : null,
       user: participant.user,
       isBlockedByMe: blockedUserIds.has(participant.userId),
     };

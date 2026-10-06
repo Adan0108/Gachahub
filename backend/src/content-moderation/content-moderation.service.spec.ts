@@ -252,7 +252,10 @@ describe('ContentModerationService', () => {
     ]);
 
     const withHidden = await service.listFlagged({ page: 1, limit: 20 });
-    expect(withHidden.items.map((item) => item.id)).toEqual(['post-1', 'post-2']);
+    expect(withHidden.items.map((item) => item.id)).toEqual([
+      'post-1',
+      'post-2',
+    ]);
 
     const withoutHidden = await service.listFlagged({
       page: 1,

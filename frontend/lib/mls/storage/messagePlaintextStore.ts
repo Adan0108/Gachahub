@@ -34,6 +34,26 @@ export function onMessageSaved(listener: MessageSavedListener): () => void {
   return () => savedListeners.delete(listener);
 }
 
+type MessageRemovedListener = (messageId: string) => void;
+const removedListeners = new Set<MessageRemovedListener>();
+
+/** Runs after a message's cached plaintext is dropped; returns an unsubscribe. */
+export function onMessageRemoved(listener: MessageRemovedListener): () => void {
+  removedListeners.add(listener);
+  return () => removedListeners.delete(listener);
+}
+
+/** Calls every listener; one that throws never stops the rest. */
+function notify<T>(listeners: Set<(value: T) => void>, value: T, what: string): void {
+  for (const listener of listeners) {
+    try {
+      listener(value);
+    } catch (error) {
+      console.warn(`A ${what} listener failed`, error);
+    }
+  }
+}
+
 export class InMemoryMessagePlaintextStore implements MessagePlaintextStore {
   private readonly values = new Map<string, DecryptedMessage>();
 
@@ -43,6 +63,7 @@ export class InMemoryMessagePlaintextStore implements MessagePlaintextStore {
 
   async save(message: DecryptedMessage): Promise<void> {
     await this.saveWithoutNotify(message);
+    notify(savedListeners, message, 'message-saved');
   }
 
   async saveWithoutNotify(message: DecryptedMessage): Promise<void> {
@@ -55,6 +76,7 @@ export class InMemoryMessagePlaintextStore implements MessagePlaintextStore {
 
   async remove(messageId: string): Promise<void> {
     this.values.delete(messageId);
+    notify(removedListeners, messageId, 'message-removed');
   }
 }
 
@@ -68,13 +90,7 @@ export class EncryptedIndexedDbMessagePlaintextStore implements MessagePlaintext
 
   async save(message: DecryptedMessage): Promise<void> {
     await this.saveWithoutNotify(message);
-    for (const listener of savedListeners) {
-      try {
-        listener(message);
-      } catch (error) {
-        console.warn('A message-saved listener failed', error);
-      }
-    }
+    notify(savedListeners, message, 'message-saved');
   }
 
   async saveWithoutNotify(message: DecryptedMessage): Promise<void> {
@@ -88,5 +104,6 @@ export class EncryptedIndexedDbMessagePlaintextStore implements MessagePlaintext
 
   async remove(messageId: string): Promise<void> {
     await deleteRecord(await openMlsDatabase(), MESSAGE_PLAINTEXT_STORE, messageId);
+    notify(removedListeners, messageId, 'message-removed');
   }
 }

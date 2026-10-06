@@ -1,3 +1,6 @@
+import { Test } from '@nestjs/testing';
+import { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '../generated/prisma/client';
 import { PostsRepository } from './posts.repository';
 
 describe('PostsRepository - Latest feed', () => {
@@ -28,7 +31,7 @@ describe('PostsRepository - Latest feed', () => {
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 21,
-      }),
+      }) as unknown,
     );
   });
 
@@ -100,6 +103,7 @@ describe('PostsRepository - Latest feed', () => {
             tag: true,
           },
         },
+        postSaves: { where: { userId: 'user-1' }, select: { userId: true } },
         postLikes: {
           where: { userId: 'user-1' },
           select: { userId: true },
@@ -129,6 +133,7 @@ describe('PostsRepository - Latest feed', () => {
         AND: [where, { id: { in: ['post-1', 'post-2'] } }],
       },
       include: {
+        postSaves: { where: { userId: 'user-1' }, select: { userId: true } },
         postLikes: {
           where: { userId: 'user-1' },
           select: { userId: true },
@@ -161,11 +166,105 @@ describe('PostsRepository - Latest feed', () => {
         AND: [where, { id: { in: ['post-1', 'post-2'] } }],
       },
       include: {
+        postSaves: { where: { userId: 'user-1' }, select: { userId: true } },
         postLikes: {
           where: { userId: 'user-1' },
           select: { userId: true },
         },
       },
     });
+  });
+});
+
+describe('PostsRepository save hydration', () => {
+  const prisma = {
+    post: {
+      findMany: jest
+        .fn<Promise<unknown[]>, [Prisma.PostFindManyArgs]>()
+        .mockResolvedValue([]),
+      findUnique: jest
+        .fn<Promise<unknown>, [Prisma.PostFindUniqueArgs]>()
+        .mockResolvedValue(null),
+      count: jest.fn().mockResolvedValue(0),
+    },
+    $transaction: jest.fn((queries: Promise<unknown>[]) =>
+      Promise.all(queries),
+    ),
+  };
+  let repository: PostsRepository;
+  beforeAll(async () => {
+    const module = await Test.createTestingModule({
+      providers: [
+        PostsRepository,
+        { provide: PrismaService, useValue: prisma },
+      ],
+    }).compile();
+    repository = module.get(PostsRepository);
+  });
+  beforeEach(() => jest.clearAllMocks());
+  it.each([
+    'list',
+    'latest',
+    'detail',
+    'profile',
+    'ids',
+    'trending',
+    'forYou',
+  ] as const)(
+    'hydrates scoped saves in the existing %s query',
+    async (route) => {
+      switch (route) {
+        case 'list':
+          await repository.findMany({
+            where: {},
+            skip: 0,
+            take: 20,
+            orderBy: { id: 'desc' },
+            userId: 'viewer',
+          });
+          break;
+        case 'latest':
+          await repository.findLatestPage({
+            where: {},
+            take: 21,
+            userId: 'viewer',
+          });
+          break;
+        case 'detail':
+          await repository.findViewableById('post', 'viewer');
+          break;
+        case 'profile':
+          await repository.findByAuthorId('author', {
+            page: 1,
+            limit: 20,
+            audience: 'public',
+            userId: 'viewer',
+          });
+          break;
+        case 'ids':
+          await repository.findManyByIds(['post'], 'viewer');
+          break;
+        case 'trending':
+          await repository.findTrendingManyByIds(['post'], {}, 'viewer');
+          break;
+        case 'forYou':
+          await repository.findForYouManyByIds(['post'], {}, 'viewer');
+          break;
+      }
+      const query =
+        route === 'detail' ? prisma.post.findUnique : prisma.post.findMany;
+      expect(query).toHaveBeenCalledTimes(1);
+      const args: unknown = query.mock.calls[0]?.[0];
+      expect(args).toMatchObject({
+        include: {
+          postSaves: { where: { userId: 'viewer' }, select: { userId: true } },
+        },
+      });
+    },
+  );
+  it('does not fetch save relations for anonymous viewers', async () => {
+    await repository.findViewableById('post');
+    const args: unknown = prisma.post.findUnique.mock.calls[0]?.[0];
+    expect(args).toMatchObject({ include: { postSaves: false } });
   });
 });

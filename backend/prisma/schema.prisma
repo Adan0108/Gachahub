@@ -20,6 +20,8 @@ model User {
   role                  UserRole              @default(USER)
   status                UserStatus            @default(ACTIVE)
   messageRequestSetting MessageRequestSetting @default(EVERYONE)
+  /// Whether others can see when you read their messages, and you theirs; mutual, like Messenger's setting. Delivery always shows, as a yes or no; that still tells the sender roughly when your device was online.
+  sendReadReceipts      Boolean               @default(true)
   // Claimed once during onboarding; case-insensitive (citext) so "Bob" and "bob" collide,
   // original casing kept for display. Null until the user completes onboarding.
   username              String?               @unique @db.Citext
@@ -37,6 +39,7 @@ model User {
   postLikes    PostLike[]
   comments     Comment[]
   interests    UserInterest[]
+  postSaves    PostSave[]
 
   followers            UserFollow[]          @relation("UserFollowers")
   following            UserFollow[]          @relation("UserFollowing")
@@ -315,6 +318,8 @@ enum ChatMessageContentType {
   AUDIO
   VIDEO
   SYSTEM
+  /// A hidden message carrying a new encrypted body for an earlier message (editsMessageId); never shown, counted unread or notified.
+  EDIT
 }
 
 enum ChatMessageStatus {
@@ -433,6 +438,8 @@ model ChatMessage {
   contentType     ChatMessageContentType @default(TEXT)
   status          ChatMessageStatus      @default(SENT)
   replyToId       String?
+  /// Set only on EDIT messages: the message this one is a new version of.
+  editsMessageId  String?
 
   createdAt DateTime  @default(now())
   editedAt  DateTime?
@@ -442,6 +449,8 @@ model ChatMessage {
   sender       User                  @relation("ChatMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
   replyTo      ChatMessage?          @relation("ChatMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies      ChatMessage[]         @relation("ChatMessageReplies")
+  editsMessage ChatMessage?          @relation("ChatMessageEdits", fields: [editsMessageId], references: [id], onDelete: Cascade)
+  edits        ChatMessage[]         @relation("ChatMessageEdits")
   receipts     ChatMessageReceipt[]
   reactions    ChatMessageReaction[]
   media        ChatMessageMedia[]
@@ -451,6 +460,7 @@ model ChatMessage {
   @@index([conversationId, id])
   @@index([senderId])
   @@index([replyToId])
+  @@index([editsMessageId])
   @@map("chat_messages")
 }
 
@@ -617,6 +627,7 @@ model Post {
   tags      PostTag[]
   postLikes PostLike[]
   comments  Comment[]
+  postSaves PostSave[]
 
   @@index([gameId, status, createdAt])
   @@index([categoryId, status, createdAt])
@@ -1262,4 +1273,18 @@ model Mention {
   @@id([entityType, entityId, userId])
   @@index([userId])
   @@map("mentions")
+}
+
+model PostSave {
+  userId    String
+  postId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@id([userId, postId])
+  @@index([userId, createdAt, postId])
+  @@index([postId])
+  @@map("post_saves")
 }

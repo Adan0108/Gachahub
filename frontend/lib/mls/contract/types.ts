@@ -17,8 +17,15 @@ export interface DeviceCredential {
 /** The decrypted, application-level content of one MLS application message */
 export interface BodyEnvelope {
   v: 1;
-  type: 'text' | 'edit' | 'delete' | 'reaction';
+  type: 'text' | 'delete' | 'reaction';
   body: unknown;
+}
+
+/** A new body for an earlier text message by the same author; `n` is which edit of that message this is (1 for the first). */
+export interface EditEnvelope {
+  v: 1;
+  type: 'edit';
+  body: { targetMessageId: string; text: string; n: number };
 }
 
 /** An encrypted blob uploaded as opaque bytes; `blob` is its upload id, the rest decrypts it. */
@@ -51,7 +58,7 @@ export interface AttachmentEnvelope {
   files: AttachmentFile[];
 }
 
-export type PlaintextEnvelope = BodyEnvelope | AttachmentEnvelope;
+export type PlaintextEnvelope = BodyEnvelope | EditEnvelope | AttachmentEnvelope;
 
 export type RejectReason =
   | 'credential-mismatch'

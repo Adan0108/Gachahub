@@ -1,31 +1,42 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { FiCopy, FiCornerUpLeft, FiEyeOff, FiMoreHorizontal, FiSmile, FiTrash2 } from "react-icons/fi";
+import { useEffect, useRef, useState } from "react";
+import { FiCopy, FiCornerUpLeft, FiEdit2, FiMoreHorizontal, FiPlus, FiSmile, FiTrash2 } from "react-icons/fi";
 import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
 import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+const COMING_SOON_MS = 1800;
 
-/** Hover toolbar on a message: react, reply, and a "..." menu (copy, unsend for your own messages). */
+/** Hover toolbar on a message: react, reply, and a "..." menu (copy, edit your own, remove). */
 export function MessageActions({
-  isMine,
   canCopy,
+  canEdit = false,
   onReact,
   onReply,
   onCopy,
-  onDelete,
-  onDeleteForMe,
+  onEdit,
+  onRemove,
 }) {
   const [isReactOpen, setIsReactOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const [isComingSoonShown, setIsComingSoonShown] = useState(false);
+  const comingSoonTimerRef = useRef(null);
   const reactButtonRef = useRef(null);
   const reactMenuRef = useRef(null);
   const moreButtonRef = useRef(null);
   const moreMenuRef = useRef(null);
   useMenuDismiss(isReactOpen, () => setIsReactOpen(false), reactButtonRef, reactMenuRef);
   useMenuDismiss(isMoreOpen, () => setIsMoreOpen(false), moreButtonRef, moreMenuRef);
-  const reactStyle = useFloatingPosition(isReactOpen, reactButtonRef, reactMenuRef);
+  const reactStyle = useFloatingPosition(isReactOpen, reactButtonRef, reactMenuRef, { align: "center" });
+
+  useEffect(() => () => window.clearTimeout(comingSoonTimerRef.current), []);
+
+  const showComingSoon = () => {
+    window.clearTimeout(comingSoonTimerRef.current);
+    setIsComingSoonShown(true);
+    comingSoonTimerRef.current = window.setTimeout(() => setIsComingSoonShown(false), COMING_SOON_MS);
+  };
   const moreStyle = useFloatingPosition(isMoreOpen, moreButtonRef, moreMenuRef, { align: "end" });
 
   return (
@@ -47,19 +58,29 @@ export function MessageActions({
               role="menu"
               style={floatingStyle(reactStyle)}
             >
-              {QUICK_EMOJIS.map((emoji) => (
-                <button
-                  key={emoji}
-                  onClick={() => {
-                    onReact(emoji);
-                    setIsReactOpen(false);
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  {emoji}
+              <div className="message-actions-picker-row">
+                {QUICK_EMOJIS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    onClick={() => {
+                      onReact(emoji);
+                      setIsReactOpen(false);
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+                <button aria-label="More reactions" onClick={showComingSoon} role="menuitem" type="button">
+                  <FiPlus />
                 </button>
-              ))}
+              </div>
+              {isComingSoonShown && (
+                <small className="message-actions-picker-note" role="status">
+                  More reactions are coming soon.
+                </small>
+              )}
             </div>,
           )}
       </div>
@@ -95,28 +116,28 @@ export function MessageActions({
                   <FiCopy /> Copy
                 </button>
               )}
-              <button
-                onClick={() => {
-                  onDeleteForMe();
-                  setIsMoreOpen(false);
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <FiEyeOff /> Delete for me
-              </button>
-              {isMine && (
+              {canEdit && (
                 <button
                   onClick={() => {
-                    onDelete();
+                    onEdit();
                     setIsMoreOpen(false);
                   }}
                   role="menuitem"
                   type="button"
                 >
-                  <FiTrash2 /> Unsend
+                  <FiEdit2 /> Edit
                 </button>
               )}
+              <button
+                onClick={() => {
+                  onRemove();
+                  setIsMoreOpen(false);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <FiTrash2 /> Remove
+              </button>
             </div>,
           )}
       </div>

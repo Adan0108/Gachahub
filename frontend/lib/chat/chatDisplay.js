@@ -23,6 +23,12 @@ export function myParticipant(conversation, userId) {
   return conversation?.participants?.find((participant) => participant.userId === userId);
 }
 
+/** Whether you muted this conversation (the backend decides, including expiry), and until when; null = until you turn it back on. */
+export function conversationMute(conversation, userId) {
+  const mine = myParticipant(conversation, userId);
+  return { isMuted: Boolean(mine?.isMuted), mutedUntil: mine?.mutedUntil ?? null };
+}
+
 export function conversationDisplayName(conversation, userId) {
   if (conversation?.type === "GROUP") return conversation.title || "Group chat";
   return conversationPeer(conversation, userId)?.name || "GachaHub member";
@@ -36,4 +42,11 @@ export function conversationImage(conversation, userId) {
 
 export function initialOf(name) {
   return name?.trim()?.charAt(0).toUpperCase() || "?";
+}
+
+/** "Mado is typing...", "Mado and Rover are typing...", "Mado and 2 others are typing..." */
+export function typingLabel(names) {
+  if (names.length === 1) return `${names[0]} is typing...`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing...`;
+  return `${names[0]} and ${names.length - 1} others are typing...`;
 }

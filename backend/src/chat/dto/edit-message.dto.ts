@@ -1,50 +1,24 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsEnum,
-  IsObject,
-  IsOptional,
-  IsString,
-  MaxLength,
-  MinLength,
-  ValidateIf,
-} from 'class-validator';
-import { ChatMessageContentType } from '../../generated/prisma/client';
+import { ApiProperty, PickType } from '@nestjs/swagger';
+import { IsString, MaxLength, MinLength } from 'class-validator';
+import { EncryptedMessagePayloadDto } from './encrypted-message-payload.dto';
 
 /**
- * Request body for editing an encrypted chat message.
+ * Request body for editing a text message.
  *
- * The backend still never receives plaintext. Editing replaces the old
- * ciphertext with a new encrypted payload from the client.
+ * The new text travels as a new encrypted message (an MLS application message the other
+ * devices decrypt like any other); the backend still never sees plaintext.
  */
-export class EditMessageDto {
+export class EditMessageDto extends PickType(EncryptedMessagePayloadDto, [
+  'ciphertext',
+  'encryptionMeta',
+] as const) {
   @ApiProperty({
-    example: 'new-base64-or-armored-ciphertext',
-    description: 'Updated client-side encrypted message body. Never plaintext.',
+    example: 'client-generated-idempotency-id',
+    description:
+      'Client-generated id so a retry of the same edit is not applied twice.',
   })
   @IsString()
   @MinLength(1)
-  @MaxLength(20000)
-  ciphertext!: string;
-
-  @ApiPropertyOptional({
-    example: {
-      version: 'e2ee-v1',
-      nonce: 'new-base64-nonce',
-      senderKeyId: 'sender-device-key-id',
-      recipientKeyIds: ['recipient-device-key-id'],
-    },
-    description:
-      'Client-managed encryption metadata for the updated ciphertext.',
-  })
-  @ValidateIf((object: EditMessageDto) => object.encryptionMeta !== undefined)
-  @IsObject()
-  encryptionMeta?: Record<string, unknown>;
-
-  @ApiPropertyOptional({
-    enum: ChatMessageContentType,
-    default: ChatMessageContentType.TEXT,
-  })
-  @IsOptional()
-  @IsEnum(ChatMessageContentType)
-  contentType?: ChatMessageContentType;
+  @MaxLength(120)
+  clientMessageId!: string;
 }

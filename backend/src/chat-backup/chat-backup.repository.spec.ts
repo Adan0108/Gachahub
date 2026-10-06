@@ -73,11 +73,21 @@ describe('ChatBackupRepository', () => {
 
       await repository.verifyProofAndMutate(
         'u1',
-        { action: 'delete', nonce: NONCE, proof: validProof(), now: new Date() },
+        {
+          action: 'delete',
+          nonce: NONCE,
+          proof: validProof(),
+          now: new Date(),
+        },
         mutate,
       );
 
-      expect(order).toEqual(['lock', 'read-secret', 'consume-challenge', 'mutate']);
+      expect(order).toEqual([
+        'lock',
+        'read-secret',
+        'consume-challenge',
+        'mutate',
+      ]);
       expect(mutate).toHaveBeenCalledWith(prisma, SECRET);
     });
 
@@ -88,7 +98,12 @@ describe('ChatBackupRepository', () => {
       await expect(
         repository.verifyProofAndMutate(
           'u1',
-          { action: 'delete', nonce: NONCE, proof: validProof(), now: new Date() },
+          {
+            action: 'delete',
+            nonce: NONCE,
+            proof: validProof(),
+            now: new Date(),
+          },
           mutate,
         ),
       ).rejects.toBeInstanceOf(ForbiddenException);
@@ -103,7 +118,12 @@ describe('ChatBackupRepository', () => {
       await expect(
         repository.verifyProofAndMutate(
           'u1',
-          { action: 'delete', nonce: NONCE, proof: validProof(), now: new Date() },
+          {
+            action: 'delete',
+            nonce: NONCE,
+            proof: validProof(),
+            now: new Date(),
+          },
           mutate,
         ),
       ).rejects.toBeInstanceOf(ForbiddenException);
@@ -149,14 +169,24 @@ describe('ChatBackupRepository', () => {
       const results = await Promise.allSettled([
         repository.verifyProofAndMutate(
           'u1',
-          { action: 'delete', nonce: NONCE, proof: validProof(SECRET), now: new Date() },
+          {
+            action: 'delete',
+            nonce: NONCE,
+            proof: validProof(SECRET),
+            now: new Date(),
+          },
           async () => {
             secret = replacement;
           },
         ),
         repository.verifyProofAndMutate(
           'u1',
-          { action: 'delete', nonce: NONCE, proof: validProof(SECRET), now: new Date() },
+          {
+            action: 'delete',
+            nonce: NONCE,
+            proof: validProof(SECRET),
+            now: new Date(),
+          },
           async () => {
             secret = replacement;
           },

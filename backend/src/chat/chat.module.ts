@@ -8,6 +8,8 @@ import { ChatMessagingService } from './chat-messaging.service';
 import { ChatGroupService } from './chat-group.service';
 import { ChatInboxService } from './chat-inbox.service';
 import { ChatMessageActionsService } from './chat-message-actions.service';
+import { ChatMessageEditService } from './chat-message-edit.service';
+import { ChatReceiptsService } from './chat-receipts.service';
 import { ChatTypingGateway } from './realtime/chat-typing.gateway';
 import { ChatTypingService } from './realtime/chat-typing.service';
 import { ChatMessageRateLimiterService } from './chat-message-rate-limiter.service';
@@ -62,6 +64,8 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
     ChatGroupService,
     ChatInboxService,
     ChatMessageActionsService,
+    ChatMessageEditService,
+    ChatReceiptsService,
     ChatTypingGateway,
     ChatTypingService,
     ChatMessageRateLimiterService,

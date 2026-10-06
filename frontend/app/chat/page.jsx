@@ -30,7 +30,12 @@ import { SafetyChangedBanner } from "../../components/chat/SafetyStatus";
 import { UserPicker } from "../../components/chat/UserPicker";
 import { DevicesModal } from "../../components/chat/DevicesModal";
 import { ChatBackupModal } from "../../components/chat/ChatBackupModal";
+import { RemoveMessageDialog } from "../../components/chat/RemoveMessageDialog";
 import { ThreadRow } from "../../components/chat/ThreadRow";
+import { ConversationListItem } from "../../components/chat/ConversationListItem";
+import { NoChatSelected } from "../../components/chat/NoChatSelected";
+import { SidebarMessageSearch } from "../../components/chat/SidebarMessageSearch";
+import { JumpToBottomButton } from "../../components/chat/JumpToBottomButton";
 import { AttachmentComposerTray } from "../../components/chat/AttachmentComposerTray";
 import { AttachmentLightbox } from "../../components/chat/AttachmentLightbox";
 import { AvatarFace } from "../../components/AvatarFace";
@@ -40,10 +45,16 @@ import { useAttachmentPicker } from "../../hooks/chat/useAttachmentPicker";
 import { useDeviceIdentity } from "../../hooks/chat/useDeviceIdentity";
 import { useSyncEngine } from "../../hooks/chat/useSyncEngine";
 import { useChatBackup } from "../../hooks/chat/useChatBackup";
+import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
+import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
+import { useReceiptDisplay } from "../../hooks/chat/useReceiptDisplay";
+import { useStickToBottom } from "../../hooks/chat/useStickToBottom";
+import { useTypingNames } from "../../hooks/chat/useTypingNames";
 import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
 import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
 import { useThreadData } from "../../hooks/chat/useThreadData";
-import { sendEncryptedChatMessage } from "../../lib/mls/messaging/sendEncryptedMessage";
+import { sendEncryptedChatMessage, sendEncryptedEdit } from "../../lib/mls/messaging/sendEncryptedMessage";
+
 import { sendAttachmentsWithCache } from "../../lib/mls/messaging/sendEncryptedAttachment";
 import {
   flattenOtherAttachments,
@@ -54,6 +65,8 @@ import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightbo
 import { api } from "../../lib/api";
 import { queries, queryKeys } from "../../lib/queries";
 import { typingSignal } from "../../lib/chat/chatTypingSignal";
+import { conversationMatches } from "../../lib/chat/conversationSearch";
+import { MIN_SEARCH_CHARS, parseSearchQuery } from "../../lib/chat/searchFolding";
 import {
   activeMembers,
   conversationDisplayName,
@@ -62,8 +75,8 @@ import {
   myParticipant,
   otherActiveMemberIds,
   participantUser,
+  typingLabel,
 } from "../../lib/chat/chatDisplay";
-import { relativeTime } from "../../lib/time";
 import { threadItemKey, withOptimisticDelete } from "../../lib/chat/chatThread";
 import { withOptimisticReaction } from "../../lib/chat/chatReactions";
 import { getHiddenMessageIds, hideMessageForMe, unhideMessageForMe } from "../../lib/chat/chatHiddenMessages";
@@ -98,7 +111,9 @@ function ChatSkeleton() {
             ))}
           </div>
         </aside>
-        <section className="panel chat-thread" />
+        <section className="panel chat-thread">
+          <NoChatSelected />
+        </section>
       </div>
     </div>
   );
@@ -111,6 +126,8 @@ export default function ChatPage() {
   const [view, setView] = useState("inbox");
   const [selectedId, setSelectedId] = useState("");
   const [search, setSearch] = useState("");
+  // The text message search was last run for (on Enter); null until it has been used.
+  const [messageQuery, setMessageQuery] = useState(null);
   const conversations = useQuery({ ...queries.chatConversations(), enabled: isAuthenticated });
   const requests = useQuery({ ...queries.chatRequests(), enabled: isAuthenticated });
   const archived = useQuery({
@@ -120,16 +137,14 @@ export default function ChatPage() {
   const listByView = { inbox: conversations, requests, archived };
   const listQuery = listByView[view];
   const rawList = listQuery.data || [];
-  const searchTerm = search.trim().toLowerCase();
-  const currentList = searchTerm
-    ? rawList.filter((conversation) =>
-        conversationDisplayName(conversation, user?.id).toLowerCase().includes(searchTerm),
-      )
+  const searchTerms = parseSearchQuery(search);
+  const isFiltering = searchTerms.length > 0;
+  const currentList = isFiltering
+    ? rawList.filter((conversation) => conversationMatches(conversation, user?.id, searchTerms))
     : rawList;
-  const activeId = currentList.some((conversation) => conversation.id === selectedId)
-    ? selectedId
-    : currentList[0]?.id || "";
-  const activeConversation = currentList.find((conversation) => conversation.id === activeId);
+  // Nothing is open until you pick a conversation; searching narrows the list but never changes what is open.
+  const activeId = rawList.some((conversation) => conversation.id === selectedId) ? selectedId : "";
+  const activeConversation = rawList.find((conversation) => conversation.id === activeId);
   // DM-only; a group's recipients are recomputed per send.
   const peer = conversationPeer(activeConversation, user?.id);
   // A pending invite (group invite or DM message request) can read history; only sending is gated until accept.
@@ -138,18 +153,8 @@ export default function ChatPage() {
     ...queries.chatMessages(activeId),
     enabled: isAuthenticated && Boolean(activeId),
   });
-  // Cache is only ever written to by useChatSocket's typing:start/typing:stop handlers - nothing
-  // here ever fetches it, this just observes whatever's currently in it for this conversation.
-  const typingUserIds = useQuery({
-    queryKey: queryKeys.chatTyping(activeId),
-    queryFn: () => [],
-    enabled: Boolean(activeId),
-    staleTime: Infinity,
-  }).data;
-  const typingNames = (typingUserIds || [])
-    .filter((id) => id !== user?.id)
-    .map((id) => participantUser(activeConversation, id)?.name)
-    .filter(Boolean);
+  const typingNames = useTypingNames(activeConversation, user?.id);
+  const conversationPreviews = useConversationPreviews(listQuery.data, user?.id);
   const {
     displayMessages,
     isLoadingOlder,
@@ -157,9 +162,12 @@ export default function ChatPage() {
     rateLimitSecondsLeft,
     historyError,
     retryHistory,
+    hasMoreHistory,
+    loadOlderMessages,
     containerRef: messagesContainerRef,
     handleScroll: handleMessagesScroll,
     decrypted: decryptedMessages,
+    edited,
     messagesById,
     neighbors,
     groupProblem,
@@ -182,7 +190,12 @@ export default function ChatPage() {
   const syncEngine = useSyncEngine();
   const [verifyPeerId, setVerifyPeerId] = useState("");
   const readableMessageIdsKey = readableMessageIds.join(",");
-  const messagesEndRef = useRef(null);
+  const {
+    onScroll: trackMessagesScroll,
+    scrollToBottom,
+    followIfNearBottom,
+    showJumpToBottom,
+  } = useStickToBottom(messagesContainerRef);
   const [draft, setDraft] = useState("");
   // { id, senderName, preview } of the message being replied to, or null.
   const [replyTarget, setReplyTarget] = useState(null);
@@ -196,72 +209,74 @@ export default function ChatPage() {
   const dragDepthRef = useRef(0);
   // Uploaded attachment entries by clientId, so a retry re-sends without re-uploading.
   const uploadedAttachmentsRef = useRef(new Map());
-  const sendMessage = useMutation({
-    mutationFn: async ({ text, clientId, files, replyToId }) => {
-      const recipientIds =
-        activeConversation?.type === "GROUP"
-          ? otherActiveMemberIds(activeConversation, user?.id)
-          : peer?.id;
-      try {
-        if (files?.length) {
-          return await sendAttachmentsWithCache({
-            syncEngine,
-            deviceId: deviceCredential.deviceId,
-            conversationId: activeId,
-            recipientUserId: recipientIds,
-            files,
-            caption: text,
-            clientMessageId: clientId,
-            uploaded: uploadedAttachmentsRef.current,
-            onStage: (stage) =>
-              setPendingMessages((prev) =>
-                prev.map((item) => (item.clientId === clientId ? { ...item, stage } : item)),
-              ),
-          });
-        }
-        return await sendEncryptedChatMessage(
-          syncEngine,
-          deviceCredential.deviceId,
-          activeId,
-          recipientIds,
-          text,
-          clientId,
-          replyToId,
-        );
-      } catch (error) {
-        if (error?.code !== "DEVICE_REVOKED" && error?.code !== "SESSION_NOT_LINKED") throw error;
-        // Device retired or unlinked: reprovision for the next attempt, no retry of this send.
-        if (!(await reprovisionDevice())) {
-          throw new Error("Couldn't reconnect this device. Try again in a moment.", {
-            cause: error,
-          });
-        }
-        throw new Error(
-          "Your device needed to be reconnected. Give it a few seconds to rejoin your conversations, then try sending again.",
-          { cause: error },
-        );
+  const recipientIds = () =>
+    activeConversation?.type === "GROUP" ? otherActiveMemberIds(activeConversation, user?.id) : peer?.id;
+  // A retired or unlinked device is reprovisioned for the next attempt; this attempt is not retried.
+  const withDeviceRecovery = async (action) => {
+    try {
+      return await action();
+    } catch (error) {
+      if (error?.code !== "DEVICE_REVOKED" && error?.code !== "SESSION_NOT_LINKED") throw error;
+      if (!(await reprovisionDevice())) {
+        throw new Error("Couldn't reconnect this device. Try again in a moment.", {
+          cause: error,
+        });
       }
-    },
+      throw new Error(
+        "Your device needed to be reconnected. Give it a few seconds to rejoin your conversations, then try sending again.",
+        { cause: error },
+      );
+    }
+  };
+  // Merges a message the server just stored into the cache instead of refetching.
+  const mergeIntoMessageCache = (conversationId, message) => {
+    const hadCachedMessages = Boolean(queryClient.getQueryData(queryKeys.chatMessages(conversationId)));
+    queryClient.setQueryData(queryKeys.chatMessages(conversationId), (old) => {
+      if (!old || old.items.some((item) => item.id === message.id)) {
+        return old;
+      }
+      return { ...old, items: [...old.items, message] };
+    });
+    if (!hadCachedMessages) {
+      // A brand-new conversation (this group's first-ever message) has no cached page to merge
+      // into, so the write above was a silent no-op - fetch it instead of losing the message.
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(conversationId) });
+    }
+  };
+  const sendMessage = useMutation({
+    mutationFn: ({ text, clientId, files, replyToId }) =>
+      withDeviceRecovery(() =>
+        files?.length
+          ? sendAttachmentsWithCache({
+              syncEngine,
+              deviceId: deviceCredential.deviceId,
+              conversationId: activeId,
+              recipientUserId: recipientIds(),
+              files,
+              caption: text,
+              clientMessageId: clientId,
+              uploaded: uploadedAttachmentsRef.current,
+              onStage: (stage) =>
+                setPendingMessages((prev) =>
+                  prev.map((item) => (item.clientId === clientId ? { ...item, stage } : item)),
+                ),
+            })
+          : sendEncryptedChatMessage(
+              syncEngine,
+              deviceCredential.deviceId,
+              activeId,
+              recipientIds(),
+              text,
+              clientId,
+              replyToId,
+            ),
+      ),
     onSuccess: (response, variables) => {
       uploadedAttachmentsRef.current.delete(variables.clientId);
       setPendingMessages((prev) =>
         prev.filter((pending) => pending.clientId !== variables.clientId),
       );
-      // Merge the sent message into the cache instead of refetching.
-      const hadCachedMessages = Boolean(
-        queryClient.getQueryData(queryKeys.chatMessages(activeId)),
-      );
-      queryClient.setQueryData(queryKeys.chatMessages(activeId), (old) => {
-        if (!old || old.items.some((item) => item.id === response.message.id)) {
-          return old;
-        }
-        return { ...old, items: [...old.items, response.message] };
-      });
-      if (!hadCachedMessages) {
-        // A brand-new conversation (this group's first-ever message) has no cached page to merge
-        // into, so the write above was a silent no-op - fetch it instead of losing the message.
-        queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(activeId) });
-      }
+      mergeIntoMessageCache(response.conversationId ?? activeId, response.message);
       queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
     },
     onError: (error, variables) => {
@@ -277,6 +292,31 @@ export default function ChatPage() {
       prev.map((item) => (item.clientId === pending.clientId ? { ...item, failed: false } : item)),
     );
     sendMessage.mutate({ text: pending.text, clientId: pending.clientId, files: pending.files });
+  };
+
+  const composerInputRef = useRef(null);
+  const messageEdit = useMessageEdit({
+    draft,
+    setDraft,
+    edited,
+    messagesById,
+    send: ({ messageId, text, n, clientId }) =>
+      withDeviceRecovery(() =>
+        sendEncryptedEdit(
+          syncEngine,
+          deviceCredential.deviceId,
+          activeId,
+          recipientIds(),
+          { targetMessageId: messageId, text, n },
+          clientId,
+        ),
+      ),
+    onSent: (response) => mergeIntoMessageCache(response.conversationId ?? activeId, response.message),
+    focusInput: () => requestAnimationFrame(() => composerInputRef.current?.focus()),
+  });
+  const startEdit = (message) => {
+    setReplyTarget(null);
+    messageEdit.start(message);
   };
 
   // Reactions are plaintext metadata, not part of the encrypted envelope. A socket event (handled
@@ -321,11 +361,8 @@ export default function ChatPage() {
     onError: rollbackOptimisticUpdate,
     onSettled: refetchMessages,
   });
-  const handleDelete = (messageId) => {
-    if (window.confirm("Unsend this message? This can't be undone.")) {
-      deleteMessageMutation.mutate(messageId);
-    }
-  };
+  // The message the remove dialog is asking about: { id, mine }.
+  const [removeTarget, setRemoveTarget] = useState(null);
   const handleCopy = (text) => {
     if (text) navigator.clipboard?.writeText(text).catch(() => {});
   };
@@ -430,15 +467,22 @@ export default function ChatPage() {
     typingSignal.stop(replyLightboxOwnerId);
     setReplyLightboxOwnerId(activeId);
     setReplyTarget(null);
+    if (messageEdit.target) messageEdit.leave();
+    setRemoveTarget(null);
     setLightboxKey(null);
     setHiddenMessageIds(getHiddenMessageIds(activeId));
     setHiddenNotice(null);
   }
-  const handleDeleteForMe = (messageId) => {
-    if (!window.confirm("Hide this message on this device? You can undo it right after.")) return;
+  const hideMessage = (messageId) => {
     hideMessageForMe(activeId, messageId);
     setHiddenMessageIds((current) => new Set(current).add(messageId));
     setHiddenNotice({ conversationId: activeId, messageId });
+  };
+  const confirmRemove = (scope) => {
+    const { id } = removeTarget;
+    setRemoveTarget(null);
+    if (scope === "everyone") deleteMessageMutation.mutate(id);
+    else hideMessage(id);
   };
   const undoDeleteForMe = () => {
     if (!hiddenNotice) return;
@@ -464,10 +508,32 @@ export default function ChatPage() {
   const activePendingCount = pendingMessages.filter(
     (pending) => pending.conversationId === activeId,
   ).length;
-  // Follows the latest message, including optimistic bubbles.
+  const receiptInfo = useReceiptDisplay({
+    messages: displayMessages,
+    hiddenMessageIds,
+    userId: user?.id,
+    conversation: activeConversation,
+    peerId: peer?.id,
+    hasPending: activePendingCount > 0,
+  });
+  const someoneTyping = typingNames.length > 0;
+  const previousPendingCount = useRef(0);
+  // Opening a conversation starts at its newest message.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ block: "end" });
-  }, [activeId, messages.data?.items?.length, decryptedCount, activePendingCount]);
+    scrollToBottom();
+  }, [activeId, scrollToBottom]);
+  // Reaction chips and "Edited" labels make the thread taller without adding a message.
+  const reactionCount = displayMessages.reduce((total, message) => total + (message.reactions?.length ?? 0), 0);
+  const editLabelCount = edited.size + messageEdit.pending.size;
+  // New messages, reactions, edits and the typing indicator only follow you while you're already at the bottom.
+  useEffect(() => {
+    followIfNearBottom();
+  }, [messages.data?.items?.length, decryptedCount, someoneTyping, reactionCount, editLabelCount, followIfNearBottom]);
+  // Sending a message always takes you to it, wherever you were.
+  useEffect(() => {
+    if (activePendingCount > previousPendingCount.current) scrollToBottom();
+    previousPendingCount.current = activePendingCount;
+  }, [activePendingCount, scrollToBottom]);
 
   const refreshChat = async () => {
     await Promise.all([
@@ -545,6 +611,17 @@ export default function ChatPage() {
   const composeMenuStyle = useFloatingPosition(isComposeMenuOpen, composeMenuButtonRef, composeMenuRef);
 
   const [isConversationInfoOpen, setIsConversationInfoOpen] = useState(false);
+  // A message search started from the sidebar: opens that conversation's search panel with the same text.
+  const [searchSeed, setSearchSeed] = useState(null);
+  const selectConversation = (conversationId) => {
+    setSelectedId(conversationId);
+    setSearchSeed(null);
+  };
+  const openMessageSearch = (conversationId, messageId) => {
+    setSelectedId(conversationId);
+    setSearchSeed({ conversationId, messageId, query: messageQuery ?? "", nonce: Date.now() });
+    setIsConversationInfoOpen(true);
+  };
 
   if (isSessionLoading || !isAuthenticated) {
     return <ChatSkeleton />;
@@ -836,18 +913,28 @@ export default function ChatPage() {
           <div className="chat-sidebar-search">
             <FiSearch aria-hidden="true" />
             <input
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search conversations..."
+              enterKeyHint="search"
+              onChange={(event) => {
+                setSearch(event.target.value);
+                if (!event.target.value.trim()) setMessageQuery((current) => (current === null ? null : ""));
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && search.trim().length >= MIN_SEARCH_CHARS) setMessageQuery(search.trim());
+              }}
+              placeholder="Search chats and messages..."
               type="text"
               value={search}
             />
           </div>
+          {search.trim().length >= MIN_SEARCH_CHARS && search.trim() !== messageQuery && (
+            <small className="chat-sidebar-search-hint">Press Enter to search messages</small>
+          )}
           <QueryNotice
             isLoading={listQuery.isLoading}
             isError={listQuery.isError}
             isEmpty={!currentList.length}
             emptyText={
-              searchTerm
+              isFiltering
                 ? "No conversations match your search."
                 : view === "requests"
                   ? "No pending requests."
@@ -857,44 +944,25 @@ export default function ChatPage() {
             }
           />
           <div className="chat-conversation-list">
-            {currentList.map((conversation) => {
-              const isGroup = conversation.type === "GROUP";
-              const displayName = conversationDisplayName(conversation, user?.id);
-              return (
-                <button
-                  className={activeId === conversation.id ? "active" : ""}
-                  key={conversation.id}
-                  onClick={() => setSelectedId(conversation.id)}
-                  type="button"
-                >
-                  <span className="chat-avatar">
-                    <AvatarFace
-                      image={conversationImage(conversation, user?.id)}
-                      name={displayName}
-                    />
-                  </span>
-                  <span>
-                    <b>{displayName}</b>
-                    <small>
-                      {isGroup ? (
-                        <>
-                          <FiUsers /> {activeMembers(conversation).length} members
-                        </>
-                      ) : (
-                        <>
-                          <FiLock /> Encrypted message
-                        </>
-                      )}
-                    </small>
-                  </span>
-                  <span className="chat-list-meta">
-                    <small>{relativeTime(conversation.updatedAt)}</small>
-                    {conversation.unreadCount > 0 && <b>{conversation.unreadCount}</b>}
-                  </span>
-                </button>
-              );
-            })}
+            {currentList.map((conversation) => (
+              <ConversationListItem
+                active={activeId === conversation.id}
+                conversation={conversation}
+                key={conversation.id}
+                onSelect={selectConversation}
+                preview={conversationPreviews[conversation.lastMessage?.id]}
+                userId={user?.id}
+              />
+            ))}
           </div>
+          {messageQuery !== null && (
+            <SidebarMessageSearch
+              conversations={listQuery.data}
+              onSelect={openMessageSearch}
+              query={messageQuery}
+              userId={user?.id}
+            />
+          )}
         </aside>
 
         <section
@@ -968,10 +1036,14 @@ export default function ChatPage() {
               <div className="sr-only" aria-live="polite" aria-atomic="true">
                 <p key={announcement.seq}>{announcement.text}</p>
               </div>
+              <div className="chat-messages-wrap">
               <div
                 className="chat-messages"
                 ref={messagesContainerRef}
-                onScroll={handleMessagesScroll}
+                onScroll={(event) => {
+                  trackMessagesScroll(event);
+                  handleMessagesScroll(event);
+                }}
               >
                 <AttachmentLightboxContext.Provider value={setLightboxKey}>
                 <QueryNotice isLoading={messages.isLoading} isError={messages.isError} />
@@ -1009,14 +1081,19 @@ export default function ChatPage() {
                     <ThreadRow
                       conversation={activeConversation}
                       decryptedById={decryptedMessages}
+                      edited={edited}
                       item={item}
+                      onDiscardEdit={messageEdit.discard}
+                      onRetryEdit={messageEdit.retry}
+                      pendingEdits={messageEdit.pending}
+                      receiptInfo={receiptInfo}
                       key={threadItemKey(item)}
                       messagesById={messagesById}
                       neighbors={neighbors}
                       now={threadNow}
                       onCopy={handleCopy}
-                      onDelete={handleDelete}
-                      onDeleteForMe={handleDeleteForMe}
+                      onRemove={setRemoveTarget}
+                      onEdit={startEdit}
                       onJumpToMessage={jumpToMessage}
                       onReact={handleReact}
                       onReply={setReplyTarget}
@@ -1058,8 +1135,21 @@ export default function ChatPage() {
                       <b>No messages in this conversation</b>
                     </div>
                   )}
-                <div className="chat-messages-end" ref={messagesEndRef} />
+                {typingNames.length > 0 && (
+                  <div className="chat-typing-indicator">
+                    <span className="chat-typing-pill">
+                      <span className="chat-typing-dots">
+                        <span />
+                        <span />
+                        <span />
+                      </span>
+                      {typingLabel(typingNames)}
+                    </span>
+                  </div>
+                )}
                 </AttachmentLightboxContext.Provider>
+              </div>
+              <JumpToBottomButton onClick={() => scrollToBottom("smooth")} visible={showJumpToBottom} />
               </div>
               {lightboxIndex >= 0 && (
                 <AttachmentLightbox
@@ -1100,22 +1190,6 @@ export default function ChatPage() {
                   <button aria-label="Dismiss" onClick={() => setHiddenNotice(null)} type="button">
                     <FiX />
                   </button>
-                </div>
-              )}
-              {typingNames.length > 0 && (
-                <div className="chat-typing-indicator">
-                  <span className="chat-typing-pill">
-                    <span className="chat-typing-dots">
-                      <span />
-                      <span />
-                      <span />
-                    </span>
-                    {typingNames.length === 1
-                      ? `${typingNames[0]} is typing...`
-                      : typingNames.length === 2
-                        ? `${typingNames[0]} and ${typingNames[1]} are typing...`
-                        : `${typingNames[0]} and ${typingNames.length - 1} others are typing...`}
-                  </span>
                 </div>
               )}
               {shownError && shownError.message !== dismissedErrorMessage && (
@@ -1171,10 +1245,27 @@ export default function ChatPage() {
                       </button>
                     </div>
                   )}
+                  {messageEdit.target && (
+                    <div className="chat-reply-banner chat-edit-banner">
+                      <small>
+                        <b>Editing message</b>
+                        {messageEdit.error && (
+                          <span className="chat-edit-error" role="alert">
+                            {" "}
+                            {messageEdit.error}
+                          </span>
+                        )}
+                      </small>
+                      <button aria-label="Cancel edit" onClick={messageEdit.leave} type="button">
+                        <FiX />
+                      </button>
+                    </div>
+                  )}
                   <form
                     className="chat-composer"
                     onSubmit={(event) => {
                       event.preventDefault();
+                      if (messageEdit.target) return messageEdit.submit();
                       const text = draft.trim();
                       const files = attachmentPicker.files;
                       if (!text && files.length === 0) return;
@@ -1211,6 +1302,7 @@ export default function ChatPage() {
                   <button
                     aria-label="Attach files"
                     className="chat-attach-button"
+                    disabled={Boolean(messageEdit.target)}
                     onClick={() => fileInputRef.current?.click()}
                     type="button"
                   >
@@ -1219,18 +1311,26 @@ export default function ChatPage() {
                   <input
                     onChange={(event) => {
                       setDraft(event.target.value);
-                      if (event.target.value.trim()) typingSignal.ping(activeId);
+                      if (!messageEdit.target && event.target.value.trim()) typingSignal.ping(activeId);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape" && messageEdit.target) messageEdit.leave();
                     }}
                     onPaste={handleDraftPaste}
-                    placeholder="Send an encrypted message..."
+                    placeholder={messageEdit.target ? "Edit your message..." : "Send an encrypted message..."}
+                    ref={composerInputRef}
                     value={draft}
                   />
                   <button
-                    aria-label="Send"
-                    disabled={!draft.trim() && attachmentPicker.files.length === 0}
+                    aria-label={messageEdit.target ? "Save edit" : "Send"}
+                    disabled={
+                      messageEdit.target
+                        ? !draft.trim()
+                        : !draft.trim() && attachmentPicker.files.length === 0
+                    }
                     type="submit"
                   >
-                    <FiSend />
+                    {messageEdit.target ? <FiCheck /> : <FiSend />}
                   </button>
                   </form>
                 </>
@@ -1256,16 +1356,13 @@ export default function ChatPage() {
               )}
             </>
           ) : (
-            <div className="chat-empty-thread">
-              <FiMessageCircle />
-              <b>Select a conversation</b>
-              <small>Your messages or requests will appear here.</small>
-            </div>
+            <NoChatSelected />
           )}
         </section>
 
         <ConversationInfoPanel
           canVerify={canVerify}
+          conversation={activeConversation}
           displayImage={activeConversationImage}
           displayName={activeConversationName}
           encryptionStatus={encryptionStatus}
@@ -1280,10 +1377,28 @@ export default function ChatPage() {
           onManageGroup={() => setIsGroupSettingsOpen(true)}
           onOpenAttachment={setLightboxKey}
           onVerify={() => setVerifyPeerId(verifyPeerCandidate)}
+          search={{
+            messagesById,
+            hiddenMessageIds,
+            history: {
+              hasMoreHistory,
+              isLoadingOlder,
+              isWaitingOnRateLimit,
+              rateLimitSecondsLeft,
+              historyError,
+              retryHistory,
+              loadOlderMessages,
+            },
+            onJump: jumpToMessage,
+          }}
+          searchSeed={searchSeed?.conversationId === activeId ? searchSeed : null}
+          userId={user?.id}
           verifyLabel={verifyLabel}
           visualAttachments={flatAttachments}
         />
       </div>
+
+      <RemoveMessageDialog onClose={() => setRemoveTarget(null)} onConfirm={confirmRemove} target={removeTarget} />
 
       <DevicesModal
         currentDeviceId={deviceCredential?.deviceId}

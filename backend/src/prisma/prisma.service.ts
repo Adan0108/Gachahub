@@ -9,6 +9,12 @@ if (!databaseUrl) {
   throw new Error('DATABASE_URL is missing from .env');
 }
 
+/** Default for every interactive transaction (a call can still override it); Prisma's 5s timeout is too tight over a remote database. */
+export const TRANSACTION_OPTIONS = {
+  maxWait: 5_000,
+  timeout: 15_000,
+} as const;
+
 @Injectable()
 export class PrismaService
   extends PrismaClient
@@ -19,7 +25,7 @@ export class PrismaService
       connectionString: databaseUrl,
     });
 
-    super({ adapter });
+    super({ adapter, transactionOptions: TRANSACTION_OPTIONS });
   }
 
   async onModuleInit() {

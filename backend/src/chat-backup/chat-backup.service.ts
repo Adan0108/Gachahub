@@ -180,7 +180,12 @@ export class ChatBackupService {
       // started can never be deleted without its own proof.
       await this.repository.verifyProofAndMutate(
         userId,
-        { action: 'delete', nonce: dto.nonce, proof: dto.proof, now: new Date() },
+        {
+          action: 'delete',
+          nonce: dto.nonce,
+          proof: dto.proof,
+          now: new Date(),
+        },
         async (tx) => {
           await tx.chatBackupBlob.deleteMany({ where: { userId } });
           await tx.chatBackupKey.deleteMany({ where: { userId } });

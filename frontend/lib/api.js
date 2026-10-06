@@ -80,6 +80,7 @@ export const backendRoutes = {
   chatMessages: (conversationId) =>
     `/chat/conversations/${encodePathParam(conversationId)}/messages`,
   chatMessage: (messageId) => `/chat/messages/${encodePathParam(messageId)}`,
+  chatMessageEdits: (messageId) => `/chat/messages/${encodePathParam(messageId)}/edits`,
   chatMessageReactions: (messageId) =>
     `/chat/messages/${encodePathParam(messageId)}/reactions`,
   chatAcceptRequest: (conversationId) => `/chat/requests/${encodePathParam(conversationId)}/accept`,
@@ -87,6 +88,8 @@ export const backendRoutes = {
     `/chat/requests/${encodePathParam(conversationId)}/decline`,
   chatBlockConversation: (conversationId) =>
     `/chat/conversations/${encodePathParam(conversationId)}/block`,
+  chatNotificationLevel: (conversationId) =>
+    `/chat/conversations/${encodePathParam(conversationId)}/notification-level`,
   chatGroups: '/chat/groups',
   chatGroup: (conversationId) => `/chat/groups/${encodePathParam(conversationId)}`,
   chatGroupMembers: (conversationId) =>
@@ -837,6 +840,13 @@ export const api = {
     mutation(backendRoutes.chatDeclineRequest(conversationId)),
   blockChatConversation: (conversationId) =>
     mutation(backendRoutes.chatBlockConversation(conversationId)),
+  /** `notificationLevel` is ALL or NOTHING (muted); `mutedUntil` is an ISO time, omitted for an open-ended mute. */
+  setChatNotificationLevel: (conversationId, { notificationLevel, mutedUntil }) =>
+    mutation(
+      backendRoutes.chatNotificationLevel(conversationId),
+      { notificationLevel, mutedUntil },
+      { method: 'PATCH' },
+    ),
   createGroupChat: ({ title, photoUrl, memberUserIds }) =>
     mutation(backendRoutes.chatGroups, { title, photoUrl, memberUserIds }),
   updateGroupChat: (conversationId, { title, photoUrl }) =>
@@ -862,6 +872,11 @@ export const api = {
   removeReaction: (messageId) =>
     mutation(backendRoutes.chatMessageReactions(messageId), undefined, { method: 'DELETE' }),
   // Own message only; soft delete (server clears the ciphertext, the row stays for history).
+  /** Changes the signed-in user's settings (for now: sendReadReceipts, messageRequestSetting); answers with the /users/me shape. */
+  updateProfile: (changes) => mutation(backendRoutes.currentUser, changes, { method: 'PATCH' }),
+  /** The new text goes as a new encrypted message; `clientMessageId` makes a retry safe. */
+  editChatMessage: (messageId, { ciphertext, encryptionMeta, clientMessageId }) =>
+    mutation(backendRoutes.chatMessageEdits(messageId), { ciphertext, encryptionMeta, clientMessageId }),
   deleteChatMessage: (messageId) =>
     mutation(backendRoutes.chatMessage(messageId), undefined, { method: 'DELETE' }),
   // History backup: { enabled, keyCheck, deletionScheduledFor: ISO | null, blobCount, bytesUsed }. Blobs are opaque base64 ciphertext.

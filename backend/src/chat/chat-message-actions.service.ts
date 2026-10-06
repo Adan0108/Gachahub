@@ -5,19 +5,17 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '../generated/prisma/client';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
 import { GamesService } from '../games/games.service';
 import { MediaService } from '../media/media.service';
 import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
-import { EditMessageDto } from './dto/edit-message.dto';
 import { ReactToMessageDto } from './dto/react-to-message.dto';
 import type { ChatDeliveryPort } from './ports/chat-delivery.port';
 
 /**
- * Message-level actions after the initial send: reactions, edits, deletes,
+ * Message-level actions after the initial send: reactions, deletes,
  * game emotes, and typing-indicator recipients. Pulled out of the former
  * monolithic ChatService as its own concern - each of these operates on one
  * existing message or conversation's participant list, not on the send
@@ -156,45 +154,6 @@ export class ChatMessageActionsService {
     return {
       removedCount: result.count,
     };
-  }
-
-  /**
-   * Edits the current user's own encrypted message.
-   *
-   * Business behavior:
-   * - Only the original sender can edit.
-   * - Deleted messages cannot be edited.
-   * - Edited message gets a new encrypted payload and editedAt timestamp.
-   * - Publishes a real-time event to other participants.
-   */
-  async editMessage(userId: string, messageId: string, dto: EditMessageDto) {
-    const message = await this.chatAccessService.assertCanModifyOwnMessage(
-      userId,
-      messageId,
-    );
-
-    this.chatAccessService.assertNoMembershipChangePending(
-      message.conversation.participants,
-    );
-
-    const updated = await this.chatRepository.updateMessage({
-      messageId,
-      ciphertext: dto.ciphertext,
-      encryptionMeta: dto.encryptionMeta as Prisma.InputJsonValue | undefined,
-      contentType: dto.contentType,
-    });
-
-    await this.chatDelivery.publishMessageEdited({
-      conversationId: message.conversationId,
-      messageId,
-      actorId: userId,
-      recipientUserIds: this.chatAccessService.getDeliverableRecipientIds(
-        message.conversation,
-        userId,
-      ),
-    });
-
-    return updated;
   }
 
   /**

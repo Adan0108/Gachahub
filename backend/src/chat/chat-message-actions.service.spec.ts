@@ -35,7 +35,6 @@ jest.mock('../generated/prisma/client', () => ({
   Prisma: loadActualPrisma(),
 }));
 
-import { MembershipChangePendingException } from '../common/exceptions/membership-change-pending.exception';
 import { ChatAccessService } from './chat-access.service';
 import { ChatMessageActionsService } from './chat-message-actions.service';
 
@@ -68,7 +67,6 @@ describe('ChatMessageActionsService', () => {
     updateParticipantPinnedAt: jest.fn(),
     markMessagesDelivered: jest.fn(),
     markConversationRead: jest.fn(),
-    updateMessage: jest.fn(),
     softDeleteMessage: jest.fn(),
     findInboxConversations: jest.fn(),
     findConversationType: jest.fn(),
@@ -115,6 +113,7 @@ describe('ChatMessageActionsService', () => {
     publishReactionAdded: jest.fn(),
     publishReactionRemoved: jest.fn(),
     publishRequestAccepted: jest.fn(),
+    publishReceiptsUpdated: jest.fn(),
   };
 
   let chatAccessService: ChatAccessService;
@@ -458,15 +457,11 @@ describe('ChatMessageActionsService', () => {
     });
   });
 
-  describe('editMessage / deleteMessage (permission)', () => {
+  describe('deleteMessage (permission)', () => {
     const modifyMessageMethods: Array<{
       name: string;
       call: (userId: string, messageId: string) => Promise<unknown>;
     }> = [
-      {
-        name: 'editMessage',
-        call: (u, m) => service.editMessage(u, m, { ciphertext: 'new-cipher' }),
-      },
       { name: 'deleteMessage', call: (u, m) => service.deleteMessage(u, m) },
     ];
 
@@ -516,87 +511,38 @@ describe('ChatMessageActionsService', () => {
         );
       },
     );
-  });
 
-  describe('editMessage', () => {
-    it('makes the sender wait while a group member is still being removed', async () => {
+    it('treats a hidden edit message as not there, so it cannot be unsent on its own', async () => {
       repository.findMessageWithParticipants.mockResolvedValue({
-        id: 'message-1',
+        id: 'edit-1',
         status: 'SENT',
-        senderId: 'user-1',
-        conversation: {
-          participants: [
-            { userId: 'user-1', state: 'ACTIVE' },
-            { userId: 'user-2', state: 'LEAVING' },
-          ],
-        },
-      });
-
-      await expect(
-        service.editMessage('user-1', 'message-1', {
-          ciphertext: 'new-cipher',
-        } as any),
-      ).rejects.toThrow(MembershipChangePendingException);
-
-      expect(repository.updateMessage).not.toHaveBeenCalled();
-    });
-
-    it('updates the message on success', async () => {
-      repository.findMessageWithParticipants.mockResolvedValue({
-        id: 'message-1',
-        status: 'SENT',
+        contentType: 'EDIT',
         senderId: 'user-1',
         conversation: {
           participants: [{ userId: 'user-1', state: 'ACTIVE' }],
         },
       });
-      repository.updateMessage.mockResolvedValue({
-        id: 'message-1',
-        ciphertext: 'new-cipher',
-      });
 
-      await service.editMessage('user-1', 'message-1', {
-        ciphertext: 'new-cipher',
-        contentType: 'IMAGE',
-      } as any);
-
-      expect(repository.updateMessage).toHaveBeenCalledWith({
-        messageId: 'message-1',
-        ciphertext: 'new-cipher',
-        encryptionMeta: undefined,
-        contentType: 'IMAGE',
-      });
+      await expect(service.deleteMessage('user-1', 'edit-1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(repository.softDeleteMessage).not.toHaveBeenCalled();
     });
 
-    it('publishes a message-edited event with the deliverable recipients', async () => {
+    it('does not let anyone react to a hidden edit message', async () => {
       repository.findMessageWithParticipants.mockResolvedValue({
-        id: 'message-1',
-        conversationId: 'conversation-1',
+        id: 'edit-1',
         status: 'SENT',
-        senderId: 'user-1',
+        contentType: 'EDIT',
+        senderId: 'user-2',
         conversation: {
-          type: 'DIRECT',
-          participants: [
-            { userId: 'user-1', state: 'ACTIVE', deletedAt: null },
-            { userId: 'user-2', state: 'ACTIVE', deletedAt: null },
-          ],
+          participants: [{ userId: 'user-1', state: 'ACTIVE' }],
         },
       });
-      repository.updateMessage.mockResolvedValue({
-        id: 'message-1',
-        ciphertext: 'new-cipher',
-      });
 
-      await service.editMessage('user-1', 'message-1', {
-        ciphertext: 'new-cipher',
-      });
-
-      expect(chatDelivery.publishMessageEdited).toHaveBeenCalledWith({
-        conversationId: 'conversation-1',
-        messageId: 'message-1',
-        actorId: 'user-1',
-        recipientUserIds: ['user-2'],
-      });
+      await expect(
+        service.reactToMessage('user-1', 'edit-1', { emoji: '👍' }),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 

@@ -1,6 +1,7 @@
 import { api } from '../../api';
 import { bytesToBase64 } from '../storage/base64';
 import { ensureConversationGroup } from './ensureConversationGroup';
+import { buildEditEnvelope } from './editEnvelope';
 import { senderMeta } from './messageOrigin';
 import type { SyncEngine } from '../sync/syncEngine';
 import { EncryptedIndexedDbMessagePlaintextStore } from '../storage/messagePlaintextStore';
@@ -30,8 +31,11 @@ export function sendEncryptedChatMessage(
   );
 }
 
+type WireMessage = { ciphertext: string; encryptionMeta: ReturnType<typeof senderMeta> };
+type Submit = (wire: WireMessage) => Promise<{ message: { id: string } }>;
+
 /** Same send path for any envelope; `mediaUploadIds` are the already-uploaded encrypted blobs to attach. */
-export async function sendEncryptedEnvelope(
+export function sendEncryptedEnvelope(
   syncEngine: SyncEngine,
   deviceId: DeviceId,
   conversationId: ConversationId,
@@ -41,32 +45,55 @@ export async function sendEncryptedEnvelope(
   mediaUploadIds: string[] = [],
   replyToId?: string,
 ) {
-  try {
-    return await encryptAndSend(
-      syncEngine,
-      deviceId,
-      conversationId,
-      recipientUserId,
-      envelope,
+  return encryptSubmitAndCache(syncEngine, deviceId, conversationId, recipientUserId, envelope, (wire) =>
+    api.sendChatMessage(conversationId, {
+      ...wire,
+      contentType: 'TEXT',
       clientMessageId,
-      mediaUploadIds,
-      replyToId,
-    );
+      ...(replyToId ? { replyToId } : {}),
+      ...(mediaUploadIds.length
+        ? { media: mediaUploadIds.map((mediaUploadId, sortOrder) => ({ mediaUploadId, sortOrder })) }
+        : {}),
+    }),
+  );
+}
+
+/** Sends a new body for one of your own text messages: encrypted like any message, stored by the server as a hidden edit. `n` is which edit of the message this is. */
+export function sendEncryptedEdit(
+  syncEngine: SyncEngine,
+  deviceId: DeviceId,
+  conversationId: ConversationId,
+  recipientUserId: UserId | UserId[],
+  edit: { targetMessageId: string; text: string; n: number },
+  clientMessageId: string,
+) {
+  return encryptSubmitAndCache(
+    syncEngine,
+    deviceId,
+    conversationId,
+    recipientUserId,
+    buildEditEnvelope(edit),
+    (wire) => api.editChatMessage(edit.targetMessageId, { ...wire, clientMessageId }),
+  );
+}
+
+/** Encrypts, submits and caches the plaintext, re-trying once after catching up on a pending membership change. */
+async function encryptSubmitAndCache(
+  syncEngine: SyncEngine,
+  deviceId: DeviceId,
+  conversationId: ConversationId,
+  recipientUserId: UserId | UserId[],
+  envelope: PlaintextEnvelope,
+  submit: Submit,
+) {
+  try {
+    return await encryptAndSend(syncEngine, deviceId, conversationId, recipientUserId, envelope, submit);
   } catch (error) {
     if (!isMembershipChangePending(error)) throw error;
 
     // A member is being removed, so anything encrypted now would still be readable to them
     await syncEngine.reconcileMembership({ conversationId });
-    return encryptAndSend(
-      syncEngine,
-      deviceId,
-      conversationId,
-      recipientUserId,
-      envelope,
-      clientMessageId,
-      mediaUploadIds,
-      replyToId,
-    );
+    return encryptAndSend(syncEngine, deviceId, conversationId, recipientUserId, envelope, submit);
   }
 }
 
@@ -84,23 +111,15 @@ async function encryptAndSend(
   conversationId: ConversationId,
   recipientUserId: UserId | UserId[],
   envelope: PlaintextEnvelope,
-  clientMessageId: string,
-  mediaUploadIds: string[],
-  replyToId?: string,
+  submit: Submit,
 ) {
   await ensureConversationGroup(syncEngine, conversationId, recipientUserId);
 
   const { wireBytes, epoch } = await syncEngine.encryptMessage(conversationId, envelope);
 
-  const response = await api.sendChatMessage(conversationId, {
+  const response = await submit({
     ciphertext: bytesToBase64(wireBytes),
-    contentType: 'TEXT',
-    clientMessageId,
     encryptionMeta: senderMeta(deviceId),
-    ...(replyToId ? { replyToId } : {}),
-    ...(mediaUploadIds.length
-      ? { media: mediaUploadIds.map((mediaUploadId, sortOrder) => ({ mediaUploadId, sortOrder })) }
-      : {}),
   });
 
   await plaintextStore.save({

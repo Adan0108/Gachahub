@@ -5,8 +5,8 @@ import type { CSSProperties, ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 
 export interface FloatingPositionOptions {
-  /** Which edge of the button the menu's own edge lines up with. */
-  align?: "start" | "end";
+  /** Which edge of the button the menu's own edge lines up with, or "center" to centre it on the button. */
+  align?: "start" | "end" | "center";
   /** Gap between the button and the menu. */
   gap?: number;
 }
@@ -68,7 +68,12 @@ export function useFloatingPosition(
         ? buttonRect.bottom + gap
         : Math.max(8, buttonRect.top - gap - menuRect.height);
 
-      const preferredLeft = align === "end" ? buttonRect.right - menuRect.width : buttonRect.left;
+      const preferredLeft =
+        align === "end"
+          ? buttonRect.right - menuRect.width
+          : align === "center"
+            ? buttonRect.left + (buttonRect.width - menuRect.width) / 2
+            : buttonRect.left;
       const left = Math.min(Math.max(8, preferredLeft), viewportWidth - menuRect.width - 8);
 
       setStyle({ position: "fixed", top, left });

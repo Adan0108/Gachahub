@@ -31,11 +31,12 @@ import type {
 import { CredentialMismatchError } from '../contract/errors';
 import { bytesEqual } from '../bytes';
 import { isAttachmentEnvelope } from '../media/attachmentEnvelope';
+import { isEditEnvelope } from '../messaging/editEnvelope';
 import { decodeIdentity } from './identityCodec';
 import { diffLeafMembership, listLeafCredentials } from './leafMembership';
 import { encodeConversationId, getImpl } from './tsMlsShared';
 
-const BODY_ENVELOPE_TYPES = new Set(['text', 'edit', 'delete', 'reaction']);
+const BODY_ENVELOPE_TYPES = new Set(['text', 'delete', 'reaction']);
 
 /** Guards against a malformed or version-mismatched decrypted payload rather than trusting contract/types.ts's shape via a bare cast. */
 function isPlaintextEnvelope(value: unknown): value is PlaintextEnvelope {
@@ -44,6 +45,7 @@ function isPlaintextEnvelope(value: unknown): value is PlaintextEnvelope {
   }
   const { type } = value as { type?: unknown };
   if (type === 'attachment') return isAttachmentEnvelope(value);
+  if (type === 'edit') return isEditEnvelope(value);
   return BODY_ENVELOPE_TYPES.has(type as string);
 }
 

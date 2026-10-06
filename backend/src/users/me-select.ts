@@ -11,6 +11,7 @@ export const ME_SELECT = {
   role: true,
   status: true,
   messageRequestSetting: true,
+  sendReadReceipts: true,
   username: true,
   onboarded: true,
 } as const;

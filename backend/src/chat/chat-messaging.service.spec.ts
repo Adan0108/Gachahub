@@ -131,6 +131,7 @@ describe('ChatMessagingService', () => {
     publishReactionAdded: jest.fn(),
     publishReactionRemoved: jest.fn(),
     publishRequestAccepted: jest.fn(),
+    publishReceiptsUpdated: jest.fn(),
   };
 
   const eventPublisher = {
@@ -181,8 +182,9 @@ describe('ChatMessagingService', () => {
     // membership change racing the send override this directly.
     repository.lockAndFindParticipants.mockImplementation(
       async (_tx: unknown, conversationId: string) => {
-        const conversation =
-          await repository.findConversationWithParticipants(conversationId);
+        const conversation = (await repository.findConversationWithParticipants(
+          conversationId,
+        )) as { participants?: unknown[] } | null;
         return conversation?.participants ?? [];
       },
     );
