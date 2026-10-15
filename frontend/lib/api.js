@@ -203,7 +203,7 @@ export function normalizePost(post) {
 
   return {
     id: post.id,
-    title: post.title,
+    title: post.title || post.content?.slice(0, 100) || 'Post',
     author: post.author?.name || 'Unknown user',
     authorId: post.author?.id || post.authorId,
     authorImage: post.author?.image || null,
@@ -215,7 +215,7 @@ export function normalizePost(post) {
     media: Array.isArray(post.media) ? post.media : [],
     visibility: post.visibility || "PUBLIC",
     isSpoiler: Boolean(post.isSpoiler),
-    type: post.type || "GENERAL",
+    type: post.type ?? null,
     likeCount: post.reactionCount ?? post.likeCount ?? 0,
     commentCount: post.commentCount ?? 0,
     likedByCurrentUser: Boolean(post.likedByCurrentUser),
@@ -803,16 +803,24 @@ export const api = {
   hideContent: (item) =>
     mutation(
       item.type === "POST"
-        ? backendRoutes.postHide(item.gameSlug, item.id)
-        : backendRoutes.commentHide(item.gameSlug, item.id),
+        ? item.gameSlug
+          ? backendRoutes.postHide(item.gameSlug, item.id)
+          : `/admin/posts/${encodePathParam(item.id)}/hide`
+        : item.gameSlug
+          ? backendRoutes.commentHide(item.gameSlug, item.id)
+          : `/admin/comments/${encodePathParam(item.id)}/hide`,
       undefined,
       { method: "PATCH" },
     ),
   restoreContent: (item) =>
     mutation(
       item.type === "POST"
-        ? backendRoutes.postRestore(item.gameSlug, item.id)
-        : backendRoutes.commentRestore(item.gameSlug, item.id),
+        ? item.gameSlug
+          ? backendRoutes.postRestore(item.gameSlug, item.id)
+          : `/admin/posts/${encodePathParam(item.id)}/restore`
+        : item.gameSlug
+          ? backendRoutes.commentRestore(item.gameSlug, item.id)
+          : `/admin/comments/${encodePathParam(item.id)}/restore`,
       undefined,
       { method: "PATCH" },
     ),

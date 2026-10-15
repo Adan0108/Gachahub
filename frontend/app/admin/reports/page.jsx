@@ -40,14 +40,20 @@ export default function AdminReportsPage() {
   const [note, setNote] = useState("");
 
   const claimMutation = useMutation({
-    mutationFn: (report) => api.claimReport(report.game.slug, report.id),
+    mutationFn: (report) => {
+      if (!report.game?.slug) throw new Error("Platform report moderation is not available yet.");
+      return api.claimReport(report.game.slug, report.id);
+    },
     onSuccess: invalidate,
     onError: (error) => showNotice(error.message || "Could not claim report"),
   });
   const decision = DECISIONS[decisionKey];
   const decisionMutation = useMutation({
-    mutationFn: () =>
-      decision.call(selected.game.slug, selected.id, { resolutionNote: note.trim() }),
+    mutationFn: () => {
+      if (!selected?.game?.slug)
+        throw new Error("Platform report moderation is not available yet.");
+      return decision.call(selected.game.slug, selected.id, { resolutionNote: note.trim() });
+    },
     onSuccess: () => {
       invalidate();
       setSelected(null);
@@ -60,6 +66,10 @@ export default function AdminReportsPage() {
     return <AdminState kind="loading" title="Checking admin access" />;
 
   const openDecision = (report) => {
+    if (!report.game?.slug) {
+      showNotice("Platform report moderation is not available yet.");
+      return;
+    }
     setSelected(report);
     setDecisionKey("RESOLVE");
     setNote("");
@@ -130,7 +140,7 @@ export default function AdminReportsPage() {
                         <code>{report.id}</code>
                       </div>
                     </td>
-                    <td>{report.game?.name || report.gameId}</td>
+                    <td>{report.game?.name || report.gameId || "General / Platform"}</td>
                     <td>
                       <div className="admin-target-cell">
                         <span className="admin-type-badge">{report.targetType}</span>
@@ -158,7 +168,8 @@ export default function AdminReportsPage() {
                           aria-label={`Claim ${report.id}`}
                           className="admin-icon-button"
                           disabled={
-                            claimMutation.isPending && claimMutation.variables?.id === report.id
+                            !report.game?.slug ||
+                            (claimMutation.isPending && claimMutation.variables?.id === report.id)
                           }
                           onClick={() => claimMutation.mutate(report)}
                           type="button"
@@ -169,6 +180,7 @@ export default function AdminReportsPage() {
                         <button
                           aria-label={`Review ${report.id}`}
                           className="admin-icon-button"
+                          disabled={!report.game?.slug}
                           onClick={() => openDecision(report)}
                           type="button"
                         >
@@ -179,6 +191,10 @@ export default function AdminReportsPage() {
                           <FiCheckCircle />
                         </span>
                       )}
+                      {!report.game?.slug &&
+                        (report.status === "PENDING" || report.status === "IN_REVIEW") && (
+                          <small>Platform report moderation is not available yet.</small>
+                        )}
                     </td>
                   </tr>
                 ))}
