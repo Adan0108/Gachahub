@@ -7,6 +7,7 @@ import { ChatAccessService } from './chat-access.service';
 import { ChatMessagingService } from './chat-messaging.service';
 import { ChatGroupService } from './chat-group.service';
 import { ChatInboxService } from './chat-inbox.service';
+import { ChatEmotesService } from './chat-emotes.service';
 import { ChatMessageActionsService } from './chat-message-actions.service';
 import { ChatMessageEditService } from './chat-message-edit.service';
 import { ChatReceiptsService } from './chat-receipts.service';
@@ -66,6 +67,7 @@ import { NotificationModule } from '../notifications/notification.module';
     ChatGroupService,
     ChatInboxService,
     ChatMessageActionsService,
+    ChatEmotesService,
     ChatMessageEditService,
     ChatReceiptsService,
     ChatTypingGateway,

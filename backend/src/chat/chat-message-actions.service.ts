@@ -12,6 +12,7 @@ import { GamesService } from '../games/games.service';
 import { MediaService } from '../media/media.service';
 import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
 import { ReactToMessageDto } from './dto/react-to-message.dto';
+import { isOwnEmoteAssetUrl } from './utils/emote-asset-url';
 import type { ChatDeliveryPort } from './ports/chat-delivery.port';
 
 /**
@@ -58,6 +59,15 @@ export class ChatMessageActionsService {
       throw new BadRequestException(
         'Emote requires unicode, imageUrl, or animationUrl',
       );
+    }
+
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    for (const url of [dto.imageUrl, dto.animationUrl]) {
+      if (url && !isOwnEmoteAssetUrl(url, cloudName)) {
+        throw new BadRequestException(
+          'Emote pictures must be uploaded to GachaHub',
+        );
+      }
     }
 
     return this.chatRepository.createGameChatEmote({

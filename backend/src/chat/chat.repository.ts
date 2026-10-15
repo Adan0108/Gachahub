@@ -987,6 +987,22 @@ export class ChatRepository {
     });
   }
 
+  /** Every emote the user may use: the global ones, and those of each game community they belong to. */
+  findUsableChatEmotes(userId: string) {
+    return this.prisma.chatEmote.findMany({
+      where: {
+        deletedAt: null,
+        OR: [
+          { scope: 'GLOBAL' },
+          { scope: 'GAME', game: { members: { some: { userId } } } },
+        ],
+      },
+      orderBy: [{ shortcode: 'asc' }],
+      take: 500,
+      include: { game: { select: { id: true, name: true, slug: true } } },
+    });
+  }
+
   /** Creates or replaces a user's reaction; unicode stores emoji text, custom emotes use emoteId, and updating clears the other. */
   upsertMessageReaction(params: {
     messageId: string;
