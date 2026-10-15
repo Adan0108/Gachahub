@@ -135,7 +135,9 @@ describe('ChatBackupService', () => {
         if (
           !proofMatches(expected, Buffer.from(params.proof as string, 'base64'))
         ) {
-          throw new ForbiddenException('The proof does not match the current key');
+          throw new ForbiddenException(
+            'The proof does not match the current key',
+          );
         }
 
         return mutate(fakeTx, secret);

@@ -9,7 +9,7 @@ describe('viewablePostWhere', () => {
     });
   });
 
-  it('allows PUBLIC, the viewer\'s own FOLLOWERS_ONLY posts, and FOLLOWERS_ONLY posts from authors the viewer follows', () => {
+  it("allows PUBLIC, the viewer's own FOLLOWERS_ONLY posts, and FOLLOWERS_ONLY posts from authors the viewer follows", () => {
     expect(viewablePostWhere('viewer-1')).toEqual({
       status: 'PUBLISHED',
       deletedAt: null,
