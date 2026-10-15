@@ -1,0 +1,192 @@
+.share-post-modal {
+  display: grid;
+  gap: 12px;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(640px, calc(100vh - 48px));
+  overflow: auto;
+}
+
+.share-post-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.share-post-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.share-post-head button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+}
+
+.share-post-search,
+.share-post-note {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel2);
+  color: var(--text);
+  font: inherit;
+}
+
+.share-post-note {
+  resize: vertical;
+}
+
+.share-post-list {
+  display: grid;
+  gap: 2px;
+  max-height: 220px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+/* The page styles bare labels and inputs as stacked form fields; a chat row is one line. */
+.share-post-modal label.share-post-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.share-post-modal label.share-post-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+}
+
+.share-post-modal label.share-post-row:hover {
+  background: var(--panel2);
+}
+
+.share-post-modal label.share-post-row.disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.share-post-avatar {
+  display: grid;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--panel2);
+  font-size: 14px;
+}
+
+.share-post-avatar .avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.share-post-name {
+  display: grid;
+  min-width: 0;
+}
+
+.share-post-name b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-post-name small,
+.share-post-people > small,
+.share-post-hint,
+.share-post-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.share-post-people {
+  display: grid;
+  gap: 6px;
+}
+
+.share-post-people > span {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.share-post-results {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.share-post-results li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.share-post-results li span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.share-post-results li.failed span {
+  color: #ff6b6b;
+}
+
+.share-post-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.share-post-secondary,
+.share-post-primary {
+  display: flex;
+  gap: 8px;
+}
+
+.share-post-actions button {
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.share-post-actions > button.primary {
+  flex: 1;
+  justify-content: center;
+}
+
+.share-post-actions button.primary {
+  border-color: transparent;
+  background: var(--purple);
+  color: #fff;
+}
+
+.share-post-actions button:disabled {
+  opacity: 0.5;
+}

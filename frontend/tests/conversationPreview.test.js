@@ -30,6 +30,13 @@ describe("previewLine", () => {
     expect(previewLine(attachment(files), { mine: false })).toBe("Sent 2 attachments");
   });
 
+  it("names a shared post, or shows its note", () => {
+    const share = (body) => ({ v: 1, type: "post-share", postId: "cm123abc", body });
+    expect(previewLine(share(undefined), { mine: false })).toBe("Shared a post");
+    expect(previewLine(share(undefined), { mine: true })).toBe("You: Shared a post");
+    expect(previewLine(share("look at this"), { mine: false })).toBe("look at this");
+  });
+
   it("prefers the caption over the attachment label", () => {
     expect(previewLine(attachment([file("a.png", "image/png")], "look"), { mine: true })).toBe("You: look");
   });

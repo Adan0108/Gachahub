@@ -45,6 +45,7 @@ import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useAttachmentPicker } from "../../hooks/chat/useAttachmentPicker";
 import { useDeviceIdentity } from "../../hooks/chat/useDeviceIdentity";
 import { useSyncEngine } from "../../hooks/chat/useSyncEngine";
+import { withDeviceRecovery as recoverDevice } from "../../lib/mls/device/withDeviceRecovery";
 import { useChatBackup } from "../../hooks/chat/useChatBackup";
 import { useBackgroundDecrypt } from "../../hooks/chat/useBackgroundDecrypt";
 import { useLinkPreviewDraft } from "../../hooks/chat/useLinkPreviewDraft";
@@ -221,23 +222,7 @@ export default function ChatPage() {
   const preparedPreviewsRef = useRef(new Map());
   const recipientIds = () =>
     activeConversation?.type === "GROUP" ? otherActiveMemberIds(activeConversation, user?.id) : peer?.id;
-  // A retired or unlinked device is reprovisioned for the next attempt; this attempt is not retried.
-  const withDeviceRecovery = async (action) => {
-    try {
-      return await action();
-    } catch (error) {
-      if (error?.code !== "DEVICE_REVOKED" && error?.code !== "SESSION_NOT_LINKED") throw error;
-      if (!(await reprovisionDevice())) {
-        throw new Error("Couldn't reconnect this device. Try again in a moment.", {
-          cause: error,
-        });
-      }
-      throw new Error(
-        "Your device needed to be reconnected. Give it a few seconds to rejoin your conversations, then try sending again.",
-        { cause: error },
-      );
-    }
-  };
+  const withDeviceRecovery = (action) => recoverDevice(action, reprovisionDevice);
   // Merges a message the server just stored into the cache instead of refetching.
   const mergeIntoMessageCache = (conversationId, message) => {
     const hadCachedMessages = Boolean(queryClient.getQueryData(queryKeys.chatMessages(conversationId)));

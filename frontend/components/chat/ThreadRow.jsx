@@ -4,6 +4,7 @@ import { EditedLabel } from "./EditedLabel";
 import { QuotedLinkPreview } from "./LinkPreviewCard";
 import { MessageActions } from "./MessageActions";
 import { MessageStatusLine } from "./MessageStatusLine";
+import { QuotedSharedPost } from "./SharedPostCard";
 import { HistoryBanner, MembershipEventLine, TimestampDivider } from "./ThreadNotices";
 import { useAttachmentBlobUrl } from "../../hooks/chat/useAttachmentBlobUrl";
 import { ReactionFace } from "./Emoji";
@@ -18,6 +19,7 @@ import {
   resolveAttachmentSources,
 } from "../../lib/mls/media/attachmentView";
 import { readLinkPreviews } from "../../lib/mls/messaging/linkPreviewEnvelope";
+import { postPath } from "../../lib/mls/messaging/postShareEnvelope";
 import {
   membershipEventText,
   messageDividerLabel,
@@ -85,9 +87,20 @@ function ReplyQuote({ message, messagesById, decryptedById, onJumpToMessage }) {
       {view?.kind === "attachment" && view.files[0] && (
         <ReplyQuoteMedia file={view.files[0]} media={original?.media} replyToId={message.replyToId} />
       )}
+      {view?.kind === "post" && <QuotedSharedPost postId={view.postId} />}
       {!view && <span>a message</span>}
     </button>
   );
+}
+
+/** What Copy puts on the clipboard: the text, a caption, or for a shared post its address. */
+function copyTextOf(view) {
+  if (view?.kind === "text") return view.text;
+  if (view?.kind === "attachment") return view.caption;
+  if (view?.kind === "post") {
+    return typeof window === "undefined" ? postPath(view.postId) : `${window.location.origin}${postPath(view.postId)}`;
+  }
+  return "";
 }
 
 function ReactionChips({ reactions, userId, onToggle }) {
@@ -140,7 +153,7 @@ function MessageBubble({
   const sentAt = Date.parse(message.createdAt);
   const view = decrypted.status === "ok" ? envelopeView(decrypted.envelope) : null;
   const mediaOnly = isMediaOnlyView(view);
-  const copyText = view?.kind === "text" ? view.text : view?.kind === "attachment" ? view.caption : "";
+  const copyText = copyTextOf(view);
   const versions = edited?.get(message.id)?.versions;
   const receiptStatus = mine ? receiptInfo?.statusFor.get(message.id) : undefined;
   const receiptReaders = mine
@@ -246,7 +259,7 @@ function MessageBubble({
                 onReply({
                   id: message.id,
                   senderName: mine ? "yourself" : sender?.name || "GachaHub member",
-                  preview: copyText ? copyText.slice(0, 80) : "an attachment",
+                  preview: copyText ? copyText.slice(0, 80) : view?.kind === "post" ? "a post" : "an attachment",
                 })
               }
             />
