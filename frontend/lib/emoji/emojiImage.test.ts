@@ -37,15 +37,16 @@ describe("emojiImageUrl", () => {
     expect(emojiImageUrl("😀")).toBe(`${EMOJI_IMAGE_BASE}/1f600.svg`);
   });
 
-  it('is pinned to an exact version, never "latest"', () => {
-    expect(EMOJI_IMAGE_BASE).toMatch(/@\d+\.\d+\.\d+\//);
-    expect(EMOJI_IMAGE_BASE).not.toContain("latest");
+  it("is served from our own origin, never another host", () => {
+    expect(EMOJI_IMAGE_BASE.startsWith("/")).toBe(true);
+    expect(EMOJI_IMAGE_BASE.startsWith("//")).toBe(false);
+    expect(emojiImageUrl("😀")).not.toMatch(/^[a-z]+:/i);
   });
 
-  it("only ever builds a plain https svg address", () => {
+  it("only ever builds a plain svg path", () => {
     const url = emojiImageUrl(char(0x1f1fb, 0x1f1f3));
 
-    expect(url.startsWith("https://")).toBe(true);
     expect(url.endsWith(".svg")).toBe(true);
+    expect(url).not.toContain("..");
   });
 });

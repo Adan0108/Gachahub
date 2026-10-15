@@ -7,7 +7,7 @@ import { MessageStatusLine } from "./MessageStatusLine";
 import { HistoryBanner, MembershipEventLine, TimestampDivider } from "./ThreadNotices";
 import { useAttachmentBlobUrl } from "../../hooks/chat/useAttachmentBlobUrl";
 import { ReactionFace } from "./Emoji";
-import { choiceOf, groupReactions } from "../../lib/chat/chatReactions";
+import { groupReactions } from "../../lib/chat/chatReactions";
 import { canEditMessage } from "../../lib/chat/editPolicy";
 import { AvatarFace } from "../AvatarFace";
 import { participantUser } from "../../lib/chat/chatDisplay";
@@ -99,13 +99,10 @@ function ReactionChips({ reactions, userId, onToggle }) {
         <button
           className={group.mine ? "mine" : ""}
           key={group.key}
-          onClick={() => {
-            const choice = choiceOf(group);
-            if (choice) onToggle(choice, group.mine);
-          }}
+          onClick={() => onToggle(group.choice, group.mine)}
           type="button"
         >
-          <ReactionFace emoji={group.emoji} emote={group.emote} /> {group.count}
+          <ReactionFace choice={group.choice} /> {group.count}
         </button>
       ))}
     </div>

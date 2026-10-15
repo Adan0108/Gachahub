@@ -1,4 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsOptional,
   IsString,
@@ -8,12 +9,17 @@ import {
   ValidatorConstraint,
   ValidatorConstraintInterface,
 } from 'class-validator';
-import { isSingleEmoji } from '../utils/is-single-emoji';
+import { isSingleEmoji } from '../../common/utils/is-single-emoji';
+
+// Stray spaces around an emoji are dropped, so the presence check and the emoji check see the same value
+const trimmed = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim() : value;
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+// Request-shape rules like "exactly one of these fields" live in the DTO, so they show in Swagger and 400 before the service runs
 @ValidatorConstraint({ name: 'ExactlyOneReactionSelector', async: false })
 class ExactlyOneReactionSelectorConstraint implements ValidatorConstraintInterface {
   validate(emoji: unknown, args: ValidationArguments): boolean {
@@ -49,6 +55,7 @@ export class ReactToMessageDto {
     description:
       'One Unicode emoji, such as 😋, 🔟, 🇻🇳 or 👵🏽. Anything that is not a single emoji is refused.',
   })
+  @Transform(trimmed)
   @Validate(ExactlyOneReactionSelectorConstraint)
   emoji?: string;
 
@@ -56,6 +63,7 @@ export class ReactToMessageDto {
     example: 'cm123emote456',
     description: 'Custom ChatEmote id used for image/gif emote reactions.',
   })
+  @Transform(trimmed)
   @IsOptional()
   @IsString()
   @MaxLength(120)

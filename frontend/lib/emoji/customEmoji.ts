@@ -71,8 +71,8 @@ export function choiceFromSelection(
   selection: PickerSelection,
   byId: Map<string, ChatEmote>,
 ): ReactionChoice | null {
-  if (selection.native) return { emoji: selection.native };
+  if (selection.native) return { kind: "emoji", emoji: selection.native };
 
   const emote = selection.id ? byId.get(selection.id) : undefined;
-  return emote ? { emoteId: emote.id, emote } : null;
+  return emote ? { kind: "emote", emote } : null;
 }

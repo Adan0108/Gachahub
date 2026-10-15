@@ -8,6 +8,7 @@ import {
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { GamesService } from '../games/games.service';
 import { MediaService } from '../media/media.service';
 import { CreateChatEmoteDto } from './dto/create-chat-emote.dto';
@@ -31,6 +32,7 @@ export class ChatMessageActionsService {
     private readonly chatAccessService: ChatAccessService,
     private readonly gamesService: GamesService,
     private readonly mediaService: MediaService,
+    private readonly cloudinaryService: CloudinaryService,
     @Inject(CHAT_DELIVERY_PORT)
     private readonly chatDelivery: ChatDeliveryPort,
   ) {}
@@ -61,7 +63,7 @@ export class ChatMessageActionsService {
       );
     }
 
-    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const { cloudName } = this.cloudinaryService;
     for (const url of [dto.imageUrl, dto.animationUrl]) {
       if (url && !isOwnEmoteAssetUrl(url, cloudName)) {
         throw new BadRequestException(

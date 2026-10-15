@@ -25,6 +25,20 @@ describe('ReactToMessageDto', () => {
     expect((await check({ emoji })).length).toBeGreaterThan(0);
   });
 
+  it('accepts an emoji with stray spaces and keeps only the emoji', async () => {
+    const dto = plainToInstance(ReactToMessageDto, { emoji: ' 😋 ' });
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.emoji).toBe('😋');
+  });
+
+  it('trims an emote id too', async () => {
+    const dto = plainToInstance(ReactToMessageDto, { emoteId: ' cm123 ' });
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.emoteId).toBe('cm123');
+  });
+
   it('refuses something that is not text', async () => {
     expect((await check({ emoji: 42 })).length).toBeGreaterThan(0);
   });

@@ -54,7 +54,10 @@ describe("Emoji", () => {
 });
 
 describe("Emote", () => {
-  beforeEach(() => stubMotionPreference(false));
+  beforeEach(() => {
+    supported.check.mockReturnValue(true);
+    stubMotionPreference(false);
+  });
   afterEach(() => vi.restoreAllMocks());
 
   it("shows the animation", () => {
@@ -93,6 +96,28 @@ describe("Emote", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
+  it("shows the :shortcode: for a removed emote even when it has a unicode form", () => {
+    render(
+      <Emote
+        emote={emote({
+          imageUrl: null,
+          animationUrl: null,
+          unicode: "😀",
+          deletedAt: "2026-10-10T00:00:00.000Z",
+        })}
+      />,
+    );
+
+    expect(screen.getByText(":cat:")).toBeInTheDocument();
+    expect(screen.queryByText("😀")).not.toBeInTheDocument();
+  });
+
+  it("shows the emoji for a live emote that is only a unicode form", () => {
+    render(<Emote emote={emote({ imageUrl: null, animationUrl: null, unicode: "😀" })} />);
+
+    expect(screen.getByText("😀")).toBeInTheDocument();
+  });
+
   it("shows the :shortcode: when the picture does not load", () => {
     render(<Emote emote={emote()} />);
 
@@ -109,10 +134,10 @@ describe("ReactionFace", () => {
   });
 
   it("draws an emote when there is one, an emoji otherwise", () => {
-    const { rerender } = render(<ReactionFace emoji={null} emote={emote()} />);
+    const { rerender } = render(<ReactionFace choice={{ kind: "emote", emote: emote() }} />);
     expect(screen.getByRole("img", { name: ":cat:" })).toBeInTheDocument();
 
-    rerender(<ReactionFace emoji="👍" emote={null} />);
+    rerender(<ReactionFace choice={{ kind: "emoji", emoji: "👍" }} />);
     expect(screen.getByText("👍")).toBeInTheDocument();
   });
 });

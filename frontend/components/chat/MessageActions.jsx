@@ -71,7 +71,7 @@ export function MessageActions({
               ) : (
                 <div className="message-actions-picker-row">
                   {QUICK_EMOJIS.map((emoji) => (
-                    <button key={emoji} onClick={() => pick({ emoji })} role="menuitem" type="button">
+                    <button key={emoji} onClick={() => pick({ kind: "emoji", emoji })} role="menuitem" type="button">
                       <Emoji emoji={emoji} />
                     </button>
                   ))}

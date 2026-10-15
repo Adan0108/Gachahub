@@ -5,8 +5,12 @@ import { buildCustomEmoji, choiceFromSelection, type EmoteLibrary } from "./cust
 const emote = (id: string, shortcode: string, extra: Partial<ChatEmote> = {}): ChatEmote => ({
   id,
   shortcode,
+  unicode: null,
   imageUrl: `https://res.cloudinary.com/x/${shortcode}.png`,
   animationUrl: null,
+  width: null,
+  height: null,
+  mimeType: null,
   ...extra,
 });
 
@@ -75,11 +79,14 @@ describe("choiceFromSelection", () => {
   const { byId } = buildCustomEmoji({ global: [cat], games: [] });
 
   it("is the emoji for a unicode pick", () => {
-    expect(choiceFromSelection({ id: "grinning", native: "😀" }, byId)).toEqual({ emoji: "😀" });
+    expect(choiceFromSelection({ id: "grinning", native: "😀" }, byId)).toEqual({
+      kind: "emoji",
+      emoji: "😀",
+    });
   });
 
   it("is the emote, with its details, for a custom pick", () => {
-    expect(choiceFromSelection({ id: "e1" }, byId)).toEqual({ emoteId: "e1", emote: cat });
+    expect(choiceFromSelection({ id: "e1" }, byId)).toEqual({ kind: "emote", emote: cat });
   });
 
   it("is nothing for a custom pick that is not in the library", () => {

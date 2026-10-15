@@ -881,11 +881,11 @@ export const api = {
       lastReadMessageId ? { lastReadMessageId } : {},
     ),
   // Reactions are plaintext (not part of the encrypted envelope) - one reaction per user per message.
-  // `choice` is { emoji } or { emoteId, emote }; the server only needs the id.
+  // `choice` is { kind: 'emoji', emoji } or { kind: 'emote', emote }; the server only needs the id.
   reactToMessage: (messageId, choice) =>
     mutation(
       backendRoutes.chatMessageReactions(messageId),
-      'emoteId' in choice ? { emoteId: choice.emoteId } : { emoji: choice.emoji },
+      choice.kind === 'emote' ? { emoteId: choice.emote.id } : { emoji: choice.emoji },
     ),
   getChatEmotes: () => request(backendRoutes.chatEmotes),
   removeReaction: (messageId) =>

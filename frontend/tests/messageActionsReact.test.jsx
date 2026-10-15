@@ -3,16 +3,21 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MessageActions } from "../components/chat/MessageActions";
 
-const CAT = { id: "e1", shortcode: "cat", imageUrl: "https://res.cloudinary.com/x/cat.png", animationUrl: null };
+const CAT = {
+  id: "e1",
+  shortcode: "cat",
+  imageUrl: "https://res.cloudinary.com/x/cat.png",
+  animationUrl: null,
+};
 
 // The real picker is a web component fetched on demand; here it just offers one emoji and one emote.
 vi.mock("../components/chat/EmojiPicker", () => ({
   EmojiPicker: ({ onPick }) => (
     <div data-testid="full-picker">
-      <button onClick={() => onPick({ emoji: "🫛" })} type="button">
+      <button onClick={() => onPick({ kind: "emoji", emoji: "🫛" })} type="button">
         pick emoji
       </button>
-      <button onClick={() => onPick({ emoteId: "e1", emote: CAT })} type="button">
+      <button onClick={() => onPick({ kind: "emote", emote: CAT })} type="button">
         pick emote
       </button>
     </div>
@@ -46,7 +51,7 @@ describe("MessageActions reaction picker", () => {
 
     fireEvent.click(screen.getByRole("menuitem", { name: "❤️" }));
 
-    expect(onReact).toHaveBeenCalledWith({ emoji: "❤️" });
+    expect(onReact).toHaveBeenCalledWith({ kind: "emoji", emoji: "❤️" });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
@@ -66,7 +71,7 @@ describe("MessageActions reaction picker", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "pick emoji" }));
 
-    expect(onReact).toHaveBeenCalledWith({ emoji: "🫛" });
+    expect(onReact).toHaveBeenCalledWith({ kind: "emoji", emoji: "🫛" });
     expect(screen.queryByTestId("full-picker")).not.toBeInTheDocument();
   });
 
@@ -76,7 +81,7 @@ describe("MessageActions reaction picker", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "pick emote" }));
 
-    expect(onReact).toHaveBeenCalledWith({ emoteId: "e1", emote: CAT });
+    expect(onReact).toHaveBeenCalledWith({ kind: "emote", emote: CAT });
   });
 
   it("starts from the quick row again the next time it opens", () => {

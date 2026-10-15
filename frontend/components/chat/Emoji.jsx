@@ -52,8 +52,9 @@ export function Emote({ emote }) {
     ? (emote.imageUrl ?? emote.animationUrl)
     : (emote.animationUrl ?? emote.imageUrl);
 
+  if (emote.deletedAt) return <span className="emote-label">{label}</span>;
   if (emote.unicode && !src) return <Emoji emoji={emote.unicode} />;
-  if (emote.deletedAt || !src || pictureFailed) return <span className="emote-label">{label}</span>;
+  if (!src || pictureFailed) return <span className="emote-label">{label}</span>;
   return (
     <img
       alt={label}
@@ -66,7 +67,12 @@ export function Emote({ emote }) {
   );
 }
 
-/** Whatever a reaction is made of. */
-export function ReactionFace({ emoji, emote }) {
-  return emote ? <Emote emote={emote} /> : <Emoji emoji={emoji} />;
+/** Whatever a reaction is made of; `choice` is { kind: "emoji", emoji } or { kind: "emote", emote }. */
+export function ReactionFace({ choice }) {
+  switch (choice.kind) {
+    case "emote":
+      return <Emote emote={choice.emote} />;
+    default:
+      return <Emoji emoji={choice.emoji} />;
+  }
 }

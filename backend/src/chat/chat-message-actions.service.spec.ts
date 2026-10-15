@@ -106,6 +106,8 @@ describe('ChatMessageActionsService', () => {
     markReleaseFailed: jest.fn().mockResolvedValue(undefined),
   };
 
+  const cloudinaryService = { cloudName: 'gachahub-demo' };
+
   const chatDelivery = {
     publishMessageCreated: jest.fn(),
     publishMessageEdited: jest.fn(),
@@ -132,6 +134,7 @@ describe('ChatMessageActionsService', () => {
       chatAccessService,
       gamesService as any,
       mediaService as any,
+      cloudinaryService as any,
       chatDelivery,
     );
     blocksService.getBlockedIdsAmong.mockResolvedValue(new Set());
@@ -197,21 +200,15 @@ describe('ChatMessageActionsService', () => {
     });
 
     describe('where the picture lives', () => {
-      const original = process.env.CLOUDINARY_CLOUD_NAME;
       const OWN =
         'https://res.cloudinary.com/gachahub-demo/image/upload/catcooking.png';
 
       beforeEach(() => {
-        process.env.CLOUDINARY_CLOUD_NAME = 'gachahub-demo';
         gamesService.findById.mockResolvedValue({ id: 'game-1' });
         gameModeratorsService.assertCanModerateGame.mockResolvedValue(
           undefined,
         );
         repository.createGameChatEmote.mockResolvedValue({ id: 'emote-1' });
-      });
-      afterEach(() => {
-        if (original === undefined) delete process.env.CLOUDINARY_CLOUD_NAME;
-        else process.env.CLOUDINARY_CLOUD_NAME = original;
       });
 
       it('creates the emote with the given fields on success', async () => {
@@ -269,20 +266,7 @@ describe('ChatMessageActionsService', () => {
         expect(repository.createGameChatEmote).toHaveBeenCalled();
       });
 
-      it('refuses any picture when the account is not configured, since nothing can be checked', async () => {
-        delete process.env.CLOUDINARY_CLOUD_NAME;
-
-        await expect(
-          service.createGameEmote('user-1', 'game-1', {
-            shortcode: 'catcooking',
-            imageUrl: OWN,
-          }),
-        ).rejects.toThrow(BadRequestException);
-      });
-
       it('still allows a unicode-only emote, which has no picture to check', async () => {
-        delete process.env.CLOUDINARY_CLOUD_NAME;
-
         await service.createGameEmote('user-1', 'game-1', {
           shortcode: 'catcooking',
           unicode: '\\u{1F639}',

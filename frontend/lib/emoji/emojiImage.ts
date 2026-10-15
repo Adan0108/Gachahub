@@ -1,5 +1,5 @@
-// Pinned, so the pictures can never change under us; each is a few hundred bytes and cached for a year.
-export const EMOJI_IMAGE_BASE = "https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/svg";
+// Our own origin: a third-party host would see who is reading the chat (copied at build, scripts/copy-emoji-svg.mjs).
+export const EMOJI_IMAGE_BASE = "/emoji/svg";
 
 const ZERO_WIDTH_JOINER = "‍";
 const VARIATION_SELECTOR_16 = /️/g;

@@ -1,16 +1,18 @@
-/** A custom emote as the server describes it on a reaction or in the picker. */
+/** A custom emote on the wire: mirrors PublicEmote in backend/src/chat/chat-emotes.service.ts, field for field. */
 export interface ChatEmote {
   id: string;
   shortcode: string;
-  unicode?: string | null;
+  unicode: string | null;
   imageUrl: string | null;
   animationUrl: string | null;
-  width?: number | null;
-  height?: number | null;
-  /** Set when the emote has been removed since it was used; the reaction stays. */
+  width: number | null;
+  height: number | null;
+  mimeType: string | null;
+  /** Only present when seen through a reaction: removed since it was used, the reaction stays. */
   deletedAt?: string | null;
 }
 
+/** A reaction as the server sends it: an emoji, or an emote with its details. */
 export interface RawReaction {
   userId: string;
   emoji: string | null;
@@ -18,29 +20,33 @@ export interface RawReaction {
   emote?: ChatEmote | null;
 }
 
-/** What someone reacted with: a unicode emoji, or one of a game's or the app's custom emotes. */
-export type ReactionChoice = { emoji: string } | { emoteId: string; emote: ChatEmote };
+/** What someone reacted with. A new kind of reaction is one more member here and one more case where it is drawn. */
+export type ReactionChoice = { kind: "emoji"; emoji: string } | { kind: "emote"; emote: ChatEmote };
 
 export interface ReactionGroup {
-  /** Stable across renders and between an emoji and an emote, for React keys. */
+  /** Stable across renders, and different between an emoji and an emote, for React keys. */
   key: string;
-  emoji: string | null;
-  emote: ChatEmote | null;
+  choice: ReactionChoice;
   count: number;
   /** Whether the current user is one of the people behind this reaction. */
   mine: boolean;
 }
 
-export function isEmoteChoice(
-  choice: ReactionChoice,
-): choice is { emoteId: string; emote: ChatEmote } {
-  return "emoteId" in choice;
+export function choiceKey(choice: ReactionChoice): string {
+  return choice.kind === "emoji" ? `emoji:${choice.emoji}` : `emote:${choice.emote.id}`;
 }
 
-function keyOf(reaction: RawReaction): string | null {
-  if (reaction.emoji) return `emoji:${reaction.emoji}`;
-  if (reaction.emoteId) return `emote:${reaction.emoteId}`;
+/** The choice a server reaction stands for; null when it carries nothing that can be drawn. */
+function choiceFromReaction(reaction: RawReaction): ReactionChoice | null {
+  if (reaction.emoji) return { kind: "emoji", emoji: reaction.emoji };
+  if (reaction.emote) return { kind: "emote", emote: reaction.emote };
   return null;
+}
+
+function reactionFromChoice(userId: string, choice: ReactionChoice): RawReaction {
+  return choice.kind === "emoji"
+    ? { userId, emoji: choice.emoji }
+    : { userId, emoji: null, emoteId: choice.emote.id, emote: choice.emote };
 }
 
 /** Reactions are plaintext (server-visible), unlike message content: grouped by what was used, own reaction first. */
@@ -51,27 +57,20 @@ export function groupReactions(
   const groups = new Map<string, ReactionGroup>();
 
   for (const reaction of reactions ?? []) {
-    const key = keyOf(reaction);
-    if (!key) continue;
+    const choice = choiceFromReaction(reaction);
+    if (!choice) continue;
 
+    const key = choiceKey(choice);
     const existing = groups.get(key);
     groups.set(key, {
       key,
-      emoji: reaction.emoji || null,
-      emote: reaction.emote ?? existing?.emote ?? null,
+      choice: existing?.choice ?? choice,
       count: (existing?.count ?? 0) + 1,
       mine: Boolean(existing?.mine) || reaction.userId === currentUserId,
     });
   }
 
   return [...groups.values()].sort((a, b) => (b.mine ? 1 : 0) - (a.mine ? 1 : 0));
-}
-
-/** The reaction a chip stands for, to send it again or to take it back. */
-export function choiceOf(group: ReactionGroup): ReactionChoice | null {
-  if (group.emoji) return { emoji: group.emoji };
-  if (group.emote) return { emoteId: group.emote.id, emote: group.emote };
-  return null;
 }
 
 /** Patches one message's own reaction into a cached message list, so the reactor sees it before the server round trip. `null` removes it - one reaction per user per message, same as the backend. */
@@ -85,11 +84,7 @@ export function withOptimisticReaction<M extends { id: string; reactions?: RawRe
     if (message.id !== messageId) return message;
 
     const withoutMine = (message.reactions ?? []).filter((reaction) => reaction.userId !== userId);
-    if (!choice) return { ...message, reactions: withoutMine };
-
-    const mine: RawReaction = isEmoteChoice(choice)
-      ? { userId, emoji: null, emoteId: choice.emoteId, emote: choice.emote }
-      : { userId, emoji: choice.emoji };
-    return { ...message, reactions: [...withoutMine, mine] };
+    const reactions = choice ? [...withoutMine, reactionFromChoice(userId, choice)] : withoutMine;
+    return { ...message, reactions };
   });
 }
