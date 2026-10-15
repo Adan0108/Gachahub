@@ -368,9 +368,9 @@ export default function ChatPage() {
     patchOlder(() => context.previousOlder);
   };
   const reactMutation = useMutation({
-    mutationFn: ({ messageId, emoji }) => api.reactToMessage(messageId, emoji),
-    onMutate: ({ messageId, emoji }) =>
-      patchMessages((items) => withOptimisticReaction(items, messageId, user?.id, emoji)),
+    mutationFn: ({ messageId, choice }) => api.reactToMessage(messageId, choice),
+    onMutate: ({ messageId, choice }) =>
+      patchMessages((items) => withOptimisticReaction(items, messageId, user?.id, choice)),
     onError: rollbackOptimisticUpdate,
     onSettled: refetchMessages,
   });
@@ -381,8 +381,8 @@ export default function ChatPage() {
     onError: rollbackOptimisticUpdate,
     onSettled: refetchMessages,
   });
-  const handleReact = (messageId, emoji, mineAlready) =>
-    (mineAlready ? removeReactionMutation : reactMutation).mutate({ messageId, emoji });
+  const handleReact = (messageId, choice, mineAlready) =>
+    (mineAlready ? removeReactionMutation : reactMutation).mutate({ messageId, choice });
   const deleteMessageMutation = useMutation({
     mutationFn: (messageId) => api.deleteChatMessage(messageId),
     onMutate: (messageId) => patchMessages((items) => withOptimisticDelete(items, messageId)),

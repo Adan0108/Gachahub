@@ -3213,14 +3213,39 @@
   gap: 2px;
 }
 
-/* Zero width of its own, so the note never widens the picker (which was centred before it appeared). */
-.message-actions-picker-note {
-  width: 0;
-  min-width: 100%;
-  padding: 0 6px 2px;
+/* Fixed size so the popover is placed right before the picker has finished loading. */
+.emoji-picker-host {
+  display: grid;
+  place-items: center;
+  width: 352px;
+  max-width: calc(100vw - 32px);
+  height: 435px;
+  max-height: 70vh;
+}
+
+.emoji-picker-error {
   color: var(--muted);
-  font-size: 11px;
-  text-align: center;
+  font-size: 12px;
+}
+
+.emoji-picker-host em-emoji-picker {
+  width: 100%;
+  height: 100%;
+}
+
+/* A picture standing in for an emoji (or a custom emote) sits in the line like a glyph of the same size. */
+.emoji-picture,
+.emote-picture {
+  display: inline-block;
+  width: 1.2em;
+  height: 1.2em;
+  vertical-align: -0.25em;
+  object-fit: contain;
+}
+
+.emote-label {
+  color: var(--muted);
+  font-size: 0.85em;
 }
 
 .message-actions-picker button {
