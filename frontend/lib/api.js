@@ -83,6 +83,7 @@ export const backendRoutes = {
   chatMessageEdits: (messageId) => `/chat/messages/${encodePathParam(messageId)}/edits`,
   chatMessageReactions: (messageId) =>
     `/chat/messages/${encodePathParam(messageId)}/reactions`,
+  chatEmotes: '/chat/emotes',
   chatAcceptRequest: (conversationId) => `/chat/requests/${encodePathParam(conversationId)}/accept`,
   chatDeclineRequest: (conversationId) =>
     `/chat/requests/${encodePathParam(conversationId)}/decline`,
@@ -880,8 +881,13 @@ export const api = {
       lastReadMessageId ? { lastReadMessageId } : {},
     ),
   // Reactions are plaintext (not part of the encrypted envelope) - one reaction per user per message.
-  reactToMessage: (messageId, emoji) =>
-    mutation(backendRoutes.chatMessageReactions(messageId), { emoji }),
+  // `choice` is { emoji } or { emoteId, emote }; the server only needs the id.
+  reactToMessage: (messageId, choice) =>
+    mutation(
+      backendRoutes.chatMessageReactions(messageId),
+      'emoteId' in choice ? { emoteId: choice.emoteId } : { emoji: choice.emoji },
+    ),
+  getChatEmotes: () => request(backendRoutes.chatEmotes),
   removeReaction: (messageId) =>
     mutation(backendRoutes.chatMessageReactions(messageId), undefined, { method: 'DELETE' }),
   // Own message only; soft delete (server clears the ciphertext, the row stays for history).

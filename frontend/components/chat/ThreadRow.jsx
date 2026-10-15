@@ -6,7 +6,8 @@ import { MessageActions } from "./MessageActions";
 import { MessageStatusLine } from "./MessageStatusLine";
 import { HistoryBanner, MembershipEventLine, TimestampDivider } from "./ThreadNotices";
 import { useAttachmentBlobUrl } from "../../hooks/chat/useAttachmentBlobUrl";
-import { groupReactions } from "../../lib/chat/chatReactions";
+import { ReactionFace } from "./Emoji";
+import { choiceOf, groupReactions } from "../../lib/chat/chatReactions";
 import { canEditMessage } from "../../lib/chat/editPolicy";
 import { AvatarFace } from "../AvatarFace";
 import { participantUser } from "../../lib/chat/chatDisplay";
@@ -97,11 +98,14 @@ function ReactionChips({ reactions, userId, onToggle }) {
       {groups.map((group) => (
         <button
           className={group.mine ? "mine" : ""}
-          key={group.emoji}
-          onClick={() => onToggle(group.emoji, group.mine)}
+          key={group.key}
+          onClick={() => {
+            const choice = choiceOf(group);
+            if (choice) onToggle(choice, group.mine);
+          }}
           type="button"
         >
-          {group.emoji} {group.count}
+          <ReactionFace emoji={group.emoji} emote={group.emote} /> {group.count}
         </button>
       ))}
     </div>
@@ -240,7 +244,7 @@ function MessageBubble({
               onCopy={() => onCopy(copyText)}
               onEdit={() => onEdit({ id: message.id, text: copyText, editCount: versions ? versions.length - 1 : 0 })}
               onRemove={() => onRemove({ id: message.id, mine })}
-              onReact={(emoji) => onReact(message.id, emoji)}
+              onReact={(choice) => onReact(message.id, choice)}
               onReply={() =>
                 onReply({
                   id: message.id,
@@ -256,7 +260,7 @@ function MessageBubble({
             <span className="chat-message-time-tip">{messageFullTimestamp(sentAt)}</span>
           )}
           <ReactionChips
-            onToggle={(emoji, mineAlready) => onReact(message.id, emoji, mineAlready)}
+            onToggle={(choice, mineAlready) => onReact(message.id, choice, mineAlready)}
             reactions={message.reactions}
             userId={userId}
           />

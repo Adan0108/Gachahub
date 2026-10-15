@@ -110,3 +110,89 @@ describe('DevService', () => {
     });
   });
 });
+
+describe('DevService seeding emotes', () => {
+  const makeService = (existing: string[]) => {
+    env.nodeEnv = 'development';
+    const prisma = {
+      chatEmote: {
+        findFirst: jest.fn(({ where }: { where: { shortcode: string } }) =>
+          Promise.resolve(
+            existing.includes(where.shortcode) ? { id: 'x' } : null,
+          ),
+        ),
+        create: jest.fn().mockResolvedValue({}),
+      },
+    };
+    return { service: new DevService(prisma as never, {} as never), prisma };
+  };
+
+  afterEach(() => {
+    env.nodeEnv = 'development';
+  });
+
+  it('creates global emotes that are not there yet', async () => {
+    const { service, prisma } = makeService([]);
+
+    const result = await service.seedGlobalEmotes();
+
+    expect(result.created).toEqual(['pity', 'lucky', 'salty', 'roll']);
+    expect(result.existing).toEqual([]);
+    expect(prisma.chatEmote.create).toHaveBeenCalledTimes(4);
+  });
+
+  it('can be run again without making duplicates', async () => {
+    const { service, prisma } = makeService(['pity', 'lucky', 'salty', 'roll']);
+
+    const result = await service.seedGlobalEmotes();
+
+    expect(result.created).toEqual([]);
+    expect(result.existing).toHaveLength(4);
+    expect(prisma.chatEmote.create).not.toHaveBeenCalled();
+  });
+
+  it('only creates the missing ones when some are there', async () => {
+    const { service, prisma } = makeService(['pity']);
+
+    const result = await service.seedGlobalEmotes();
+
+    expect(result.created).toEqual(['lucky', 'salty', 'roll']);
+    expect(prisma.chatEmote.create).toHaveBeenCalledTimes(3);
+  });
+
+  it('stores global emotes with a picture and a size, and nobody as the author', async () => {
+    const { service, prisma } = makeService([]);
+
+    await service.seedGlobalEmotes();
+
+    const [{ data }] = prisma.chatEmote.create.mock.calls[0] as [
+      { data: Record<string, unknown> },
+    ];
+    expect(data).toMatchObject({
+      scope: 'GLOBAL',
+      shortcode: 'pity',
+      width: 64,
+      height: 64,
+      mimeType: 'image/svg+xml',
+    });
+    expect(String(data.imageUrl)).toMatch(/^data:image\/svg\+xml;base64,/);
+    expect(data).not.toHaveProperty('createdById');
+    expect(data).not.toHaveProperty('gameId');
+  });
+
+  it('draws a valid picture for each', async () => {
+    const { service, prisma } = makeService([]);
+
+    await service.seedGlobalEmotes();
+
+    for (const [{ data }] of prisma.chatEmote.create.mock.calls as Array<
+      [{ data: { imageUrl: string } }]
+    >) {
+      const svg = Buffer.from(data.imageUrl.split(',')[1], 'base64').toString(
+        'utf8',
+      );
+      expect(svg.startsWith('<svg')).toBe(true);
+      expect(svg.endsWith('</svg>')).toBe(true);
+    }
+  });
+});

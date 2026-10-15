@@ -65,6 +65,7 @@ export const queryKeys = {
   chatArchivedConversations: ["chat", "archived"],
   chatRequests: ["chat", "requests"],
   chatMessages: (conversationId) => ["chat", "messages", conversationId],
+  chatEmotes: ["chat", "emotes"],
   // Socket-pushed only - nobody ever fetches this over REST, useChatSocket just writes into it.
   chatTyping: (conversationId) => ["chat", "typing", conversationId],
   // Same idea: the one-shot "your message request was accepted" event, keyed per conversation.
@@ -276,6 +277,12 @@ export const queries = {
     retry: 1,
     staleTime: 10_000,
     refetchInterval: 15_000,
+  }),
+  chatEmotes: () => ({
+    queryKey: queryKeys.chatEmotes,
+    queryFn: api.getChatEmotes,
+    retry: 1,
+    staleTime: 5 * 60_000,
   }),
   chatMessages: (conversationId) => ({
     queryKey: queryKeys.chatMessages(conversationId),

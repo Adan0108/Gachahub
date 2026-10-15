@@ -8,8 +8,7 @@ import {
   ValidatorConstraint,
   ValidatorConstraintInterface,
 } from 'class-validator';
-
-const EMOJI_MAX_LENGTH = 32;
+import { isSingleEmoji } from '../utils/is-single-emoji';
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
@@ -30,11 +29,11 @@ class ExactlyOneReactionSelectorConstraint implements ValidatorConstraintInterfa
       return false;
     }
 
-    return !hasEmoji || emoji.length <= EMOJI_MAX_LENGTH;
+    return !hasEmoji || isSingleEmoji(emoji);
   }
 
   defaultMessage(): string {
-    return `Reaction requires exactly one of emoji (max ${EMOJI_MAX_LENGTH} chars) or emoteId`;
+    return 'Reaction requires exactly one of a single emoji or emoteId';
   }
 }
 
@@ -47,7 +46,8 @@ class ExactlyOneReactionSelectorConstraint implements ValidatorConstraintInterfa
 export class ReactToMessageDto {
   @ApiPropertyOptional({
     example: '😋',
-    description: 'Raw Unicode emoji reaction, such as 😋, 🔟, or 👵🏽.',
+    description:
+      'One Unicode emoji, such as 😋, 🔟, 🇻🇳 or 👵🏽. Anything that is not a single emoji is refused.',
   })
   @Validate(ExactlyOneReactionSelectorConstraint)
   emoji?: string;
