@@ -9,6 +9,7 @@ import {
   MembershipMismatchError,
 } from '../../lib/mls/contract/errors';
 import { wasSentByDevice } from '../../lib/mls/messaging/messageOrigin';
+import { claimDecrypt, whenDecryptReleased } from '../../lib/mls/messaging/decryptClaims';
 import { base64ToBytes } from '../../lib/mls/storage/base64';
 import {
   nextRetryDelayMs,
@@ -74,8 +75,6 @@ export function useDecryptedMessages(
   const syncEngine = useSyncEngine();
   const ownDeviceId = useDeviceIdentity().credential?.deviceId;
   const [decrypted, setDecrypted] = useState<Record<string, DecryptedMessageState>>({});
-  // Message ids already claimed by a running effect; message keys are single-use.
-  const inFlightRef = useRef<Set<string>>(new Set());
   // Bumped by a timer to run the effect again for messages that couldn't be decrypted
   // only because catching up on commits failed.
   const [retryTick, setRetryTick] = useState(0);
@@ -157,14 +156,32 @@ export function useDecryptedMessages(
     const conversationToken = conversationTokenRef.current;
     // Messages this run has claimed, so a failure anywhere below can settle them instead of leaving a blank gap.
     let claimed: ChatMessageRow[] = [];
+    // Releases for the messages this run holds; message keys are single-use, so nobody else may decrypt them meanwhile.
+    const claims = new Map<string, () => void>();
+    const letGo = (messageId: string) => {
+      claims.get(messageId)?.();
+      claims.delete(messageId);
+    };
 
     void (async () => {
       // Cache hits resolve first so they show without waiting on syncCommits.
       const pendingIncoming: ChatMessageRow[] = [];
       await Promise.all(
         messages.map(async (message) => {
+          // Claimed before the cache is read: a run that saves and lets go in between must not be decrypted again.
+          const release = claimDecrypt(message.id);
+          if (!release) {
+            // Someone else is decrypting it; look again once they are done.
+            void whenDecryptReleased(message.id)?.then(() => {
+              if (!cancelled) setRetryTick((tick) => tick + 1);
+            });
+            return;
+          }
+          claims.set(message.id, release);
+
           const cached = await plaintextStore.get(message.id);
           if (cached) {
+            letGo(message.id);
             setDecrypted((prev) => ({
               ...prev,
               [message.id]: { status: 'ok', envelope: cached.envelope },
@@ -179,12 +196,8 @@ export function useDecryptedMessages(
             wasSentByDevice(message.encryptionMeta, ownDeviceId)
           ) {
             // Sent from this device with no local copy: its key is gone, so it cannot be decrypted.
+            letGo(message.id);
             setDecrypted((prev) => ({ ...prev, [message.id]: { status: 'unavailable' } }));
-            return;
-          }
-
-          if (inFlightRef.current.has(message.id)) {
-            // Already claimed by another running invocation; decrypting again would burn its one-time key.
             return;
           }
 
@@ -193,13 +206,11 @@ export function useDecryptedMessages(
       );
 
       if (pendingIncoming.length === 0 || cancelled) {
+        for (const message of pendingIncoming) letGo(message.id);
         return;
       }
 
       claimed = pendingIncoming;
-      for (const message of pendingIncoming) {
-        inFlightRef.current.add(message.id);
-      }
 
       const wireBytesByMessageId = new Map(
         pendingIncoming.map((message) => [message.id, base64ToBytes(message.ciphertext)]),
@@ -262,7 +273,7 @@ export function useDecryptedMessages(
             needsRetry ||= retryable;
             setDecrypted((prev) => ({ ...prev, [message.id]: { status } }));
           } finally {
-            inFlightRef.current.delete(message.id);
+            letGo(message.id);
           }
         }),
       );
@@ -285,7 +296,7 @@ export function useDecryptedMessages(
       // e.g. local storage failing: settle as unavailable rather than leaving the messages absent forever.
       console.warn('Could not decrypt messages', error);
       const stuck = claimed.length > 0 ? claimed : messages;
-      for (const message of claimed) inFlightRef.current.delete(message.id);
+      for (const messageId of [...claims.keys()]) letGo(messageId);
       setDecrypted((prev) => {
         const next = { ...prev };
         for (const message of stuck) {

@@ -100,8 +100,49 @@ describe("ConversationListItem", () => {
   it("selects the conversation on click", () => {
     const { onSelect } = renderRow(dm(), { preview: "hey" });
 
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(screen.getByRole("button", { name: /^(?!Options for)/ }));
 
     expect(onSelect).toHaveBeenCalledWith("c1");
+  });
+
+  describe("the three-dot menu", () => {
+    it("is a button of its own beside the one that opens the chat, not inside it", () => {
+      renderRow(dm(), { preview: "hey" });
+
+      const more = screen.getByRole("button", { name: "Options for devTest_mur" });
+      const open = screen.getByRole("button", { name: /^(?!Options for)/ });
+      expect(open).not.toContainElement(more);
+      expect(more.parentElement).toBe(open.parentElement);
+    });
+
+    it("opens its menu without opening the chat", () => {
+      const { onSelect } = renderRow(dm(), { preview: "hey" });
+
+      fireEvent.click(screen.getByRole("button", { name: "Options for devTest_mur" }));
+
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("marks the row active, not just the button inside it", () => {
+      renderRow(dm(), { active: true });
+
+      const row = screen.getByRole("button", { name: /^(?!Options for)/ }).parentElement;
+      expect(row).toHaveClass("chat-conversation-row", "active");
+    });
+
+    it("is not marked active when the chat is not open", () => {
+      renderRow(dm(), { active: false });
+
+      expect(screen.getByRole("button", { name: /^(?!Options for)/ }).parentElement).not.toHaveClass("active");
+    });
+
+    it("gives the menu the list it is in, so Archive and Unarchive are the right way round", () => {
+      renderRow(dm(), { view: "archived" });
+
+      fireEvent.click(screen.getByRole("button", { name: "Options for devTest_mur" }));
+
+      expect(screen.getByRole("menuitem", { name: "Unarchive chat" })).toBeInTheDocument();
+    });
   });
 });

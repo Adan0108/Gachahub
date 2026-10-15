@@ -2,8 +2,10 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { loadActiveUser } from '../common/guards/active-user.util';
 import { CommentStatus } from '../generated/prisma/client';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import type { CommentAuditAction } from '../audit-log/audit-log.types';
@@ -67,6 +69,23 @@ export class CommentModerationService {
     });
   }
 
+  async setPersonalStatus(
+    commentId: string,
+    moderatorId: string,
+    hidden: boolean,
+  ) {
+    return this.setModeratedStatus({
+      commentId,
+      moderatorId,
+      from: hidden ? CommentStatus.PUBLISHED : CommentStatus.HIDDEN,
+      to: hidden ? CommentStatus.HIDDEN : CommentStatus.PUBLISHED,
+      auditAction: hidden ? 'COMMENT_HIDDEN' : 'COMMENT_RESTORED',
+      rejectionMessage: hidden
+        ? 'Only published comments can be hidden'
+        : 'Only hidden comments can be restored',
+    });
+  }
+
   /**
    * Lists comments a moderator has hidden in their game - without this
    * there is no way to discover a commentId to pass to restoreAsModerator,
@@ -94,7 +113,7 @@ export class CommentModerationService {
   }
 
   private async setModeratedStatus(params: {
-    gameSlug: string;
+    gameSlug?: string;
     commentId: string;
     moderatorId: string;
     from: CommentStatus;
@@ -112,10 +131,18 @@ export class CommentModerationService {
       rejectionMessage,
     } = params;
 
-    const gameId = await this.gameModeratorsService.resolveModeratableGameId(
-      gameSlug,
-      moderatorId,
-    );
+    let gameId: string | null;
+    if (gameSlug !== undefined) {
+      gameId = await this.gameModeratorsService.resolveModeratableGameId(
+        gameSlug,
+        moderatorId,
+      );
+    } else {
+      const user = await loadActiveUser(this.prisma, moderatorId);
+      if (user.role !== 'ADMIN')
+        throw new ForbiddenException('Admin permission required');
+      gameId = null;
+    }
 
     const comment =
       await this.commentsRepository.findByIdForModeration(commentId);
@@ -155,7 +182,7 @@ export class CommentModerationService {
           actorId: moderatorId,
           targetType: 'COMMENT',
           targetId: commentId,
-          gameId,
+          gameId: gameId ?? undefined,
           gameSlug,
           metadata: { authorId: comment.authorId, postId: comment.post.id },
         },

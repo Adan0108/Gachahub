@@ -12,6 +12,7 @@ export const ME_SELECT = {
   status: true,
   messageRequestSetting: true,
   sendReadReceipts: true,
+  sendLinkPreviews: true,
   username: true,
   onboarded: true,
 } as const;

@@ -493,11 +493,21 @@ export class NotificationConsumerService
   ): Promise<NotificationRecord[]> {
     const payload = asChatMessageSentPayload(event.payload, event.eventId);
 
+    // Someone reading the chat as the message lands has already seen it; nothing to notify.
+    const alreadyRead = await this.findRecipientsWhoRead(
+      payload.messageId,
+      payload.recipientUserIds,
+      transaction,
+    );
+    const recipientUserIds = payload.recipientUserIds.filter(
+      (id) => !alreadyRead.has(id),
+    );
+
     // Reply target must be a different, notifiable recipient.
     const repliedToUserId =
       payload.replyToSenderId &&
       payload.replyToSenderId !== payload.senderId &&
-      payload.recipientUserIds.includes(payload.replyToSenderId)
+      recipientUserIds.includes(payload.replyToSenderId)
         ? payload.replyToSenderId
         : null;
 
@@ -515,7 +525,7 @@ export class NotificationConsumerService
       : null;
 
     // Exclude the reply target so they don't get both notification types.
-    const receivedRecipientIds = payload.recipientUserIds.filter(
+    const receivedRecipientIds = recipientUserIds.filter(
       (id) => id !== repliedToUserId,
     );
 
@@ -534,6 +544,24 @@ export class NotificationConsumerService
     return replyNotification
       ? [replyNotification, ...receivedNotifications]
       : receivedNotifications;
+  }
+
+  /** Recipients whose device has already read the message by the time its event is handled. */
+  private async findRecipientsWhoRead(
+    messageId: string,
+    recipientUserIds: readonly string[],
+    transaction: Prisma.TransactionClient,
+  ): Promise<Set<string>> {
+    const receipts = await transaction.chatMessageReceipt.findMany({
+      where: {
+        messageId,
+        userId: { in: [...recipientUserIds] },
+        readAt: { not: null },
+      },
+      select: { userId: true },
+    });
+
+    return new Set(receipts.map((receipt) => receipt.userId));
   }
 
   /** chat.participant.added -> GROUP_ADDED (ACTIVE/JOINING) or GROUP_INVITE_PENDING (PENDING). */

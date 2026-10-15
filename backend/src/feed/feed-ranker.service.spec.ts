@@ -178,4 +178,29 @@ describe('FeedRankerService - For You engagement', () => {
   it('returns an empty list for empty input', () => {
     expect(ranker.rankForYou([], coldStartProfile, new Set())).toEqual([]);
   });
+  it('does not group personal posts into one game diversity bucket', () => {
+    const personal = Array.from({ length: 4 }, (_, i) => ({
+      ...candidate(`personal-${i}`, 1, {
+        authorId: `author-${i}`,
+        gameId: null,
+        type: null,
+        categoryId: null,
+      }),
+      score: 10 - i,
+    }));
+    const community = {
+      ...candidate('community', 1, { authorId: 'community-author' }),
+      score: 1,
+    };
+    const result = ranker.diversifyForYou([...personal, community]);
+    expect(result.map((p) => p.id)).toEqual([
+      ...personal.map((p) => p.id),
+      'community',
+    ]);
+    expect(
+      ranker
+        .rankForYou(personal, personalizedProfile, new Set())
+        .every((p) => Number.isFinite(p.score)),
+    ).toBe(true);
+  });
 });

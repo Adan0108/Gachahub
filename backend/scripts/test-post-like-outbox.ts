@@ -58,6 +58,7 @@ async function main() {
       data: {
         authorId,
         gameId: game.id,
+        type: 'GENERAL',
         title: '[TEST] Transactional Outbox',
         content: 'Temporary post for transactional outbox testing.',
         status: 'PUBLISHED',

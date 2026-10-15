@@ -65,26 +65,27 @@ export class CreatePostMediaDto {
 }
 
 export class CreatePostDto {
-  @ApiProperty({
-    example: 'game_id',
-  })
+  @ApiPropertyOptional({ example: 'game_id', nullable: true })
+  @IsOptional()
   @IsString()
-  gameId!: string;
+  @MinLength(1)
+  gameId?: string | null;
 
   @ApiPropertyOptional({
     example: 'category_id',
   })
   @IsOptional()
   @IsString()
-  categoryId?: string;
+  categoryId?: string | null;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'Beginner Jinhsi build guide',
   })
+  @IsOptional()
   @IsString()
   @MinLength(3)
   @MaxLength(255)
-  title!: string;
+  title?: string;
 
   @ApiProperty({
     example:
@@ -97,11 +98,13 @@ export class CreatePostDto {
 
   @ApiPropertyOptional({
     enum: PostTypeDto,
-    default: PostTypeDto.GENERAL,
+    nullable: true,
+    description:
+      'Community classification; defaults to GENERAL for game posts, null for personal posts',
   })
   @IsOptional()
   @IsEnum(PostTypeDto)
-  type?: PostTypeDto;
+  type?: PostTypeDto | null;
 
   @ApiPropertyOptional({
     enum: CreatePostStatusDto,

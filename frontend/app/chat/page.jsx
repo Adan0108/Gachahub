@@ -37,6 +37,7 @@ import { NoChatSelected } from "../../components/chat/NoChatSelected";
 import { SidebarMessageSearch } from "../../components/chat/SidebarMessageSearch";
 import { JumpToBottomButton } from "../../components/chat/JumpToBottomButton";
 import { AttachmentComposerTray } from "../../components/chat/AttachmentComposerTray";
+import { LinkPreviewTray } from "../../components/chat/LinkPreviewTray";
 import { AttachmentLightbox } from "../../components/chat/AttachmentLightbox";
 import { AvatarFace } from "../../components/AvatarFace";
 import { PendingContent } from "../../components/chat/EnvelopeContent";
@@ -45,8 +46,13 @@ import { useAttachmentPicker } from "../../hooks/chat/useAttachmentPicker";
 import { useDeviceIdentity } from "../../hooks/chat/useDeviceIdentity";
 import { useSyncEngine } from "../../hooks/chat/useSyncEngine";
 import { useChatBackup } from "../../hooks/chat/useChatBackup";
+import { useBackgroundDecrypt } from "../../hooks/chat/useBackgroundDecrypt";
+import { useLinkPreviewDraft } from "../../hooks/chat/useLinkPreviewDraft";
+import { useConversationActions } from "../../hooks/chat/useConversationActions";
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
+import { useMarkChatRead } from "../../hooks/chat/useMarkChatRead";
+import { useReadWhenSeen } from "../../hooks/chat/useReadWhenSeen";
 import { useReceiptDisplay } from "../../hooks/chat/useReceiptDisplay";
 import { useStickToBottom } from "../../hooks/chat/useStickToBottom";
 import { useTypingNames } from "../../hooks/chat/useTypingNames";
@@ -56,6 +62,7 @@ import { useThreadData } from "../../hooks/chat/useThreadData";
 import { sendEncryptedChatMessage, sendEncryptedEdit } from "../../lib/mls/messaging/sendEncryptedMessage";
 
 import { sendAttachmentsWithCache } from "../../lib/mls/messaging/sendEncryptedAttachment";
+import { previewForSend } from "../../lib/mls/messaging/sendLinkPreview";
 import {
   flattenOtherAttachments,
   flattenVisualAttachments,
@@ -155,6 +162,7 @@ export default function ChatPage() {
   });
   const typingNames = useTypingNames(activeConversation, user?.id);
   const conversationPreviews = useConversationPreviews(listQuery.data, user?.id);
+  useBackgroundDecrypt(listQuery.data, user?.id, activeId);
   const {
     displayMessages,
     isLoadingOlder,
@@ -209,6 +217,8 @@ export default function ChatPage() {
   const dragDepthRef = useRef(0);
   // Uploaded attachment entries by clientId, so a retry re-sends without re-uploading.
   const uploadedAttachmentsRef = useRef(new Map());
+  // Link preview cards already prepared by clientId, so a retry re-sends the same card without uploading its picture again.
+  const preparedPreviewsRef = useRef(new Map());
   const recipientIds = () =>
     activeConversation?.type === "GROUP" ? otherActiveMemberIds(activeConversation, user?.id) : peer?.id;
   // A retired or unlinked device is reprovisioned for the next attempt; this attempt is not retried.
@@ -244,35 +254,43 @@ export default function ChatPage() {
     }
   };
   const sendMessage = useMutation({
-    mutationFn: ({ text, clientId, files, replyToId }) =>
-      withDeviceRecovery(() =>
-        files?.length
-          ? sendAttachmentsWithCache({
-              syncEngine,
-              deviceId: deviceCredential.deviceId,
-              conversationId: activeId,
-              recipientUserId: recipientIds(),
-              files,
-              caption: text,
-              clientMessageId: clientId,
-              uploaded: uploadedAttachmentsRef.current,
-              onStage: (stage) =>
-                setPendingMessages((prev) =>
-                  prev.map((item) => (item.clientId === clientId ? { ...item, stage } : item)),
-                ),
-            })
-          : sendEncryptedChatMessage(
-              syncEngine,
-              deviceCredential.deviceId,
-              activeId,
-              recipientIds(),
-              text,
-              clientId,
-              replyToId,
-            ),
-      ),
+    mutationFn: ({ text, clientId, files, replyToId, preview }) =>
+      withDeviceRecovery(async () => {
+        if (files?.length) {
+          return sendAttachmentsWithCache({
+            syncEngine,
+            deviceId: deviceCredential.deviceId,
+            conversationId: activeId,
+            recipientUserId: recipientIds(),
+            files,
+            caption: text,
+            clientMessageId: clientId,
+            uploaded: uploadedAttachmentsRef.current,
+            onStage: (stage) =>
+              setPendingMessages((prev) =>
+                prev.map((item) => (item.clientId === clientId ? { ...item, stage } : item)),
+              ),
+          });
+        }
+        const card = await previewForSend({
+          preview,
+          clientMessageId: clientId,
+          prepared: preparedPreviewsRef.current,
+        });
+        return sendEncryptedChatMessage(
+          syncEngine,
+          deviceCredential.deviceId,
+          activeId,
+          recipientIds(),
+          text,
+          clientId,
+          replyToId,
+          card,
+        );
+      }),
     onSuccess: (response, variables) => {
       uploadedAttachmentsRef.current.delete(variables.clientId);
+      preparedPreviewsRef.current.delete(variables.clientId);
       setPendingMessages((prev) =>
         prev.filter((pending) => pending.clientId !== variables.clientId),
       );
@@ -291,7 +309,12 @@ export default function ChatPage() {
     setPendingMessages((prev) =>
       prev.map((item) => (item.clientId === pending.clientId ? { ...item, failed: false } : item)),
     );
-    sendMessage.mutate({ text: pending.text, clientId: pending.clientId, files: pending.files });
+    sendMessage.mutate({
+      text: pending.text,
+      clientId: pending.clientId,
+      files: pending.files,
+      preview: pending.preview,
+    });
   };
 
   const composerInputRef = useRef(null);
@@ -313,6 +336,11 @@ export default function ChatPage() {
       ),
     onSent: (response) => mergeIntoMessageCache(response.conversationId ?? activeId, response.message),
     focusInput: () => requestAnimationFrame(() => composerInputRef.current?.focus()),
+  });
+  // Only a plain text message gets a card: not an attachment, not an edit, and not if the person turned previews off.
+  const linkPreview = useLinkPreviewDraft({
+    text: draft,
+    enabled: user?.sendLinkPreviews !== false && attachmentPicker.files.length === 0 && !messageEdit.target,
   });
   const startEdit = (message) => {
     setReplyTarget(null);
@@ -452,11 +480,18 @@ export default function ChatPage() {
     if (!isSessionLoading && !isAuthenticated) router.replace("/login");
   }, [isAuthenticated, isSessionLoading, router]);
 
+  // This device has the messages as soon as they are decrypted; they only count as read once they are on screen.
   useEffect(() => {
     if (!activeId || !readableMessageIdsKey) return;
     api.markChatDelivered(readableMessageIds).catch(() => {});
-    api.markChatRead(activeId, readableMessageIds.at(-1)).catch(() => {});
   }, [activeId, readableMessageIds, readableMessageIdsKey]);
+  const markChatRead = useMarkChatRead();
+  useReadWhenSeen({
+    containerRef: messagesContainerRef,
+    conversationId: activeId,
+    messageIds: readableMessageIds,
+    onRead: (messageId) => markChatRead(activeId, messageId, { isNewest: messageId === readableMessageIds.at(-1) }),
+  });
 
   const [replyLightboxOwnerId, setReplyLightboxOwnerId] = useState(activeId);
   const [hiddenMessageIds, setHiddenMessageIds] = useState(() => getHiddenMessageIds(activeId));
@@ -557,13 +592,11 @@ export default function ChatPage() {
       await refreshChat();
     },
   });
-  const blockConversation = useMutation({
-    mutationFn: () => api.blockChatConversation(activeId),
-    onSuccess: async () => {
-      setSelectedId("");
-      await refreshChat();
-    },
-  });
+  // A chat that was blocked, archived or deleted is no longer in this list, so it cannot stay open.
+  const closeIfOpen = (conversationId) => {
+    if (conversationId === activeId) setSelectedId("");
+  };
+  const conversationActions = useConversationActions({ onGone: closeIfOpen });
 
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [groupTitle, setGroupTitle] = useState("");
@@ -627,7 +660,7 @@ export default function ChatPage() {
     return <ChatSkeleton />;
   }
 
-  const actionError = acceptRequest.error || declineRequest.error || blockConversation.error;
+  const actionError = acceptRequest.error || declineRequest.error || conversationActions.block.error;
   // Only claim end-to-end encryption when this device can actually use the group.
   const encryptionStatus = groupProblem
     ? "Encryption problem on this device"
@@ -949,9 +982,11 @@ export default function ChatPage() {
                 active={activeId === conversation.id}
                 conversation={conversation}
                 key={conversation.id}
+                onGone={closeIfOpen}
                 onSelect={selectConversation}
                 preview={conversationPreviews[conversation.lastMessage?.id]}
                 userId={user?.id}
+                view={view}
               />
             ))}
           </div>
@@ -1108,7 +1143,7 @@ export default function ChatPage() {
                         className={`chat-message mine pending ${pending.failed ? "failed" : ""}`}
                       >
                         <div>
-                          <PendingContent files={pending.files} text={pending.text} />
+                          <PendingContent files={pending.files} preview={pending.preview} text={pending.text} />
                           <small>
                             {pending.failed ? (
                               <button
@@ -1270,10 +1305,11 @@ export default function ChatPage() {
                       const files = attachmentPicker.files;
                       if (!text && files.length === 0) return;
                       const clientId = crypto.randomUUID();
+                      const preview = files.length === 0 ? (linkPreview.preview ?? undefined) : undefined;
                       // Show the bubble and free the input; the send reconciles in the background.
                       setPendingMessages((prev) => [
                         ...prev,
-                        { clientId, text, files, conversationId: activeId },
+                        { clientId, text, files, preview, conversationId: activeId },
                       ]);
                       setDraft("");
                       attachmentPicker.clear();
@@ -1281,13 +1317,18 @@ export default function ChatPage() {
                       typingSignal.stop(activeId);
                       const replyToId = replyTarget?.id;
                       setReplyTarget(null);
-                      sendMessage.mutate({ text, clientId, files, replyToId });
+                      sendMessage.mutate({ text, clientId, files, replyToId, preview });
                     }}
                   >
                   <AttachmentComposerTray
                     error={attachmentPicker.error}
                     files={attachmentPicker.files}
                     onRemove={attachmentPicker.remove}
+                  />
+                  <LinkPreviewTray
+                    isLoading={linkPreview.isLoading}
+                    onDismiss={linkPreview.dismiss}
+                    preview={linkPreview.preview}
                   />
                   <input
                     hidden
@@ -1367,12 +1408,12 @@ export default function ChatPage() {
           displayName={activeConversationName}
           encryptionStatus={encryptionStatus}
           fileAttachments={flatOtherAttachments}
-          isBlockPending={blockConversation.isPending}
+          isBlockPending={conversationActions.block.isPending}
           isGroup={activeConversation?.type === "GROUP"}
           isOpen={isConversationInfoOpen && Boolean(activeConversation)}
           key={activeId || "no-conversation"}
           manageButtonRef={groupSettingsButtonRef}
-          onBlock={() => blockConversation.mutate()}
+          onBlock={() => conversationActions.block.mutate(activeId)}
           onClose={() => setIsConversationInfoOpen(false)}
           onManageGroup={() => setIsGroupSettingsOpen(true)}
           onOpenAttachment={setLightboxKey}

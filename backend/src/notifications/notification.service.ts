@@ -303,6 +303,20 @@ export class NotificationService {
     };
   }
 
+  /** Reading a message in the chat settles its notifications, so the bell does not count what was just seen. */
+  async markMessageNotificationsAsRead(
+    recipientId: string,
+    messageIds: string[],
+  ) {
+    if (messageIds.length === 0) return { count: 0 };
+
+    return this.notificationRepository.markMessageNotificationsAsRead({
+      recipientId,
+      messageIds,
+      readAt: new Date(),
+    });
+  }
+
   /**
    * Marks all currently unread notifications for a recipient as read.
    */

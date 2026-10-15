@@ -64,6 +64,53 @@ describe('applyEdits', () => {
     expect(result.edited.get('m1')?.versions.map((version) => version.at)).toEqual([T0, T0 + 120_000, T0 + 300_000]);
   });
 
+  describe('a message that has a link preview card', () => {
+    const preview = { url: 'https://example.com/post', title: 'A post' };
+    const withCard = (body: string) => ({
+      status: 'ok' as const,
+      envelope: { v: 1 as const, type: 'text' as const, body, previews: [preview] },
+    });
+    const previewsOf = (state: unknown) => (state as { envelope: { previews?: unknown } }).envelope.previews;
+
+    it('keeps its card through an edit', () => {
+      const result = applyEdits([original('m1'), editRow('e1', 'm1', 2)], {
+        m1: withCard('see https://example.com/post'),
+        e1: edit('m1', 'look https://example.com/post'),
+      });
+
+      expect(bodyOf(result.decrypted.m1)).toBe('look https://example.com/post');
+      expect(previewsOf(result.decrypted.m1)).toEqual([preview]);
+    });
+
+    it('keeps its card through several edits', () => {
+      const result = applyEdits([original('m1'), editRow('e1', 'm1', 2), editRow('e2', 'm1', 5)], {
+        m1: withCard('see https://example.com/post'),
+        e1: edit('m1', 'one https://example.com/post', 1),
+        e2: edit('m1', 'two https://example.com/post', 2),
+      });
+
+      expect(previewsOf(result.decrypted.m1)).toEqual([preview]);
+    });
+
+    it('does not give a message a card it never had', () => {
+      const result = applyEdits([original('m1'), editRow('e1', 'm1', 2)], {
+        m1: text('hello'),
+        e1: edit('m1', 'hello again'),
+      });
+
+      expect(result.decrypted.m1).toEqual({ status: 'ok', envelope: { v: 1, type: 'text', body: 'hello again' } });
+    });
+
+    it('does not take a card from a message this device could not read', () => {
+      const result = applyEdits([original('m1'), editRow('e1', 'm1', 2)], {
+        m1: { status: 'unavailable' as const },
+        e1: edit('m1', 'hello again'),
+      });
+
+      expect(result.decrypted.m1).toEqual({ status: 'ok', envelope: { v: 1, type: 'text', body: 'hello again' } });
+    });
+  });
+
   it('orders edits by when the server stored them, not by the order given', () => {
     const result = applyEdits(
       [original('m1'), editRow('e2', 'm1', 5), editRow('e1', 'm1', 2)],

@@ -52,6 +52,9 @@ function renderChat() {
   );
 }
 
+// The row has two buttons now: the one that opens the chat, and its three-dot menu.
+const OPEN_ROW = /^(?!Options for).*sender/i;
+
 describe("chat requests", () => {
   beforeEach(() => {
     mocks.accept.mockClear();
@@ -62,7 +65,7 @@ describe("chat requests", () => {
     renderChat();
     fireEvent.click(await screen.findByRole("button", { name: /more/i }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /requests/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /sender/i }));
+    fireEvent.click(await screen.findByRole("button", { name: OPEN_ROW }));
     fireEvent.click(await screen.findByRole("button", { name: /accept/i }));
     await waitFor(() => expect(mocks.accept).toHaveBeenCalledWith("conversation-1"));
   });
@@ -71,7 +74,7 @@ describe("chat requests", () => {
     renderChat();
     fireEvent.click(await screen.findByRole("button", { name: /more/i }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /requests/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /sender/i }));
+    fireEvent.click(await screen.findByRole("button", { name: OPEN_ROW }));
     fireEvent.click(await screen.findByRole("button", { name: /decline/i }));
     await waitFor(() => expect(mocks.decline).toHaveBeenCalledWith("conversation-1"));
   });

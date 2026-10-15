@@ -78,7 +78,7 @@ export class ReportsService {
     targetType: ReportTargetType,
     targetId: string,
     reporterId: string,
-  ): Promise<string> {
+  ): Promise<string | null> {
     const target = await this.reportsRepository.findTargetPostInfo(
       targetType,
       targetId,

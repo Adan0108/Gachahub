@@ -17,7 +17,9 @@ import {
 import { AttachmentFileChip } from "./AttachmentFileChip";
 import { MuteRow } from "./MuteRow";
 import { ImageTile, VideoTile } from "./AttachmentTiles";
+import { ConfirmChatActionDialog } from "./ConfirmChatActionDialog";
 import { ConversationSearchView } from "./ConversationSearchView";
+import { CONFIRMATIONS } from "../../lib/chat/chatActionConfirmations";
 import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightboxContext";
 import { attachmentKind } from "../../lib/mls/media/attachmentView";
 import { AvatarFace } from "../AvatarFace";
@@ -56,6 +58,7 @@ export function ConversationInfoPanel({
   // A search started from the sidebar opens this panel on the search view with its text.
   const [appliedSeed, setAppliedSeed] = useState(searchSeed);
   const [toast, setToast] = useState(null);
+  const [isConfirmingBlock, setIsConfirmingBlock] = useState(false);
   const toastTimerRef = useRef(null);
 
   useEffect(() => () => window.clearTimeout(toastTimerRef.current), []);
@@ -152,7 +155,7 @@ export function ConversationInfoPanel({
                 <button
                   className="chat-info-row danger"
                   disabled={isBlockPending}
-                  onClick={onBlock}
+                  onClick={() => setIsConfirmingBlock(true)}
                   type="button"
                 >
                   <FiUserX /> Block
@@ -222,6 +225,18 @@ export function ConversationInfoPanel({
             {toast}
           </div>
         )}
+        <ConfirmChatActionDialog
+          body={CONFIRMATIONS.block.body}
+          confirmLabel={CONFIRMATIONS.block.confirmLabel}
+          isOpen={isConfirmingBlock}
+          isPending={isBlockPending}
+          onClose={() => setIsConfirmingBlock(false)}
+          onConfirm={() => {
+            setIsConfirmingBlock(false);
+            onBlock();
+          }}
+          title={CONFIRMATIONS.block.title(displayName)}
+        />
       </aside>
     </AttachmentLightboxContext.Provider>
   );

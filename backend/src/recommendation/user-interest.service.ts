@@ -52,23 +52,26 @@ export class UserInterestService {
 
       const deltas: InterestDelta[] = [
         {
-          entityType: 'GAME',
-          entityId: post.gameId,
-          amount: weight,
-        },
-
-        {
-          entityType: 'POST_TYPE',
-          entityId: post.type,
-          amount: weight,
-        },
-
-        {
           entityType: 'AUTHOR',
           entityId: post.authorId,
           amount: weight * AUTHOR_WEIGHT_MULTIPLIER,
         },
       ];
+
+      if (post.gameId !== null) {
+        deltas.push({
+          entityType: 'GAME',
+          entityId: post.gameId,
+          amount: weight,
+        });
+      }
+      if (post.type !== null) {
+        deltas.push({
+          entityType: 'POST_TYPE',
+          entityId: post.type,
+          amount: weight,
+        });
+      }
 
       if (post.categoryId) {
         deltas.push({

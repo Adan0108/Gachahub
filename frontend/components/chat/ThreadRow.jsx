@@ -1,6 +1,7 @@
 import { FiCornerUpLeft, FiFile, FiLock } from "react-icons/fi";
 import { EnvelopeContent } from "./EnvelopeContent";
 import { EditedLabel } from "./EditedLabel";
+import { QuotedLinkPreview } from "./LinkPreviewCard";
 import { MessageActions } from "./MessageActions";
 import { MessageStatusLine } from "./MessageStatusLine";
 import { HistoryBanner, MembershipEventLine, TimestampDivider } from "./ThreadNotices";
@@ -15,6 +16,7 @@ import {
   isMediaOnlyView,
   resolveAttachmentSources,
 } from "../../lib/mls/media/attachmentView";
+import { readLinkPreviews } from "../../lib/mls/messaging/linkPreviewEnvelope";
 import {
   membershipEventText,
   messageDividerLabel,
@@ -75,6 +77,10 @@ function ReplyQuote({ message, messagesById, decryptedById, onJumpToMessage }) {
   return (
     <button className="chat-reply-quote" onClick={() => onJumpToMessage(message.replyToId)} type="button">
       {view?.kind === "text" && <span className="chat-reply-quote-text">{view.text}</span>}
+      {view?.kind === "text" &&
+        readLinkPreviews(decrypted.envelope).map((preview) => (
+          <QuotedLinkPreview key={preview.url} media={original?.media} messageId={message.replyToId} preview={preview} />
+        ))}
       {view?.kind === "attachment" && view.files[0] && (
         <ReplyQuoteMedia file={view.files[0]} media={original?.media} replyToId={message.replyToId} />
       )}

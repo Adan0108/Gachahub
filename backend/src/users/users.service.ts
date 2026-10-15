@@ -91,6 +91,7 @@ export class UsersService {
       data: {
         messageRequestSetting: dto.messageRequestSetting,
         sendReadReceipts: dto.sendReadReceipts,
+        sendLinkPreviews: dto.sendLinkPreviews,
       },
       select: ME_SELECT,
     });

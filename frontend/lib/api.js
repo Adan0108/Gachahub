@@ -88,6 +88,9 @@ export const backendRoutes = {
     `/chat/requests/${encodePathParam(conversationId)}/decline`,
   chatBlockConversation: (conversationId) =>
     `/chat/conversations/${encodePathParam(conversationId)}/block`,
+  chatConversation: (conversationId) => `/chat/conversations/${encodePathParam(conversationId)}`,
+  chatArchiveConversation: (conversationId) =>
+    `/chat/conversations/${encodePathParam(conversationId)}/archive`,
   chatNotificationLevel: (conversationId) =>
     `/chat/conversations/${encodePathParam(conversationId)}/notification-level`,
   chatGroups: '/chat/groups',
@@ -101,6 +104,7 @@ export const backendRoutes = {
   chatGroupLeave: (conversationId) =>
     `/chat/groups/${encodePathParam(conversationId)}/leave`,
   chatDelivered: '/chat/messages/delivered',
+  linkPreviews: '/link-previews',
   chatRead: (conversationId) => `/chat/conversations/${encodePathParam(conversationId)}/read`,
   chatBackup: '/chat-backup',
   chatBackupBlobs: '/chat-backup/blobs',
@@ -199,7 +203,7 @@ export function normalizePost(post) {
 
   return {
     id: post.id,
-    title: post.title,
+    title: post.title || post.content?.slice(0, 100) || 'Post',
     author: post.author?.name || 'Unknown user',
     authorId: post.author?.id || post.authorId,
     authorImage: post.author?.image || null,
@@ -211,7 +215,7 @@ export function normalizePost(post) {
     media: Array.isArray(post.media) ? post.media : [],
     visibility: post.visibility || "PUBLIC",
     isSpoiler: Boolean(post.isSpoiler),
-    type: post.type || "GENERAL",
+    type: post.type ?? null,
     likeCount: post.reactionCount ?? post.likeCount ?? 0,
     commentCount: post.commentCount ?? 0,
     likedByCurrentUser: Boolean(post.likedByCurrentUser),
@@ -799,16 +803,24 @@ export const api = {
   hideContent: (item) =>
     mutation(
       item.type === "POST"
-        ? backendRoutes.postHide(item.gameSlug, item.id)
-        : backendRoutes.commentHide(item.gameSlug, item.id),
+        ? item.gameSlug
+          ? backendRoutes.postHide(item.gameSlug, item.id)
+          : `/admin/posts/${encodePathParam(item.id)}/hide`
+        : item.gameSlug
+          ? backendRoutes.commentHide(item.gameSlug, item.id)
+          : `/admin/comments/${encodePathParam(item.id)}/hide`,
       undefined,
       { method: "PATCH" },
     ),
   restoreContent: (item) =>
     mutation(
       item.type === "POST"
-        ? backendRoutes.postRestore(item.gameSlug, item.id)
-        : backendRoutes.commentRestore(item.gameSlug, item.id),
+        ? item.gameSlug
+          ? backendRoutes.postRestore(item.gameSlug, item.id)
+          : `/admin/posts/${encodePathParam(item.id)}/restore`
+        : item.gameSlug
+          ? backendRoutes.commentRestore(item.gameSlug, item.id)
+          : `/admin/comments/${encodePathParam(item.id)}/restore`,
       undefined,
       { method: "PATCH" },
     ),
@@ -840,6 +852,13 @@ export const api = {
     mutation(backendRoutes.chatDeclineRequest(conversationId)),
   blockChatConversation: (conversationId) =>
     mutation(backendRoutes.chatBlockConversation(conversationId)),
+  archiveChatConversation: (conversationId) =>
+    mutation(backendRoutes.chatArchiveConversation(conversationId)),
+  unarchiveChatConversation: (conversationId) =>
+    mutation(backendRoutes.chatArchiveConversation(conversationId), undefined, { method: 'DELETE' }),
+  // Removes the chat for you only; the other people keep theirs.
+  deleteChatConversation: (conversationId) =>
+    mutation(backendRoutes.chatConversation(conversationId), undefined, { method: 'DELETE' }),
   /** `notificationLevel` is ALL or NOTHING (muted); `mutedUntil` is an ISO time, omitted for an open-ended mute. */
   setChatNotificationLevel: (conversationId, { notificationLevel, mutedUntil }) =>
     mutation(
@@ -861,6 +880,8 @@ export const api = {
     mutation(backendRoutes.chatGroupMemberRole(conversationId, userId), { role }, { method: 'PATCH' }),
   leaveGroup: (conversationId) => mutation(backendRoutes.chatGroupLeave(conversationId)),
   markChatDelivered: (messageIds) => mutation(backendRoutes.chatDelivered, { messageIds }),
+  // The server fetches the page; the sender attaches the result to the encrypted message.
+  fetchLinkPreview: (url) => mutation(backendRoutes.linkPreviews, { url }),
   markChatRead: (conversationId, lastReadMessageId) =>
     mutation(
       backendRoutes.chatRead(conversationId),

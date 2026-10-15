@@ -44,6 +44,27 @@ describe('UpdateProfileDto', () => {
     expect(errors).toHaveLength(1);
   });
 
+  describe('sendLinkPreviews', () => {
+    it.each([true, false])('allows %s', async (value) => {
+      const dto = plainToInstance(UpdateProfileDto, {
+        sendLinkPreviews: value,
+      });
+
+      expect(await validate(dto)).toHaveLength(0);
+    });
+
+    it.each([null, 'yes', 1, 'true'])('rejects %p', async (value) => {
+      const dto = plainToInstance(UpdateProfileDto, {
+        sendLinkPreviews: value,
+      });
+
+      const errors = await validate(dto);
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0].property).toBe('sendLinkPreviews');
+    });
+  });
+
   describe('sendReadReceipts', () => {
     it.each([true, false])('allows %s', async (value) => {
       const dto = plainToInstance(UpdateProfileDto, {

@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { NotificationService } from '../notifications/notification.service';
 import { ChatAccessService } from './chat-access.service';
 import { ChatRepository } from './chat.repository';
 import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
@@ -24,6 +25,7 @@ export class ChatReceiptsService {
     private readonly chatAccessService: ChatAccessService,
     @Inject(CHAT_DELIVERY_PORT)
     private readonly chatDelivery: ChatDeliveryPort,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -77,6 +79,8 @@ export class ChatReceiptsService {
       lastReadMessageId: dto.lastReadMessageId,
     });
 
+    await this.settleNotifications(userId, result.readMessageIds);
+
     if (result.count > 0 && result.lastReadMessage) {
       await this.announceRead(
         userId,
@@ -88,6 +92,21 @@ export class ChatReceiptsService {
     return {
       readCount: result.count,
     };
+  }
+
+  /** Best effort: the read is already saved, a notification left unread must not fail the request. */
+  private async settleNotifications(userId: string, messageIds: string[]) {
+    try {
+      await this.notificationService.markMessageNotificationsAsRead(
+        userId,
+        messageIds,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Could not mark notifications read for ${userId}`,
+        error,
+      );
+    }
   }
 
   private announceDelivered(

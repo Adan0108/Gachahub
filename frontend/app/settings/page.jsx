@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FiBell, FiLock, FiSettings, FiSliders } from "react-icons/fi";
 import { QueryNotice } from "../../components/QueryNotice";
+import { LinkPreviewsSetting } from "../../components/settings/LinkPreviewsSetting";
 import { ReadReceiptsSetting } from "../../components/settings/ReadReceiptsSetting";
 import { useToast } from "../../hooks/useToast";
 import { api } from "../../lib/api";
@@ -113,6 +114,7 @@ export default function SettingsPage() {
               <FiLock />
             </div>
             <ReadReceiptsSetting />
+            <LinkPreviewsSetting />
             <button className="settings-placeholder" onClick={notAvailable} type="button"><span><b>Blocked accounts</b><small>Review people you have blocked.</small></span><span>Coming soon</span></button>
           </section>
         </main>

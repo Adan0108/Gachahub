@@ -27,6 +27,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { UsersModule } from './users/users.module';
 import { AuditLogQueryModule } from './audit-log/audit-log-query.module';
+import { LinkPreviewsModule } from './link-previews/link-previews.module';
 import { ReportsModule } from './reports/reports.module';
 import { ChatBackupModule } from './chat-backup/chat-backup.module';
 import { MlsRetentionModule } from './mls-retention/mls-retention.module';
@@ -67,6 +68,7 @@ import { MlsRetentionModule } from './mls-retention/mls-retention.module';
     FollowsModule,
     FeedModule,
     ReportsModule,
+    LinkPreviewsModule,
     ContentModerationModule,
     AuditLogQueryModule,
     OverviewModule,

@@ -33,11 +33,11 @@ export function getPostMediaError(files, confirmedUploads = []) {
 
 export function buildPostPayload(form, tags, uploads) {
   return {
-    gameId: form.gameId,
-    ...(form.categoryId ? { categoryId: form.categoryId } : {}),
-    title: form.title.trim(),
+    gameId: form.gameId || null,
+    ...(form.gameId && form.categoryId ? { categoryId: form.categoryId } : {}),
+    ...(form.title.trim() ? { title: form.title.trim() } : {}),
     content: form.content.trim(),
-    type: form.type,
+    ...(form.gameId ? { type: form.type } : {}),
     status: form.status,
     visibility: form.visibility,
     isSpoiler: form.isSpoiler,

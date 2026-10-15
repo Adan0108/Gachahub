@@ -45,4 +45,17 @@ describe("post composer", () => {
       media: [{ mediaUploadId: "upload-1", sortOrder: 0 }],
     });
   });
+  it("clears stale community classification when composing a personal post or draft", () => {
+    for (const status of ["PUBLISHED", "DRAFT"]) {
+      const payload = buildPostPayload(
+        { gameId: "", categoryId: "stale", type: "GUIDE", title: "", content: "Personal", status },
+        [],
+        [],
+      );
+      expect(payload).toMatchObject({ gameId: null, content: "Personal", status });
+      expect(payload).not.toHaveProperty("type");
+      expect(payload).not.toHaveProperty("categoryId");
+      expect(payload).not.toHaveProperty("title");
+    }
+  });
 });
