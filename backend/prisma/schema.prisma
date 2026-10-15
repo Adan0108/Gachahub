@@ -59,10 +59,10 @@ model User {
   blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
   blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
 
-  reportsFiled    Report[]   @relation("ReportsFiled")
-  reportsAssigned Report[]   @relation("ReportsAssigned")
-  reportsResolved Report[]   @relation("ReportsResolved")
-  auditLogsActed  AuditLog[] @relation("AuditLogActor")
+  reportsFiled            Report[]         @relation("ReportsFiled")
+  moderationCasesAssigned ModerationCase[] @relation("ModerationCasesAssigned")
+  moderationCasesResolved ModerationCase[] @relation("ModerationCasesResolved")
+  auditLogsActed          AuditLog[]       @relation("AuditLogActor")
 
   receivedNotifications Notification[] @relation("NotificationRecipient")
   actedNotifications    Notification[] @relation("NotificationActor")
@@ -200,13 +200,13 @@ model Game {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  categories GameCategory[]
-  moderators GameModerator[]
-  posts      Post[]
-  members    GameMember[]
-  chatEmotes ChatEmote[]
-  reports    Report[]
-  auditLogs  AuditLog[]
+  categories      GameCategory[]
+  moderators      GameModerator[]
+  posts           Post[]
+  members         GameMember[]
+  chatEmotes      ChatEmote[]
+  moderationCases ModerationCase[]
+  auditLogs       AuditLog[]
 
   @@index([status])
   @@index([createdAt])
@@ -865,28 +865,68 @@ enum ReportTargetType {
 enum ReportReason {
   UNMARKED_SPOILERS
   HARASSMENT
+  HATE
+  VIOLENCE
   COMMERCIAL_SPAM
+  SCAM
+  IMPERSONATION
   MISINFORMATION
   NSFW
   OTHER
 }
 
-enum ReportStatus {
-  PENDING
+enum ModerationCaseStatus {
+  OPEN
   IN_REVIEW
   RESOLVED
   DISMISSED
 }
 
+enum ModerationRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
 model Report {
   id         String           @id @default(cuid())
-  gameId     String
+  caseId     String
   reporterId String
   targetType ReportTargetType
   targetId   String
   reasonCode ReportReason
   details    String?
-  status     ReportStatus     @default(PENDING)
+
+  /// Immutable moderation evidence captured when this report is created; structure defined later.
+  targetSnapshot Json?
+
+  createdAt DateTime @default(now())
+
+  reporter User           @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  case     ModerationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  // TODO(manual migration): replace/remove the existing reports_open_target_key partial
+  // unique index from migration 20260918160000_add_reports: Report no longer owns status.
+  // Do not replace it with an unconditional reporter/target unique constraint.
+  @@index([reporterId, createdAt])
+  @@index([caseId, createdAt])
+  @@index([targetType, targetId])
+  @@map("reports")
+}
+
+model ModerationCase {
+  id         String           @id @default(cuid())
+  targetType ReportTargetType
+  targetId   String
+  /// Denormalized from the target for game moderation queries; null for platform cases or a deleted game.
+  gameId     String?
+
+  status              ModerationCaseStatus @default(OPEN)
+  reportCount         Int                  @default(0)
+  uniqueReporterCount Int                  @default(0)
+  currentRiskScore    Float?
+  currentRiskLevel    ModerationRiskLevel?
 
   assignedModeratorId String?
   resolutionNote      String?
@@ -896,30 +936,20 @@ model Report {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  game              Game  @relation(fields: [gameId], references: [id], onDelete: Cascade)
-  reporter          User  @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
-  assignedModerator User? @relation("ReportsAssigned", fields: [assignedModeratorId], references: [id], onDelete: SetNull)
-  resolvedBy        User? @relation("ReportsResolved", fields: [resolvedById], references: [id], onDelete: SetNull)
+  reports           Report[]
+  game              Game?    @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  assignedModerator User?    @relation("ModerationCasesAssigned", fields: [assignedModeratorId], references: [id], onDelete: SetNull)
+  resolvedBy        User?    @relation("ModerationCasesResolved", fields: [resolvedById], references: [id], onDelete: SetNull)
 
-  // gameId is denormalized from the target (Post.gameId, or Comment -> Post.gameId) at creation
-  // time. A report's target is polymorphic (POST or COMMENT), and Prisma has no native way to
-  // join "whichever table targetType points at" - without gameId living here directly, listing
-  // "reports for game X" would mean two separate queries merged and paginated in application
-  // code. Denormalizing it once at write time keeps every read a plain indexed query.
-  //
-  // No @@unique here: uniqueness on (reporterId, targetType, targetId) is scoped to open
-  // (PENDING/IN_REVIEW) reports only, so a reporter can re-report the same target after an
-  // earlier report closes. Prisma cannot express a WHERE-scoped unique index, so the real
-  // constraint is a hand-written partial unique index in migration 20260918160000_add_reports
-  // ("reports_open_target_key") - same pattern as ChatEmote's global shortcode uniqueness.
-  // Keep that migration line when regenerating. ReportsService.create also does a plain
-  // pre-check query for a friendly 409 message; the partial index is what actually prevents
-  // the race between two concurrent requests both passing that check.
+  // TODO(manual migration): create a partial unique index on (targetType, targetId)
+  // WHERE status IN ('OPEN', 'IN_REVIEW'). Prisma cannot express this constraint.
+  // Do not add an unconditional @@unique: closed cases must allow a new case for the target.
   @@index([gameId, status, createdAt])
   @@index([gameId, createdAt])
-  @@index([status, createdAt])
+  @@index([status, currentRiskLevel, createdAt])
   @@index([targetType, targetId])
-  @@map("reports")
+  @@index([assignedModeratorId])
+  @@map("moderation_cases")
 }
 
 enum AuditAction {
