@@ -35,10 +35,10 @@ vi.mock("@tanstack/react-query", () => ({
   useMutation: ({ mutationFn, onMutate, onError, onSettled }) => ({
     isPending: false,
     isError: false,
-    mutate: () => {
-      mutationFn?.();
-      const context = onMutate?.();
-      onError?.(new Error("failed"), undefined, context);
+    mutate: (variables) => {
+      mutationFn?.(variables);
+      const context = onMutate?.(variables);
+      onError?.(new Error("failed"), variables, context);
       onSettled?.();
     },
   }),

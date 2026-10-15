@@ -10,6 +10,9 @@ function asItemsList(data) {
   return { items, meta: { total: items.length } };
 }
 
+/** Every cached list a post can appear in: its detail and lists, the home feeds, and community feeds. */
+export const postListQueryKeys = [["posts"], ["feed"], ["game-feed"]];
+
 export const queryKeys = {
   health: ["health"],
   home: (search) => ["home", { search }],

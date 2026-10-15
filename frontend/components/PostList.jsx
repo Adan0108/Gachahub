@@ -23,7 +23,7 @@ import {
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { useDismiss } from "../hooks/useDismiss";
 import { api } from "../lib/api";
-import { queries, queryKeys } from "../lib/queries";
+import { postListQueryKeys, queries, queryKeys } from "../lib/queries";
 import { AvatarFace } from "./AvatarFace";
 import { artTones, glyph } from "./constants";
 import { MentionInput } from "./MentionInput";
@@ -223,14 +223,13 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
   };
 
   const toggleLike = useMutation({
-    // Derive the request from the state currently rendered on the button.
-    // Unliked posts use POST; liked posts use DELETE.
-    mutationFn: () => (liked ? api.unlikePost(post.id) : api.likePost(post.id)),
-    onMutate: () => {
+    // The direction is decided at the click: by the time this runs, `liked` already shows the optimistic state.
+    mutationFn: (shouldLike) => (shouldLike ? api.likePost(post.id) : api.unlikePost(post.id)),
+    onMutate: (shouldLike) => {
       const previous = { liked, likeCount };
       setLikeOverride({
-        liked: !liked,
-        likeCount: Math.max(0, likeCount + (liked ? -1 : 1)),
+        liked: shouldLike,
+        likeCount: Math.max(0, likeCount + (shouldLike ? 1 : -1)),
       });
       return previous;
     },
@@ -238,7 +237,8 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
       setLikeOverride(previous);
     },
     onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["posts"] });
+      // Every list the post can be in, so the one on screen has the server's answer before the optimistic state goes.
+      await Promise.all(postListQueryKeys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
       setLikeOverride(null);
     },
   });
@@ -413,7 +413,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
           aria-pressed={liked}
           className={liked ? "active" : ""}
           disabled={toggleLike.isPending}
-          onClick={() => requireAuth() && toggleLike.mutate()}
+          onClick={() => requireAuth() && toggleLike.mutate(!liked)}
           type="button"
         >
           <FiHeart /> {likeCount}
