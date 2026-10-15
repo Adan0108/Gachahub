@@ -2864,6 +2864,13 @@
   scrollbar-color: var(--line) transparent;
 }
 
+/* A short thread sits against the composer, not at the top; unlike justify-content: flex-end this stays scrollable once it overflows. */
+.chat-messages::before {
+  content: "";
+  flex: 0 0 auto;
+  margin: auto 0 -12px;
+}
+
 .chat-messages::-webkit-scrollbar,
 .chat-conversation-list::-webkit-scrollbar {
   width: 8px;
