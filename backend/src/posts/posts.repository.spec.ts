@@ -268,3 +268,86 @@ describe('PostsRepository save hydration', () => {
     expect(args).toMatchObject({ include: { postSaves: false } });
   });
 });
+
+describe('PostsRepository optional game lifecycle', () => {
+  const post = {
+    id: 'p',
+    gameId: null as string | null,
+    status: 'PUBLISHED',
+    deletedAt: null,
+  };
+  const tx = {
+    post: {
+      create: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    game: { update: jest.fn() },
+  };
+  const prisma = {
+    $transaction: (work: (client: typeof tx) => unknown) => work(tx),
+  };
+  const repository = new PostsRepository(prisma as never);
+  beforeEach(() => {
+    jest.clearAllMocks();
+    tx.post.create.mockResolvedValue(post);
+    tx.post.findUniqueOrThrow.mockResolvedValue(post);
+    tx.post.update.mockResolvedValue({ ...post, status: 'DRAFT' });
+    tx.post.updateMany.mockResolvedValue({ count: 1 });
+  });
+  it.each(['PUBLISHED', 'DRAFT'])(
+    'creates personal %s without a game connection/counter',
+    async (status) => {
+      tx.post.create.mockResolvedValue({ ...post, status });
+      await repository.create(tx as never, {
+        authorId: 'u',
+        gameId: null,
+        type: null,
+        title: '',
+        content: 'Personal',
+        status: status as never,
+      });
+      expect(tx.post.create.mock.calls[0][0].data).not.toHaveProperty('game');
+      expect(tx.game.update).not.toHaveBeenCalled();
+    },
+  );
+  it('keeps community creation counter', async () => {
+    tx.post.create.mockResolvedValue({ ...post, gameId: 'g' });
+    await repository.create(tx as never, {
+      authorId: 'u',
+      gameId: 'g',
+      title: 'Game post',
+      content: 'Community',
+      type: 'GENERAL',
+    });
+    expect(tx.game.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'g' },
+        data: { postCount: { increment: 1 } },
+      }),
+    );
+  });
+  it('deletes personal posts without a game counter', async () => {
+    await repository.softDelete('p');
+    expect(tx.game.update).not.toHaveBeenCalled();
+  });
+  it('changes publication status without a game counter', async () => {
+    await repository.update(tx as never, {
+      id: 'p',
+      data: { status: 'DRAFT' },
+    });
+    await repository.transitionStatus(tx as never, {
+      id: 'p',
+      gameId: null,
+      from: 'PUBLISHED',
+      to: 'HIDDEN',
+    });
+    expect(tx.game.update).not.toHaveBeenCalled();
+    expect(tx.post.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'p', gameId: null, status: 'PUBLISHED' },
+      }),
+    );
+  });
+});

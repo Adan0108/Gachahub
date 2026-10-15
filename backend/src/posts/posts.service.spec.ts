@@ -1074,4 +1074,83 @@ describe('PostsService', () => {
       expect(userInterestService.recordPostInteraction).not.toHaveBeenCalled();
     });
   });
+  describe('personal posts', () => {
+    const personal = {
+      ...basePost,
+      gameId: null,
+      game: null,
+      type: null,
+      categoryId: null,
+      category: null,
+    };
+    beforeEach(() => {
+      mediaService.resolveAttachableMedia.mockResolvedValue([]);
+      postsRepository.create.mockResolvedValue(personal);
+      postsRepository.findById.mockResolvedValue(personal);
+      postsRepository.update.mockResolvedValue(personal);
+    });
+    it.each([undefined, null])(
+      'creates without game lookup for gameId=%s',
+      async (gameId) => {
+        await expect(
+          service.create({ gameId, content: 'My personal post' }, 'author-1'),
+        ).resolves.toMatchObject({
+          gameId: null,
+          type: null,
+          categoryId: null,
+        });
+        expect(postsRepository.findGameById).not.toHaveBeenCalled();
+        expect(postsRepository.create).toHaveBeenCalledWith(
+          transaction,
+          expect.objectContaining({ gameId: null, type: null, title: '' }),
+        );
+      },
+    );
+    it('allows personal drafts', async () => {
+      await service.create(
+        { content: 'Draft', status: CreatePostStatusDto.DRAFT },
+        'author-1',
+      );
+      expect(postsRepository.create).toHaveBeenCalledWith(
+        transaction,
+        expect.objectContaining({ gameId: null, status: 'DRAFT' }),
+      );
+    });
+    it.each([{ type: 'GUIDE' }, { categoryId: 'category-1' }])(
+      'rejects classification %j',
+      async (classification) => {
+        await expect(
+          service.create(
+            { content: 'Personal', ...classification } as never,
+            'author-1',
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expect(postsRepository.create).not.toHaveBeenCalled();
+        await expect(
+          service.update('post-1', classification as never, 'author-1'),
+        ).rejects.toThrow(BadRequestException);
+        expect(postsRepository.update).not.toHaveBeenCalled();
+      },
+    );
+    it('allows ordinary personal edits', async () => {
+      await service.update('post-1', { content: 'Edited' }, 'author-1');
+      expect(postsRepository.update).toHaveBeenCalledWith(
+        transaction,
+        expect.objectContaining({ data: { content: 'Edited' } }),
+      );
+    });
+    it('reads personal details and profile posts', async () => {
+      postsRepository.findViewableById.mockResolvedValue(personal);
+      postsRepository.findByAuthorId.mockResolvedValue({
+        items: [personal],
+        total: 1,
+      });
+      await expect(
+        service.findOne('post-1', 'author-1'),
+      ).resolves.toMatchObject({ game: null });
+      expect(
+        (await service.findByAuthor({}, 'author-1', 'author-1')).items[0],
+      ).toMatchObject({ gameId: null });
+    });
+  });
 });

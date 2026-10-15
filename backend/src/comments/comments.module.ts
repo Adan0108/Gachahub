@@ -1,3 +1,4 @@
+import { AdminCommentModerationController } from './admin-comment-moderation.controller';
 import { Module } from '@nestjs/common';
 
 import { AuditLogModule } from '../audit-log/audit-log.module';
@@ -21,7 +22,11 @@ import { MentionsModule } from '../mentions/mentions.module';
     DomainEventsModule,
     MentionsModule,
   ],
-  controllers: [CommentsController, CommentModerationController],
+  controllers: [
+    AdminCommentModerationController,
+    CommentsController,
+    CommentModerationController,
+  ],
   providers: [CommentsService, CommentsRepository, CommentModerationService],
   exports: [CommentsService, CommentsRepository],
 })

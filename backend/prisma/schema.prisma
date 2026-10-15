@@ -597,16 +597,19 @@ enum PostMediaType {
   VIDEO
 }
 
+// Personal posts have no game, type or category. posts_classification_check and
+// posts_clear_detached_classification (migration 20261015050000) enforce this
+// and clear classification when a Game deletion sets gameId to null.
 model Post {
   id         String  @id @default(cuid())
   authorId   String
-  gameId     String
+  gameId     String?
   categoryId String?
 
   title   String
   content String
 
-  type       PostType       @default(GENERAL)
+  type       PostType?
   status     PostStatus     @default(PUBLISHED)
   visibility PostVisibility @default(PUBLIC)
   isSpoiler  Boolean        @default(false)
@@ -622,7 +625,7 @@ model Post {
   deletedAt DateTime?
 
   author   User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  game     Game          @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  game     Game?         @relation(fields: [gameId], references: [id], onDelete: SetNull)
   category GameCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   media     PostMedia[]

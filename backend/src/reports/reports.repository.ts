@@ -24,7 +24,7 @@ const reportInclude = {
 } satisfies Prisma.ReportInclude;
 
 export interface ReportableTargetInfo {
-  gameId: string;
+  gameId: string | null;
   deletedAt: Date | null;
   status: PostStatus;
   visibility: PostVisibility;
@@ -140,7 +140,7 @@ export class ReportsRepository {
   // TODO(Stage 2): implement case attachment, immutable evidence and the
   // report-creation transaction. The old insert cannot satisfy required caseId.
   async create(_params: {
-    gameId: string;
+    gameId: string | null;
     reporterId: string;
     targetType: ReportTargetType;
     targetId: string;

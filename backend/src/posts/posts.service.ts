@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -199,10 +200,17 @@ export class PostsService {
   }
 
   async create(dto: CreatePostDto, authorId: string) {
-    const game = await this.postsRepository.findGameById(dto.gameId);
-
-    if (!game || game.status !== 'ACTIVE') {
-      throw new NotFoundException('Active game not found');
+    this.assertClassification(dto.gameId ?? null, dto);
+    if (dto.gameId != null) {
+      if (!dto.title || dto.title.trim().length < 3) {
+        throw new BadRequestException(
+          'Community posts require a title of at least 3 characters',
+        );
+      }
+      const game = await this.postsRepository.findGameById(dto.gameId);
+      if (!game || game.status !== 'ACTIVE') {
+        throw new NotFoundException('Active game not found');
+      }
     }
 
     if (dto.categoryId) {
@@ -264,7 +272,7 @@ export class PostsService {
       };
     });
 
-    const title = dto.title.trim();
+    const title = dto.title?.trim() ?? '';
     const content = dto.content.trim();
     const mentionTargetIds = await this.resolveMentionTargets(
       `${title}
@@ -283,11 +291,11 @@ ${content}`,
       async (transaction) => {
         const created = await this.postsRepository.create(transaction, {
           authorId,
-          gameId: dto.gameId,
+          gameId: dto.gameId ?? null,
           categoryId: dto.categoryId,
           title,
           content,
-          type: dto.type,
+          type: dto.gameId != null ? (dto.type ?? 'GENERAL') : null,
           status: dto.status,
           visibility: dto.visibility,
           isSpoiler: dto.isSpoiler,
@@ -332,6 +340,11 @@ ${content}`,
       throw new ForbiddenException('This post was hidden by a moderator');
     }
 
+    this.assertClassification(existingPost.gameId, dto);
+    if (existingPost.gameId != null && dto.type === null) {
+      throw new BadRequestException('Community posts require a post type');
+    }
+
     if (dto.categoryId) {
       const category = await this.postsRepository.findCategoryById(
         dto.categoryId,
@@ -346,6 +359,10 @@ ${content}`,
           'Active category not found in the post game',
         );
       }
+    }
+
+    if (dto.title === null) {
+      throw new BadRequestException('Title must be a string');
     }
 
     const data: Prisma.PostUpdateInput = {
@@ -548,6 +565,17 @@ ${dto.content?.trim() ?? existingPost.content}`,
       actorId,
       canView: (mentionedId) => this.postVisibility.canView(post, mentionedId),
     });
+  }
+
+  private assertClassification(
+    gameId: string | null,
+    dto: { categoryId?: string | null; type?: string | null },
+  ) {
+    if (gameId === null && (dto.categoryId != null || dto.type != null)) {
+      throw new BadRequestException(
+        'Personal posts cannot have a category or post type',
+      );
+    }
   }
 
   private normalizeTags(tags?: string[]) {
