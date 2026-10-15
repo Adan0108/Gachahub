@@ -208,13 +208,14 @@ export class FeedRankerService {
     post: ForYouFeedCandidate,
     profile: UserInterestProfile,
   ) {
-    const game = profile.games[post.gameId] ?? 0;
+    const game = post.gameId !== null ? (profile.games[post.gameId] ?? 0) : 0;
 
     const category = post.categoryId
       ? (profile.categories[post.categoryId] ?? 0)
       : 0;
 
-    const postType = profile.postTypes[post.type] ?? 0;
+    const postType =
+      post.type !== null ? (profile.postTypes[post.type] ?? 0) : 0;
 
     const author = profile.authors[post.authorId] ?? 0;
 
@@ -291,7 +292,7 @@ export class FeedRankerService {
       return false;
     }
 
-    if (current.length >= 3) {
+    if (candidate.gameId !== null && current.length >= 3) {
       const lastThree = current.slice(-3);
 
       if (lastThree.every((item) => item.gameId === candidate.gameId)) {

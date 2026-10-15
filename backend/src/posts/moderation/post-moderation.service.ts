@@ -2,7 +2,10 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
+import { loadActiveUser } from '../../common/guards/active-user.util';
 import { PostStatus } from '../../generated/prisma/client';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import type { PostAuditAction } from '../../audit-log/audit-log.types';
@@ -57,6 +60,23 @@ export class PostModerationService {
     });
   }
 
+  async setPersonalStatus(
+    postId: string,
+    moderatorId: string,
+    hidden: boolean,
+  ) {
+    return this.setModeratedStatus({
+      postId,
+      moderatorId,
+      from: hidden ? PostStatus.PUBLISHED : PostStatus.HIDDEN,
+      to: hidden ? PostStatus.HIDDEN : PostStatus.PUBLISHED,
+      auditAction: hidden ? 'POST_HIDDEN' : 'POST_RESTORED',
+      rejectionMessage: hidden
+        ? 'Only published posts can be hidden'
+        : 'Only hidden posts can be restored',
+    });
+  }
+
   /**
    * Lists posts a moderator has hidden in their game, since a moderator
    * cannot otherwise view a post they hid (PostsService.findOne only allows
@@ -102,7 +122,7 @@ export class PostModerationService {
    * record of who did it.
    */
   private async setModeratedStatus(params: {
-    gameSlug: string;
+    gameSlug?: string;
     postId: string;
     moderatorId: string;
     from: PostStatus;
@@ -120,13 +140,11 @@ export class PostModerationService {
       rejectionMessage,
     } = params;
 
-    const { gameId, resource: post } =
-      await this.gameModeratorsService.loadModeratableResource({
-        gameSlug,
-        moderatorId,
-        notFoundMessage: 'Post not found',
-        load: () => this.findLivePost(postId),
-      });
+    const { gameId, post } = await this.loadForModeration(
+      gameSlug,
+      postId,
+      moderatorId,
+    );
 
     if (post.status === to) {
       return formatPost(post);
@@ -158,7 +176,7 @@ export class PostModerationService {
           actorId: moderatorId,
           targetType: 'POST',
           targetId: postId,
-          gameId,
+          gameId: gameId ?? undefined,
           gameSlug,
           metadata: { authorId: post.authorId, postTitle: post.title },
         },
@@ -169,6 +187,34 @@ export class PostModerationService {
     });
 
     return formatPost(updated);
+  }
+
+  private async loadForModeration(
+    gameSlug: string | undefined,
+    postId: string,
+    moderatorId: string,
+  ) {
+    if (gameSlug !== undefined) {
+      const result = await this.gameModeratorsService.loadModeratableResource({
+        gameSlug,
+        moderatorId,
+        notFoundMessage: 'Post not found',
+        load: async () => {
+          const post = await this.findLivePost(postId);
+          return post && post.gameId !== null
+            ? { ...post, gameId: post.gameId }
+            : null;
+        },
+      });
+      return { gameId: result.gameId, post: result.resource };
+    }
+    const user = await loadActiveUser(this.prisma, moderatorId);
+    if (user.role !== 'ADMIN')
+      throw new ForbiddenException('Admin permission required');
+    const post = await this.findLivePost(postId);
+    if (!post || post.gameId !== null)
+      throw new NotFoundException('Personal post not found');
+    return { gameId: null, post };
   }
 
   /**

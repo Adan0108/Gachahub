@@ -1,3 +1,4 @@
+import { AdminPostModerationController } from './moderation/admin-post-moderation.controller';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { Module } from '@nestjs/common';
 import { PostsController } from './posts.controller';
@@ -25,7 +26,12 @@ import { PostSaveRepository } from './save/post-save.repository';
     DomainEventsModule,
     MentionsModule,
   ],
-  controllers: [PostSaveController, PostsController, PostModerationController],
+  controllers: [
+    AdminPostModerationController,
+    PostSaveController,
+    PostsController,
+    PostModerationController,
+  ],
   providers: [
     PostsService,
     PostsRepository,

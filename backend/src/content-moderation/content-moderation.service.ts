@@ -12,7 +12,7 @@ export interface FlaggedItem {
   authorName: string;
   status: string;
   reportCount: number;
-  gameSlug: string;
+  gameSlug: string | null;
 }
 
 /**
@@ -69,11 +69,11 @@ export class ContentModerationService {
             post && {
               id: post.id,
               type: 'POST',
-              title: post.title,
+              title: post.title || post.content.slice(0, 140),
               authorName: post.author.name,
               status: post.status,
               reportCount: entry.count,
-              gameSlug: post.game.slug,
+              gameSlug: post.game?.slug ?? null,
             }
           );
         }
@@ -89,7 +89,7 @@ export class ContentModerationService {
             authorName: comment.author.name,
             status: comment.status,
             reportCount: entry.count,
-            gameSlug: comment.post.game.slug,
+            gameSlug: comment.post.game?.slug ?? null,
           }
         );
       })

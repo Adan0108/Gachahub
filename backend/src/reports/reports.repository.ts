@@ -1,42 +1,67 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { Injectable, NotImplementedException } from '@nestjs/common';
 import {
   Prisma,
   type PostStatus,
   type PostVisibility,
   type ReportReason,
-  type ReportStatus,
+  type ModerationCaseStatus,
   type ReportTargetType,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { type LegacyReportStatus, toCaseStatus } from './report-status.compat';
 
 const reportInclude = {
   reporter: {
     select: { id: true, name: true, image: true },
   },
-  assignedModerator: {
-    select: { id: true, name: true, image: true },
-  },
-  resolvedBy: {
-    select: { id: true, name: true, image: true },
-  },
-  // The admin cross-game queue needs a game to scope claim/resolve/dismiss calls against.
-  game: {
-    select: { id: true, name: true, slug: true },
+  case: {
+    include: {
+      assignedModerator: { select: { id: true, name: true, image: true } },
+      resolvedBy: { select: { id: true, name: true, image: true } },
+      game: { select: { id: true, name: true, slug: true } },
+    },
   },
 } satisfies Prisma.ReportInclude;
 
 export interface ReportableTargetInfo {
-  gameId: string;
+  gameId: string | null;
   deletedAt: Date | null;
   status: PostStatus;
   visibility: PostVisibility;
   authorId: string;
 }
 
-const OPEN_REPORT_STATUSES = [
-  'PENDING',
+const OPEN_CASE_STATUSES = [
+  'OPEN',
   'IN_REVIEW',
-] as const satisfies ReportStatus[];
+] as const satisfies ModerationCaseStatus[];
+
+type ReportWithCase = Prisma.ReportGetPayload<{
+  include: typeof reportInclude;
+}>;
+
+// TODO(Stage 3): retire this projection when the existing report APIs are
+// replaced with case APIs. It preserves their flat response fields for now.
+function toLegacyReport({ case: moderationCase, ...report }: ReportWithCase) {
+  return {
+    ...report,
+    gameId: moderationCase.gameId,
+    game: moderationCase.game,
+    status:
+      moderationCase.status === 'OPEN'
+        ? ('PENDING' as const)
+        : moderationCase.status,
+    assignedModeratorId: moderationCase.assignedModeratorId,
+    assignedModerator: moderationCase.assignedModerator,
+    resolutionNote: moderationCase.resolutionNote,
+    resolvedById: moderationCase.resolvedById,
+    resolvedBy: moderationCase.resolvedBy,
+    resolvedAt: moderationCase.resolvedAt,
+    updatedAt: moderationCase.updatedAt,
+  };
+}
+
+type LegacyReport = ReturnType<typeof toLegacyReport>;
 
 @Injectable()
 export class ReportsRepository {
@@ -93,11 +118,7 @@ export class ReportsRepository {
     return comment.post;
   }
 
-  /**
-   * True when this reporter already has an unresolved report on this exact
-   * target. Used instead of a DB unique constraint so a report can be
-   * re-filed once an earlier one closes - see the schema comment on Report.
-   */
+  /** Read-only duplicate pre-check against the report's case workflow. */
   async hasOpenReport(
     reporterId: string,
     targetType: ReportTargetType,
@@ -108,7 +129,7 @@ export class ReportsRepository {
         reporterId,
         targetType,
         targetId,
-        status: { in: OPEN_REPORT_STATUSES },
+        case: { status: { in: OPEN_CASE_STATUSES } },
       },
       select: { id: true },
     });
@@ -116,55 +137,32 @@ export class ReportsRepository {
     return existing !== null;
   }
 
-  /**
-   * hasOpenReport() is the fast, friendly pre-check; the real guarantee
-   * against two concurrent requests both passing that check is the hand-
-   * written partial unique index "reports_open_target_key" (see the Report
-   * model's schema comment). Postgres reports a violation of it the same way
-   * as any other unique constraint, so it surfaces here as an ordinary P2002.
-   */
-  async create(params: {
-    gameId: string;
+  // TODO(Stage 2): implement case attachment, immutable evidence and the
+  // report-creation transaction. The old insert cannot satisfy required caseId.
+  async create(_params: {
+    gameId: string | null;
     reporterId: string;
     targetType: ReportTargetType;
     targetId: string;
     reasonCode: ReportReason;
     details?: string;
-  }) {
-    try {
-      return await this.prisma.report.create({
-        data: params,
-        include: reportInclude,
-      });
-    } catch (error) {
-      if (this.isDuplicateOpenReport(error)) {
-        throw new ConflictException(
-          'You already have an open report on this content',
-        );
-      }
-      throw error;
-    }
-  }
-
-  private isDuplicateOpenReport(
-    error: unknown,
-  ): error is Prisma.PrismaClientKnownRequestError {
-    return (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === 'P2002'
+  }): Promise<LegacyReport> {
+    throw new NotImplementedException(
+      'Report creation is pending the case-based implementation',
     );
   }
 
-  findById(id: string) {
-    return this.prisma.report.findUnique({
+  async findById(id: string) {
+    const report = await this.prisma.report.findUnique({
       where: { id },
       include: reportInclude,
     });
+    return report ? toLegacyReport(report) : null;
   }
 
   /**
    * Open report count per target, across every game - scoped to
-   * PENDING/IN_REVIEW so a target stops showing up once its reports are all
+   * OPEN/IN_REVIEW so a target stops showing up once its reports are all
    * resolved or dismissed, the same way it drops out of the per-game report
    * queue. Without this the aggregate grows with all report history ever
    * filed instead of staying bounded by what's actually outstanding, which
@@ -178,7 +176,7 @@ export class ReportsRepository {
   async countAllByTarget() {
     const groups = await this.prisma.report.groupBy({
       by: ['targetType', 'targetId'],
-      where: { status: { in: OPEN_REPORT_STATUSES } },
+      where: { case: { status: { in: OPEN_CASE_STATUSES } } },
       _count: { _all: true },
     });
 
@@ -189,10 +187,10 @@ export class ReportsRepository {
     }));
   }
 
-  /** Total open (PENDING/IN_REVIEW) reports across every game - the admin dashboard's metric. */
+  /** Total open (OPEN/IN_REVIEW) reports across every game - the admin dashboard's metric. */
   countOpen() {
     return this.prisma.report.count({
-      where: { status: { in: OPEN_REPORT_STATUSES } },
+      where: { case: { status: { in: OPEN_CASE_STATUSES } } },
     });
   }
 
@@ -207,28 +205,36 @@ export class ReportsRepository {
       return [];
     }
 
-    const groups = await this.prisma.report.groupBy({
-      by: ['gameId'],
-      where: { status: { in: OPEN_REPORT_STATUSES }, gameId: { in: gameIds } },
-      _count: { _all: true },
+    // Compatibility read: count individual complaints, not case rows or
+    // the aggregate counters that will be maintained in a later stage.
+    const cases = await this.prisma.moderationCase.findMany({
+      where: { status: { in: OPEN_CASE_STATUSES }, gameId: { in: gameIds } },
+      select: { gameId: true, _count: { select: { reports: true } } },
     });
-
-    return groups.map((group) => ({
-      gameId: group.gameId,
-      count: group._count._all,
-    }));
+    const counts = new Map<string, number>();
+    for (const entry of cases) {
+      if (entry.gameId !== null && entry._count.reports > 0) {
+        counts.set(
+          entry.gameId,
+          (counts.get(entry.gameId) ?? 0) + entry._count.reports,
+        );
+      }
+    }
+    return Array.from(counts, ([gameId, count]) => ({ gameId, count }));
   }
 
   async findMany(params: {
     gameId?: string;
-    status?: ReportStatus;
+    status?: LegacyReportStatus;
     targetType?: ReportTargetType;
     page: number;
     limit: number;
   }) {
     const where: Prisma.ReportWhereInput = {
-      ...(params.gameId ? { gameId: params.gameId } : {}),
-      ...(params.status ? { status: params.status } : {}),
+      case: {
+        ...(params.gameId ? { gameId: params.gameId } : {}),
+        ...(params.status ? { status: toCaseStatus(params.status) } : {}),
+      },
       ...(params.targetType ? { targetType: params.targetType } : {}),
     };
 
@@ -245,64 +251,25 @@ export class ReportsRepository {
       this.prisma.report.count({ where }),
     ]);
 
-    return { items, total };
+    return { items: items.map(toLegacyReport), total };
   }
 
-  /**
-   * Claims a report only if it's still PENDING when the write happens -
-   * unlike a plain update, which would let two moderators clicking Claim at
-   * the same time both "succeed", with the second silently overwriting the
-   * first's assignedModeratorId. Returns null when someone else already
-   * claimed it, mirroring PostsRepository.transitionStatus.
-   */
-  claim(id: string, moderatorId: string) {
-    return this.prisma.$transaction(async (tx) => {
-      const result = await tx.report.updateMany({
-        where: { id, status: 'PENDING' },
-        data: { status: 'IN_REVIEW', assignedModeratorId: moderatorId },
-      });
-
-      if (result.count === 0) {
-        return null;
-      }
-
-      return tx.report.findUniqueOrThrow({
-        where: { id },
-        include: reportInclude,
-      });
-    });
+  // TODO(Stage 3): design case-scoped moderation writes and audit semantics.
+  // Updating a case here would silently resolve/claim every sibling report.
+  async claim(_id: string, _moderatorId: string): Promise<LegacyReport | null> {
+    throw new NotImplementedException(
+      'Report claiming is pending case-based moderation',
+    );
   }
 
-  /**
-   * Same conditional-write shape as claim() - only closes a report that's
-   * still open when the write happens, so two moderators resolving the same
-   * report at once can't silently clobber each other's resolutionNote.
-   */
-  finalize(params: {
+  async finalize(_params: {
     id: string;
     status: 'RESOLVED' | 'DISMISSED';
     resolvedById: string;
     resolutionNote?: string;
-  }) {
-    return this.prisma.$transaction(async (tx) => {
-      const result = await tx.report.updateMany({
-        where: { id: params.id, status: { in: OPEN_REPORT_STATUSES } },
-        data: {
-          status: params.status,
-          resolvedById: params.resolvedById,
-          resolutionNote: params.resolutionNote,
-          resolvedAt: new Date(),
-        },
-      });
-
-      if (result.count === 0) {
-        return null;
-      }
-
-      return tx.report.findUniqueOrThrow({
-        where: { id: params.id },
-        include: reportInclude,
-      });
-    });
+  }): Promise<LegacyReport | null> {
+    throw new NotImplementedException(
+      'Report resolution is pending case-based moderation',
+    );
   }
 }

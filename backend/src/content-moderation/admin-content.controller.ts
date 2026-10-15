@@ -10,7 +10,7 @@ import { QueryContentModerationDto } from './dto/query-content-moderation.dto';
  * pattern as AdminReportsController/AdminUsersController). Hiding or
  * restoring an item found here still goes through the existing per-game
  * routes (games/:gameSlug/posts/:postId/hide, .../comments/:commentId/hide)
- * - this controller only has to tell the frontend which gameSlug to use.
+ * - personal content instead uses admin/posts or admin/comments action routes.
  */
 @ApiTags('Content Moderation')
 @ApiCookieAuth('better-auth.session_token')

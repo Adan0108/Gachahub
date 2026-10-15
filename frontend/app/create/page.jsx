@@ -54,16 +54,15 @@ export default function CreatePostPage() {
   });
   const parsedTags = useMemo(() => parsePostTags(form.tags), [form.tags]);
   const tagError = getPostTagError(parsedTags);
-  const gameError = submitAttempted && !form.gameId ? "Choose a game before publishing." : "";
+
   const titleError =
-    submitAttempted && form.title.trim().length < 3
+    submitAttempted && (form.gameId || form.title.trim()) && form.title.trim().length < 3
       ? "Title must contain at least 3 characters."
       : "";
   const contentError =
     submitAttempted && !form.content.trim() ? "Write some content before publishing." : "";
   const canSubmit =
-    Boolean(form.gameId) &&
-    form.title.trim().length >= 3 &&
+    ((!form.gameId && !form.title.trim()) || form.title.trim().length >= 3) &&
     form.content.trim().length > 0 &&
     !tagError &&
     !fileError;
@@ -153,8 +152,8 @@ export default function CreatePostPage() {
       <section className="welcome hero-polish create-post-hero">
         <div>
           <span className="eyebrow">Publish</span>
-          <h1>Create a community post</h1>
-          <p>Share a guide, build, theory, question, or update with your game community.</p>
+          <h1>Create a post</h1>
+          <p>Share with your profile and global feeds, or choose a game community.</p>
         </div>
         <FiFileText aria-hidden="true" />
       </section>
@@ -168,51 +167,46 @@ export default function CreatePostPage() {
         }}
       >
         <div className="create-post-grid">
-          <label className={gameError ? "field-invalid" : ""}>
-            Game
-            <select
-              aria-describedby={gameError ? "game-error" : undefined}
-              value={form.gameId}
-              onChange={updateField("gameId")}
-            >
-              <option value="">Select a community</option>
+          <label>
+            Post to
+            <select value={form.gameId} onChange={updateField("gameId")}>
+              <option value="">General / My Profile</option>
               {(games.data?.items || []).map((game) => (
                 <option key={game.id} value={game.id}>
                   {game.name}
                 </option>
               ))}
             </select>
-            {gameError && (
-              <small className="field-error" id="game-error">
-                {gameError}
-              </small>
-            )}
           </label>
-          <label>
-            Category <small>(optional)</small>
-            <select
-              value={form.categoryId}
-              onChange={updateField("categoryId")}
-              disabled={!form.gameId}
-            >
-              <option value="">No category</option>
-              {(categories.data || []).map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Post type
-            <select value={form.type} onChange={updateField("type")}>
-              {postTypes.map((type) => (
-                <option key={type} value={type}>
-                  {type.charAt(0) + type.slice(1).toLowerCase()}
-                </option>
-              ))}
-            </select>
-          </label>
+          {form.gameId && (
+            <>
+              <label>
+                Category <small>(optional)</small>
+                <select
+                  value={form.categoryId}
+                  onChange={updateField("categoryId")}
+                  disabled={!form.gameId}
+                >
+                  <option value="">No category</option>
+                  {(categories.data || []).map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Post type
+                <select value={form.type} onChange={updateField("type")}>
+                  {postTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {type.charAt(0) + type.slice(1).toLowerCase()}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
           <label>
             Visibility
             <select value={form.visibility} onChange={updateField("visibility")}>
@@ -225,7 +219,7 @@ export default function CreatePostPage() {
 
         <label className={titleError ? "field-invalid" : ""}>
           <span className="field-label-row">
-            <span>Title</span>
+            <span>Title {!form.gameId && <small>(optional)</small>}</span>
             <small className={form.title.length === 255 ? "limit-reached" : ""}>
               {form.title.length}/255
             </small>
@@ -236,7 +230,7 @@ export default function CreatePostPage() {
             minLength={3}
             onChange={updateField("title")}
             placeholder="Give your post a clear title"
-            required
+            required={Boolean(form.gameId)}
             value={form.title}
           />
           <small

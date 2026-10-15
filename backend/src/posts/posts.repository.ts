@@ -269,8 +269,8 @@ export class PostsRepository {
     tx: Prisma.TransactionClient,
     params: {
       authorId: string;
-      gameId: string;
-      categoryId?: string;
+      gameId: string | null;
+      categoryId?: string | null;
       title: string;
       content: string;
       type?: Prisma.PostCreateInput['type'];
@@ -304,11 +304,11 @@ export class PostsRepository {
             id: params.authorId,
           },
         },
-        game: {
-          connect: {
-            id: params.gameId,
-          },
-        },
+        ...(params.gameId !== null
+          ? {
+              game: { connect: { id: params.gameId } },
+            }
+          : {}),
         ...(params.categoryId
           ? {
               category: {
@@ -369,7 +369,7 @@ export class PostsRepository {
       });
     }
 
-    if (post.status === 'PUBLISHED') {
+    if (post.status === 'PUBLISHED' && params.gameId !== null) {
       await tx.game.update({
         where: {
           id: params.gameId,
@@ -453,7 +453,7 @@ export class PostsRepository {
             ? -1
             : 0;
 
-      if (delta !== 0) {
+      if (delta !== 0 && before.gameId !== null) {
         await tx.game.update({
           where: {
             id: before.gameId,
@@ -487,7 +487,7 @@ export class PostsRepository {
     tx: Prisma.TransactionClient,
     params: {
       id: string;
-      gameId: string;
+      gameId: string | null;
       from: Prisma.PostWhereInput['status'];
       to: Prisma.PostUpdateInput['status'];
     },
@@ -510,7 +510,7 @@ export class PostsRepository {
     const delta =
       params.to === 'PUBLISHED' ? 1 : params.from === 'PUBLISHED' ? -1 : 0;
 
-    if (delta !== 0) {
+    if (delta !== 0 && params.gameId !== null) {
       await tx.game.update({
         where: {
           id: params.gameId,
@@ -571,7 +571,7 @@ export class PostsRepository {
         });
       }
 
-      if (before.status === 'PUBLISHED') {
+      if (before.status === 'PUBLISHED' && before.gameId !== null) {
         await tx.game.update({
           where: {
             id: before.gameId,
@@ -765,6 +765,7 @@ export class PostsRepository {
       select: {
         id: true,
         title: true,
+        content: true,
         status: true,
         author: {
           select: {

@@ -327,7 +327,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
         )}
       </div>
       <Link className="post-content-link" href={`/post/${encodeURIComponent(post.id)}`}>
-        <b>{post.title}</b>
+        <b>{post.title || post.content.slice(0, 100)}</b>
         <small>
           {post.gameName ? `${post.gameName} - ` : ""}
           {post.author} - {post.time}

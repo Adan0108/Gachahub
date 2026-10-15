@@ -25,10 +25,10 @@ export interface ForYouFeedCandidate {
   id: string;
 
   authorId: string;
-  gameId: string;
+  gameId: string | null;
   categoryId: string | null;
 
-  type: PostType;
+  type: PostType | null;
 
   createdAt: Date;
 

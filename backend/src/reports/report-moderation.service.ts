@@ -127,7 +127,7 @@ export class ReportModerationService {
       moderatorId,
     );
 
-    // Deliberately not restricted to report.assignedModeratorId: with no
+    // Deliberately not restricted to the case's assignedModeratorId: with no
     // "unclaim" path yet, locking resolve/dismiss to whoever claimed it
     // would let one moderator going offline strand a report forever. Any
     // moderator who can already see this queue can close it out. As with
@@ -217,7 +217,13 @@ export class ReportModerationService {
       gameSlug,
       moderatorId,
       notFoundMessage: 'Report not found',
-      load: () => this.reportsRepository.findById(reportId),
+      load: async () => {
+        const report = await this.reportsRepository.findById(reportId);
+        // A platform case or deleted game cannot belong to a game-scoped route.
+        return report && report.gameId !== null
+          ? { ...report, gameId: report.gameId }
+          : null;
+      },
     });
   }
 }
