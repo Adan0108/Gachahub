@@ -13,6 +13,7 @@ const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 export function MessageActions({
   canCopy,
   canEdit = false,
+  canRemove = true,
   onReact,
   onReply,
   onCopy,
@@ -132,16 +133,18 @@ export function MessageActions({
                   <FiEdit2 /> Edit
                 </button>
               )}
-              <button
-                onClick={() => {
-                  onRemove();
-                  setIsMoreOpen(false);
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <FiTrash2 /> Remove
-              </button>
+              {canRemove && (
+                <button
+                  onClick={() => {
+                    onRemove();
+                    setIsMoreOpen(false);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <FiTrash2 /> Remove
+                </button>
+              )}
             </div>,
           )}
       </div>
