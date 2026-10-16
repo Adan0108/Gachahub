@@ -1,192 +1,374 @@
-.share-post-modal {
-  display: grid;
-  gap: 12px;
-  width: min(440px, calc(100vw - 32px));
-  max-height: min(640px, calc(100vh - 48px));
-  overflow: auto;
+/* Send-a-post sheet: a search pill, a grid of round pictures to tick, a message bar, and quick actions. */
+.modal.share-post-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(480px, calc(100vw - 24px));
+  max-height: min(680px, calc(100vh - 32px));
+  padding: 16px 18px 14px;
+  overflow: hidden;
+  border-radius: 20px;
 }
 
 .share-post-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: 32px 1fr 32px;
   align-items: center;
-  justify-content: space-between;
 }
 
 .share-post-head h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
+  text-align: center;
 }
 
 .share-post-head button {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: 50%;
   background: transparent;
   color: inherit;
+  font-size: 20px;
 }
 
-.share-post-search,
-.share-post-note {
+.share-post-head button:hover {
+  background: var(--panel2);
+}
+
+.share-post-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.share-post-search svg {
+  position: absolute;
+  left: 14px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.share-post-search input {
   width: 100%;
-  padding: 9px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  padding: 10px 14px 10px 40px;
+  border: 1px solid transparent;
+  border-radius: 999px;
   background: var(--panel2);
   color: var(--text);
   font: inherit;
+  font-size: 14px;
 }
 
-.share-post-note {
-  resize: vertical;
+.share-post-search input:focus {
+  border-color: var(--purple);
+  outline: none;
 }
 
-.share-post-list {
+.share-post-grid {
   display: grid;
-  gap: 2px;
-  max-height: 220px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-content: start;
+  gap: 16px 6px;
+  min-height: 120px;
+  /* Room for the selection ring and tick, which stick out past the picture and would be cut off by the scroll area. */
+  padding: 10px 10px 8px;
+  margin: -6px -10px 0;
+  overflow-y: auto;
+}
+
+.share-post-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.share-post-tile:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.share-post-tile-avatar {
+  position: relative;
+  display: grid;
+  width: 64px;
+  height: 64px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--panel2);
+  font-size: 22px;
+  font-weight: 700;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.share-post-tile-avatar .avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.share-post-tile:not(:disabled):hover .share-post-tile-avatar {
+  transform: scale(1.05);
+}
+
+.share-post-tile.selected .share-post-tile-avatar {
+  box-shadow: 0 0 0 3px var(--panel), 0 0 0 5px var(--purple);
+}
+
+.share-post-tile-check {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: var(--purple);
+  color: #fff;
+  font-size: 12px;
+}
+
+.share-post-tile-name {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.share-post-tile-reason {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.2;
+  text-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.share-post-skeleton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  animation: share-post-pulse 1.3s ease-in-out infinite;
+}
+
+.share-post-skeleton span {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--panel2);
+}
+
+.share-post-skeleton i {
+  width: 44px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--panel2);
+}
+
+@keyframes share-post-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.share-post-empty,
+.share-post-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.share-post-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--purple);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.share-post-compose {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.share-post-compose input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel2);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.share-post-compose input:focus {
+  border-color: var(--purple);
+  outline: none;
+}
+
+.share-post-send,
+.share-post-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--purple);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.share-post-secondary {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+}
+
+.share-post-send:disabled,
+.share-post-secondary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.share-post-results {
+  display: grid;
+  gap: 4px;
   margin: 0;
   padding: 0;
   overflow-y: auto;
   list-style: none;
 }
 
-/* The page styles bare labels and inputs as stacked form fields; a chat row is one line. */
-.share-post-modal label.share-post-row {
+.share-post-results li {
   display: flex;
-  flex-direction: row;
   align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
-  border-radius: 10px;
-  cursor: pointer;
+  gap: 12px;
+  padding: 8px 4px;
 }
 
-.share-post-modal label.share-post-row input[type="checkbox"] {
-  flex: 0 0 auto;
-  width: auto;
-  margin: 0;
-}
-
-.share-post-modal label.share-post-row:hover {
-  background: var(--panel2);
-}
-
-.share-post-modal label.share-post-row.disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.share-post-avatar {
+.share-post-result-avatar {
   display: grid;
   flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   place-items: center;
   overflow: hidden;
   border-radius: 50%;
   background: var(--panel2);
-  font-size: 14px;
+  font-weight: 700;
 }
 
-.share-post-avatar .avatar-img {
+.share-post-result-avatar .avatar-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.share-post-name {
+.share-post-result-text {
   display: grid;
+  flex: 1;
   min-width: 0;
 }
 
-.share-post-name b {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.share-post-name small,
-.share-post-people > small,
-.share-post-hint,
-.share-post-empty {
+.share-post-result-text small {
   color: var(--muted);
   font-size: 12px;
 }
 
-.share-post-people {
-  display: grid;
-  gap: 6px;
-}
-
-.share-post-people > span {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.share-post-results {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.share-post-results li {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.share-post-results li span {
+.share-post-results li > svg {
+  flex: 0 0 auto;
+  font-size: 18px;
   color: var(--muted);
-  font-size: 13px;
 }
 
-.share-post-results li.failed span {
+.share-post-results li.sent > svg {
+  color: #3ecf8e;
+}
+
+.share-post-results li.failed > svg,
+.share-post-results li.failed .share-post-result-text small {
   color: #ff6b6b;
 }
 
-.share-post-actions {
+/* Round shortcuts like the share sheets people already know. */
+.share-post-shortcuts {
+  position: relative;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
-.share-post-secondary,
-.share-post-primary {
+.share-post-shortcuts button {
   display: flex;
-  gap: 8px;
-}
-
-.share-post-actions button {
-  white-space: nowrap;
-  display: inline-flex;
+  flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  padding: 0;
+  border: 0;
   background: transparent;
-  color: inherit;
+  color: var(--muted);
   font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
 }
 
-.share-post-actions > button.primary {
-  flex: 1;
-  justify-content: center;
+.share-post-shortcuts button > span {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 18px;
+  transition: background 0.12s ease;
 }
 
-.share-post-actions button.primary {
-  border-color: transparent;
-  background: var(--purple);
-  color: #fff;
+.share-post-shortcuts button:hover > span {
+  background: var(--line);
 }
 
-.share-post-actions button:disabled {
-  opacity: 0.5;
+.share-post-toast {
+  position: absolute;
+  right: 0;
+  bottom: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 12px;
 }

@@ -59,8 +59,7 @@
 .chat-shared-post-media {
   position: relative;
   display: block;
-  aspect-ratio: 4 / 5;
-  max-height: 340px;
+  height: 320px;
   overflow: hidden;
   background: #0d0f14;
 }
@@ -76,7 +75,7 @@
 .chat-shared-post-media.covered img,
 .chat-shared-post-media.covered video {
   filter: blur(28px) brightness(0.7);
-  transform: scale(1.1);
+  transform: scale(1.3);
 }
 
 .chat-shared-post-play {
