@@ -4,11 +4,10 @@ import { EditedLabel } from "./EditedLabel";
 import { QuotedLinkPreview } from "./LinkPreviewCard";
 import { MessageActions } from "./MessageActions";
 import { MessageStatusLine } from "./MessageStatusLine";
+import { ReactionChips } from "./ReactionChips";
 import { QuotedSharedPost } from "./SharedPostCard";
 import { HistoryBanner, MembershipEventLine, TimestampDivider } from "./ThreadNotices";
 import { useAttachmentBlobUrl } from "../../hooks/chat/useAttachmentBlobUrl";
-import { ReactionFace } from "./Emoji";
-import { groupReactions } from "../../lib/chat/chatReactions";
 import { canEditMessage } from "../../lib/chat/editPolicy";
 import { AvatarFace } from "../AvatarFace";
 import { participantUser } from "../../lib/chat/chatDisplay";
@@ -101,25 +100,6 @@ function copyTextOf(view) {
     return typeof window === "undefined" ? postPath(view.postId) : `${window.location.origin}${postPath(view.postId)}`;
   }
   return "";
-}
-
-function ReactionChips({ reactions, userId, onToggle }) {
-  const groups = groupReactions(reactions, userId);
-  if (!groups.length) return null;
-  return (
-    <div className="chat-reaction-chips">
-      {groups.map((group) => (
-        <button
-          className={group.mine ? "mine" : ""}
-          key={group.key}
-          onClick={() => onToggle(group.choice, group.mine)}
-          type="button"
-        >
-          <ReactionFace choice={group.choice} /> {group.count}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 /** A message bubble; `decrypted` is this message's ok/unavailable state (pending renders nothing). */

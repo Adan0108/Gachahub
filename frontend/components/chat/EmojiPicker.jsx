@@ -9,7 +9,7 @@ function currentTheme() {
 }
 
 /** The full emoji picker, loaded only when first opened. Calls `onPick` with a reaction choice ({ emoji } or { emoteId, emote }). */
-export function EmojiPicker({ onPick }) {
+export function EmojiPicker({ onPick, emojiOnly = false }) {
   const hostRef = useRef(null);
   const onPickRef = useRef(onPick);
   const [failed, setFailed] = useState(false);
@@ -32,7 +32,7 @@ export function EmojiPicker({ onPick }) {
         if (cancelled || !hostRef.current) return;
         picker = new Picker({
           data: dataModule.default,
-          custom: custom.categories,
+          custom: emojiOnly ? [] : custom.categories,
           theme: currentTheme(),
           previewPosition: "none",
           skinTonePosition: "search",
@@ -53,7 +53,7 @@ export function EmojiPicker({ onPick }) {
       cancelled = true;
       picker?.remove();
     };
-  }, [isLoading, custom]);
+  }, [isLoading, custom, emojiOnly]);
 
   return (
     <div className="emoji-picker-host" ref={hostRef}>

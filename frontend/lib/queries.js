@@ -66,6 +66,8 @@ export const queryKeys = {
   chatRequests: ["chat", "requests"],
   chatMessages: (conversationId) => ["chat", "messages", conversationId],
   chatEmotes: ["chat", "emotes"],
+  communityChannels: (slug) => ["community-chat", slug, "channels"],
+  communityMessages: (slug, channelId) => ["community-chat", slug, "messages", channelId],
   // Socket-pushed only - nobody ever fetches this over REST, useChatSocket just writes into it.
   chatTyping: (conversationId) => ["chat", "typing", conversationId],
   // Same idea: the one-shot "your message request was accepted" event, keyed per conversation.
@@ -277,6 +279,13 @@ export const queries = {
     retry: 1,
     staleTime: 10_000,
     refetchInterval: 15_000,
+  }),
+  communityChannels: (slug) => ({
+    queryKey: queryKeys.communityChannels(slug),
+    queryFn: () => api.getCommunityChannels(slug),
+    enabled: Boolean(slug),
+    retry: false,
+    staleTime: 15_000,
   }),
   chatEmotes: () => ({
     queryKey: queryKeys.chatEmotes,
