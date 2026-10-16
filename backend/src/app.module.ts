@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { auth } from './auth/auth';
 import { ChatDevicesModule } from './chat-devices/chat-devices.module';
 import { ChatModule } from './chat/chat.module';
+import { CommunityChatModule } from './community-chat/community-chat.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { CommonModule } from './common/common.module';
 import { env } from './config/env';
@@ -57,6 +58,7 @@ import { MlsRetentionModule } from './mls-retention/mls-retention.module';
     GameModeratorsModule,
 
     ChatModule,
+    CommunityChatModule,
     ChatDevicesModule,
     ChatBackupModule,
     MlsHandshakesModule,
