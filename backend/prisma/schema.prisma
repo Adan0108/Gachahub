@@ -624,6 +624,7 @@ model ChatMessageReceipt {
   @@map("chat_message_receipts")
 }
 
+// DB CHECK chat_message_reactions_one_kind: exactly one of emoji/emoteId (hand-added, not in Prisma schema).
 model ChatMessageReaction {
   id        String  @id @default(cuid())
   messageId String
