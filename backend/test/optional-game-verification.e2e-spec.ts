@@ -101,7 +101,8 @@ import type {
 // DTO classification/title/visibility; create/media/tags/mentions; update and
 // category/type immutability; all four counter writers; retention and races;
 // detail/profile/search/latest/trending/For You; save/like/comment/reply;
-// interest deltas/ranking; admin/game permissions/audits; report null reads/501.
+// interest deltas/ranking; admin/game permissions/audits; report creation/null
+// reads and the still-deferred moderation 501 responses.
 // Sessions are injected, with a test auth gate matching OPTIONAL metadata.
 // Real outbox/mentions/media attachment/notification dispatch; no Kafka broker,
 // Cloudinary requests or Socket.IO delivery. Only Redis storage is in memory;
@@ -1616,7 +1617,7 @@ describe('Optional-game comprehensive API/integration verification', () => {
     });
 
     it.each([false, true])(
-      'keeps report null/game reads valid and deferred writes at 501: game=%s',
+      'creates null/game reports while keeping moderation writes at 501: game=%s',
       async (game) => {
         const post = await (game ? community() : create());
         const comment = await http()
@@ -1633,29 +1634,16 @@ describe('Optional-game comprehensive API/integration verification', () => {
             await reports.findTargetPostInfo(targetType, targetId),
           ).toMatchObject({ gameId: game ? gameId : null });
         }
-        await http()
+        const submitted = await http()
           .post('/reports')
           .set('x-test-user', viewer)
           .send({ targetType: 'POST', targetId: post.id, reasonCode: 'OTHER' })
-          .expect(501);
-        expect(await db.report.count({ where: { targetId: post.id } })).toBe(0);
-        const moderationCase = await db.moderationCase.create({
-          data: {
-            targetType: 'POST',
-            targetId: post.id,
-            gameId: game ? gameId : null,
-          },
+          .expect(201);
+        expect(await db.report.count({ where: { targetId: post.id } })).toBe(1);
+        const report = await db.report.findUniqueOrThrow({
+          where: { id: submitted.body.id },
         });
-        caseIds.push(moderationCase.id);
-        const report = await db.report.create({
-          data: {
-            caseId: moderationCase.id,
-            reporterId: viewer,
-            targetType: 'POST',
-            targetId: post.id,
-            reasonCode: 'OTHER',
-          },
-        });
+        caseIds.push(report.caseId);
         const listing = await http()
           .get('/admin/reports?limit=100')
           .set('x-test-user', admin)

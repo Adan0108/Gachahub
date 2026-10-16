@@ -1,4 +1,8 @@
-import { Injectable, NotImplementedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotImplementedException,
+} from '@nestjs/common';
 import {
   Prisma,
   type PostStatus,
@@ -9,6 +13,7 @@ import {
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { type LegacyReportStatus, toCaseStatus } from './report-status.compat';
+import type { ReportTargetSnapshot } from './report-target-snapshot';
 
 const reportInclude = {
   reporter: {
@@ -29,6 +34,7 @@ export interface ReportableTargetInfo {
   status: PostStatus;
   visibility: PostVisibility;
   authorId: string;
+  snapshot: ReportTargetSnapshot;
 }
 
 const OPEN_CASE_STATUSES = [
@@ -42,7 +48,11 @@ type ReportWithCase = Prisma.ReportGetPayload<{
 
 // TODO(Stage 3): retire this projection when the existing report APIs are
 // replaced with case APIs. It preserves their flat response fields for now.
-function toLegacyReport({ case: moderationCase, ...report }: ReportWithCase) {
+function toLegacyReport({
+  case: moderationCase,
+  targetSnapshot: _evidence,
+  ...report
+}: ReportWithCase) {
   return {
     ...report,
     gameId: moderationCase.gameId,
@@ -82,7 +92,7 @@ export class ReportsRepository {
     targetId: string,
   ): Promise<ReportableTargetInfo | null> {
     if (targetType === 'POST') {
-      return this.prisma.post.findUnique({
+      const post = await this.prisma.post.findUnique({
         where: { id: targetId },
         select: {
           gameId: true,
@@ -90,8 +100,41 @@ export class ReportsRepository {
           status: true,
           visibility: true,
           authorId: true,
+          id: true,
+          title: true,
+          content: true,
+          type: true,
+          categoryId: true,
+          media: {
+            orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+            select: {
+              id: true,
+              mediaUploadId: true,
+              mediaType: true,
+              url: true,
+              assetId: true,
+              publicId: true,
+              altText: true,
+              sortOrder: true,
+              width: true,
+              height: true,
+              duration: true,
+              bytes: true,
+              format: true,
+            },
+          },
         },
       });
+      if (!post) return null;
+      const { id, deletedAt: _deletedAt, ...evidence } = post;
+      return {
+        gameId: post.gameId,
+        deletedAt: post.deletedAt,
+        status: post.status,
+        visibility: post.visibility,
+        authorId: post.authorId,
+        snapshot: { ...evidence, version: 1, targetType: 'POST', postId: id },
+      };
     }
 
     const comment = await this.prisma.comment.findUnique({
@@ -99,6 +142,11 @@ export class ReportsRepository {
       select: {
         deletedAt: true,
         status: true,
+        id: true,
+        authorId: true,
+        content: true,
+        postId: true,
+        parentId: true,
         post: {
           select: {
             gameId: true,
@@ -115,7 +163,20 @@ export class ReportsRepository {
       return null;
     }
 
-    return comment.post;
+    return {
+      ...comment.post,
+      snapshot: {
+        version: 1,
+        targetType: 'COMMENT',
+        commentId: comment.id,
+        authorId: comment.authorId,
+        content: comment.content,
+        status: comment.status,
+        postId: comment.postId,
+        parentId: comment.parentId,
+        gameId: comment.post.gameId,
+      },
+    };
   }
 
   /** Read-only duplicate pre-check against the report's case workflow. */
@@ -137,19 +198,95 @@ export class ReportsRepository {
     return existing !== null;
   }
 
-  // TODO(Stage 2): implement case attachment, immutable evidence and the
-  // report-creation transaction. The old insert cannot satisfy required caseId.
-  async create(_params: {
+  async create(params: {
     gameId: string | null;
     reporterId: string;
     targetType: ReportTargetType;
     targetId: string;
     reasonCode: ReportReason;
     details?: string;
+    snapshot: ReportTargetSnapshot;
   }): Promise<LegacyReport> {
-    throw new NotImplementedException(
-      'Report creation is pending the case-based implementation',
-    );
+    // A PostgreSQL unique violation aborts its transaction: recovery must use
+    // a fresh transaction, never another query in the failed transaction.
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const result = await this.prisma.$transaction(async (tx) => {
+          let moderationCase = await tx.moderationCase.findFirst({
+            where: {
+              targetType: params.targetType,
+              targetId: params.targetId,
+              status: { in: OPEN_CASE_STATUSES },
+            },
+          });
+          if (moderationCase) {
+            // Serialize reporters of an existing case. This also protects the
+            // duplicate check and recomputed counters across server instances.
+            const locked = await tx.$queryRaw<Array<{ id: string }>>`
+              SELECT "id" FROM "moderation_cases"
+              WHERE "id" = ${moderationCase.id}
+              AND "status" IN ('OPEN', 'IN_REVIEW') FOR UPDATE
+            `;
+            if (locked.length === 0) return null; // closed while waiting: retry
+          } else {
+            // The partial unique index arbitrates simultaneous first reports.
+            moderationCase = await tx.moderationCase.create({
+              data: {
+                targetType: params.targetType,
+                targetId: params.targetId,
+                gameId: params.gameId,
+                status: 'OPEN',
+              },
+            });
+          }
+          const duplicate = await tx.report.findFirst({
+            where: { caseId: moderationCase.id, reporterId: params.reporterId },
+            select: { id: true },
+          });
+          if (duplicate)
+            throw new ConflictException(
+              'You already have an open report on this content',
+            );
+          const report = await tx.report.create({
+            data: {
+              caseId: moderationCase.id,
+              reporterId: params.reporterId,
+              targetType: params.targetType,
+              targetId: params.targetId,
+              reasonCode: params.reasonCode,
+              details: params.details,
+              targetSnapshot: params.snapshot,
+            },
+          });
+          const reportCount = await tx.report.count({
+            where: { caseId: moderationCase.id },
+          });
+          const reporters = await tx.report.findMany({
+            where: { caseId: moderationCase.id },
+            distinct: ['reporterId'],
+            select: { reporterId: true },
+          });
+          await tx.moderationCase.update({
+            where: { id: moderationCase.id },
+            data: { reportCount, uniqueReporterCount: reporters.length },
+          });
+          return tx.report.findUniqueOrThrow({
+            where: { id: report.id },
+            include: reportInclude,
+          });
+        });
+        if (result) return toLegacyReport(result);
+      } catch (error) {
+        if (
+          !(
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === 'P2002'
+          )
+        )
+          throw error;
+      }
+    }
+    throw new ConflictException('The moderation case changed; please retry');
   }
 
   async findById(id: string) {

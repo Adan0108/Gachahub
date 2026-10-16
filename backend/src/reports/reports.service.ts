@@ -10,7 +10,10 @@ import { PostVisibilityService } from '../post-visibility/post-visibility.servic
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReportDto } from './dto/create-report.dto';
 import { ReportRateLimiterService } from './report-rate-limiter.service';
-import { ReportsRepository } from './reports.repository';
+import {
+  ReportsRepository,
+  type ReportableTargetInfo,
+} from './reports.repository';
 
 /**
  * Filing a report. Split from the moderation queue (ReportModerationService)
@@ -41,7 +44,7 @@ export class ReportsService {
 
     await loadActiveUser(this.prisma, reporterId);
 
-    const gameId = await this.assertReportableTarget(
+    const target = await this.assertReportableTarget(
       dto.targetType,
       dto.targetId,
       reporterId,
@@ -60,7 +63,8 @@ export class ReportsService {
     }
 
     return this.reportsRepository.create({
-      gameId,
+      gameId: target.gameId,
+      snapshot: target.snapshot,
       reporterId,
       targetType: dto.targetType,
       targetId: dto.targetId,
@@ -78,7 +82,7 @@ export class ReportsService {
     targetType: ReportTargetType,
     targetId: string,
     reporterId: string,
-  ): Promise<string | null> {
+  ): Promise<ReportableTargetInfo> {
     const target = await this.reportsRepository.findTargetPostInfo(
       targetType,
       targetId,
@@ -88,6 +92,6 @@ export class ReportsService {
       throw new NotFoundException('Reported content not found');
     }
 
-    return target.gameId;
+    return target;
   }
 }

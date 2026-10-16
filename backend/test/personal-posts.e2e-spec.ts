@@ -330,7 +330,7 @@ describe('Personal posts API (development database)', () => {
     ).toBe(0);
   });
 
-  it('report helpers preserve null context and creation remains intentionally 501', async () => {
+  it('report helpers and creation preserve null context', async () => {
     const reports = app.get(ReportsRepository);
     expect(await reports.findTargetPostInfo('POST', personalId)).toMatchObject({
       gameId: null,
@@ -338,15 +338,18 @@ describe('Personal posts API (development database)', () => {
     expect(
       await reports.findTargetPostInfo('COMMENT', commentId),
     ).toMatchObject({ gameId: null });
-    await expect(
-      reports.create({
-        gameId: null,
-        reporterId: author,
-        targetType: 'POST',
-        targetId: personalId,
-        reasonCode: 'OTHER',
-      }),
-    ).rejects.toMatchObject({ status: 501 });
+    const target = await reports.findTargetPostInfo('POST', personalId);
+    const report = await reports.create({
+      gameId: null,
+      reporterId: author,
+      targetType: 'POST',
+      targetId: personalId,
+      reasonCode: 'OTHER',
+      snapshot: target!.snapshot,
+    });
+    caseIds.push(report.caseId);
+    expect(report).toMatchObject({ gameId: null, status: 'PENDING' });
+    expect(report).not.toHaveProperty('targetSnapshot');
   });
 
   it('admin content reads expose null game context without fake metadata', async () => {
@@ -354,11 +357,12 @@ describe('Personal posts API (development database)', () => {
       ['POST', personalId],
       ['COMMENT', commentId],
     ] as const) {
+      if (targetType === 'POST') continue; // created through the repository above
       const moderationCase = await db.moderationCase.create({
         data: { targetType, targetId, gameId: null },
       });
       caseIds.push(moderationCase.id);
-      // Test fixtures only: production report creation remains intentionally 501.
+      // Read fixture: report submission is covered separately above.
       await db.report.create({
         data: {
           caseId: moderationCase.id,

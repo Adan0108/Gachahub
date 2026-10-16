@@ -61,6 +61,20 @@ describe('ReportsService', () => {
   const activeReporter = { id: 'reporter-1', role: 'USER', status: 'ACTIVE' };
 
   const publicPost = {
+    snapshot: {
+      version: 1,
+      targetType: 'POST',
+      postId: 'post-1',
+      authorId: 'author-1',
+      title: 'Evidence',
+      content: 'Body',
+      status: 'PUBLISHED',
+      visibility: 'PUBLIC',
+      gameId: 'game-1',
+      type: 'GENERAL',
+      categoryId: null,
+      media: [],
+    },
     gameId: 'game-1',
     deletedAt: null,
     status: 'PUBLISHED',
@@ -94,7 +108,7 @@ describe('ReportsService', () => {
   });
 
   describe('create', () => {
-    it('files a report and denormalizes the target game onto it', async () => {
+    it('derives game context and forwards backend evidence when filing a report', async () => {
       reportsRepository.findTargetPostInfo.mockResolvedValue(publicPost);
       reportsRepository.hasOpenReport.mockResolvedValue(false);
       reportsRepository.create.mockResolvedValue(baseReport);
@@ -110,6 +124,7 @@ describe('ReportsService', () => {
       );
       expect(reportsRepository.create).toHaveBeenCalledWith({
         gameId: 'game-1',
+        snapshot: publicPost.snapshot,
         reporterId: 'reporter-1',
         targetType: 'POST',
         targetId: 'post-1',
