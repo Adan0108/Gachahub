@@ -10,6 +10,7 @@ import {
   type ClientState,
 } from 'ts-mls';
 import { defaultClientConfig } from 'ts-mls/clientConfig.js';
+import { ratchetTreeFromExtension } from 'ts-mls/groupInfo.js';
 import { makeKeyPackageRef } from 'ts-mls/keyPackage.js';
 import type { GroupSession, GroupSessionFactory } from '../contract/client';
 import type { ConversationId } from '../contract/types';
@@ -73,11 +74,18 @@ export class TsMlsGroupSessionFactory implements GroupSessionFactory {
     const credential = await this.store.getOwnCredential();
     const impl = await getImpl();
     const keyPackage = await this.store.createEphemeralKeyPackage();
+    // A device that lost its saved state is still a leaf: the join replaces that leaf instead of adding a second
+    const ownKey = keyPackage.publicPackage.leafNode.signaturePublicKey;
+    const resync = Boolean(
+      ratchetTreeFromExtension(decoded.groupInfo)?.some(
+        (node) => node?.nodeType === 'leaf' && bytesEqual(node.leaf.signaturePublicKey, ownKey),
+      ),
+    );
     const { publicMessage, newState } = await joinGroupExternal(
       decoded.groupInfo,
       keyPackage.publicPackage,
       keyPackage.privatePackage,
-      false,
+      resync,
       impl,
     );
 

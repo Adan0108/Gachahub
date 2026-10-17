@@ -642,6 +642,66 @@ describe('MlsHandshakesRepository.acceptHandshake', () => {
       },
     );
 
+    describe('a device replacing its own old leaf (resync)', () => {
+      const resync = { ...join, resync: true };
+      const bothInGroup = () => {
+        roster.findActiveLeaves.mockResolvedValue([
+          { deviceId: 'device-1', userId: 'user-1' },
+          { deviceId: 'device-2', userId: 'user-2' },
+        ]);
+        devices(['device-2', 'user-2']);
+        participants(['user-1', 'ACTIVE'], ['user-2', 'ACTIVE']);
+      };
+
+      it('changes no roster row and declares nobody added or removed, but still moves the epoch and stores the snapshot', async () => {
+        bothInGroup();
+
+        const result = await repository.acceptExternalJoin(resync);
+
+        expect(result.outcome).toBe('accepted');
+        expect(roster.addLeaves).toHaveBeenCalledWith('conv-1', [], 4, tx);
+        expect(roster.removeLeaves).toHaveBeenCalledWith('conv-1', [], 4, tx);
+        expect(createdHandshakeData()).toMatchObject({
+          senderDeviceId: 'device-2',
+          addedDevices: [],
+          removedDevices: [],
+        });
+        expect(groupInfos.save).toHaveBeenCalledWith(
+          'conv-1',
+          4,
+          join.groupInfo,
+          tx,
+        );
+        expect(tx.chatParticipant.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('refuses when the device is not in the group, since there is no leaf to replace', async () => {
+        devices(['device-2', 'user-2']);
+        participants(['user-1', 'ACTIVE'], ['user-2', 'ACTIVE']);
+
+        await expect(repository.acceptExternalJoin(resync)).rejects.toThrow(
+          ConflictException,
+        );
+      });
+
+      it('still needs the user to be entitled to a leaf', async () => {
+        bothInGroup();
+        participants(['user-1', 'ACTIVE'], ['user-2', 'LEAVING']);
+
+        await expect(repository.acceptExternalJoin(resync)).rejects.toThrow(
+          ForbiddenException,
+        );
+      });
+
+      it('a plain join by a device that is already a leaf is still refused', async () => {
+        bothInGroup();
+
+        await expect(repository.acceptExternalJoin(join)).rejects.toThrow(
+          ConflictException,
+        );
+      });
+    });
+
     it('refuses a revoked joining device', async () => {
       devices(['device-2', 'user-2', new Date()]);
       participants(['user-1', 'ACTIVE'], ['user-2', 'JOINING']);

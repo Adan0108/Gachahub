@@ -1,9 +1,6 @@
 jest.mock('../chat-devices/chat-devices.service', () => ({
   ChatDevicesService: class {},
 }));
-jest.mock('../mls-group-roster/mls-group-roster.repository', () => ({
-  MlsGroupRosterRepository: class {},
-}));
 jest.mock('./mls-handshakes.repository', () => ({
   MlsHandshakesRepository: class {},
 }));
@@ -18,18 +15,13 @@ jest.mock('./mls-self-join-rate-limiter.service', () => ({
 }));
 
 import { RateLimitedException } from '../common/exceptions/rate-limited.exception';
-import {
-  ConflictException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { MlsSelfJoinService } from './mls-self-join.service';
 
 describe('MlsSelfJoinService', () => {
   const selfJoinRepository = { findJoinableConversationIds: jest.fn() };
   const groupInfoRepository = { findCurrent: jest.fn() };
   const participantStates = { findState: jest.fn() };
-  const rosterRepository = { findActiveLeaves: jest.fn() };
   const requestRateLimiter = {
     assertMaySubmitHandshake: jest.fn(),
     assertMayTakeMembershipWork: jest.fn(),
@@ -53,9 +45,6 @@ describe('MlsSelfJoinService', () => {
     requestRateLimiter.assertMayPollPending.mockReset();
     chatDevicesService.assertOwnActiveDevice.mockResolvedValue({});
     participantStates.findState.mockResolvedValue('ACTIVE');
-    rosterRepository.findActiveLeaves.mockResolvedValue([
-      { userId: 'user-2', deviceId: 'other-device' },
-    ]);
     groupInfoRepository.findCurrent.mockResolvedValue({
       epoch: 4,
       payload: new Uint8Array([1, 2]),
@@ -64,7 +53,6 @@ describe('MlsSelfJoinService', () => {
       selfJoinRepository as never,
       groupInfoRepository as never,
       participantStates as never,
-      rosterRepository as never,
       chatDevicesService as never,
       rateLimiter as never,
       requestRateLimiter as never,
@@ -109,7 +97,7 @@ describe('MlsSelfJoinService', () => {
   });
 
   describe('getGroupInfo', () => {
-    it('hands the current snapshot, base64, to an entitled user for a device not in the group', async () => {
+    it('hands the current snapshot, base64, to an entitled user to an entitled user', async () => {
       await expect(
         service.getGroupInfo('user-1', 'conv-1', 'device-1'),
       ).resolves.toEqual({
@@ -127,14 +115,10 @@ describe('MlsSelfJoinService', () => {
       expect(groupInfoRepository.findCurrent).not.toHaveBeenCalled();
     });
 
-    it('says so when the device is already in the group', async () => {
-      rosterRepository.findActiveLeaves.mockResolvedValue([
-        { userId: 'user-1', deviceId: 'device-1' },
-      ]);
-
+    it('also hands it to a device that is already a leaf, which replaces that leaf after losing its state', async () => {
       await expect(
         service.getGroupInfo('user-1', 'conv-1', 'device-1'),
-      ).rejects.toThrow(ConflictException);
+      ).resolves.toMatchObject({ epoch: 4 });
     });
 
     it('says so when there is no up-to-date snapshot yet', async () => {

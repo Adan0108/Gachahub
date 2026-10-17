@@ -41,6 +41,8 @@ interface CommitToAccept {
   groupInfo?: Uint8Array;
   /** A member changing the group, or a device outside it joining by itself. */
   sender: 'member' | 'external';
+  /** An external commit by a device that is already a leaf, replacing that leaf: the roster does not change. */
+  resync?: boolean;
 }
 
 export type HandshakeAcceptResult =
@@ -72,14 +74,16 @@ export class MlsHandshakesRepository {
     payload: Uint8Array;
     payloadSha256: string;
     groupInfo?: Uint8Array;
+    resync?: boolean;
   }): Promise<HandshakeAcceptResult> {
-    const { deviceId, userId, ...rest } = params;
+    const { deviceId, userId, resync, ...rest } = params;
 
     return this.acceptCommit({
       ...rest,
+      resync,
       senderDeviceId: deviceId,
       senderUserId: userId,
-      addedDeviceIds: [deviceId],
+      addedDeviceIds: resync ? [] : [deviceId],
       removedDeviceIds: [],
       welcomes: [],
       sender: 'external',
@@ -183,6 +187,7 @@ export class MlsHandshakesRepository {
       addedDeviceIds: string[];
       removedDeviceIds: string[];
       sender: 'member' | 'external';
+      resync?: boolean;
     },
   ): Promise<{
     addedDevices: AttestedAddedDevice[];
@@ -227,6 +232,11 @@ export class MlsHandshakesRepository {
 
     if (sender === 'member' && !groupJustActivated) {
       assertSenderIsMember(activeLeafDeviceIds, senderDeviceId);
+    }
+    if (params.resync && !activeLeafDeviceIds.has(senderDeviceId)) {
+      throw new ConflictException(
+        'This device is not in the group, so there is no leaf to replace',
+      );
     }
 
     const devices = await tx.chatDevice.findMany({
