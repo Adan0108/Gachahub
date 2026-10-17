@@ -108,7 +108,7 @@ export function CommunityMessageRow({
     return (
       <div className="community-message removed" id={`community-message-${message.id}`}>
         <div className="community-gutter" />
-        <div className="community-body">
+        <div className="community-msg-body">
           <p className="community-removed">Blocked message</p>
         </div>
       </div>
@@ -122,7 +122,7 @@ export function CommunityMessageRow({
     >
       <div className="community-gutter">
         {showHeader ? (
-          <span className="community-avatar">
+          <span className="community-msg-avatar">
             <AvatarFace image={message.author?.image} name={message.author?.name} />
           </span>
         ) : (
@@ -136,7 +136,7 @@ export function CommunityMessageRow({
         )}
       </div>
 
-      <div className="community-body">
+      <div className="community-msg-body">
         {showHeader && (
           <header>
             <Author author={message.author} />

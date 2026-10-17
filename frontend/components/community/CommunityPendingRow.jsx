@@ -7,11 +7,11 @@ export function CommunityPendingRow({ entry, user, onRetry, onDiscard }) {
   return (
     <div className={`community-message with-header pending ${entry.status}`}>
       <div className="community-gutter">
-        <span className="community-avatar">
+        <span className="community-msg-avatar">
           <AvatarFace image={user?.image} name={user?.name} />
         </span>
       </div>
-      <div className="community-body">
+      <div className="community-msg-body">
         <header>
           <b className="community-author">{user?.name}</b>
         </header>

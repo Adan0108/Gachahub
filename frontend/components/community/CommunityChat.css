@@ -184,7 +184,7 @@
   padding-top: 2px;
 }
 
-.community-avatar {
+.community-msg-avatar {
   display: grid;
   width: 40px;
   height: 40px;
@@ -195,7 +195,7 @@
   font-weight: 700;
 }
 
-.community-avatar .avatar-img {
+.community-msg-avatar .avatar-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -212,12 +212,12 @@
   opacity: 1;
 }
 
-.community-body {
+.community-msg-body {
   min-width: 0;
   flex: 1;
 }
 
-.community-body header {
+.community-msg-body header {
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -227,7 +227,7 @@
   font-size: 14px;
 }
 
-.community-body header time {
+.community-msg-body header time {
   color: var(--muted);
   font-size: 11px;
 }
