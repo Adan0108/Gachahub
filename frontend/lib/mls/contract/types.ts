@@ -70,7 +70,16 @@ export interface AttachmentEnvelope {
   files: AttachmentFile[];
 }
 
-export type PlaintextEnvelope = BodyEnvelope | EditEnvelope | AttachmentEnvelope;
+/** A post shown as a card. Only its id travels: every viewer looks it up themselves, so the sender cannot make a card say something the post does not. */
+export interface PostShareEnvelope {
+  v: 1;
+  type: 'post-share';
+  /** An optional note from the sender. */
+  body?: string;
+  postId: string;
+}
+
+export type PlaintextEnvelope = BodyEnvelope | EditEnvelope | AttachmentEnvelope | PostShareEnvelope;
 
 export type RejectReason =
   | 'credential-mismatch'

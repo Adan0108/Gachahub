@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { FiLogOut, FiMenu, FiMoon, FiPlus, FiSettings, FiSun, FiUser } from "react-icons/fi";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { useDismiss } from "../hooks/useDismiss";
+import { useMyPresence, useOfflineExpiryNotice } from "../hooks/presence/useMyPresence";
 import { useSignOut } from "../hooks/useSignOut";
 import { useToast } from "../hooks/useToast";
 import { api } from "../lib/api";
@@ -14,6 +15,8 @@ import { queries } from "../lib/queries";
 import { AvatarFace } from "./AvatarFace";
 import { GlobalSearch } from "./GlobalSearch";
 import { NotificationBell } from "./NotificationBell";
+import { PresenceDot } from "./PresenceDot";
+import { StatusMenu } from "./StatusMenu";
 
 export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobalActions = true }) {
   const router = useRouter();
@@ -37,6 +40,9 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
       showNotice("Logged out successfully");
     },
   });
+
+  const { me: myPresence, change: changePresence } = useMyPresence();
+  useOfflineExpiryNotice(myPresence, showNotice);
 
   const closeNotifications = useCallback(() => setNotificationsOpen(false), []);
   const closeAccountMenu = useCallback(() => setAccountOpen(false), []);
@@ -117,12 +123,18 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
             >
               <AvatarFace fallback={initials} image={user.image} />
             </button>
+            <PresenceDot own status={myPresence?.status === "INVISIBLE" ? "INVISIBLE" : myPresence ? "ONLINE" : undefined} />
             {accountOpen && (
               <div className="user-menu" ref={accountMenuRef} role="menu">
                 <div className="user-menu-profile">
                   <b>{user.name || "GachaHub user"}</b>
                   <small>{user.email}</small>
                 </div>
+                <StatusMenu
+                  isPending={changePresence.isPending}
+                  me={myPresence}
+                  onChoose={(change) => changePresence.mutate(change)}
+                />
                 <Link href="/profile" onClick={() => setAccountOpen(false)} role="menuitem">
                   <FiUser /> View profile
                 </Link>

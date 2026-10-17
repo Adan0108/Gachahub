@@ -22,6 +22,7 @@ import {
   FiUsers,
   FiX,
 } from "react-icons/fi";
+import { PresenceDot } from "../../components/PresenceDot";
 import { QueryNotice } from "../../components/QueryNotice";
 import { ConversationInfoPanel } from "../../components/chat/ConversationInfoPanel";
 import { GroupSettingsModal } from "../../components/chat/GroupSettingsModal";
@@ -45,12 +46,15 @@ import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useAttachmentPicker } from "../../hooks/chat/useAttachmentPicker";
 import { useDeviceIdentity } from "../../hooks/chat/useDeviceIdentity";
 import { useSyncEngine } from "../../hooks/chat/useSyncEngine";
+import { withDeviceRecovery as recoverDevice } from "../../lib/mls/device/withDeviceRecovery";
 import { useChatBackup } from "../../hooks/chat/useChatBackup";
 import { useBackgroundDecrypt } from "../../hooks/chat/useBackgroundDecrypt";
 import { useLinkPreviewDraft } from "../../hooks/chat/useLinkPreviewDraft";
 import { useConversationActions } from "../../hooks/chat/useConversationActions";
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
+import { useAcknowledgeUnreadable } from "../../hooks/chat/useAcknowledgeUnreadable";
+import { usePresenceOf } from "../../hooks/presence/usePresenceOf";
 import { useMarkChatRead } from "../../hooks/chat/useMarkChatRead";
 import { useReadWhenSeen } from "../../hooks/chat/useReadWhenSeen";
 import { useReceiptDisplay } from "../../hooks/chat/useReceiptDisplay";
@@ -154,6 +158,7 @@ export default function ChatPage() {
   const activeConversation = rawList.find((conversation) => conversation.id === activeId);
   // DM-only; a group's recipients are recomputed per send.
   const peer = conversationPeer(activeConversation, user?.id);
+  const peerPresence = usePresenceOf(activeConversation?.type === "GROUP" ? undefined : peer?.id);
   // A pending invite (group invite or DM message request) can read history; only sending is gated until accept.
   const isPendingInvite = myParticipant(activeConversation, user?.id)?.state === "PENDING";
   const messages = useQuery({
@@ -183,6 +188,7 @@ export default function ChatPage() {
     safetyPeerIds,
     threadItems,
     readableMessageIds,
+    unreadableMessageId,
     announcement,
     now: threadNow,
     patchOlder,
@@ -221,23 +227,7 @@ export default function ChatPage() {
   const preparedPreviewsRef = useRef(new Map());
   const recipientIds = () =>
     activeConversation?.type === "GROUP" ? otherActiveMemberIds(activeConversation, user?.id) : peer?.id;
-  // A retired or unlinked device is reprovisioned for the next attempt; this attempt is not retried.
-  const withDeviceRecovery = async (action) => {
-    try {
-      return await action();
-    } catch (error) {
-      if (error?.code !== "DEVICE_REVOKED" && error?.code !== "SESSION_NOT_LINKED") throw error;
-      if (!(await reprovisionDevice())) {
-        throw new Error("Couldn't reconnect this device. Try again in a moment.", {
-          cause: error,
-        });
-      }
-      throw new Error(
-        "Your device needed to be reconnected. Give it a few seconds to rejoin your conversations, then try sending again.",
-        { cause: error },
-      );
-    }
-  };
+  const withDeviceRecovery = (action) => recoverDevice(action, reprovisionDevice);
   // Merges a message the server just stored into the cache instead of refetching.
   const mergeIntoMessageCache = (conversationId, message) => {
     const hadCachedMessages = Boolean(queryClient.getQueryData(queryKeys.chatMessages(conversationId)));
@@ -368,9 +358,9 @@ export default function ChatPage() {
     patchOlder(() => context.previousOlder);
   };
   const reactMutation = useMutation({
-    mutationFn: ({ messageId, emoji }) => api.reactToMessage(messageId, emoji),
-    onMutate: ({ messageId, emoji }) =>
-      patchMessages((items) => withOptimisticReaction(items, messageId, user?.id, emoji)),
+    mutationFn: ({ messageId, choice }) => api.reactToMessage(messageId, choice),
+    onMutate: ({ messageId, choice }) =>
+      patchMessages((items) => withOptimisticReaction(items, messageId, user?.id, choice)),
     onError: rollbackOptimisticUpdate,
     onSettled: refetchMessages,
   });
@@ -381,8 +371,8 @@ export default function ChatPage() {
     onError: rollbackOptimisticUpdate,
     onSettled: refetchMessages,
   });
-  const handleReact = (messageId, emoji, mineAlready) =>
-    (mineAlready ? removeReactionMutation : reactMutation).mutate({ messageId, emoji });
+  const handleReact = (messageId, choice, mineAlready) =>
+    (mineAlready ? removeReactionMutation : reactMutation).mutate({ messageId, choice });
   const deleteMessageMutation = useMutation({
     mutationFn: (messageId) => api.deleteChatMessage(messageId),
     onMutate: (messageId) => patchMessages((items) => withOptimisticDelete(items, messageId)),
@@ -491,6 +481,13 @@ export default function ChatPage() {
     conversationId: activeId,
     messageIds: readableMessageIds,
     onRead: (messageId) => markChatRead(activeId, messageId, { isNewest: messageId === readableMessageIds.at(-1) }),
+  });
+
+  useAcknowledgeUnreadable({
+    conversationId: activeId,
+    unreadCount: activeConversation?.unreadCount,
+    messageId: unreadableMessageId,
+    onRead: (messageId) => markChatRead(activeId, messageId, { isNewest: false }),
   });
 
   const [replyLightboxOwnerId, setReplyLightboxOwnerId] = useState(activeId);
@@ -660,6 +657,11 @@ export default function ChatPage() {
     return <ChatSkeleton />;
   }
 
+  // Nobody has written yet: the "Conversation started" opener sits at the top, not against the composer.
+  const isFreshChat =
+    displayMessages.length > 0 &&
+    displayMessages.every((message) => message.contentType === "SYSTEM") &&
+    pendingMessages.length === 0;
   const actionError = acceptRequest.error || declineRequest.error || conversationActions.block.error;
   // Only claim end-to-end encryption when this device can actually use the group.
   const encryptionStatus = groupProblem
@@ -962,10 +964,16 @@ export default function ChatPage() {
           {search.trim().length >= MIN_SEARCH_CHARS && search.trim() !== messageQuery && (
             <small className="chat-sidebar-search-hint">Press Enter to search messages</small>
           )}
+          {listQuery.isLoading && (
+            <div aria-busy="true" aria-label="Loading conversations" className="chat-skeleton-list">
+              {[0, 1, 2, 3, 4].map((index) => (
+                <ChatSkeletonRow key={index} />
+              ))}
+            </div>
+          )}
           <QueryNotice
-            isLoading={listQuery.isLoading}
             isError={listQuery.isError}
-            isEmpty={!currentList.length}
+            isEmpty={!listQuery.isLoading && !currentList.length}
             emptyText={
               isFiltering
                 ? "No conversations match your search."
@@ -1017,8 +1025,11 @@ export default function ChatPage() {
             <>
               <header className="chat-thread-head">
                 <div>
-                  <span className="chat-avatar">
-                    <AvatarFace image={activeConversationImage} name={activeConversationName} />
+                  <span className="avatar-with-presence">
+                    <span className="chat-avatar">
+                      <AvatarFace image={activeConversationImage} name={activeConversationName} />
+                    </span>
+                    <PresenceDot status={peerPresence} />
                   </span>
                   <span>
                     <b>{activeConversationName}</b>
@@ -1029,6 +1040,7 @@ export default function ChatPage() {
                         </>
                       ) : (
                         <>
+                          {peerPresence === "ONLINE" && <span className="chat-head-online">Online</span>}
                           <FiLock /> {encryptionStatus}
                         </>
                       )}
@@ -1073,7 +1085,7 @@ export default function ChatPage() {
               </div>
               <div className="chat-messages-wrap">
               <div
-                className="chat-messages"
+                className={`chat-messages${isFreshChat ? " fresh" : ""}`}
                 ref={messagesContainerRef}
                 onScroll={(event) => {
                   trackMessagesScroll(event);
@@ -1081,7 +1093,8 @@ export default function ChatPage() {
                 }}
               >
                 <AttachmentLightboxContext.Provider value={setLightboxKey}>
-                <QueryNotice isLoading={messages.isLoading} isError={messages.isError} />
+                {messages.isLoading && <span aria-label="Loading messages" className="chat-thread-spinner" role="status" />}
+                <QueryNotice isError={messages.isError} />
                 {groupProblem && (
                   <div className="chat-history-ceiling" role="alert">
                     This group had a problem on this device - messages may not decrypt.

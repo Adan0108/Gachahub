@@ -43,21 +43,25 @@ model User {
   interests    UserInterest[]
   postSaves    PostSave[]
 
-  followers            UserFollow[]          @relation("UserFollowers")
-  following            UserFollow[]          @relation("UserFollowing")
-  moderatedGames       GameModerator[]       @relation("GameModeratorUser")
-  assignedModerators   GameModerator[]       @relation("GameModeratorAssigner")
-  createdChats         ChatConversation[]    @relation("ChatConversationCreator")
+  followers            UserFollow[]           @relation("UserFollowers")
+  following            UserFollow[]           @relation("UserFollowing")
+  moderatedGames       GameModerator[]        @relation("GameModeratorUser")
+  assignedModerators   GameModerator[]        @relation("GameModeratorAssigner")
+  createdChats         ChatConversation[]     @relation("ChatConversationCreator")
   gameMemberships      GameMember[]
   chatParticipants     ChatParticipant[]
-  sentChatMessages     ChatMessage[]         @relation("ChatMessageSender")
+  sentChatMessages     ChatMessage[]          @relation("ChatMessageSender")
   chatMessageReceipts  ChatMessageReceipt[]
-  directChatPairsAsA   ChatDirectPair[]      @relation("ChatDirectPairUserA")
-  directChatPairsAsB   ChatDirectPair[]      @relation("ChatDirectPairUserB")
+  directChatPairsAsA   ChatDirectPair[]       @relation("ChatDirectPairUserA")
+  directChatPairsAsB   ChatDirectPair[]       @relation("ChatDirectPairUserB")
   chatMessageReactions ChatMessageReaction[]
-  createdChatEmotes    ChatEmote[]           @relation("ChatEmoteCreator")
-  blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
-  blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
+  createdChatEmotes    ChatEmote[]            @relation("ChatEmoteCreator")
+  gameChannelMessages  GameChannelMessage[]   @relation("GameChannelMessageAuthor")
+  gameChannelDeletions GameChannelMessage[]   @relation("GameChannelMessageDeleter")
+  gameChannelReactions GameChannelReaction[]
+  gameChannelReads     GameChannelReadState[]
+  blockedUsers         ChatUserBlock[]        @relation("ChatUserBlockBlocker")
+  blockedBy            ChatUserBlock[]        @relation("ChatUserBlockBlocked")
 
   reportsFiled            Report[]         @relation("ReportsFiled")
   moderationCasesAssigned ModerationCase[] @relation("ModerationCasesAssigned")
@@ -205,6 +209,7 @@ model Game {
   posts           Post[]
   members         GameMember[]
   chatEmotes      ChatEmote[]
+  channels        GameChannel[]
   moderationCases ModerationCase[]
   auditLogs       AuditLog[]
 
@@ -466,6 +471,113 @@ model ChatMessage {
   @@map("chat_messages")
 }
 
+enum GameChannelKind {
+  TEXT
+  ANNOUNCEMENT
+}
+
+/// A chat room inside one game community. Plaintext on purpose (unlike DMs): moderators must be able to read and remove messages.
+model GameChannel {
+  id     String @id @default(cuid())
+  gameId String
+
+  slug  String
+  name  String
+  topic String?
+  kind  GameChannelKind @default(TEXT)
+
+  sortOrder       Int       @default(0)
+  /// Minimum seconds between one member's messages; 0 is off, moderators are exempt.
+  slowmodeSeconds Int       @default(0)
+  /// Only moderators can post while locked.
+  isLocked        Boolean   @default(false)
+  archivedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  game       Game                   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  messages   GameChannelMessage[]
+  readStates GameChannelReadState[]
+
+  @@unique([gameId, slug])
+  @@index([gameId, sortOrder])
+  @@map("game_channels")
+}
+
+model GameChannelMessage {
+  id        String  @id @default(cuid())
+  channelId String
+  /// Null once the author's account is gone; shown as a deleted user.
+  authorId  String?
+
+  content         String
+  replyToId       String?
+  /// Lets a client retry a send without posting twice.
+  clientMessageId String?
+
+  editedAt     DateTime?
+  /// Soft delete: the text stays for moderation evidence and is never returned.
+  deletedAt    DateTime?
+  deletedById  String?
+  deleteReason String?
+
+  createdAt DateTime @default(now())
+
+  channel   GameChannel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author    User?                 @relation("GameChannelMessageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  deletedBy User?                 @relation("GameChannelMessageDeleter", fields: [deletedById], references: [id], onDelete: SetNull)
+  replyTo   GameChannelMessage?   @relation("GameChannelMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   GameChannelMessage[]  @relation("GameChannelMessageReplies")
+  reactions GameChannelReaction[]
+
+  @@unique([authorId, clientMessageId])
+  @@index([channelId, createdAt, id])
+  @@index([authorId])
+  @@index([replyToId])
+  @@map("game_channel_messages")
+}
+
+model GameChannelReaction {
+  id        String  @id @default(cuid())
+  messageId String
+  userId    String
+  emoteId   String?
+  emoji     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  message GameChannelMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Cascade: a reaction must carry exactly one of emoji/emoteId, so a hard-deleted emote takes its reactions.
+  emote   ChatEmote?         @relation(fields: [emoteId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
+  @@index([emoteId])
+  @@map("game_channel_reactions")
+}
+
+/// Where one member has read up to in one channel; unread is counted from here.
+model GameChannelReadState {
+  userId    String
+  channelId String
+
+  lastReadAt        DateTime
+  lastReadMessageId String?
+
+  updatedAt DateTime @updatedAt
+
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel GameChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@id([userId, channelId])
+  @@index([channelId])
+  @@map("game_channel_read_states")
+}
+
 model ChatMessageMedia {
   id            String @id @default(cuid())
   messageId     String
@@ -512,6 +624,7 @@ model ChatMessageReceipt {
   @@map("chat_message_receipts")
 }
 
+// DB CHECK chat_message_reactions_one_kind: exactly one of emoji/emoteId (hand-added, not in Prisma schema).
 model ChatMessageReaction {
   id        String  @id @default(cuid())
   messageId String
@@ -557,7 +670,8 @@ model ChatEmote {
   game      Game? @relation(fields: [gameId], references: [id], onDelete: Cascade)
   createdBy User? @relation("ChatEmoteCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
-  reactions ChatMessageReaction[]
+  reactions        ChatMessageReaction[]
+  channelReactions GameChannelReaction[]
 
   // Only game-scoped emotes; global shortcode uniqueness is a hand-added partial index in migration 20260805093000.
   @@unique([scope, gameId, shortcode])

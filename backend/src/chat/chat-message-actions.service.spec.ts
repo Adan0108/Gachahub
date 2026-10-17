@@ -106,6 +106,8 @@ describe('ChatMessageActionsService', () => {
     markReleaseFailed: jest.fn().mockResolvedValue(undefined),
   };
 
+  const cloudinaryService = { cloudName: 'gachahub-demo' };
+
   const chatDelivery = {
     publishMessageCreated: jest.fn(),
     publishMessageEdited: jest.fn(),
@@ -132,6 +134,7 @@ describe('ChatMessageActionsService', () => {
       chatAccessService,
       gamesService as any,
       mediaService as any,
+      cloudinaryService as any,
       chatDelivery,
     );
     blocksService.getBlockedIdsAmong.mockResolvedValue(new Set());
@@ -196,24 +199,81 @@ describe('ChatMessageActionsService', () => {
       expect(repository.createGameChatEmote).not.toHaveBeenCalled();
     });
 
-    it('creates the emote with the given fields on success', async () => {
-      gamesService.findById.mockResolvedValue({ id: 'game-1' });
-      gameModeratorsService.assertCanModerateGame.mockResolvedValue(undefined);
-      repository.createGameChatEmote.mockResolvedValue({ id: 'emote-1' });
+    describe('where the picture lives', () => {
+      const OWN =
+        'https://res.cloudinary.com/gachahub-demo/image/upload/catcooking.png';
 
-      await service.createGameEmote('user-1', 'game-1', {
-        shortcode: 'catcooking',
-        imageUrl: 'https://cdn.example.com/catcooking.png',
+      beforeEach(() => {
+        gamesService.findById.mockResolvedValue({ id: 'game-1' });
+        gameModeratorsService.assertCanModerateGame.mockResolvedValue(
+          undefined,
+        );
+        repository.createGameChatEmote.mockResolvedValue({ id: 'emote-1' });
       });
 
-      expect(repository.createGameChatEmote).toHaveBeenCalledWith(
-        expect.objectContaining({
-          gameId: 'game-1',
-          createdById: 'user-1',
+      it('creates the emote with the given fields on success', async () => {
+        await service.createGameEmote('user-1', 'game-1', {
           shortcode: 'catcooking',
-          imageUrl: 'https://cdn.example.com/catcooking.png',
-        }),
-      );
+          imageUrl: OWN,
+        });
+
+        expect(repository.createGameChatEmote).toHaveBeenCalledWith(
+          expect.objectContaining({
+            gameId: 'game-1',
+            createdById: 'user-1',
+            shortcode: 'catcooking',
+            imageUrl: OWN,
+          }),
+        );
+      });
+
+      it.each([
+        ['another site', 'https://cdn.example.com/catcooking.png'],
+        ['a tracking pixel', 'https://tracker.example/p.gif'],
+        [
+          "someone else's account",
+          'https://res.cloudinary.com/other/image/upload/c.png',
+        ],
+        ['a data address', 'data:image/png;base64,AAAA'],
+      ])('refuses a picture on %s', async (_name, imageUrl) => {
+        await expect(
+          service.createGameEmote('user-1', 'game-1', {
+            shortcode: 'catcooking',
+            imageUrl,
+          }),
+        ).rejects.toThrow(BadRequestException);
+
+        expect(repository.createGameChatEmote).not.toHaveBeenCalled();
+      });
+
+      it('refuses an animation on another site too', async () => {
+        await expect(
+          service.createGameEmote('user-1', 'game-1', {
+            shortcode: 'catcooking',
+            imageUrl: OWN,
+            animationUrl: 'https://cdn.example.com/catcooking.gif',
+          }),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('accepts a picture and an animation on our account', async () => {
+        await service.createGameEmote('user-1', 'game-1', {
+          shortcode: 'catcooking',
+          imageUrl: OWN,
+          animationUrl: OWN.replace('.png', '.gif'),
+        });
+
+        expect(repository.createGameChatEmote).toHaveBeenCalled();
+      });
+
+      it('still allows a unicode-only emote, which has no picture to check', async () => {
+        await service.createGameEmote('user-1', 'game-1', {
+          shortcode: 'catcooking',
+          unicode: '\\u{1F639}',
+        });
+
+        expect(repository.createGameChatEmote).toHaveBeenCalled();
+      });
     });
   });
 

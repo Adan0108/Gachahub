@@ -19,5 +19,6 @@
 @import "../styles/app-background.css";
 @import "../styles/qa-fixes-misc.css";
 @import "../styles/chat.css";
+@import "../styles/presence.css";
 @import "../styles/devtools.css";
 @import "../styles/misc-widgets.css";

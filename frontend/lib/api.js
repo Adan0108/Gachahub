@@ -83,6 +83,16 @@ export const backendRoutes = {
   chatMessageEdits: (messageId) => `/chat/messages/${encodePathParam(messageId)}/edits`,
   chatMessageReactions: (messageId) =>
     `/chat/messages/${encodePathParam(messageId)}/reactions`,
+  chatEmotes: '/chat/emotes',
+  communityChat: (gameSlug) => `/games/${encodePathParam(gameSlug)}/chat`,
+  communityChatMessages: (gameSlug, channelId) =>
+    `/games/${encodePathParam(gameSlug)}/chat/channels/${encodePathParam(channelId)}/messages`,
+  communityChatRead: (gameSlug, channelId) =>
+    `/games/${encodePathParam(gameSlug)}/chat/channels/${encodePathParam(channelId)}/read`,
+  communityChatMessage: (gameSlug, messageId) =>
+    `/games/${encodePathParam(gameSlug)}/chat/messages/${encodePathParam(messageId)}`,
+  communityChatReactions: (gameSlug, messageId) =>
+    `/games/${encodePathParam(gameSlug)}/chat/messages/${encodePathParam(messageId)}/reactions`,
   chatAcceptRequest: (conversationId) => `/chat/requests/${encodePathParam(conversationId)}/accept`,
   chatDeclineRequest: (conversationId) =>
     `/chat/requests/${encodePathParam(conversationId)}/decline`,
@@ -106,6 +116,8 @@ export const backendRoutes = {
   chatDelivered: '/chat/messages/delivered',
   linkPreviews: '/link-previews',
   chatRead: (conversationId) => `/chat/conversations/${encodePathParam(conversationId)}/read`,
+  presence: '/presence',
+  presenceMe: '/presence/me',
   chatBackup: '/chat-backup',
   chatBackupBlobs: '/chat-backup/blobs',
   chatBackupChallenge: '/chat-backup/challenge',
@@ -888,8 +900,45 @@ export const api = {
       lastReadMessageId ? { lastReadMessageId } : {},
     ),
   // Reactions are plaintext (not part of the encrypted envelope) - one reaction per user per message.
-  reactToMessage: (messageId, emoji) =>
-    mutation(backendRoutes.chatMessageReactions(messageId), { emoji }),
+  // `choice` is { kind: 'emoji', emoji } or { kind: 'emote', emote }; the server only needs the id.
+  reactToMessage: (messageId, choice) =>
+    mutation(
+      backendRoutes.chatMessageReactions(messageId),
+      choice.kind === 'emote' ? { emoteId: choice.emote.id } : { emoji: choice.emoji },
+    ),
+  getChatEmotes: () => request(backendRoutes.chatEmotes),
+  // Presence: who is online, and your own choice to appear offline for a while.
+  getMyPresence: () => request(backendRoutes.presenceMe),
+  /** `status` is ONLINE, or INVISIBLE (shown as Offline) with a `duration` of 15m, 1h, 8h, 24h, 3d or forever. */
+  setMyPresence: ({ status, duration }) =>
+    mutation(backendRoutes.presenceMe, { status, duration }, { method: 'PUT' }),
+  /** Online or offline for up to 100 people; anyone the viewer may not see reads as offline. */
+  getPresence: (userIds) =>
+    request(withQuery(backendRoutes.presence, { userIds: userIds.join(',') })),
+  // Community chat: public rooms of a game community, plaintext so moderators can read and remove messages.
+  getCommunityChannels: (gameSlug) => request(backendRoutes.communityChat(gameSlug)),
+  getCommunityMessages: (gameSlug, channelId, query = {}) =>
+    request(withQuery(backendRoutes.communityChatMessages(gameSlug, channelId), query)),
+  sendCommunityMessage: (gameSlug, channelId, message) =>
+    mutation(backendRoutes.communityChatMessages(gameSlug, channelId), message),
+  editCommunityMessage: (gameSlug, messageId, content) =>
+    mutation(backendRoutes.communityChatMessage(gameSlug, messageId), { content }, { method: 'PATCH' }),
+  removeCommunityMessage: (gameSlug, messageId, reason) =>
+    mutation(
+      backendRoutes.communityChatMessage(gameSlug, messageId),
+      reason ? { reason } : {},
+      { method: 'DELETE' },
+    ),
+  // `choice` is { kind: 'emoji', emoji } or { kind: 'emote', emote }, same as direct messages.
+  reactToCommunityMessage: (gameSlug, messageId, choice) =>
+    mutation(
+      backendRoutes.communityChatReactions(gameSlug, messageId),
+      choice.kind === 'emote' ? { emoteId: choice.emote.id } : { emoji: choice.emoji },
+    ),
+  unreactToCommunityMessage: (gameSlug, messageId) =>
+    mutation(backendRoutes.communityChatReactions(gameSlug, messageId), undefined, { method: 'DELETE' }),
+  markCommunityRead: (gameSlug, channelId, messageId) =>
+    mutation(backendRoutes.communityChatRead(gameSlug, channelId), messageId ? { messageId } : {}),
   removeReaction: (messageId) =>
     mutation(backendRoutes.chatMessageReactions(messageId), undefined, { method: 'DELETE' }),
   // Own message only; soft delete (server clears the ciphertext, the row stays for history).

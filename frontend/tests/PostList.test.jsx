@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   createReport: vi.fn(() => Promise.resolve({ id: "report-1" })),
   share: vi.fn(() => Promise.resolve()),
   push: vi.fn(),
+  isAuthenticated: true,
 }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push }) }));
@@ -43,7 +44,20 @@ vi.mock("@tanstack/react-query", () => ({
   }),
 }));
 vi.mock("../hooks/useCurrentUser", () => ({
-  useCurrentUser: () => ({ user: { id: "viewer" }, isAuthenticated: true }),
+  useCurrentUser: () => ({ user: { id: "viewer" }, isAuthenticated: mocks.isAuthenticated }),
+}));
+// The real dialog needs the chat engine; here it only has to open and hand back its two actions.
+vi.mock("../components/SharePostDialog", () => ({
+  SharePostDialog: ({ postId, onClose, onNativeShare }) => (
+    <div role="dialog" aria-label={`share ${postId}`}>
+      <button onClick={onNativeShare} type="button">
+        native share
+      </button>
+      <button onClick={onClose} type="button">
+        close dialog
+      </button>
+    </div>
+  ),
 }));
 vi.mock("../lib/api", () => ({
   api: {
@@ -65,8 +79,9 @@ vi.mock("../lib/api", () => ({
 }));
 
 describe("PostList", () => {
-  it("shares a feed post with the browser share sheet", async () => {
+  it("opens the send dialog for a signed-in reader, which can still use the browser share sheet", async () => {
     mocks.share.mockClear();
+    mocks.isAuthenticated = true;
     Object.defineProperty(navigator, "share", { configurable: true, value: mocks.share });
 
     render(
@@ -77,11 +92,34 @@ describe("PostList", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /^share$/i }));
+    expect(screen.getByRole("dialog", { name: "share post-share" })).toBeInTheDocument();
+    expect(mocks.share).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "native share" }));
     await waitFor(() =>
       expect(mocks.share).toHaveBeenCalledWith(
         expect.objectContaining({ title: "Share me", url: expect.stringContaining("/post/post-share") }),
       ),
     );
+  });
+
+  it("shares straight to the browser share sheet for someone not signed in", async () => {
+    mocks.share.mockClear();
+    mocks.isAuthenticated = false;
+    Object.defineProperty(navigator, "share", { configurable: true, value: mocks.share });
+
+    render(
+      <PostList
+        posts={[{ id: "post-guest", title: "Share me", author: "Author", content: "Body" }]}
+        variant="feed"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^share$/i }));
+
+    await waitFor(() => expect(mocks.share).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    mocks.isAuthenticated = true;
   });
 
   it("opens the post menu and submits a report", async () => {

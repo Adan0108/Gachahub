@@ -4,9 +4,10 @@ import { EditedLabel } from "./EditedLabel";
 import { QuotedLinkPreview } from "./LinkPreviewCard";
 import { MessageActions } from "./MessageActions";
 import { MessageStatusLine } from "./MessageStatusLine";
+import { ReactionChips } from "./ReactionChips";
+import { QuotedSharedPost } from "./SharedPostCard";
 import { HistoryBanner, MembershipEventLine, TimestampDivider } from "./ThreadNotices";
 import { useAttachmentBlobUrl } from "../../hooks/chat/useAttachmentBlobUrl";
-import { groupReactions } from "../../lib/chat/chatReactions";
 import { canEditMessage } from "../../lib/chat/editPolicy";
 import { AvatarFace } from "../AvatarFace";
 import { participantUser } from "../../lib/chat/chatDisplay";
@@ -17,6 +18,7 @@ import {
   resolveAttachmentSources,
 } from "../../lib/mls/media/attachmentView";
 import { readLinkPreviews } from "../../lib/mls/messaging/linkPreviewEnvelope";
+import { postPath } from "../../lib/mls/messaging/postShareEnvelope";
 import {
   membershipEventText,
   messageDividerLabel,
@@ -84,28 +86,20 @@ function ReplyQuote({ message, messagesById, decryptedById, onJumpToMessage }) {
       {view?.kind === "attachment" && view.files[0] && (
         <ReplyQuoteMedia file={view.files[0]} media={original?.media} replyToId={message.replyToId} />
       )}
+      {view?.kind === "post" && <QuotedSharedPost postId={view.postId} />}
       {!view && <span>a message</span>}
     </button>
   );
 }
 
-function ReactionChips({ reactions, userId, onToggle }) {
-  const groups = groupReactions(reactions, userId);
-  if (!groups.length) return null;
-  return (
-    <div className="chat-reaction-chips">
-      {groups.map((group) => (
-        <button
-          className={group.mine ? "mine" : ""}
-          key={group.emoji}
-          onClick={() => onToggle(group.emoji, group.mine)}
-          type="button"
-        >
-          {group.emoji} {group.count}
-        </button>
-      ))}
-    </div>
-  );
+/** What Copy puts on the clipboard: the text, a caption, or for a shared post its address. */
+function copyTextOf(view) {
+  if (view?.kind === "text") return view.text;
+  if (view?.kind === "attachment") return view.caption;
+  if (view?.kind === "post") {
+    return typeof window === "undefined" ? postPath(view.postId) : `${window.location.origin}${postPath(view.postId)}`;
+  }
+  return "";
 }
 
 /** A message bubble; `decrypted` is this message's ok/unavailable state (pending renders nothing). */
@@ -139,7 +133,7 @@ function MessageBubble({
   const sentAt = Date.parse(message.createdAt);
   const view = decrypted.status === "ok" ? envelopeView(decrypted.envelope) : null;
   const mediaOnly = isMediaOnlyView(view);
-  const copyText = view?.kind === "text" ? view.text : view?.kind === "attachment" ? view.caption : "";
+  const copyText = copyTextOf(view);
   const versions = edited?.get(message.id)?.versions;
   const receiptStatus = mine ? receiptInfo?.statusFor.get(message.id) : undefined;
   const receiptReaders = mine
@@ -240,12 +234,12 @@ function MessageBubble({
               onCopy={() => onCopy(copyText)}
               onEdit={() => onEdit({ id: message.id, text: copyText, editCount: versions ? versions.length - 1 : 0 })}
               onRemove={() => onRemove({ id: message.id, mine })}
-              onReact={(emoji) => onReact(message.id, emoji)}
+              onReact={(choice) => onReact(message.id, choice)}
               onReply={() =>
                 onReply({
                   id: message.id,
                   senderName: mine ? "yourself" : sender?.name || "GachaHub member",
-                  preview: copyText ? copyText.slice(0, 80) : "an attachment",
+                  preview: copyText ? copyText.slice(0, 80) : view?.kind === "post" ? "a post" : "an attachment",
                 })
               }
             />
@@ -256,7 +250,7 @@ function MessageBubble({
             <span className="chat-message-time-tip">{messageFullTimestamp(sentAt)}</span>
           )}
           <ReactionChips
-            onToggle={(emoji, mineAlready) => onReact(message.id, emoji, mineAlready)}
+            onToggle={(choice, mineAlready) => onReact(message.id, choice, mineAlready)}
             reactions={message.reactions}
             userId={userId}
           />

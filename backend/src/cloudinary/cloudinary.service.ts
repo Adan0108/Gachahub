@@ -40,6 +40,27 @@ export class CloudinaryService {
     private readonly cloudinary: typeof CloudinaryType,
   ) {}
 
+  /** The account's cloud name; the module refuses to boot without one. */
+  get cloudName(): string {
+    return this.cloudinary.config().cloud_name as string;
+  }
+
+  /** Uploads a small file the server made itself under a fixed id, replacing an earlier copy. */
+  async uploadGeneratedImage(params: {
+    dataUri: string;
+    folder: string;
+    publicId: string;
+  }): Promise<{ secureUrl: string; bytes: number }> {
+    const result = (await this.cloudinary.uploader.upload(params.dataUri, {
+      folder: params.folder,
+      public_id: params.publicId,
+      resource_type: 'image',
+      overwrite: true,
+    })) as { secure_url: string; bytes: number };
+
+    return { secureUrl: result.secure_url, bytes: result.bytes };
+  }
+
   /** Signs an upload authorization; only the returned parameters may be sent to Cloudinary. */
   generateUploadSignature(params: GenerateUploadSignatureParams) {
     const timestamp = Math.floor(Date.now() / 1000);
