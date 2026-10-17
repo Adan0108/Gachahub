@@ -495,6 +495,11 @@ export function PostItem({
       {(detail || isFeed) && (post.content || media.length > 0) && (
         <div className={`post-body ${detail ? "full" : ""}`}>
           {post.content && <p>{post.content}</p>}
+          {!detail && isFeed && post.content && (
+            <Link className="post-read-more" href={`/post/${encodeURIComponent(post.id)}`}>
+              Read full post
+            </Link>
+          )}
           {media.length > 0 && (
             <div
               className={`post-media-wrap ${post.isSpoiler && !spoilerRevealed ? "hidden" : ""}`}

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { PostList } from "../components/PostList";
+import { PostItem, PostList } from "../components/PostList";
 
 const mocks = vi.hoisted(() => ({
   createReply: vi.fn(),
@@ -75,6 +75,38 @@ vi.mock("../lib/api", () => ({
 }));
 
 describe("PostList", () => {
+  it("leaves the full body on the post detail page", () => {
+    const content = "Full post text. ".repeat(1000);
+    const { container } = render(
+      <PostItem
+        index={0}
+        detail
+        post={{ id: "detail-post", title: "Detail post", author: "Author", content }}
+      />,
+    );
+
+    expect(container.querySelector(".post-body.full > p")).toHaveTextContent(content.trim());
+    expect(screen.queryByRole("link", { name: "Read full post" })).not.toBeInTheDocument();
+  });
+
+  it("keeps long feed bodies in the preview and links to the full post", () => {
+    const content = "A long post body. ".repeat(1000);
+    const { container } = render(
+      <PostList
+        posts={[{ id: "long-post", title: "Long post", author: "Author", content }]}
+        variant="feed"
+      />,
+    );
+
+    expect(container.querySelector(".post-feed-card .post-body:not(.full) > p")).toHaveTextContent(
+      content.trim(),
+    );
+    expect(screen.getByRole("link", { name: "Read full post" })).toHaveAttribute(
+      "href",
+      "/post/long-post",
+    );
+  });
+
   it("shares a feed post with the browser share sheet", async () => {
     mocks.share.mockClear();
     Object.defineProperty(navigator, "share", { configurable: true, value: mocks.share });
