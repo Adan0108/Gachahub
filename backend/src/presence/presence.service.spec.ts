@@ -6,6 +6,10 @@ describe('PresenceService', () => {
   const store = {
     getInvisible: jest.fn(),
     connectedAmong: jest.fn(),
+    onlineAmong: jest.fn(),
+    startLingering: jest.fn(),
+    stopLingering: jest.fn(),
+    popLingerDue: jest.fn(),
     invisibleAmong: jest.fn(),
     setInvisible: jest.fn(),
     clearInvisible: jest.fn(),
@@ -32,6 +36,10 @@ describe('PresenceService', () => {
     store.getInvisible.mockResolvedValue(null);
     store.connectedAmong.mockResolvedValue(new Set(['me']));
     store.invisibleAmong.mockResolvedValue(new Set());
+    store.onlineAmong.mockResolvedValue(new Set(['me']));
+    store.stopLingering.mockResolvedValue(false);
+    store.popExpired.mockResolvedValue([]);
+    store.popLingerDue.mockResolvedValue([]);
     repository.findAudienceIds.mockResolvedValue(['bo', 'cy']);
     service = new PresenceService(
       store as never,
@@ -76,7 +84,7 @@ describe('PresenceService', () => {
       repository.findVisibleAmong.mockResolvedValue(
         new Set(['on', 'hidden', 'away']),
       );
-      store.connectedAmong.mockResolvedValue(new Set(['on', 'hidden']));
+      store.onlineAmong.mockResolvedValue(new Set(['on', 'hidden']));
       store.invisibleAmong.mockResolvedValue(new Set(['hidden']));
 
       const result = await service.getVisible('me', [
@@ -96,11 +104,11 @@ describe('PresenceService', () => {
 
     it('does not even look up connection or choice for people the viewer may not see', async () => {
       repository.findVisibleAmong.mockResolvedValue(new Set(['on']));
-      store.connectedAmong.mockResolvedValue(new Set());
+      store.onlineAmong.mockResolvedValue(new Set());
 
       await service.getVisible('me', ['on', 'stranger']);
 
-      expect(store.connectedAmong).toHaveBeenCalledWith(['on'], NOW);
+      expect(store.onlineAmong).toHaveBeenCalledWith(['on'], NOW);
       expect(store.invisibleAmong).toHaveBeenCalledWith(['on'], NOW);
     });
   });
@@ -176,19 +184,39 @@ describe('PresenceService', () => {
       expect(emit).not.toHaveBeenCalled();
     });
 
-    it('announces offline only when the last socket goes', async () => {
-      store.connectedAmong.mockResolvedValue(new Set());
+    it('keeps others seeing them online for a random one to three minutes after the last socket goes, announcing nothing', async () => {
+      const random = jest.spyOn(Math, 'random');
 
       store.dropSocket.mockResolvedValue(1);
       await service.socketGone('me', 's1');
-      expect(emit).not.toHaveBeenCalled();
+      expect(store.startLingering).not.toHaveBeenCalled();
 
       store.dropSocket.mockResolvedValue(0);
+      random.mockReturnValueOnce(0);
       await service.socketGone('me', 's2');
-      expect(emit).toHaveBeenCalledWith('presence:update', {
-        userId: 'me',
-        status: 'OFFLINE',
-      });
+      random.mockReturnValueOnce(0.999999);
+      await service.socketGone('me', 's3');
+      random.mockReturnValueOnce(0.5);
+      await service.socketGone('me', 's4');
+
+      const untils = store.startLingering.mock.calls.map(
+        ([, until]) => (until as number) - NOW,
+      );
+      expect(untils[0]).toBe(60_000);
+      expect(untils[1]).toBe(180_000);
+      expect(untils[2]).toBeGreaterThan(60_000);
+      expect(untils[2]).toBeLessThan(180_000);
+      expect(emit).not.toHaveBeenCalled();
+      random.mockRestore();
+    });
+
+    it('does not announce coming back when others never saw them leave', async () => {
+      store.touchSocket.mockResolvedValue({ added: true, count: 1 });
+      store.stopLingering.mockResolvedValue(true);
+
+      await service.socketAlive('me', 's1');
+
+      expect(emit).not.toHaveBeenCalled();
     });
 
     it('says nothing when nobody can see the person', async () => {
@@ -215,6 +243,28 @@ describe('PresenceService', () => {
         userId: 'me',
         status: 'ONLINE',
       });
+    });
+
+    it('shows someone offline once their grace has run out', async () => {
+      store.popLingerDue.mockResolvedValue(['me']);
+      store.connectedAmong.mockResolvedValue(new Set());
+      store.onlineAmong.mockResolvedValue(new Set());
+
+      await service.expireDue();
+
+      expect(emit).toHaveBeenCalledWith('presence:update', {
+        userId: 'me',
+        status: 'OFFLINE',
+      });
+    });
+
+    it('leaves alone someone who came back while their grace was running', async () => {
+      store.popLingerDue.mockResolvedValue(['me']);
+      store.connectedAmong.mockResolvedValue(new Set(['me']));
+
+      await service.expireDue();
+
+      expect(emit).not.toHaveBeenCalled();
     });
 
     it('does nothing when no one is due', async () => {

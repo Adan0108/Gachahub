@@ -4,6 +4,8 @@ import { SocketRegistry } from '../websocket/socket-registry.service';
 import type { SetPresenceDto } from './dto/set-presence.dto';
 import {
   INVISIBLE_DURATIONS_MS,
+  OFFLINE_GRACE_MAX_MS,
+  OFFLINE_GRACE_MIN_MS,
   type MyPresenceStatus,
   type PublicPresence,
 } from './presence.constants';
@@ -48,15 +50,15 @@ export class PresenceService {
     const now = Date.now();
     const visible = await this.repository.findVisibleAmong(viewerId, userIds);
     const ids = userIds.filter((id) => visible.has(id));
-    const [connected, invisible] = await Promise.all([
-      this.store.connectedAmong(ids, now),
+    const [online, invisible] = await Promise.all([
+      this.store.onlineAmong(ids, now),
       this.store.invisibleAmong(ids, now),
     ]);
 
     return Object.fromEntries(
       userIds.map((id) => [
         id,
-        visible.has(id) && connected.has(id) && !invisible.has(id)
+        visible.has(id) && online.has(id) && !invisible.has(id)
           ? 'ONLINE'
           : 'OFFLINE',
       ]),
@@ -88,18 +90,38 @@ export class PresenceService {
       socketId,
       Date.now(),
     );
-    if (added && count === 1) await this.announce(userId);
+    if (!added || count !== 1) return;
+
+    // Back before the grace ran out: others never saw them leave, so there is nothing to announce.
+    const wasStillShown = await this.store.stopLingering(userId, Date.now());
+    if (!wasStillShown) await this.announce(userId);
   }
 
   async socketGone(userId: string, socketId: string): Promise<void> {
-    const left = await this.store.dropSocket(userId, socketId, Date.now());
-    if (left === 0) await this.announce(userId);
+    const now = Date.now();
+    const left = await this.store.dropSocket(userId, socketId, now);
+    if (left > 0) return;
+
+    // Others keep seeing them online for a random 1 to 3 minutes, so a closed tab is not given away at once.
+    const grace =
+      OFFLINE_GRACE_MIN_MS +
+      Math.floor(
+        Math.random() * (OFFLINE_GRACE_MAX_MS - OFFLINE_GRACE_MIN_MS + 1),
+      );
+    await this.store.startLingering(userId, now + grace);
   }
 
-  /** Brings back everyone whose invisibility has ended. */
+  /** Brings back everyone whose invisibility has ended, and shows offline those whose grace has run out. */
   async expireDue(): Promise<void> {
-    for (const userId of await this.store.popExpired(Date.now())) {
+    const now = Date.now();
+    for (const userId of await this.store.popExpired(now)) {
       await this.refresh(userId);
+    }
+
+    for (const userId of await this.store.popLingerDue(now)) {
+      // Back in the meantime: they never went offline.
+      const connected = await this.store.connectedAmong([userId], now);
+      if (!connected.has(userId)) await this.announce(userId);
     }
   }
 
@@ -116,15 +138,15 @@ export class PresenceService {
     if (!server) return;
 
     const now = Date.now();
-    const [connected, invisible, audience] = await Promise.all([
-      this.store.connectedAmong([userId], now),
+    const [online, invisible, audience] = await Promise.all([
+      this.store.onlineAmong([userId], now),
       this.store.invisibleAmong([userId], now),
       this.repository.findAudienceIds(userId),
     ]);
     if (audience.length === 0) return;
 
     const status: PublicPresence =
-      connected.has(userId) && !invisible.has(userId) ? 'ONLINE' : 'OFFLINE';
+      online.has(userId) && !invisible.has(userId) ? 'ONLINE' : 'OFFLINE';
     server
       .to(audience.map(userRoom))
       .emit('presence:update', { userId, status });

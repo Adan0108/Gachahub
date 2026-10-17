@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PresenceDot } from "../components/PresenceDot";
 import { StatusMenu } from "../components/StatusMenu";
 import { useOfflineExpiryNotice } from "../hooks/presence/useMyPresence";
-import { PRESENCE_PING_MS, usePresenceSocket } from "../hooks/presence/usePresenceSocket";
+import {
+  PRESENCE_PING_MS,
+  PRESENCE_REFRESH_MS,
+  usePresenceSocket,
+} from "../hooks/presence/usePresenceSocket";
 import { describeUntil, OFFLINE_DURATIONS } from "../lib/presence/offlineDurations";
 import { createPresenceStore, presenceStore } from "../lib/presence/presenceStore";
 import { queryKeys } from "../lib/queries";
@@ -141,6 +145,27 @@ describe("usePresenceSocket", () => {
 
     expect(presenceStore.get("bo")).toBe("ONLINE");
     expect(client.getQueryData(queryKeys.myPresence)).toEqual({ status: "INVISIBLE", until: null });
+  });
+
+  it("asks about everyone shown again every so often, and when the tab comes back, but not while hidden", () => {
+    const socket = fakeSocket();
+    socketMock.current = socket;
+    const refresh = vi.spyOn(presenceStore, "refreshAll");
+    renderHook(() => usePresenceSocket(), { wrapper: wrapper(new QueryClient()) });
+
+    act(() => vi.advanceTimersByTime(PRESENCE_REFRESH_MS));
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(refresh).toHaveBeenCalledTimes(2);
+
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    act(() => vi.advanceTimersByTime(PRESENCE_REFRESH_MS));
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(refresh).toHaveBeenCalledTimes(2);
+
+    refresh.mockRestore();
+    vi.restoreAllMocks();
   });
 
   it("forgets everyone when there is no connection any more", () => {

@@ -1,5 +1,6 @@
 import {
   EXPIRIES_KEY,
+  LINGER_KEY,
   SOCKET_STALE_AFTER_MS,
   preferenceKey,
   socketsKey,
@@ -14,6 +15,7 @@ describe('PresenceStore', () => {
     sortedSetAdd: jest.fn(),
     sortedSetRemove: jest.fn(),
     sortedSetPopDue: jest.fn(),
+    sortedSetScore: jest.fn(),
     getJson: jest.fn(),
     setJson: jest.fn(),
     delete: jest.fn(),
@@ -135,6 +137,63 @@ describe('PresenceStore', () => {
 
       await expect(store.popExpired(1000)).resolves.toEqual([]);
     });
+  });
+});
+
+describe('PresenceStore lingering', () => {
+  const redis = {
+    sortedSetLiveCount: jest.fn(),
+    sortedSetScore: jest.fn(),
+    sortedSetAdd: jest.fn(),
+    sortedSetRemove: jest.fn(),
+    sortedSetPopDue: jest.fn(),
+  };
+  let store: PresenceStore;
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    store = new PresenceStore(redis as never);
+  });
+
+  it('counts someone who is connected, or lingering, as online', async () => {
+    redis.sortedSetLiveCount.mockImplementation((key: string) =>
+      Promise.resolve(key === socketsKey('here') ? 1 : 0),
+    );
+    redis.sortedSetScore.mockImplementation((_key: string, user: string) =>
+      Promise.resolve(user === 'gone' ? 5000 : user === 'over' ? 500 : null),
+    );
+
+    const online = await store.onlineAmong(
+      ['here', 'gone', 'over', 'never'],
+      1000,
+    );
+
+    expect([...online].sort()).toEqual(['gone', 'here']);
+  });
+
+  it('starts lingering with the end as the score', async () => {
+    await store.startLingering('u1', 9000);
+
+    expect(redis.sortedSetAdd).toHaveBeenCalledWith(LINGER_KEY, 'u1', 9000);
+  });
+
+  it('says whether stopping ended a lingering that others could still see', async () => {
+    redis.sortedSetScore.mockResolvedValueOnce(5000);
+    await expect(store.stopLingering('u1', 1000)).resolves.toBe(true);
+    expect(redis.sortedSetRemove).toHaveBeenCalledWith(LINGER_KEY, 'u1');
+
+    redis.sortedSetScore.mockResolvedValueOnce(500);
+    await expect(store.stopLingering('u1', 1000)).resolves.toBe(false);
+
+    redis.sortedSetScore.mockResolvedValueOnce(null);
+    await expect(store.stopLingering('u1', 1000)).resolves.toBe(false);
+  });
+
+  it('hands back those whose lingering is over', async () => {
+    redis.sortedSetPopDue.mockResolvedValue(['u1']);
+
+    await expect(store.popLingerDue(1000)).resolves.toEqual(['u1']);
+    expect(redis.sortedSetPopDue).toHaveBeenCalledWith(LINGER_KEY, 1000);
   });
 });
 

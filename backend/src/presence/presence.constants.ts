@@ -25,8 +25,13 @@ export const INVISIBLE_DURATIONS = Object.keys(
 export const SOCKET_STALE_AFTER_MS = 70_000;
 export const MAX_PRESENCE_LOOKUP = 100;
 export const PRESENCE_AUDIENCE_LIMIT = 500;
-export const EXPIRY_SWEEP_MS = 30_000;
+export const EXPIRY_SWEEP_MS = 10_000;
+
+/** After the last tab closes, people keep seeing them online for a random while, so a closed tab does not show at once. */
+export const OFFLINE_GRACE_MIN_MS = 60_000;
+export const OFFLINE_GRACE_MAX_MS = 180_000;
 
 export const socketsKey = (userId: string) => `presence:sockets:${userId}`;
 export const preferenceKey = (userId: string) => `presence:pref:${userId}`;
 export const EXPIRIES_KEY = 'presence:expiries';
+export const LINGER_KEY = 'presence:linger';

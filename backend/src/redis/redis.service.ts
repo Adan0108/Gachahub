@@ -144,6 +144,10 @@ export class RedisService {
     await this.client.zAdd(this.key(key), { score, value: member });
   }
 
+  async sortedSetScore(key: string, member: string): Promise<number | null> {
+    return this.client.zScore(this.key(key), member);
+  }
+
   async sortedSetRemove(key: string, member: string) {
     await this.client.zRem(this.key(key), member);
   }

@@ -8,6 +8,8 @@ import { useSharedSocket } from "../../lib/socket/sharedSocket";
 
 // Must stay well under the server's window (70s) for a socket to count as here.
 export const PRESENCE_PING_MS = 25_000;
+// Live updates can be missed (a chat accepted after the first lookup, a dropped event), so everyone shown is asked about again now and then.
+export const PRESENCE_REFRESH_MS = 30_000;
 
 /**
  * Keeps this tab counted as online and presence live: pings the server while connected, applies
@@ -34,14 +36,22 @@ export function usePresenceSocket() {
       queryClient.invalidateQueries({ queryKey: queryKeys.myPresence });
     };
 
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") presenceStore.refreshAll();
+    };
+
     socket.on("presence:update", onUpdate);
     socket.on("presence:self", onSelf);
     socket.on("connect", onConnect);
     ping();
     const timer = setInterval(ping, PRESENCE_PING_MS);
+    const refreshTimer = setInterval(refreshWhenVisible, PRESENCE_REFRESH_MS);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
 
     return () => {
       clearInterval(timer);
+      clearInterval(refreshTimer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
       socket.off("presence:update", onUpdate);
       socket.off("presence:self", onSelf);
       socket.off("connect", onConnect);
