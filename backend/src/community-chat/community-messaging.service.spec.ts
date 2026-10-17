@@ -22,6 +22,7 @@ describe('CommunityMessagingService', () => {
   const access = { scope: jest.fn(), channelIn: jest.fn() };
   const rateLimiter = { assertNotRateLimited: jest.fn() };
   const presenter = { page: jest.fn(), one: jest.fn() };
+  const realtime = { changed: jest.fn() };
 
   let service: CommunityMessagingService;
 
@@ -51,6 +52,7 @@ describe('CommunityMessagingService', () => {
       access as never,
       rateLimiter as never,
       presenter as never,
+      realtime as never,
     );
   });
 
@@ -132,6 +134,21 @@ describe('CommunityMessagingService', () => {
       });
       expect(presenter.one).toHaveBeenCalledTimes(1);
       expect(message).toMatchObject({ content: 'hi there', channelId: 'c1' });
+    });
+
+    it('tells the room something changed, once a message is saved', async () => {
+      await send();
+
+      expect(realtime.changed).toHaveBeenCalledWith('c1');
+    });
+
+    it('says nothing for a retry that returns the earlier message, or a message that was refused', async () => {
+      repository.findByClientMessageId.mockResolvedValue(row({ id: 'again' }));
+      await send({ clientMessageId: 'client-1' });
+      repository.findByClientMessageId.mockResolvedValue(null);
+      await send({ content: ` ${ZWSP} ` }).catch(() => undefined);
+
+      expect(realtime.changed).not.toHaveBeenCalled();
     });
 
     it('refuses a message that is empty once cleaned', async () => {

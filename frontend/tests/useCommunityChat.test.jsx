@@ -1,7 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useCommunityChat } from "../hooks/community/useCommunityChat";
+import { setSharedSocket } from "../lib/socket/sharedSocket";
 
 const mocks = vi.hoisted(() => ({
   api: {
@@ -283,5 +284,96 @@ describe("useCommunityChat", () => {
       expect(mocks.api.getCommunityChannels.mock.calls.length).toBeGreaterThan(before),
     );
     expect(mocks.api.markCommunityRead).toHaveBeenCalledWith("wuwa", "c1", "m2");
+  });
+
+  describe("live updates", () => {
+    function fakeSocket(connected = true) {
+      const handlers = new Map();
+      return {
+        connected,
+        emit: vi.fn(),
+        on: vi.fn((event, handler) => handlers.set(event, handler)),
+        off: vi.fn((event) => handlers.delete(event)),
+        fire: (event, payload) => handlers.get(event)?.(payload),
+      };
+    }
+    const pulls = () => mocks.api.getCommunityMessages.mock.calls.length;
+
+    afterEach(() => setSharedSocket(null));
+
+    it("listens to its room once the messages have loaded", async () => {
+      const socket = fakeSocket();
+      setSharedSocket(socket);
+
+      await loaded(setup());
+
+      expect(socket.emit).toHaveBeenCalledWith("community:join", { slug: "wuwa", channelId: "c1" });
+    });
+
+    it("pulls the newest page when its room changes, once for a burst", async () => {
+      const socket = fakeSocket();
+      setSharedSocket(socket);
+      await loaded(setup());
+      const before = pulls();
+
+      act(() => {
+        socket.fire("community:activity", { channelId: "c1" });
+        socket.fire("community:activity", { channelId: "c1" });
+      });
+
+      await waitFor(() => expect(pulls()).toBe(before + 1));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(pulls()).toBe(before + 1);
+    });
+
+    it("shows what the pull brings, such as a message from someone else", async () => {
+      const socket = fakeSocket();
+      setSharedSocket(socket);
+      const hook = await loaded(setup());
+      mocks.api.getCommunityMessages.mockResolvedValue({
+        items: [message("m1", 1), message("m2", 2), message("m3", 3)],
+        hasMore: false,
+      });
+
+      act(() => socket.fire("community:activity", { channelId: "c1" }));
+
+      await waitFor(() => expect(hook.result.current.messages.map((item) => item.id)).toContain("m3"));
+    });
+
+    it("ignores a change in another room", async () => {
+      const socket = fakeSocket();
+      setSharedSocket(socket);
+      await loaded(setup());
+      const before = pulls();
+
+      act(() => socket.fire("community:activity", { channelId: "other" }));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      expect(pulls()).toBe(before);
+    });
+
+    it("joins again and catches up after the connection comes back", async () => {
+      const socket = fakeSocket();
+      setSharedSocket(socket);
+      await loaded(setup());
+      const before = pulls();
+      socket.emit.mockClear();
+
+      act(() => socket.fire("connect"));
+
+      expect(socket.emit).toHaveBeenCalledWith("community:join", { slug: "wuwa", channelId: "c1" });
+      await waitFor(() => expect(pulls()).toBe(before + 1));
+    });
+
+    it("leaves the room and stops listening when the chat closes", async () => {
+      const socket = fakeSocket();
+      setSharedSocket(socket);
+      const hook = await loaded(setup());
+
+      hook.unmount();
+
+      expect(socket.emit).toHaveBeenCalledWith("community:leave", { channelId: "c1" });
+      expect(socket.off).toHaveBeenCalledWith("community:activity", expect.any(Function));
+    });
   });
 });

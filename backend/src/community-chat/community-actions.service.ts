@@ -12,6 +12,7 @@ import { CommunityAccessService } from './community-access.service';
 import { CommunityChatRepository } from './community-chat.repository';
 import { toCommunityReactions } from './community-message.mapper';
 import { CommunityMessagePresenter } from './community-message.presenter';
+import { CommunityRealtimeService } from './community-realtime.service';
 import type { DeleteCommunityMessageDto } from './dto/delete-community-message.dto';
 import type { EditCommunityMessageDto } from './dto/edit-community-message.dto';
 import { validMessageContent } from './utils/valid-message-content';
@@ -23,6 +24,7 @@ export class CommunityActionsService {
     private readonly repository: CommunityChatRepository,
     private readonly access: CommunityAccessService,
     private readonly presenter: CommunityMessagePresenter,
+    private readonly realtime: CommunityRealtimeService,
   ) {}
 
   async edit(
@@ -50,6 +52,7 @@ export class CommunityActionsService {
     if (content === message.content) return this.presenter.one(scope, message);
 
     const updated = await this.repository.updateContent(message.id, content);
+    this.realtime.changed(message.channelId);
     return this.presenter.one(scope, updated);
   }
 
@@ -75,6 +78,7 @@ export class CommunityActionsService {
       scope.user.id,
       reason,
     );
+    this.realtime.changed(message.channelId);
     return this.presenter.one(scope, removed);
   }
 
@@ -103,6 +107,7 @@ export class CommunityActionsService {
       emoji: dto.emoji,
       emoteId: dto.emoteId,
     });
+    this.realtime.changed(message.channelId);
     return this.reactionsOf(message.id);
   }
 
@@ -111,6 +116,7 @@ export class CommunityActionsService {
     const message = await this.access.messageIn(game.id, messageId);
 
     await this.repository.deleteReaction(message.id, user.id);
+    this.realtime.changed(message.channelId);
     return this.reactionsOf(message.id);
   }
 

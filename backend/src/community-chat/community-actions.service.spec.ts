@@ -15,6 +15,7 @@ describe('CommunityActionsService', () => {
   };
   const access = { scope: jest.fn(), messageIn: jest.fn() };
   const presenter = { one: jest.fn() };
+  const realtime = { changed: jest.fn() };
 
   let service: CommunityActionsService;
 
@@ -31,6 +32,7 @@ describe('CommunityActionsService', () => {
       repository as never,
       access as never,
       presenter as never,
+      realtime as never,
     );
   });
 
@@ -48,6 +50,17 @@ describe('CommunityActionsService', () => {
       expect(repository.updateContent).toHaveBeenCalledWith('m1', 'fixed');
       expect(message).toMatchObject({ content: 'fixed' });
       expect(message?.editedAt).not.toBeNull();
+    });
+
+    it('tells the room when the text changed, not when it did not', async () => {
+      repository.updateContent.mockResolvedValue(row({ content: 'fixed' }));
+      await edit();
+      expect(realtime.changed).toHaveBeenCalledWith('c1');
+
+      realtime.changed.mockClear();
+      access.messageIn.mockResolvedValue(row({ content: 'same' }));
+      await edit('same');
+      expect(realtime.changed).not.toHaveBeenCalled();
     });
 
     it('does nothing when the text is the same', async () => {
@@ -94,6 +107,17 @@ describe('CommunityActionsService', () => {
       await remove('because');
 
       expect(repository.softDelete).toHaveBeenCalledWith('m1', 'me', undefined);
+    });
+
+    it('tells the room a message went, and not again the second time', async () => {
+      repository.softDelete.mockResolvedValue(row({ deletedAt: new Date() }));
+      await remove();
+      expect(realtime.changed).toHaveBeenCalledWith('c1');
+
+      realtime.changed.mockClear();
+      access.messageIn.mockResolvedValue(row({ deletedAt: new Date() }));
+      await remove();
+      expect(realtime.changed).not.toHaveBeenCalled();
     });
 
     it("refuses to remove someone else's message", async () => {
@@ -161,6 +185,14 @@ describe('CommunityActionsService', () => {
         service.react('wuwa', 'm1', { emoteId: 'foreign' }, 'me'),
       ).rejects.toThrow(ForbiddenException);
       expect(repository.upsertReaction).not.toHaveBeenCalled();
+    });
+
+    it('tells the room about a reaction given or taken back', async () => {
+      await service.react('wuwa', 'm1', { emoji: '👍' }, 'me');
+      await service.unreact('wuwa', 'm1', 'me');
+
+      expect(realtime.changed).toHaveBeenCalledTimes(2);
+      expect(realtime.changed).toHaveBeenCalledWith('c1');
     });
 
     it('refuses to react to a removed message', async () => {

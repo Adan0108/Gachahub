@@ -21,6 +21,8 @@ import { CommunityChatController } from '../src/community-chat/community-chat.co
 import { CommunityChatRateLimiterService } from '../src/community-chat/community-chat-rate-limiter.service';
 import { CommunityChatRepository } from '../src/community-chat/community-chat.repository';
 import { CommunityAccessService } from '../src/community-chat/community-access.service';
+import { CommunityRealtimeService } from '../src/community-chat/community-realtime.service';
+import { SocketRegistry } from '../src/websocket/socket-registry.service';
 import { CommunityActionsService } from '../src/community-chat/community-actions.service';
 import { CommunityChannelsService } from '../src/community-chat/community-channels.service';
 import { CommunityMessagePresenter } from '../src/community-chat/community-message.presenter';
@@ -80,6 +82,8 @@ describe('Community chat API (real database)', () => {
         CommunityChannelsService,
         CommunityMessagingService,
         CommunityActionsService,
+        CommunityRealtimeService,
+        SocketRegistry,
         CommunityChatRepository,
         GameModeratorsRepository,
         BlocksService,

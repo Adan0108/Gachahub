@@ -10,6 +10,7 @@ import { CommunityAccessService } from './community-access.service';
 import { CommunityChatRateLimiterService } from './community-chat-rate-limiter.service';
 import { CommunityChatRepository } from './community-chat.repository';
 import { CommunityMessagePresenter } from './community-message.presenter';
+import { CommunityRealtimeService } from './community-realtime.service';
 import type { QueryCommunityMessagesDto } from './dto/query-community-messages.dto';
 import type { SendCommunityMessageDto } from './dto/send-community-message.dto';
 import { validMessageContent } from './utils/valid-message-content';
@@ -22,6 +23,7 @@ export class CommunityMessagingService {
     private readonly access: CommunityAccessService,
     private readonly rateLimiter: CommunityChatRateLimiterService,
     private readonly presenter: CommunityMessagePresenter,
+    private readonly realtime: CommunityRealtimeService,
   ) {}
 
   /** A page of history, oldest first; `before` loads the page above the one you have. */
@@ -113,6 +115,7 @@ export class CommunityMessagingService {
         replyToId: dto.replyToId,
         clientMessageId: dto.clientMessageId,
       });
+      this.realtime.changed(channel.id);
       return await this.presenter.one(scope, created);
     } catch (error) {
       // Two sends with one client id at once: the loser gets the winner's message.

@@ -11,11 +11,14 @@ import {
   upsertMessage,
 } from "../../lib/community/communityChat";
 import { queries, queryKeys } from "../../lib/queries";
+import { useSharedSocket } from "../../lib/socket/sharedSocket";
 import { useCurrentUser } from "../useCurrentUser";
 
 const PAGE_SIZE = 50;
-// Until messages are pushed live, the newest page is pulled now and then and folded in.
-const LATEST_POLL_MS = 10_000;
+// The server says when a room changed; this slower pull only catches whatever a push missed.
+const LATEST_POLL_MS = 60_000;
+// A burst of changes (several people typing at once) is one pull.
+const PUSH_PULL_DELAY_MS = 150;
 
 /**
  * One community's chat room: its messages (newest page first, older ones on demand), sending with
@@ -43,21 +46,54 @@ export function useCommunityChat(slug, { enabled = true } = {}) {
     retry: 1,
   });
 
+  // Folds the newest page into the room: new messages, and edits, removals and reactions on them.
+  const pullLatest = useCallback(async () => {
+    try {
+      const page = await api.getCommunityMessages(slug, channelId, { limit: PAGE_SIZE });
+      queryClient.setQueryData(messagesKey, (data) => page.items.reduce(upsertMessage, data));
+    } catch {
+      // The next push or pull tries again.
+    }
+  }, [slug, channelId, messagesKey, queryClient]);
+
   // The first page just arrived, so the first pull waits a full interval; after that a hidden tab stays quiet.
   const polling = canLoad && history.isSuccess;
   useEffect(() => {
     if (!polling) return undefined;
-    const timer = setInterval(async () => {
-      if (document.visibilityState !== "visible") return;
-      try {
-        const page = await api.getCommunityMessages(slug, channelId, { limit: PAGE_SIZE });
-        queryClient.setQueryData(messagesKey, (data) => page.items.reduce(upsertMessage, data));
-      } catch {
-        // The next pull tries again.
-      }
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") pullLatest();
     }, LATEST_POLL_MS);
     return () => clearInterval(timer);
-  }, [polling, slug, channelId, messagesKey, queryClient]);
+  }, [polling, pullLatest]);
+
+  // Listens to the room, so a change by anyone shows up at once instead of on the next pull.
+  const socket = useSharedSocket();
+  useEffect(() => {
+    if (!polling || !socket) return undefined;
+
+    let pullTimer;
+    const onActivity = (event) => {
+      if (event?.channelId !== channelId) return;
+      clearTimeout(pullTimer);
+      pullTimer = setTimeout(pullLatest, PUSH_PULL_DELAY_MS);
+    };
+    // After a reconnect the room must be joined again, and anything missed meanwhile is pulled.
+    const join = () => {
+      socket.emit("community:join", { slug, channelId });
+      pullLatest();
+    };
+
+    socket.on("community:activity", onActivity);
+    socket.on("connect", join);
+    if (socket.connected) socket.emit("community:join", { slug, channelId });
+
+    return () => {
+      clearTimeout(pullTimer);
+      socket.off("community:activity", onActivity);
+      socket.off("connect", join);
+      if (socket.connected) socket.emit("community:leave", { channelId });
+    };
+  }, [polling, socket, slug, channelId, pullLatest]);
 
   const putMessage = useCallback(
     (message) => queryClient.setQueryData(messagesKey, (data) => upsertMessage(data, message)),
