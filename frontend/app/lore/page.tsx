@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "../../components/FieldLimit";
+
 import { useState } from "react";
 import { FiBookOpen } from "react-icons/fi";
 import { Art } from "../../components/Art";
@@ -41,13 +43,18 @@ export default function LorePage() {
       {archiveOpen && (
         <section className="panel archive-toolbar" aria-label="Lore archive search">
           <label htmlFor="lore-search">Search the archive</label>
-          <input
-            id="lore-search"
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search mysteries, characters, or regions"
-            type="search"
-            value={query}
-          />
+          <>
+            <input
+              aria-describedby="limit-frontendapplorepagetsx-0"
+              maxLength={100}
+              id="lore-search"
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search mysteries, characters, or regions"
+              type="search"
+              value={query}
+            />
+            <FieldLimit id="limit-frontendapplorepagetsx-0" value={query} max={100} />
+          </>
           <small>{filteredTopics.length} archive entries found</small>
         </section>
       )}

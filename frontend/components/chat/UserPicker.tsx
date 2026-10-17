@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "../FieldLimit";
+
 import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { UserSearchResult } from "../../hooks/chat/useUserSearch";
@@ -113,28 +115,33 @@ export function UserPicker({
         </ul>
       )}
       {showInput && (
-        <input
-          aria-activedescendant={
-            hasResults && activeOption ? `${listId}-${activeOption.id}` : undefined
-          }
-          aria-autocomplete="list"
-          aria-controls={hasResults ? listId : undefined}
-          aria-expanded={hasResults}
-          aria-label={label}
-          autoComplete="off"
-          autoFocus
-          disabled={disabled}
-          id={id}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setActiveIndex(0);
-          }}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          role="combobox"
-          type="text"
-          value={query}
-        />
+        <>
+          <input
+            aria-describedby={`${listId}-limit`}
+            maxLength={50}
+            aria-activedescendant={
+              hasResults && activeOption ? `${listId}-${activeOption.id}` : undefined
+            }
+            aria-autocomplete="list"
+            aria-controls={hasResults ? listId : undefined}
+            aria-expanded={hasResults}
+            aria-label={label}
+            autoComplete="off"
+            autoFocus
+            disabled={disabled}
+            id={id}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setActiveIndex(0);
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            role="combobox"
+            type="text"
+            value={query}
+          />
+          <FieldLimit id={`${listId}-limit`} value={query} max={50} />
+        </>
       )}
       {showInput && query.trim() && !search.isActive && (
         <small className="user-picker-hint">

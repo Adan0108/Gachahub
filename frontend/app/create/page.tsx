@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "../../components/FieldLimit";
+
 import type { ChangeEvent } from "react";
 import type { GameRecord, CategoryRecord } from "../../lib/pageTypes";
 import type { ConfirmedMediaUpload } from "../../lib/api";
@@ -52,6 +54,7 @@ export default function CreatePostPage() {
   const [fileError, setFileError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [tagLimitNotice, setTagLimitNotice] = useState("");
   const selectedGame = games.data?.items.find((game: GameRecord) => game.id === form.gameId);
   const categories = useQuery({
     ...queries.categories(selectedGame?.slug),
@@ -267,25 +270,49 @@ export default function CreatePostPage() {
         </label>
         <label className={contentError ? "field-invalid" : ""}>
           Content
-          <textarea
-            maxLength={30000}
-            onChange={updateField("content")}
-            placeholder="Write your post..."
-            required
-            rows={10}
-            value={form.content}
-          />
+          <>
+            <textarea
+              aria-describedby="limit-frontendappcreatepagetsx-0"
+              maxLength={30000}
+              onChange={updateField("content")}
+              placeholder="Write your post..."
+              required
+              rows={10}
+              value={form.content}
+            />
+            <FieldLimit id="limit-frontendappcreatepagetsx-0" value={form.content} max={30000} />
+          </>
           {contentError && <small className="field-error">{contentError}</small>}
         </label>
         <label className={tagError ? "field-invalid" : ""}>
           Tags
-          <input
-            onChange={updateField("tags")}
-            placeholder="Jinhsi, Beginner, Build"
-            value={form.tags}
-          />
-          <small className={tagError ? "field-error" : ""}>
-            {tagError || "Separate up to 10 tags with commas; 80 characters maximum per tag."}
+          <>
+            <input
+              aria-describedby="limit-frontendappcreatepagetsx-1"
+              maxLength={809}
+              onChange={(event) => {
+                const error = getPostTagError(parsePostTags(event.target.value));
+                setTagLimitNotice(error);
+                if (!error) updateField("tags")(event);
+              }}
+              placeholder="Jinhsi, Beginner, Build"
+              value={form.tags}
+            />
+            <small id="limit-frontendappcreatepagetsx-1" className="field-limit" aria-hidden="true">
+              {parsedTags.length}/10 tags · {form.tags.split(",").at(-1)?.trim().length || 0}/80
+              characters in current tag
+              {parsedTags.length >= 10 || parsedTags.some((tag) => tag.length >= 80)
+                ? " — Limit reached."
+                : ""}
+            </small>
+          </>
+          <small
+            className={tagError || tagLimitNotice ? "field-error" : ""}
+            role={tagError || tagLimitNotice ? "alert" : undefined}
+          >
+            {tagLimitNotice ||
+              tagError ||
+              "Separate up to 10 tags with commas; 80 characters maximum per tag."}
           </small>
         </label>
 

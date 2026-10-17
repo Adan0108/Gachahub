@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "../FieldLimit";
+
 import { useState } from "react";
 import type { RefObject } from "react";
 import type { ChatConversation } from "../../lib/chat/chatDisplay";
@@ -121,11 +123,20 @@ export function GroupSettingsModal({
           >
             <label htmlFor="group-settings-title">
               Group name
-              <input
-                id="group-settings-title"
-                onChange={(event) => setTitle(event.target.value)}
-                value={title}
-              />
+              <>
+                <input
+                  aria-describedby="limit-componentschatGroupSettingsModaltsx-0"
+                  maxLength={120}
+                  id="group-settings-title"
+                  onChange={(event) => setTitle(event.target.value)}
+                  value={title}
+                />
+                <FieldLimit
+                  id="limit-componentschatGroupSettingsModaltsx-0"
+                  value={title}
+                  max={120}
+                />
+              </>
             </label>
             <label htmlFor="group-settings-photo">
               Photo URL

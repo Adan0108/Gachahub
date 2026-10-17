@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "../../../../../components/FieldLimit";
+
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -108,34 +110,58 @@ function CategoryForm({
         <form className="admin-form" onSubmit={submit}>
           <label>
             <span>Name *</span>
-            <input
-              autoFocus
-              maxLength={100}
-              name="name"
-              onChange={updateField}
-              required
-              value={form.name}
-            />
+            <>
+              <input
+                aria-describedby="limit-mincommunitiesslugcategoriespagetsx-0"
+                autoFocus
+                maxLength={100}
+                name="name"
+                onChange={updateField}
+                required
+                value={form.name}
+              />
+              <FieldLimit
+                id="limit-mincommunitiesslugcategoriespagetsx-0"
+                value={form.name}
+                max={100}
+              />
+            </>
           </label>
           <label>
             <span>Slug</span>
-            <input
-              maxLength={120}
-              name="slug"
-              onChange={updateField}
-              placeholder="Generated from name"
-              value={form.slug}
-            />
+            <>
+              <input
+                aria-describedby="limit-mincommunitiesslugcategoriespagetsx-1"
+                maxLength={120}
+                name="slug"
+                onChange={updateField}
+                placeholder="Generated from name"
+                value={form.slug}
+              />
+              <FieldLimit
+                id="limit-mincommunitiesslugcategoriespagetsx-1"
+                value={form.slug}
+                max={120}
+              />
+            </>
           </label>
           <label>
             <span>Icon key</span>
-            <input
-              maxLength={50}
-              name="icon"
-              onChange={updateField}
-              placeholder="book"
-              value={form.icon}
-            />
+            <>
+              <input
+                aria-describedby="limit-mincommunitiesslugcategoriespagetsx-2"
+                maxLength={50}
+                name="icon"
+                onChange={updateField}
+                placeholder="book"
+                value={form.icon}
+              />
+              <FieldLimit
+                id="limit-mincommunitiesslugcategoriespagetsx-2"
+                value={form.icon}
+                max={50}
+              />
+            </>
           </label>
           <label>
             <span>Sort order</span>
@@ -149,13 +175,21 @@ function CategoryForm({
           </label>
           <label className="admin-form-wide">
             <span>Description</span>
-            <textarea
-              maxLength={1000}
-              name="description"
-              onChange={updateField}
-              rows={4}
-              value={form.description}
-            />
+            <>
+              <textarea
+                aria-describedby="limit-mincommunitiesslugcategoriespagetsx-3"
+                maxLength={1000}
+                name="description"
+                onChange={updateField}
+                rows={4}
+                value={form.description}
+              />
+              <FieldLimit
+                id="limit-mincommunitiesslugcategoriespagetsx-3"
+                value={form.description}
+                max={1000}
+              />
+            </>
           </label>
           <label className="admin-checkbox admin-form-wide">
             <input checked={form.isActive} name="isActive" onChange={updateField} type="checkbox" />

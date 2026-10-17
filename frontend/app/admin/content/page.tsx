@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "../../../components/FieldLimit";
+
 import { useMutation } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import type { ContentRecord } from "../../../lib/pageTypes";
@@ -86,12 +88,17 @@ export default function AdminContentPage() {
       <section className="admin-toolbar" aria-label="Content filters">
         <label className="admin-search">
           <FiSearch />
-          <input
-            aria-label="Search content"
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search title, author, or ID"
-            value={search}
-          />
+          <>
+            <input
+              aria-describedby="limit-frontendappadmincontentpagetsx-0"
+              maxLength={100}
+              aria-label="Search content"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search title, author, or ID"
+              value={search}
+            />
+            <FieldLimit id="limit-frontendappadmincontentpagetsx-0" value={search} max={100} />
+          </>
         </label>
         <select
           aria-label="Filter content type"

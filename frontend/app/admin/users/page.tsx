@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "../../../components/FieldLimit";
+
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import type { UserRecord } from "../../../lib/pageTypes";
@@ -96,10 +98,13 @@ export default function AdminUsersPage() {
           <FiSearch />
           <input
             aria-label="Search users"
+            aria-describedby="admin-user-search-limit"
+            maxLength={100}
             onChange={(event) => setFilter("search", event.target.value)}
             placeholder="Search name or email"
             value={filters.search || ""}
           />
+          <FieldLimit id="admin-user-search-limit" value={filters.search || ""} max={100} />
         </label>
         <select
           aria-label="Filter user status"
@@ -234,13 +239,17 @@ export default function AdminUsersPage() {
             ) : null}
             <label>
               <span>{mode.reasonLabel}</span>
-              <textarea
-                maxLength={500}
-                onChange={(event) => setReason(event.target.value)}
-                placeholder={mode.reasonPlaceholder}
-                rows={3}
-                value={reason}
-              />
+              <>
+                <textarea
+                  aria-describedby="limit-frontendappadminuserspagetsx-0"
+                  maxLength={500}
+                  onChange={(event) => setReason(event.target.value)}
+                  placeholder={mode.reasonPlaceholder}
+                  rows={3}
+                  value={reason}
+                />
+                <FieldLimit id="limit-frontendappadminuserspagetsx-0" value={reason} max={500} />
+              </>
             </label>
           </div>
         </AdminActionDialog>

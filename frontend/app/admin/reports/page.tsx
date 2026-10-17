@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "../../../components/FieldLimit";
+
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import type { ReportRecord } from "../../../lib/pageTypes";
@@ -228,13 +230,17 @@ export default function AdminReportsPage() {
             </label>
             <label>
               <span>Note</span>
-              <textarea
-                maxLength={1000}
-                onChange={(event) => setNote(event.target.value)}
-                placeholder="Optional context for the audit record"
-                rows={3}
-                value={note}
-              />
+              <>
+                <textarea
+                  aria-describedby="limit-frontendappadminreportspagetsx-0"
+                  maxLength={1000}
+                  onChange={(event) => setNote(event.target.value)}
+                  placeholder="Optional context for the audit record"
+                  rows={3}
+                  value={note}
+                />
+                <FieldLimit id="limit-frontendappadminreportspagetsx-0" value={note} max={1000} />
+              </>
             </label>
           </div>
         </AdminActionDialog>

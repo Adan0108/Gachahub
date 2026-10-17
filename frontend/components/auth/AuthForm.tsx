@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "../FieldLimit";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -93,13 +95,22 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
               Display name
               <span>
                 <FiUser />
-                <input
-                  required
-                  value={form.name}
-                  onChange={updateField("name")}
-                  placeholder="Hertzy"
-                  autoComplete="name"
-                />
+                <>
+                  <input
+                    aria-describedby="limit-frontendcomponentsauthAuthFormtsx-0"
+                    maxLength={50}
+                    required
+                    value={form.name}
+                    onChange={updateField("name")}
+                    placeholder="Hertzy"
+                    autoComplete="name"
+                  />
+                  <FieldLimit
+                    id="limit-frontendcomponentsauthAuthFormtsx-0"
+                    value={form.name}
+                    max={50}
+                  />
+                </>
               </span>
             </label>
           )}

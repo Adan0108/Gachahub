@@ -1,5 +1,9 @@
 "use client";
 
+import { FieldLimit } from "../../components/FieldLimit";
+import { MAX_MESSAGE_BYTES, textMessageBytes, envelopeBytes } from "../../lib/chat/messageLimits";
+import { MAX_EDIT_TEXT_CHARS, buildEditEnvelope } from "../../lib/mls/messaging/editEnvelope";
+
 import type { ClipboardEvent, DragEvent } from "react";
 import type { QueryKey } from "@tanstack/react-query";
 import type { ChatConversation } from "../../lib/chat/chatDisplay";
@@ -416,6 +420,14 @@ export default function ChatPage() {
     setReplyTarget(null);
     messageEdit.start(message);
   };
+  const draftBytes = messageEdit.target
+    ? envelopeBytes(
+        buildEditEnvelope({ targetMessageId: messageEdit.target.id, text: draft, n: 10 }),
+      )
+    : textMessageBytes(draft);
+  const draftTooLarge =
+    draftBytes > MAX_MESSAGE_BYTES ||
+    Boolean(messageEdit.target && draft.length > MAX_EDIT_TEXT_CHARS);
 
   // Reactions are plaintext metadata, not part of the encrypted envelope. A socket event (handled
   // in useChatSocket) refetches this same query for everyone else once the write lands.
@@ -1023,15 +1035,20 @@ export default function ChatPage() {
                 </button>
               </div>
               <label htmlFor="new-group-title">Group name</label>
-              <input
-                autoFocus
-                disabled={createGroup.isPending}
-                id="new-group-title"
-                onChange={(event) => setGroupTitle(event.target.value)}
-                placeholder="Team Build Chat"
-                type="text"
-                value={groupTitle}
-              />
+              <>
+                <input
+                  aria-describedby="limit-frontendappchatpagetsx-0"
+                  maxLength={120}
+                  autoFocus
+                  disabled={createGroup.isPending}
+                  id="new-group-title"
+                  onChange={(event) => setGroupTitle(event.target.value)}
+                  placeholder="Team Build Chat"
+                  type="text"
+                  value={groupTitle}
+                />
+                <FieldLimit id="limit-frontendappchatpagetsx-0" value={groupTitle} max={120} />
+              </>
               <label htmlFor="new-group-members">Members</label>
               <UserPicker
                 currentUser={user}
@@ -1052,21 +1069,26 @@ export default function ChatPage() {
           )}
           <div className="chat-sidebar-search">
             <FiSearch aria-hidden="true" />
-            <input
-              enterKeyHint="search"
-              onChange={(event) => {
-                setSearch(event.target.value);
-                if (!event.target.value.trim())
-                  setMessageQuery((current) => (current === null ? null : ""));
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && search.trim().length >= MIN_SEARCH_CHARS)
-                  setMessageQuery(search.trim());
-              }}
-              placeholder="Search chats and messages..."
-              type="text"
-              value={search}
-            />
+            <>
+              <input
+                aria-describedby="limit-frontendappchatpagetsx-1"
+                maxLength={100}
+                enterKeyHint="search"
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  if (!event.target.value.trim())
+                    setMessageQuery((current) => (current === null ? null : ""));
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && search.trim().length >= MIN_SEARCH_CHARS)
+                    setMessageQuery(search.trim());
+                }}
+                placeholder="Search chats and messages..."
+                type="text"
+                value={search}
+              />
+              <FieldLimit id="limit-frontendappchatpagetsx-1" value={search} max={100} />
+            </>
           </div>
           {search.trim().length >= MIN_SEARCH_CHARS && search.trim() !== messageQuery && (
             <small className="chat-sidebar-search-hint">Press Enter to search messages</small>
@@ -1424,6 +1446,7 @@ export default function ChatPage() {
                     className="chat-composer"
                     onSubmit={(event) => {
                       event.preventDefault();
+                      if (draftTooLarge) return;
                       if (messageEdit.target) return messageEdit.submit();
                       const text = draft.trim();
                       const files = attachmentPicker.files;
@@ -1475,6 +1498,9 @@ export default function ChatPage() {
                       <FiPaperclip />
                     </button>
                     <input
+                      aria-describedby="chat-message-limit"
+                      aria-invalid={draftTooLarge || undefined}
+                      maxLength={messageEdit.target ? MAX_EDIT_TEXT_CHARS : MAX_MESSAGE_BYTES}
                       onChange={(event) => {
                         setDraft(event.target.value);
                         if (!messageEdit.target && event.target.value.trim())
@@ -1493,15 +1519,32 @@ export default function ChatPage() {
                     <button
                       aria-label={messageEdit.target ? "Save edit" : "Send"}
                       disabled={
-                        messageEdit.target
+                        draftTooLarge ||
+                        (messageEdit.target
                           ? !draft.trim()
-                          : !draft.trim() && attachmentPicker.files.length === 0
+                          : !draft.trim() && attachmentPicker.files.length === 0)
                       }
                       type="submit"
                     >
                       {messageEdit.target ? <FiCheck /> : <FiSend />}
                     </button>
                   </form>
+                  <small
+                    id="chat-message-limit"
+                    className={`field-limit chat-message-limit ${draftTooLarge ? "field-warning" : ""}`}
+                    role="status"
+                  >
+                    {draftBytes}/{MAX_MESSAGE_BYTES} encoded bytes (safe message budget).
+                    {messageEdit.target &&
+                      ` Edits: ${draft.length}/${MAX_EDIT_TEXT_CHARS} characters.`}
+                    {draftTooLarge
+                      ? " Limit exceeded — shorten your message before sending."
+                      : draftBytes === MAX_MESSAGE_BYTES ||
+                          draft.length ===
+                            (messageEdit.target ? MAX_EDIT_TEXT_CHARS : MAX_MESSAGE_BYTES)
+                        ? " Limit reached."
+                        : " Accents and emoji use more space."}
+                  </small>
                 </>
               ) : deviceError ? (
                 <div className="chat-composer-disabled error">

@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "../../components/FieldLimit";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -121,31 +123,43 @@ export default function OnboardingPage() {
             Display name
             <span>
               <FiUser />
-              <input
-                autoFocus
-                maxLength={50}
-                onChange={(event) => {
-                  setName(event.target.value);
-                  setError("");
-                }}
-                placeholder="Hertzy"
-                value={displayName}
-              />
+              <>
+                <input
+                  aria-describedby="limit-frontendapponboardingpagetsx-0"
+                  autoFocus
+                  maxLength={50}
+                  onChange={(event) => {
+                    setName(event.target.value);
+                    setError("");
+                  }}
+                  placeholder="Hertzy"
+                  value={displayName}
+                />
+                <FieldLimit
+                  id="limit-frontendapponboardingpagetsx-0"
+                  value={displayName}
+                  max={50}
+                />
+              </>
             </span>
           </label>
           <label>
             Handle
             <span>
               <FiAtSign />
-              <input
-                maxLength={20}
-                onChange={(event) => {
-                  setUsername(event.target.value.trim());
-                  setError("");
-                }}
-                placeholder="Hertzy-123"
-                value={username}
-              />
+              <>
+                <input
+                  aria-describedby="limit-frontendapponboardingpagetsx-1"
+                  maxLength={20}
+                  onChange={(event) => {
+                    setUsername(event.target.value.trim());
+                    setError("");
+                  }}
+                  placeholder="Hertzy-123"
+                  value={username}
+                />
+                <FieldLimit id="limit-frontendapponboardingpagetsx-1" value={username} max={20} />
+              </>
             </span>
           </label>
           {username.length > 0 && !usernameFormatValid && (

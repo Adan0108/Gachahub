@@ -1,4 +1,5 @@
 import { api } from "../../api";
+import { assertMessageSize, MAX_CIPHERTEXT_CHARS } from "../../chat/messageLimits";
 import { bytesToBase64 } from "../storage/base64";
 import { ensureConversationGroup } from "./ensureConversationGroup";
 import { buildEditEnvelope } from "./editEnvelope";
@@ -106,6 +107,7 @@ async function encryptSubmitAndCache<Response extends SendResult>(
   envelope: PlaintextEnvelope,
   submit: Submit<Response>,
 ) {
+  assertMessageSize(envelope);
   try {
     return await encryptAndSend(
       syncEngine,
@@ -144,8 +146,13 @@ async function encryptAndSend<Response extends SendResult>(
 
   const { wireBytes, epoch } = await syncEngine.encryptMessage(conversationId, envelope);
 
+  const ciphertext = bytesToBase64(wireBytes);
+  if (ciphertext.length > MAX_CIPHERTEXT_CHARS) {
+    throw new Error("Encrypted message is too large. Shorten the text or caption and try again.");
+  }
+
   const response = await submit({
-    ciphertext: bytesToBase64(wireBytes),
+    ciphertext,
     encryptionMeta: senderMeta(deviceId),
   });
 

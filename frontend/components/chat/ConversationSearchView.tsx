@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "../FieldLimit";
+
 import { useEffect, useRef } from "react";
 import type { ThreadSearchOptions } from "../../hooks/chat/useThreadMessageSearch";
 import type { ChatConversation } from "../../lib/chat/chatDisplay";
@@ -59,20 +61,29 @@ export function ConversationSearchView({
     <div className="chat-info-body chat-search-view">
       <div className="chat-search-box">
         <FiSearch aria-hidden="true" />
-        <input
-          aria-label="Search this conversation"
-          enterKeyHint="search"
-          onChange={(event) => search.onQueryChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter") return;
-            event.preventDefault();
-            search.onEnter(event);
-          }}
-          placeholder="Search in conversation..."
-          ref={inputRef}
-          type="text"
-          value={search.query}
-        />
+        <>
+          <input
+            aria-describedby="limit-onentschatConversationSearchViewtsx-0"
+            maxLength={100}
+            aria-label="Search this conversation"
+            enterKeyHint="search"
+            onChange={(event) => search.onQueryChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              search.onEnter(event);
+            }}
+            placeholder="Search in conversation..."
+            ref={inputRef}
+            type="text"
+            value={search.query}
+          />
+          <FieldLimit
+            id="limit-onentschatConversationSearchViewtsx-0"
+            value={search.query}
+            max={100}
+          />
+        </>
         <button
           aria-label="Previous result"
           disabled={results.length === 0}

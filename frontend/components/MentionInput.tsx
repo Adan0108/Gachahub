@@ -45,11 +45,13 @@ export function MentionInput({
     const username = picked.username;
     const handle = `@${username} `;
     const position = active.start + handle.length;
+    const nextValue = value.slice(0, active.start) + handle + value.slice(active.end);
+    if (inputProps.maxLength !== undefined && nextValue.length > inputProps.maxLength) return;
 
     pendingCaret.current = position;
     setCaret(position);
     setConfirmed((previous) => new Set(previous).add(username.toLowerCase()));
-    onChange(value.slice(0, active.start) + handle + value.slice(active.end));
+    onChange(nextValue);
   };
 
   useLayoutEffect(() => {

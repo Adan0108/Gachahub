@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "../../components/FieldLimit";
+
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { GameRecord } from "../../lib/pageTypes";
@@ -121,13 +123,17 @@ export default function ModeratorPage() {
           <div className="admin-dialog-fields">
             <label>
               <span>Reason (optional)</span>
-              <textarea
-                maxLength={500}
-                onChange={(event) => setReason(event.target.value)}
-                placeholder="What should the admin look at?"
-                rows={3}
-                value={reason}
-              />
+              <>
+                <textarea
+                  aria-describedby="limit-frontendappmoderatorpagetsx-0"
+                  maxLength={500}
+                  onChange={(event) => setReason(event.target.value)}
+                  placeholder="What should the admin look at?"
+                  rows={3}
+                  value={reason}
+                />
+                <FieldLimit id="limit-frontendappmoderatorpagetsx-0" value={reason} max={500} />
+              </>
             </label>
           </div>
         </AdminActionDialog>

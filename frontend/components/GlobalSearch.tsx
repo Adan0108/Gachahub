@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "./FieldLimit";
+
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
@@ -152,26 +154,31 @@ export function GlobalSearch() {
     <div className="search-wrap">
       <form className="search" onSubmit={submit}>
         <FiSearch />
-        <input
-          aria-activedescendant={activeSuggestionId}
-          aria-autocomplete="list"
-          aria-controls="global-search-suggestions"
-          aria-expanded={suggestionsOpen}
-          aria-label="Search GachaHub"
-          aria-keyshortcuts="Control+K Meta+K"
-          role="combobox"
-          ref={searchInputRef}
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setFocused(true);
-            setActiveSuggestion(-1);
-          }}
-          onFocus={focusSearch}
-          onBlur={delayCloseSuggestions}
-          onKeyDown={handleSearchKeyDown}
-          placeholder="Search posts and communities..."
-        />
+        <>
+          <input
+            aria-describedby="limit-frontendcomponentsGlobalSearchtsx-0"
+            maxLength={100}
+            aria-activedescendant={activeSuggestionId}
+            aria-autocomplete="list"
+            aria-controls="global-search-suggestions"
+            aria-expanded={suggestionsOpen}
+            aria-label="Search GachaHub"
+            aria-keyshortcuts="Control+K Meta+K"
+            role="combobox"
+            ref={searchInputRef}
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setFocused(true);
+              setActiveSuggestion(-1);
+            }}
+            onFocus={focusSearch}
+            onBlur={delayCloseSuggestions}
+            onKeyDown={handleSearchKeyDown}
+            placeholder="Search posts and communities..."
+          />
+          <FieldLimit id="limit-frontendcomponentsGlobalSearchtsx-0" value={query} max={100} />
+        </>
       </form>
       {suggestionsOpen && (
         <div

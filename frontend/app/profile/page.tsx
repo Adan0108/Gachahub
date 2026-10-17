@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "../../components/FieldLimit";
+
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
@@ -355,18 +357,34 @@ export default function ProfilePage() {
               </button>
             </div>
             <AvatarEditor user={user} />
+            <small className="field-limit">
+              Display name and bio changes are saved locally on this device only.
+            </small>
             <BannerPicker currentId={user.bannerPresetId} />
             <label>
               Display name
-              <input
-                ref={nameInputRef}
-                value={draftName}
-                onChange={(event) => setDraftName(event.target.value)}
-              />
+              <>
+                <input
+                  aria-describedby="limit-frontendappprofilepagetsx-0"
+                  maxLength={50}
+                  ref={nameInputRef}
+                  value={draftName}
+                  onChange={(event) => setDraftName(event.target.value)}
+                />
+                <FieldLimit id="limit-frontendappprofilepagetsx-0" value={draftName} max={50} />
+              </>
             </label>
             <label>
               Bio
-              <textarea value={draftBio} onChange={(event) => setDraftBio(event.target.value)} />
+              <>
+                <textarea
+                  aria-describedby="limit-frontendappprofilepagetsx-1"
+                  maxLength={1000}
+                  value={draftBio}
+                  onChange={(event) => setDraftBio(event.target.value)}
+                />
+                <FieldLimit id="limit-frontendappprofilepagetsx-1" value={draftBio} max={1000} />
+              </>
             </label>
             <button className="primary" type="submit">
               Save changes

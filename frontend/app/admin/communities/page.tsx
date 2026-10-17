@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "../../../components/FieldLimit";
+
 import { useMutation } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
@@ -119,42 +121,92 @@ function CommunityForm({
         <form className="admin-form" onSubmit={submit}>
           <label>
             <span>Name *</span>
-            <input
-              autoFocus
-              maxLength={100}
-              name="name"
-              onChange={updateField}
-              required
-              value={form.name}
-            />
+            <>
+              <input
+                aria-describedby="limit-frontendappadmincommunitiespagetsx-0"
+                autoFocus
+                maxLength={100}
+                name="name"
+                onChange={updateField}
+                required
+                value={form.name}
+              />
+              <FieldLimit
+                id="limit-frontendappadmincommunitiespagetsx-0"
+                value={form.name}
+                max={100}
+              />
+            </>
           </label>
           <label>
             <span>Slug</span>
-            <input
-              maxLength={120}
-              name="slug"
-              onChange={updateField}
-              placeholder="Generated from name when blank"
-              value={form.slug}
-            />
+            <>
+              <input
+                aria-describedby="limit-frontendappadmincommunitiespagetsx-1"
+                maxLength={120}
+                name="slug"
+                onChange={updateField}
+                placeholder="Generated from name when blank"
+                value={form.slug}
+              />
+              <FieldLimit
+                id="limit-frontendappadmincommunitiespagetsx-1"
+                value={form.slug}
+                max={120}
+              />
+            </>
           </label>
           <label className="admin-form-wide">
             <span>Description</span>
-            <textarea
-              maxLength={1000}
-              name="description"
-              onChange={updateField}
-              rows={4}
-              value={form.description}
-            />
+            <>
+              <textarea
+                aria-describedby="limit-frontendappadmincommunitiespagetsx-2"
+                maxLength={1000}
+                name="description"
+                onChange={updateField}
+                rows={4}
+                value={form.description}
+              />
+              <FieldLimit
+                id="limit-frontendappadmincommunitiespagetsx-2"
+                value={form.description}
+                max={1000}
+              />
+            </>
           </label>
           <label>
             <span>Developer</span>
-            <input maxLength={100} name="developer" onChange={updateField} value={form.developer} />
+            <>
+              <input
+                aria-describedby="limit-frontendappadmincommunitiespagetsx-3"
+                maxLength={100}
+                name="developer"
+                onChange={updateField}
+                value={form.developer}
+              />
+              <FieldLimit
+                id="limit-frontendappadmincommunitiespagetsx-3"
+                value={form.developer}
+                max={100}
+              />
+            </>
           </label>
           <label>
             <span>Publisher</span>
-            <input maxLength={100} name="publisher" onChange={updateField} value={form.publisher} />
+            <>
+              <input
+                aria-describedby="limit-frontendappadmincommunitiespagetsx-4"
+                maxLength={100}
+                name="publisher"
+                onChange={updateField}
+                value={form.publisher}
+              />
+              <FieldLimit
+                id="limit-frontendappadmincommunitiespagetsx-4"
+                value={form.publisher}
+                max={100}
+              />
+            </>
           </label>
           {game ? (
             <>
@@ -296,10 +348,13 @@ export default function AdminCommunitiesPage() {
           <FiSearch aria-hidden="true" />
           <input
             aria-label="Search communities"
+            aria-describedby="admin-community-search-limit"
+            maxLength={100}
             onChange={(event) => setFilter("search", event.target.value)}
             placeholder="Search name or slug"
             value={filters.search || ""}
           />
+          <FieldLimit id="admin-community-search-limit" value={filters.search || ""} max={100} />
         </label>
         <select
           aria-label="Filter by status"

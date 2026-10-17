@@ -1,5 +1,7 @@
 "use client";
 
+import { FieldLimit } from "./FieldLimit";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -145,18 +147,27 @@ function CommentItem({ comment }: { comment: CommentRecord }) {
             submitReply();
           }}
         >
-          <MentionInput
-            aria-label={`Reply to ${comment.author?.name || "comment"}`}
-            maxLength={2000}
-            onChange={setReply}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
-              event.preventDefault();
-              submitReply();
-            }}
-            placeholder="Write a reply... use @handle to mention"
-            value={reply}
-          />
+          <>
+            <MentionInput
+              aria-describedby={`limit-frontendcomponentsPostListtsx-0-${comment.id}`}
+              aria-label={`Reply to ${comment.author?.name || "comment"}`}
+              maxLength={2000}
+              onChange={setReply}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing)
+                  return;
+                event.preventDefault();
+                submitReply();
+              }}
+              placeholder="Write a reply... use @handle to mention"
+              value={reply}
+            />
+            <FieldLimit
+              id={`limit-frontendcomponentsPostListtsx-0-${comment.id}`}
+              value={reply}
+              max={2000}
+            />
+          </>
           <button disabled={!reply.trim() || createReply.isPending} type="submit">
             <FiSend />
           </button>
@@ -589,13 +600,21 @@ export function PostItem({
                 if (comment.trim()) createComment.mutate();
               }}
             >
-              <MentionInput
-                aria-label={`Comment on ${post.title}`}
-                maxLength={2000}
-                onChange={setComment}
-                placeholder="Add a comment... use @handle to mention"
-                value={comment}
-              />
+              <>
+                <MentionInput
+                  aria-describedby={`limit-frontendcomponentsPostListtsx-1-${post.id}`}
+                  aria-label={`Comment on ${post.title}`}
+                  maxLength={2000}
+                  onChange={setComment}
+                  placeholder="Add a comment... use @handle to mention"
+                  value={comment}
+                />
+                <FieldLimit
+                  id={`limit-frontendcomponentsPostListtsx-1-${post.id}`}
+                  value={comment}
+                  max={2000}
+                />
+              </>
               <button disabled={!comment.trim() || createComment.isPending} type="submit">
                 <FiSend /> Send
               </button>
@@ -693,13 +712,21 @@ export function PostItem({
               </label>
               <label>
                 Details <span>Optional</span>
-                <textarea
-                  maxLength={1000}
-                  onChange={(event) => setReportDetails(event.target.value)}
-                  placeholder="Add context for the moderation team"
-                  rows={4}
-                  value={reportDetails}
-                />
+                <>
+                  <textarea
+                    aria-describedby={`limit-frontendcomponentsPostListtsx-2-${post.id}`}
+                    maxLength={1000}
+                    onChange={(event) => setReportDetails(event.target.value)}
+                    placeholder="Add context for the moderation team"
+                    rows={4}
+                    value={reportDetails}
+                  />
+                  <FieldLimit
+                    id={`limit-frontendcomponentsPostListtsx-2-${post.id}`}
+                    value={reportDetails}
+                    max={1000}
+                  />
+                </>
               </label>
               {reportPost.isError && (
                 <small className="post-action-error">{reportPost.error.message}</small>
