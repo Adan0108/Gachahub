@@ -74,22 +74,21 @@ export function buildThreadItems<M extends ThreadMessage>(input: {
   const pendingEvents = [...events].sort((a, b) => a.at - b.at);
 
   const items: ThreadItem<M>[] = hidden.size > 0 ? [{ kind: 'history-banner' }] : [];
-  // A chat nobody has written in yet shows the opener alone, without a time.
+  // "Conversation started" only fills an empty chat: it goes as soon as anyone has written, and has no time of its own.
   const hasWrittenMessage = messages.some(
     (message) => message.contentType !== 'SYSTEM' && !hidden.has(message.id),
   );
   let prevAt: number | undefined;
   messages.forEach((message, index) => {
     if (hidden.has(message.id)) return;
+    if (message.contentType === 'SYSTEM' && hasWrittenMessage) return;
     const sentAt = message.createdAt ? Date.parse(message.createdAt) : Number.NaN;
     while (pendingEvents[0] && !Number.isNaN(sentAt) && pendingEvents[0].at <= sentAt) {
       items.push({ kind: 'event', event: pendingEvents.shift()! });
     }
     const gap = Number.isNaN(sentAt) ? 0 : (prevAt === undefined ? Infinity : sentAt - prevAt);
-    const showDivider = gap >= TIMESTAMP_DIVIDER_GAP_MS && (hasWrittenMessage || message.contentType !== 'SYSTEM');
-    // "Conversation started" reads as the thread's own opener; its divider sits under it, not above.
-    const isConversationStart = message.contentType === 'SYSTEM';
-    if (showDivider && !isConversationStart) items.push({ kind: 'timestamp', at: sentAt });
+    const showDivider = gap >= TIMESTAMP_DIVIDER_GAP_MS && message.contentType !== 'SYSTEM';
+    if (showDivider) items.push({ kind: 'timestamp', at: sentAt });
     items.push({
       kind: 'message',
       message,
@@ -98,7 +97,6 @@ export function buildThreadItems<M extends ThreadMessage>(input: {
       groupedWithPrevious: false,
       groupedWithNext: false,
     });
-    if (showDivider && isConversationStart) items.push({ kind: 'timestamp', at: sentAt });
     if (!Number.isNaN(sentAt)) prevAt = sentAt;
   });
   return withGrouping([...items, ...pendingEvents.map((event) => ({ kind: 'event' as const, event }))]);

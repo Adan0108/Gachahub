@@ -81,7 +81,7 @@ describe('buildThreadItems', () => {
       events: [],
       collapseLeading: true,
     });
-    expect(shape(items)).toEqual(['history-banner', 's', 'timestamp', 'p', 'c']);
+    expect(shape(items)).toEqual(['history-banner', 'timestamp', 'p', 'c']);
   });
 
   it('shows no banner when nothing is unreadable, and keeps everything when told not to collapse', () => {
@@ -132,14 +132,14 @@ describe('buildThreadItems', () => {
     expect(items[0]).toMatchObject({ kind: 'timestamp', at: Date.parse(at(1)) });
   });
 
-  it('puts the divider under "conversation started", not above it', () => {
+  it('drops "conversation started" as soon as someone has written', () => {
     const items = buildThreadItems({
       messages: [message('s', 0, 'SYSTEM'), message('a', 1)],
       decrypted: decrypted({ s: 'ok', a: 'ok' }),
       events: [],
       collapseLeading: true,
     });
-    expect(shape(items)).toEqual(['s', 'timestamp', 'a']);
+    expect(shape(items)).toEqual(['timestamp', 'a']);
   });
 
   it('shows "conversation started" alone, with no time, until somebody writes', () => {
@@ -235,17 +235,6 @@ describe('buildThreadItems', () => {
       collapseLeading: true,
     });
     expect(items[2]).toMatchObject({ message: { id: 'b' }, gapBefore: true, groupedWithPrevious: false });
-  });
-
-  it('never stacks the conversation-started row with a real message', () => {
-    const items = buildThreadItems({
-      messages: [message('s', 0, 'SYSTEM'), message('a', 1)],
-      decrypted: decrypted({ a: 'ok' }),
-      events: [],
-      collapseLeading: true,
-    });
-    const real = items.find((i) => i.kind === 'message' && i.message.id === 'a');
-    expect(real).toMatchObject({ groupedWithPrevious: false });
   });
 });
 
