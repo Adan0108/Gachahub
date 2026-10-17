@@ -323,6 +323,7 @@ export function PostItem({
         (data: unknown) => removePostFromCache(data, post.id),
       );
       queryClient.removeQueries({ queryKey: queryKeys.post(post.id), exact: true });
+      window.dispatchEvent(new Event("post-deleted"));
       if (detail) router.push("/");
       await queryClient.invalidateQueries({
         predicate: (query) =>
@@ -630,6 +631,7 @@ export function PostItem({
           document.body,
         )}
       <ConfirmChatActionDialog
+        className="post-delete-dialog"
         isOpen={deleteOpen}
         title="Delete this post?"
         body="Your post and its comments will no longer be accessible. This cannot be undone."

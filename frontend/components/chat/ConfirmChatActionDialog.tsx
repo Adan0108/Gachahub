@@ -15,6 +15,7 @@ export function ConfirmChatActionDialog({
   error,
   onConfirm,
   onClose,
+  className = "",
 }: {
   isOpen: boolean;
   title: string;
@@ -24,6 +25,7 @@ export function ConfirmChatActionDialog({
   error?: string | null;
   onConfirm: () => void;
   onClose: () => void;
+  className?: string;
 }) {
   const openerRef = useRef<HTMLElement | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -44,7 +46,7 @@ export function ConfirmChatActionDialog({
         aria-describedby="confirm-chat-action-body"
         aria-labelledby="confirm-chat-action-title"
         aria-modal="true"
-        className="modal remove-message-modal"
+        className={`modal remove-message-modal ${className}`}
         onClick={(event) => event.stopPropagation()}
         ref={modalRef}
         role="dialog"

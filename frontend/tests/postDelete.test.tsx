@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PostItem } from "../components/PostList";
 import { removePostFromCache } from "../lib/removePostFromCache";
+import { PostDeleteNotice } from "../components/PostDeleteNotice";
 
 const mocks = vi.hoisted(() => ({ deletePost: vi.fn(), push: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push }) }));
@@ -26,6 +27,7 @@ function setup(detail = false, authorId = "me") {
   render(
     <QueryClientProvider client={client}>
       <PostItem post={{ ...post, authorId }} detail={detail} />
+      <PostDeleteNotice />
     </QueryClientProvider>,
   );
   fireEvent.click(screen.getByRole("button", { name: /more options/i }));
@@ -60,6 +62,9 @@ describe("post deletion", () => {
       expect(client.getQueryData(["posts", "mine"])).toEqual({ items: [], meta: { total: 0 } }),
     );
     expect(mocks.deletePost).toHaveBeenCalledWith("p1");
+    expect(await screen.findByRole("status")).toHaveTextContent("Post deleted.");
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss deletion notice" }));
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
     expect(screen.queryByText("My post")).not.toBeInTheDocument();
   });
 
@@ -69,6 +74,7 @@ describe("post deletion", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     fireEvent.click(screen.getByRole("button", { name: "Delete post" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Unable to delete");
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
     expect(client.getQueryData(["posts", "mine"])).toEqual({ items: [post], meta: { total: 1 } });
   });
 
@@ -78,6 +84,7 @@ describe("post deletion", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     fireEvent.click(screen.getByRole("button", { name: "Delete post" }));
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith("/"));
+    expect(screen.getByRole("status")).toHaveTextContent("Post deleted.");
   });
 
   it("removes posts across cursor pages and leaves other posts untouched", () => {
