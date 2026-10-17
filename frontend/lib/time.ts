@@ -1,6 +1,7 @@
 /** Shared, pure time-formatting helpers - used by chat and the admin dashboard alike. */
+type DateValue = string | number | Date | null | undefined;
 
-export function relativeTime(value) {
+export function relativeTime(value?: DateValue): string {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.valueOf())) return "Recently";
   // Clamped at 0, not floored straight to hours - anything under an hour old used to always read
@@ -13,7 +14,7 @@ export function relativeTime(value) {
 }
 
 /** "Just now", "5m", "3h", "2d", "1w" - the short form for a list row, where the time sits right beside the message. */
-export function compactRelativeTime(value) {
+export function compactRelativeTime(value?: DateValue): string {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.valueOf())) return "";
 
@@ -27,7 +28,7 @@ export function compactRelativeTime(value) {
 }
 
 /** How long ago for the past week ("5m", "2d"), then the date ("Oct 3", "Oct 3, 2025" from another year). */
-export function messageDateLabel(value) {
+export function messageDateLabel(value?: DateValue): string {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.valueOf())) return "";
 

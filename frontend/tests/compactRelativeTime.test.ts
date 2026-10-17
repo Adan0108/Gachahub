@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { compactRelativeTime, messageDateLabel } from "../lib/time";
+import { compactRelativeTime, messageDateLabel, relativeTime } from "../lib/time";
 
 const NOW = new Date("2026-10-05T12:00:00.000Z");
-const ago = (ms) => new Date(NOW.valueOf() - ms).toISOString();
+const ago = (ms: number) => new Date(NOW.valueOf() - ms).toISOString();
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
@@ -26,6 +26,15 @@ describe("compactRelativeTime", () => {
     expect(compactRelativeTime(ago(3 * HOUR))).toBe("3h");
     expect(compactRelativeTime(ago(2 * DAY))).toBe("2d");
     expect(compactRelativeTime(ago(8 * DAY))).toBe("1w");
+  });
+
+  it("preserves the longer relative time labels", () => {
+    expect(relativeTime(ago(30_000))).toBe("Just now");
+    expect(relativeTime(ago(5 * MIN))).toBe("5m ago");
+    expect(relativeTime(ago(3 * HOUR))).toBe("3h ago");
+    expect(relativeTime(ago(2 * DAY))).toBe("2d ago");
+    expect(relativeTime()).toBe("Recently");
+    expect(relativeTime("invalid")).toBe("Recently");
   });
 
   it("treats a time slightly in the future (clock drift) as Just now", () => {

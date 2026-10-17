@@ -6,9 +6,12 @@ describe("username helpers", () => {
     expect(USERNAME_PATTERN.test(handle)).toBe(true);
   });
 
-  it.each(["ab", "-bob", "bob_", "a--b", "my_-name", "a-_b", "has space"])("rejects %s", (handle) => {
-    expect(USERNAME_PATTERN.test(handle)).toBe(false);
-  });
+  it.each(["ab", "-bob", "bob_", "a--b", "my_-name", "a-_b", "has space"])(
+    "rejects %s",
+    (handle) => {
+      expect(USERNAME_PATTERN.test(handle)).toBe(false);
+    },
+  );
 
   it("only forces onboarding when onboarded is explicitly false", () => {
     expect(mustOnboard({ onboarded: false })).toBe(true);
