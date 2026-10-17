@@ -17,6 +17,7 @@ import {
 } from "../../lib/postComposer";
 import { queries } from "../../lib/queries";
 import { QueryNotice } from "../../components/QueryNotice";
+import { PostMediaPreview } from "../../components/PostMediaPreview";
 
 const postTypes = [
   "GENERAL",
@@ -49,6 +50,7 @@ export default function CreatePostPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [confirmedUploads, setConfirmedUploads] = useState<ConfirmedMediaUpload[]>([]);
   const [fileError, setFileError] = useState("");
+  const [dragActive, setDragActive] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const selectedGame = games.data?.items.find((game: GameRecord) => game.id === form.gameId);
   const categories = useQuery({
@@ -136,8 +138,8 @@ export default function CreatePostPage() {
       }));
     };
 
-  const selectFiles = (event: ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(event.target.files || []);
+  const addFiles = (selected: File[]) => {
+    if (publish.isPending) return;
     const next = [...files, ...selected];
     const nextError = getPostMediaError(next, confirmedUploads);
 
@@ -146,6 +148,10 @@ export default function CreatePostPage() {
       setFileError("");
       setFiles(next);
     }
+  };
+
+  const selectFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    addFiles(Array.from(event.target.files || []));
     event.target.value = "";
   };
 
@@ -297,16 +303,40 @@ export default function CreatePostPage() {
           </label>
         </div>
 
-        <section className="create-post-media" aria-label="Post media">
+        <section
+          className={`create-post-media${dragActive ? " drag-active" : ""}`}
+          aria-label="Post media"
+          aria-describedby="post-media-hint"
+          aria-busy={publish.isPending}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = publish.isPending ? "none" : "copy";
+            if (!publish.isPending) setDragActive(true);
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+              setDragActive(false);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragActive(false);
+            addFiles(Array.from(event.dataTransfer.files));
+          }}
+        >
           <div>
             <b>Media</b>
             <small>Up to 10 images (10 MB each) or one video (50 MB).</small>
+            <small id="post-media-hint">
+              Drag files here or choose Add media. JPG, PNG, WebP, GIF, MP4, WebM or MOV.
+            </small>
           </div>
           <label className="soft-btn create-post-upload">
             <FiImage /> Add media
             <input
               accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime"
               multiple
+              disabled={publish.isPending}
+              aria-label="Add media"
               onChange={selectFiles}
               type="file"
             />
@@ -314,10 +344,12 @@ export default function CreatePostPage() {
           {files.length > 0 && (
             <ul className="create-post-files">
               {files.map((file, index) => (
-                <li key={`${file.name}-${file.lastModified}`}>
+                <li key={`${file.name}-${file.lastModified}-${index}`}>
+                  <PostMediaPreview file={file} />
                   <span>{file.name}</span>
                   <button
                     aria-label={`Remove ${file.name}`}
+                    disabled={publish.isPending}
                     onClick={() => {
                       setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index));
                       setFileError("");
@@ -339,12 +371,27 @@ export default function CreatePostPage() {
               <ul className="create-post-files confirmed-upload-list">
                 {confirmedUploads.map((upload, index) => (
                   <li key={upload.mediaUploadId}>
+                    {upload.secureUrl &&
+                      (upload.resourceType === "VIDEO" ? (
+                        <video
+                          aria-label={`Preview ${upload.fileName || "uploaded video"}`}
+                          controls
+                          preload="metadata"
+                          src={upload.secureUrl}
+                        />
+                      ) : (
+                        <img
+                          alt={`Preview ${upload.fileName || "uploaded image"}`}
+                          src={upload.secureUrl}
+                        />
+                      ))}
                     <span>
                       {upload.fileName ||
                         `Uploaded ${(upload.resourceType ?? "media").toLowerCase()}`}
                     </span>
                     <button
                       aria-label={`Remove ${upload.fileName || `uploaded ${(upload.resourceType ?? "media").toLowerCase()}`}`}
+                      disabled={publish.isPending}
                       onClick={() => {
                         setConfirmedUploads((current) =>
                           current.filter((_, itemIndex) => itemIndex !== index),
@@ -360,7 +407,11 @@ export default function CreatePostPage() {
               </ul>
             </>
           )}
-          {fileError && <small className="post-action-error">{fileError}</small>}
+          {fileError && (
+            <small className="post-action-error" role="alert">
+              {fileError}
+            </small>
+          )}
         </section>
 
         <QueryNotice

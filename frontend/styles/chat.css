@@ -1401,6 +1401,35 @@
   gap: 4px;
 }
 
+.create-post-media.drag-active {
+  border-color: var(--accent, #9366ff);
+  background: var(--panel2);
+}
+
+.create-post-upload:focus-within {
+  outline: 2px solid var(--accent, #9366ff);
+  outline-offset: 3px;
+}
+
+.create-post-files img,
+.create-post-files video {
+  width: min(240px, 100%);
+  max-height: 180px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #080b12;
+}
+
+.create-post-files li {
+  flex-wrap: wrap;
+}
+
+.create-post-files li > span {
+  flex: 1;
+  min-width: 80px;
+  overflow-wrap: anywhere;
+}
+
 .create-post-upload {
   width: auto;
 }
@@ -1436,6 +1465,8 @@
 }
 
 .create-post-files button {
+  min-width: 44px;
+  min-height: 44px;
   display: grid;
   place-items: center;
   border: 0;

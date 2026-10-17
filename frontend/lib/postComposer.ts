@@ -28,6 +28,17 @@ type PostForm = {
 };
 
 export function getPostMediaError(files: File[], confirmedUploads: ConfirmedUpload[] = []): string {
+  const supported = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+  ]);
+  const unsupported = files.find((file) => !supported.has(file.type));
+  if (unsupported) return `${unsupported.name} is not a supported image or video.`;
   const mediaTypes = [
     ...confirmedUploads.map((upload) => upload.resourceType),
     ...files.map((file) => (file.type.startsWith("video/") ? "VIDEO" : "IMAGE")),
