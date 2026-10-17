@@ -657,6 +657,11 @@ export default function ChatPage() {
     return <ChatSkeleton />;
   }
 
+  // Nobody has written yet: the "Conversation started" opener sits at the top, not against the composer.
+  const isFreshChat =
+    displayMessages.length > 0 &&
+    displayMessages.every((message) => message.contentType === "SYSTEM") &&
+    pendingMessages.length === 0;
   const actionError = acceptRequest.error || declineRequest.error || conversationActions.block.error;
   // Only claim end-to-end encryption when this device can actually use the group.
   const encryptionStatus = groupProblem
@@ -1080,7 +1085,7 @@ export default function ChatPage() {
               </div>
               <div className="chat-messages-wrap">
               <div
-                className="chat-messages"
+                className={`chat-messages${isFreshChat ? " fresh" : ""}`}
                 ref={messagesContainerRef}
                 onScroll={(event) => {
                   trackMessagesScroll(event);

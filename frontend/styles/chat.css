@@ -2899,6 +2899,10 @@
   margin: auto 0 -12px;
 }
 
+.chat-messages.fresh::before {
+  display: none;
+}
+
 .chat-messages::-webkit-scrollbar,
 .chat-conversation-list::-webkit-scrollbar {
   width: 8px;

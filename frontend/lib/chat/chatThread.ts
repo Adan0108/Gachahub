@@ -74,6 +74,10 @@ export function buildThreadItems<M extends ThreadMessage>(input: {
   const pendingEvents = [...events].sort((a, b) => a.at - b.at);
 
   const items: ThreadItem<M>[] = hidden.size > 0 ? [{ kind: 'history-banner' }] : [];
+  // A chat nobody has written in yet shows the opener alone, without a time.
+  const hasWrittenMessage = messages.some(
+    (message) => message.contentType !== 'SYSTEM' && !hidden.has(message.id),
+  );
   let prevAt: number | undefined;
   messages.forEach((message, index) => {
     if (hidden.has(message.id)) return;
@@ -82,7 +86,7 @@ export function buildThreadItems<M extends ThreadMessage>(input: {
       items.push({ kind: 'event', event: pendingEvents.shift()! });
     }
     const gap = Number.isNaN(sentAt) ? 0 : (prevAt === undefined ? Infinity : sentAt - prevAt);
-    const showDivider = gap >= TIMESTAMP_DIVIDER_GAP_MS;
+    const showDivider = gap >= TIMESTAMP_DIVIDER_GAP_MS && (hasWrittenMessage || message.contentType !== 'SYSTEM');
     // "Conversation started" reads as the thread's own opener; its divider sits under it, not above.
     const isConversationStart = message.contentType === 'SYSTEM';
     if (showDivider && !isConversationStart) items.push({ kind: 'timestamp', at: sentAt });

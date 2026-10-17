@@ -134,12 +134,22 @@ describe('buildThreadItems', () => {
 
   it('puts the divider under "conversation started", not above it', () => {
     const items = buildThreadItems({
-      messages: [message('s', 0, 'SYSTEM')],
-      decrypted: decrypted({ s: 'ok' }),
+      messages: [message('s', 0, 'SYSTEM'), message('a', 1)],
+      decrypted: decrypted({ s: 'ok', a: 'ok' }),
       events: [],
       collapseLeading: true,
     });
-    expect(shape(items)).toEqual(['s', 'timestamp']);
+    expect(shape(items)).toEqual(['s', 'timestamp', 'a']);
+  });
+
+  it('shows "conversation started" alone, with no time, until somebody writes', () => {
+    const items = buildThreadItems({
+      messages: [message('s', 0, 'SYSTEM')],
+      decrypted: decrypted({}),
+      events: [],
+      collapseLeading: true,
+    });
+    expect(shape(items)).toEqual(['s']);
   });
 
   it('gives a message a full divider once the gap since the last one passes 45 minutes', () => {
