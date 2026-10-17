@@ -712,6 +712,8 @@ export const api = {
   getGameFeed: (gameSlug: any, query: any = {}, options: any = {}) =>
     api.getFeedCollection(backendRoutes.gameFeed(gameSlug), query, options),
   likePost: (postId: any) => mutation(backendRoutes.postLike(postId)),
+  deletePost: (postId: string) =>
+    mutation(backendRoutes.post(postId), undefined, { method: "DELETE" }),
   unlikePost: (postId: any) =>
     mutation(backendRoutes.postLike(postId), undefined, { method: "DELETE" }),
   getFollowStatus: (userId: any, options: any = {}) =>

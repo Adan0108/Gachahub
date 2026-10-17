@@ -51,6 +51,7 @@ import {
   FiSave,
   FiSend,
   FiShare2,
+  FiTrash2,
   FiUserPlus,
   FiX,
 } from "react-icons/fi";
@@ -58,6 +59,8 @@ import { useCurrentUser } from "../hooks/useCurrentUser";
 import { useDismiss } from "../hooks/useDismiss";
 import { api } from "../lib/api";
 import { queries, queryKeys } from "../lib/queries";
+import { removePostFromCache } from "../lib/removePostFromCache";
+import { ConfirmChatActionDialog } from "./chat/ConfirmChatActionDialog";
 import { AvatarFace } from "./AvatarFace";
 import { artTones, glyph } from "./constants";
 import { MentionInput } from "./MentionInput";
@@ -248,6 +251,8 @@ export function PostItem({
   const [spoilerRevealed, setSpoilerRevealed] = useState(false);
   const [expandedImage, setExpandedImage] = useState<PostMediaRecord | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleted, setDeleted] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("UNMARKED_SPOILERS");
   const [reportDetails, setReportDetails] = useState("");
@@ -266,6 +271,7 @@ export function PostItem({
   const liked = likeOverride?.liked ?? Boolean(post.likedByCurrentUser);
   const likeCount = likeOverride?.likeCount ?? Number(post.likeCount || 0);
   const canFollow = Boolean(post.authorId && post.authorId !== user?.id);
+  const canDelete = isAuthenticated && Boolean(user?.id && post.authorId === user.id);
   const followStatus = useQuery({
     ...queries.followStatus(post.authorId),
     enabled: detail && isAuthenticated && canFollow,
@@ -297,6 +303,31 @@ export function PostItem({
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: ["posts"] });
       setLikeOverride(null);
+    },
+  });
+
+  const deletePost = useMutation({
+    mutationFn: () => api.deletePost(post.id),
+    onSuccess: async () => {
+      setDeleted(true);
+      setDeleteOpen(false);
+      const roots = ["posts", "feed", "game-feed", "home"];
+      await queryClient.cancelQueries({
+        predicate: (query) => roots.includes(String(query.queryKey[0])),
+      });
+      queryClient.setQueriesData(
+        {
+          predicate: (query) =>
+            roots.includes(String(query.queryKey[0])) && query.queryKey[1] !== "detail",
+        },
+        (data: unknown) => removePostFromCache(data, post.id),
+      );
+      queryClient.removeQueries({ queryKey: queryKeys.post(post.id), exact: true });
+      if (detail) router.push("/");
+      await queryClient.invalidateQueries({
+        predicate: (query) =>
+          [...roots, "community", "games", "joined-games"].includes(String(query.queryKey[0])),
+      });
     },
   });
 
@@ -375,6 +406,8 @@ export function PostItem({
     };
   }, [expandedImage]);
 
+  if (deleted) return null;
+
   return (
     <article
       className={`post ${detail ? "post-detail-card" : ""} ${isFeed ? "post-feed-card" : ""}`}
@@ -413,6 +446,20 @@ export function PostItem({
           </button>
           {menuOpen && (
             <div className="post-options-menu" ref={menuRef} role="menu">
+              {canDelete && (
+                <button
+                  className="danger"
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    closeMenu();
+                    deletePost.reset();
+                    setDeleteOpen(true);
+                  }}
+                >
+                  <FiTrash2 /> Delete
+                </button>
+              )}
               <button
                 onClick={() => {
                   closeMenu();
@@ -582,6 +629,24 @@ export function PostItem({
           </div>,
           document.body,
         )}
+      <ConfirmChatActionDialog
+        isOpen={deleteOpen}
+        title="Delete this post?"
+        body="Your post and its comments will no longer be accessible. This cannot be undone."
+        confirmLabel={deletePost.isPending ? "Deleting..." : "Delete post"}
+        isPending={deletePost.isPending}
+        error={
+          deletePost.isError
+            ? deletePost.error.message || "Could not delete this post. Try again."
+            : null
+        }
+        onConfirm={() => {
+          if (canDelete && !deletePost.isPending) deletePost.mutate();
+        }}
+        onClose={() => {
+          if (!deletePost.isPending) setDeleteOpen(false);
+        }}
+      />
       {reportOpen &&
         createPortal(
           <div className="post-report-backdrop" onMouseDown={() => setReportOpen(false)}>
