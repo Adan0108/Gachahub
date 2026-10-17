@@ -61,6 +61,7 @@ export const queryKeys = {
   notifications: ["notifications"],
   notificationList: ["notifications", "list"],
   notificationUnreadCount: ["notifications", "unread-count"],
+  myPresence: ["presence", "me"],
   chatConversations: ["chat", "conversations"],
   chatArchivedConversations: ["chat", "archived"],
   chatRequests: ["chat", "requests"],
@@ -279,6 +280,12 @@ export const queries = {
     retry: 1,
     staleTime: 10_000,
     refetchInterval: 15_000,
+  }),
+  myPresence: () => ({
+    queryKey: queryKeys.myPresence,
+    queryFn: api.getMyPresence,
+    retry: 1,
+    staleTime: 60_000,
   }),
   communityChannels: (slug) => ({
     queryKey: queryKeys.communityChannels(slug),

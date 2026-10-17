@@ -116,6 +116,8 @@ export const backendRoutes = {
   chatDelivered: '/chat/messages/delivered',
   linkPreviews: '/link-previews',
   chatRead: (conversationId) => `/chat/conversations/${encodePathParam(conversationId)}/read`,
+  presence: '/presence',
+  presenceMe: '/presence/me',
   chatBackup: '/chat-backup',
   chatBackupBlobs: '/chat-backup/blobs',
   chatBackupChallenge: '/chat-backup/challenge',
@@ -905,6 +907,14 @@ export const api = {
       choice.kind === 'emote' ? { emoteId: choice.emote.id } : { emoji: choice.emoji },
     ),
   getChatEmotes: () => request(backendRoutes.chatEmotes),
+  // Presence: who is online, and your own choice to appear offline for a while.
+  getMyPresence: () => request(backendRoutes.presenceMe),
+  /** `status` is ONLINE, or INVISIBLE (shown as Offline) with a `duration` of 15m, 1h, 8h, 24h, 3d or forever. */
+  setMyPresence: ({ status, duration }) =>
+    mutation(backendRoutes.presenceMe, { status, duration }, { method: 'PUT' }),
+  /** Online or offline for up to 100 people; anyone the viewer may not see reads as offline. */
+  getPresence: (userIds) =>
+    request(withQuery(backendRoutes.presence, { userIds: userIds.join(',') })),
   // Community chat: public rooms of a game community, plaintext so moderators can read and remove messages.
   getCommunityChannels: (gameSlug) => request(backendRoutes.communityChat(gameSlug)),
   getCommunityMessages: (gameSlug, channelId, query = {}) =>

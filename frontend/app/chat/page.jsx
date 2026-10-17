@@ -22,6 +22,7 @@ import {
   FiUsers,
   FiX,
 } from "react-icons/fi";
+import { PresenceDot } from "../../components/PresenceDot";
 import { QueryNotice } from "../../components/QueryNotice";
 import { ConversationInfoPanel } from "../../components/chat/ConversationInfoPanel";
 import { GroupSettingsModal } from "../../components/chat/GroupSettingsModal";
@@ -53,6 +54,7 @@ import { useConversationActions } from "../../hooks/chat/useConversationActions"
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
 import { useAcknowledgeUnreadable } from "../../hooks/chat/useAcknowledgeUnreadable";
+import { usePresenceOf } from "../../hooks/presence/usePresenceOf";
 import { useMarkChatRead } from "../../hooks/chat/useMarkChatRead";
 import { useReadWhenSeen } from "../../hooks/chat/useReadWhenSeen";
 import { useReceiptDisplay } from "../../hooks/chat/useReceiptDisplay";
@@ -156,6 +158,7 @@ export default function ChatPage() {
   const activeConversation = rawList.find((conversation) => conversation.id === activeId);
   // DM-only; a group's recipients are recomputed per send.
   const peer = conversationPeer(activeConversation, user?.id);
+  const peerPresence = usePresenceOf(activeConversation?.type === "GROUP" ? undefined : peer?.id);
   // A pending invite (group invite or DM message request) can read history; only sending is gated until accept.
   const isPendingInvite = myParticipant(activeConversation, user?.id)?.state === "PENDING";
   const messages = useQuery({
@@ -1017,8 +1020,11 @@ export default function ChatPage() {
             <>
               <header className="chat-thread-head">
                 <div>
-                  <span className="chat-avatar">
-                    <AvatarFace image={activeConversationImage} name={activeConversationName} />
+                  <span className="avatar-with-presence">
+                    <span className="chat-avatar">
+                      <AvatarFace image={activeConversationImage} name={activeConversationName} />
+                    </span>
+                    <PresenceDot status={peerPresence} />
                   </span>
                   <span>
                     <b>{activeConversationName}</b>
@@ -1029,6 +1035,7 @@ export default function ChatPage() {
                         </>
                       ) : (
                         <>
+                          {peerPresence === "ONLINE" && <span className="chat-head-online">Online</span>}
                           <FiLock /> {encryptionStatus}
                         </>
                       )}
