@@ -44,6 +44,24 @@ function leadingUnreadableIds(
   return hidden;
 }
 
+/** The newest message from someone else that this device can never read (a conversation-start marker, or one it could not decrypt): marking it read clears everything unread before it. */
+export function newestUnreadableFromOthers(
+  messages: ThreadMessage[],
+  decrypted: Record<string, DecryptState>,
+  userId: string | undefined,
+): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (
+      message.senderId !== userId &&
+      (message.contentType === 'SYSTEM' || decrypted[message.id]?.status === 'unavailable')
+    ) {
+      return message.id;
+    }
+  }
+  return undefined;
+}
+
 /** The thread's rows in order: history banner, then messages with membership events sorted by server time (events first on ties). */
 export function buildThreadItems<M extends ThreadMessage>(input: {
   messages: M[];

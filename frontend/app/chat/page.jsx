@@ -52,6 +52,7 @@ import { useLinkPreviewDraft } from "../../hooks/chat/useLinkPreviewDraft";
 import { useConversationActions } from "../../hooks/chat/useConversationActions";
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
+import { useAcknowledgeUnreadable } from "../../hooks/chat/useAcknowledgeUnreadable";
 import { useMarkChatRead } from "../../hooks/chat/useMarkChatRead";
 import { useReadWhenSeen } from "../../hooks/chat/useReadWhenSeen";
 import { useReceiptDisplay } from "../../hooks/chat/useReceiptDisplay";
@@ -184,6 +185,7 @@ export default function ChatPage() {
     safetyPeerIds,
     threadItems,
     readableMessageIds,
+    unreadableMessageId,
     announcement,
     now: threadNow,
     patchOlder,
@@ -476,6 +478,13 @@ export default function ChatPage() {
     conversationId: activeId,
     messageIds: readableMessageIds,
     onRead: (messageId) => markChatRead(activeId, messageId, { isNewest: messageId === readableMessageIds.at(-1) }),
+  });
+
+  useAcknowledgeUnreadable({
+    conversationId: activeId,
+    unreadCount: activeConversation?.unreadCount,
+    messageId: unreadableMessageId,
+    onRead: (messageId) => markChatRead(activeId, messageId, { isNewest: false }),
   });
 
   const [replyLightboxOwnerId, setReplyLightboxOwnerId] = useState(activeId);
@@ -947,10 +956,16 @@ export default function ChatPage() {
           {search.trim().length >= MIN_SEARCH_CHARS && search.trim() !== messageQuery && (
             <small className="chat-sidebar-search-hint">Press Enter to search messages</small>
           )}
+          {listQuery.isLoading && (
+            <div aria-busy="true" aria-label="Loading conversations" className="chat-skeleton-list">
+              {[0, 1, 2, 3, 4].map((index) => (
+                <ChatSkeletonRow key={index} />
+              ))}
+            </div>
+          )}
           <QueryNotice
-            isLoading={listQuery.isLoading}
             isError={listQuery.isError}
-            isEmpty={!currentList.length}
+            isEmpty={!listQuery.isLoading && !currentList.length}
             emptyText={
               isFiltering
                 ? "No conversations match your search."
@@ -1066,7 +1081,8 @@ export default function ChatPage() {
                 }}
               >
                 <AttachmentLightboxContext.Provider value={setLightboxKey}>
-                <QueryNotice isLoading={messages.isLoading} isError={messages.isError} />
+                {messages.isLoading && <span aria-label="Loading messages" className="chat-thread-spinner" role="status" />}
+                <QueryNotice isError={messages.isError} />
                 {groupProblem && (
                   <div className="chat-history-ceiling" role="alert">
                     This group had a problem on this device - messages may not decrypt.

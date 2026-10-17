@@ -5,6 +5,7 @@ import {
   membershipEventText,
   messageDividerLabel,
   messageFullTimestamp,
+  newestUnreadableFromOthers,
   readableNeighbors,
   replyOriginalSenderLabel,
   threadItemKey,
@@ -349,5 +350,41 @@ describe('readableNeighbors / wasLikelySentDuringAbsence', () => {
     const neighbors = readableNeighbors(messages, decrypted({ a: 'ok', b: 'ok', c: 'unavailable' }));
     expect(wasLikelySentDuringAbsence(neighbors, 0)).toBe(false);
     expect(wasLikelySentDuringAbsence(neighbors, 2)).toBe(false);
+  });
+});
+
+describe('newestUnreadableFromOthers', () => {
+  const others = (id: string, minute: number, contentType?: string) =>
+    message(id, minute, contentType, 'bob');
+
+  it('is the newest message from someone else this device could not decrypt', () => {
+    const messages = [others('a', 1), others('b', 2), message('mine', 3, undefined, 'alice')];
+
+    expect(
+      newestUnreadableFromOthers(messages, decrypted({ a: 'unavailable', b: 'unavailable' }), 'alice'),
+    ).toBe('b');
+  });
+
+  it('counts the conversation-start marker, which is never decrypted', () => {
+    const messages = [others('start', 1, 'SYSTEM'), message('mine', 2, undefined, 'alice')];
+
+    expect(newestUnreadableFromOthers(messages, decrypted({}), 'alice')).toBe('start');
+  });
+
+  it('ignores messages that were read, are still being decrypted, or are the viewers own', () => {
+    const messages = [
+      others('read', 1),
+      others('later', 2),
+      message('mine', 3, 'SYSTEM', 'alice'),
+      message('mine-gone', 4, undefined, 'alice'),
+    ];
+
+    expect(
+      newestUnreadableFromOthers(
+        messages,
+        decrypted({ read: 'ok', later: 'pending', 'mine-gone': 'unavailable' }),
+        'alice',
+      ),
+    ).toBeUndefined();
   });
 });

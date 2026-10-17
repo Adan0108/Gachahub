@@ -1931,6 +1931,7 @@
 
 .chat-skeleton-bar {
   height: 12px;
+  border-radius: 6px;
 }
 
 .chat-skeleton-bar.title {
@@ -1946,6 +1947,7 @@
 .chat-skeleton-pill {
   width: 84px;
   height: 30px;
+  border-radius: 999px;
 }
 
 .chat-skeleton-list {
@@ -1966,6 +1968,7 @@
 .chat-skeleton-avatar {
   width: 40px;
   height: 40px;
+  border-radius: 50%;
 }
 
 .chat-skeleton-lines {
@@ -1979,6 +1982,31 @@
 
 .chat-skeleton-lines .chat-skeleton-bar.short {
   width: 40%;
+}
+
+/* A plain spinner in the middle of the thread while its messages load, like Messenger. */
+.chat-thread-spinner {
+  width: 28px;
+  height: 28px;
+  margin: auto;
+  /* The notice under it takes room, so the free space alone would leave it low. */
+  translate: 0 -5rem;
+  border: 3px solid var(--line);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: chat-thread-spin 0.8s linear infinite;
+}
+
+@keyframes chat-thread-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-thread-spinner {
+    animation-duration: 2.4s;
+  }
 }
 
 .chat-conversation-row {
