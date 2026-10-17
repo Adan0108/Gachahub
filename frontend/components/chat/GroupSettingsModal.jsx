@@ -4,11 +4,27 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { FiLogOut, FiX } from "react-icons/fi";
 import { useModalFocusTrap } from "../../hooks/chat/useModalFocusTrap";
+import { usePresenceOf } from "../../hooks/presence/usePresenceOf";
 import { api } from "../../lib/api";
 import { AvatarFace } from "../AvatarFace";
+import { PresenceDot } from "../PresenceDot";
 import { activeMembers, myParticipant } from "../../lib/chat/chatDisplay";
 import { SafetyBadge } from "./SafetyStatus";
 import { UserPicker } from "./UserPicker";
+
+/** A member's picture, with a green dot while they are online; you and people who have not accepted yet get none. */
+export function MemberAvatar({ participant, isSelf }) {
+  const presence = usePresenceOf(!isSelf && participant.state === "ACTIVE" ? participant.userId : undefined);
+
+  return (
+    <span className="avatar-with-presence">
+      <span className="chat-avatar small">
+        <AvatarFace image={participant.user?.image} name={participant.user?.name} />
+      </span>
+      <PresenceDot status={presence} />
+    </span>
+  );
+}
 
 /** Group settings: title/photo, members and roles, add/remove, leave. Render with a changing `key` on open to reseed fields. */
 export function GroupSettingsModal({
@@ -140,9 +156,7 @@ export function GroupSettingsModal({
               const canActOnMember = !isSelf && participant.state === "ACTIVE";
               return (
                 <div className="group-member-row" key={participant.userId}>
-                  <span className="chat-avatar small">
-                    <AvatarFace image={participant.user?.image} name={participant.user?.name} />
-                  </span>
+                  <MemberAvatar isSelf={isSelf} participant={participant} />
                   <span className="group-member-name">
                     <b>
                       {participant.user?.name || "GachaHub member"}
