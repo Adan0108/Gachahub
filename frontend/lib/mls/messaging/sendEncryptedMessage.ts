@@ -1,12 +1,18 @@
-import { api } from '../../api';
-import { bytesToBase64 } from '../storage/base64';
-import { ensureConversationGroup } from './ensureConversationGroup';
-import { buildEditEnvelope } from './editEnvelope';
-import { buildTextEnvelope, previewBlobIds } from './linkPreviewEnvelope';
-import { senderMeta } from './messageOrigin';
-import type { SyncEngine } from '../sync/syncEngine';
-import { EncryptedIndexedDbMessagePlaintextStore } from '../storage/messagePlaintextStore';
-import type { ConversationId, DeviceId, LinkPreviewRef, PlaintextEnvelope, UserId } from '../contract/types';
+import { api } from "../../api";
+import { bytesToBase64 } from "../storage/base64";
+import { ensureConversationGroup } from "./ensureConversationGroup";
+import { buildEditEnvelope } from "./editEnvelope";
+import { buildTextEnvelope, previewBlobIds } from "./linkPreviewEnvelope";
+import { senderMeta } from "./messageOrigin";
+import type { SyncEngine } from "../sync/syncEngine";
+import { EncryptedIndexedDbMessagePlaintextStore } from "../storage/messagePlaintextStore";
+import type {
+  ConversationId,
+  DeviceId,
+  LinkPreviewRef,
+  PlaintextEnvelope,
+  UserId,
+} from "../contract/types";
 
 const plaintextStore = new EncryptedIndexedDbMessagePlaintextStore();
 
@@ -34,7 +40,8 @@ export function sendEncryptedChatMessage(
 }
 
 type WireMessage = { ciphertext: string; encryptionMeta: ReturnType<typeof senderMeta> };
-type Submit = (wire: WireMessage) => Promise<{ message: { id: string } }>;
+type SendResult = { message: { id: string } };
+type Submit<Response extends SendResult> = (wire: WireMessage) => Promise<Response>;
 
 /** Same send path for any envelope; `mediaUploadIds` are the already-uploaded encrypted blobs to attach. */
 export function sendEncryptedEnvelope(
@@ -47,16 +54,27 @@ export function sendEncryptedEnvelope(
   mediaUploadIds: string[] = [],
   replyToId?: string,
 ) {
-  return encryptSubmitAndCache(syncEngine, deviceId, conversationId, recipientUserId, envelope, (wire) =>
-    api.sendChatMessage(conversationId, {
-      ...wire,
-      contentType: 'TEXT',
-      clientMessageId,
-      ...(replyToId ? { replyToId } : {}),
-      ...(mediaUploadIds.length
-        ? { media: mediaUploadIds.map((mediaUploadId, sortOrder) => ({ mediaUploadId, sortOrder })) }
-        : {}),
-    }),
+  return encryptSubmitAndCache(
+    syncEngine,
+    deviceId,
+    conversationId,
+    recipientUserId,
+    envelope,
+    (wire) =>
+      api.sendChatMessage(conversationId, {
+        ...wire,
+        contentType: "TEXT",
+        clientMessageId,
+        ...(replyToId ? { replyToId } : {}),
+        ...(mediaUploadIds.length
+          ? {
+              media: mediaUploadIds.map((mediaUploadId, sortOrder) => ({
+                mediaUploadId,
+                sortOrder,
+              })),
+            }
+          : {}),
+      }),
   );
 }
 
@@ -80,16 +98,23 @@ export function sendEncryptedEdit(
 }
 
 /** Encrypts, submits and caches the plaintext, re-trying once after catching up on a pending membership change. */
-async function encryptSubmitAndCache(
+async function encryptSubmitAndCache<Response extends SendResult>(
   syncEngine: SyncEngine,
   deviceId: DeviceId,
   conversationId: ConversationId,
   recipientUserId: UserId | UserId[],
   envelope: PlaintextEnvelope,
-  submit: Submit,
+  submit: Submit<Response>,
 ) {
   try {
-    return await encryptAndSend(syncEngine, deviceId, conversationId, recipientUserId, envelope, submit);
+    return await encryptAndSend(
+      syncEngine,
+      deviceId,
+      conversationId,
+      recipientUserId,
+      envelope,
+      submit,
+    );
   } catch (error) {
     if (!isMembershipChangePending(error)) throw error;
 
@@ -101,19 +126,19 @@ async function encryptSubmitAndCache(
 
 function isMembershipChangePending(error: unknown): boolean {
   return (
-    typeof error === 'object' &&
+    typeof error === "object" &&
     error !== null &&
-    (error as { code?: unknown }).code === 'MEMBERSHIP_CHANGE_PENDING'
+    (error as { code?: unknown }).code === "MEMBERSHIP_CHANGE_PENDING"
   );
 }
 
-async function encryptAndSend(
+async function encryptAndSend<Response extends SendResult>(
   syncEngine: SyncEngine,
   deviceId: DeviceId,
   conversationId: ConversationId,
   recipientUserId: UserId | UserId[],
   envelope: PlaintextEnvelope,
-  submit: Submit,
+  submit: Submit<Response>,
 ) {
   await ensureConversationGroup(syncEngine, conversationId, recipientUserId);
 

@@ -1,0 +1,313 @@
+"use client";
+
+import type { CategoryRecord } from "../../../lib/pageTypes";
+import Link from "next/link";
+import { useParams, useSearchParams } from "next/navigation";
+import { Suspense, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { FeedLoadSentinel } from "../../../components/FeedLoadSentinel";
+import { useCommunityMembership } from "../../../hooks/useCommunityMembership";
+import { useCursorFeed } from "../../../hooks/useCursorFeed";
+import { useCurrentUser } from "../../../hooks/useCurrentUser";
+import { Art } from "../../../components/Art";
+import { BuildCard } from "../../../components/BuildCard";
+import { PostList } from "../../../components/PostList";
+import { QueryNotice } from "../../../components/QueryNotice";
+import { SectionTitle } from "../../../components/SectionTitle";
+import { artTones, builds, glyph } from "../../../components/constants";
+import { api } from "../../../lib/api";
+import { fallbacks, queries } from "../../../lib/queries";
+
+const teamComps = [
+  {
+    name: "Burst Rotation",
+    description: "Fast opener with coordinated burst windows and reliable cleanup.",
+    members: builds.slice(0, 3),
+  },
+  {
+    name: "Sustained Pressure",
+    description: "Flexible rotation focused on consistent damage and safe swaps.",
+    members: [builds[1], builds[3], builds[0]],
+  },
+  {
+    name: "Boss Breaker",
+    description: "High-impact lineup for stagger windows and single-target encounters.",
+    members: [builds[2], builds[0], builds[3]],
+  },
+];
+
+function CommunityContent() {
+  const params = useParams();
+  const searchParams = useSearchParams();
+  const slug = Array.isArray(params.slug) ? params.slug[0] : params.slug;
+  const selectedTab = searchParams.get("tab") || "Overview";
+
+  const communityQuery = useQuery(queries.community(slug));
+  const categoriesQuery = useQuery(queries.categories(slug));
+  const fallbackCommunity = fallbacks.community(slug);
+  const community = communityQuery.data || (api.usingMocks ? fallbackCommunity : null);
+  const categories = useMemo(() => {
+    const items = categoriesQuery.data || (api.usingMocks ? fallbacks.categories() : []);
+    return [
+      "Overview",
+      ...items
+        .filter((category: CategoryRecord) => category.isActive !== false)
+        .map((category: CategoryRecord) => category.name),
+      "Builds",
+      "Teams",
+    ].filter((item, index, all) => all.indexOf(item) === index);
+  }, [categoriesQuery.data]);
+  const activeTab = categories.includes(selectedTab) ? selectedTab : "Overview";
+  const selectedCategory = (
+    categoriesQuery.data || (api.usingMocks ? fallbacks.categories() : [])
+  ).find((category: CategoryRecord) => category.name === activeTab);
+  const categorySlug = ["Overview", "Builds", "Teams"].includes(activeTab)
+    ? undefined
+    : selectedCategory?.slug;
+  const shouldLoadFeed = activeTab === "Overview" || Boolean(categorySlug);
+  const { user, isLoading: sessionLoading } = useCurrentUser();
+  const membership = useCommunityMembership(slug ?? "", user?.id);
+  const joined = membership.joined;
+  const feedQuery = useCursorFeed({
+    ...queries.gameFeed(slug, categorySlug, { userId: user?.id }),
+    enabled: Boolean(slug) && shouldLoadFeed,
+  });
+  const fallbackCommunityPosts = api.usingMocks ? fallbacks.posts({ gameSlug: slug }) : [];
+  const fallbackFeedPosts = categorySlug
+    ? fallbackCommunityPosts.filter((post) => {
+        const tag = post.tag.toLowerCase();
+        return tag === categorySlug || `${tag}s` === categorySlug;
+      })
+    : fallbackCommunityPosts;
+  const communityPosts = feedQuery.items || fallbackFeedPosts;
+  const categoryPosts = communityPosts;
+
+  if (communityQuery.isLoading && !community) {
+    return (
+      <div className="page">
+        <div className="state-card">Loading community...</div>
+      </div>
+    );
+  }
+
+  if (!community) {
+    return (
+      <div className="page">
+        <section className="panel state-panel">
+          <h1>{communityQuery.isError ? "Community unavailable" : "Community not found"}</h1>
+          <p>
+            {communityQuery.isError
+              ? "The community could not be loaded from the API."
+              : "Try browsing Explore to find an available game community."}
+          </p>
+          {communityQuery.isError && (
+            <button className="soft-btn" onClick={() => communityQuery.refetch()} type="button">
+              Try again
+            </button>
+          )}
+          <Link className="inline-link" href="/explore">
+            Go to Explore
+          </Link>
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page community-page">
+      <QueryNotice
+        isLoading={communityQuery.isLoading || categoriesQuery.isLoading}
+        isError={communityQuery.isError || categoriesQuery.isError}
+        onRetry={() => {
+          communityQuery.refetch();
+          categoriesQuery.refetch();
+        }}
+      />
+      <section className="community-hero">
+        <Art tone="indigo">
+          <span className="hero-rune">{community.symbol}</span>
+        </Art>
+        <div className="hero-wordmark">{community.name.toUpperCase()}</div>
+      </section>
+      <section className="community-info">
+        <div className="community-avatar">
+          <Art tone="blue">{community.symbol}</Art>
+        </div>
+        <div className="community-copy">
+          <h1>
+            {community.name} <span className="verified">{glyph.check}</span>
+          </h1>
+          <p>
+            {community.members} Members - {community.posts} Posts
+          </p>
+          <small>
+            {community.description ||
+              `A community for ${community.name} players to share builds, theories, lore, and guides.`}
+          </small>
+        </div>
+        <button
+          className={`join-btn ${joined ? "joined" : ""}`}
+          aria-pressed={joined}
+          onClick={membership.toggle}
+          disabled={
+            sessionLoading || membership.isLoading || membership.isPending || membership.isError
+          }
+          type="button"
+        >
+          {joined ? `${glyph.check} Joined` : "+ Join"}
+        </button>
+        <div className="top-characters">
+          <small>Top Characters</small>
+          <div>
+            {artTones.map((tone, index) => (
+              <span className={`character-dot art-${tone}`} key={tone}>
+                {index + 1}
+              </span>
+            ))}
+          </div>
+        </div>
+      </section>
+      <QueryNotice
+        isError={membership.isError}
+        errorText={membership.error?.message || "Could not update community membership."}
+        onRetry={membership.retry}
+      />
+      <div className="tabs wide" aria-label="Community content" role="tablist">
+        {categories.map((item) => (
+          <Link
+            aria-selected={activeTab === item}
+            className={activeTab === item ? "active" : ""}
+            href={`/community/${encodeURIComponent(community.slug)}?tab=${encodeURIComponent(item)}`}
+            key={item}
+            role="tab"
+          >
+            {item}
+          </Link>
+        ))}
+      </div>
+      <div className="community-body">
+        <section>
+          {activeTab === "Overview" && (
+            <div className="community-tab-content">
+              <div>
+                <SectionTitle>Latest discussions</SectionTitle>
+                <QueryNotice
+                  isLoading={feedQuery.isLoading}
+                  isError={feedQuery.isError}
+                  isEmpty={!communityPosts.length}
+                  emptyText="No community discussions yet."
+                  onRetry={feedQuery.restart}
+                />
+                <PostList posts={communityPosts} />
+              </div>
+              <div>
+                <SectionTitle>Popular builds</SectionTitle>
+                <div className="build-grid overview-builds">
+                  {builds.slice(0, 2).map((build, index) => (
+                    <BuildCard build={build} index={index} key={build.name} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "Builds" && (
+            <>
+              <SectionTitle>Community builds</SectionTitle>
+              <div className="build-grid">
+                {builds.map((build, index) => (
+                  <BuildCard build={build} index={index} key={build.name} />
+                ))}
+              </div>
+            </>
+          )}
+
+          {activeTab === "Teams" && (
+            <>
+              <SectionTitle>Recommended teams</SectionTitle>
+              <div className="team-grid">
+                {teamComps.map((team) => (
+                  <article className="panel team-card" key={team.name}>
+                    <div>
+                      <b>{team.name}</b>
+                      <p>{team.description}</p>
+                    </div>
+                    <div className="team-members" aria-label={`${team.name} members`}>
+                      {team.members
+                        .filter((member) => member !== undefined)
+                        .map((member) => (
+                          <span className={`art-${member.tone}`} key={member.name}>
+                            <i>{member.icon}</i>
+                            <small>{member.name}</small>
+                          </span>
+                        ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </>
+          )}
+
+          {!["Overview", "Builds", "Teams"].includes(activeTab) && (
+            <>
+              <SectionTitle>{activeTab} discussions</SectionTitle>
+              <QueryNotice
+                isLoading={feedQuery.isLoading}
+                isError={feedQuery.isError}
+                onRetry={feedQuery.restart}
+              />
+              {categoryPosts.length ? (
+                <PostList posts={categoryPosts} />
+              ) : (
+                <div className="panel state-panel compact-state">
+                  <h3>No {activeTab.toLowerCase()} posts yet</h3>
+                  <p>Be the first community member to start this discussion.</p>
+                </div>
+              )}
+            </>
+          )}
+          {shouldLoadFeed && <FeedLoadSentinel feed={feedQuery} />}
+        </section>
+        <aside className="panel highlights">
+          <div className="panel-head">
+            <h3>Community Highlights</h3>
+            <span className="panel-pill">Updated</span>
+          </div>
+          {["2.2 Livestream Recap", "Tethys System Map", "Lore Theory Megathread"].map(
+            (item, index) => (
+              <div className="highlight" key={item}>
+                <span>{glyph.sparkle}</span>
+                <div>
+                  <b>{item}</b>
+                  <small>
+                    {
+                      [
+                        "New Echoes, events, and QOL changes coming!",
+                        "Interactive map & chest locations.",
+                        "Discuss the mysteries of the Lament!",
+                      ][index]
+                    }
+                  </small>
+                </div>
+              </div>
+            ),
+          )}
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+export default function CommunityPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="page">
+          <div className="state-card">Loading community...</div>
+        </div>
+      }
+    >
+      <CommunityContent />
+    </Suspense>
+  );
+}

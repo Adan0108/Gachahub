@@ -6,7 +6,7 @@ const BANNER_COLORS: Readonly<Record<string, string>> = {
   rose: "#b5586f",
   teal: "#44908b",
   slate: "#566077",
-};
+} as const;
 
 /** Solid colour for a stored banner id; null (nothing picked, or a since-retired id) means the default banner. */
 export function bannerColor(bannerPresetId?: string | null): string | null {
