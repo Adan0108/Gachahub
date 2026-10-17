@@ -61,7 +61,9 @@ describe('ReportsRepository creation retry boundaries', () => {
     });
   beforeEach(() => {
     jest.resetAllMocks();
-    prisma.$transaction.mockImplementation((work) => work(tx));
+    prisma.$transaction.mockImplementation(
+      (work: (client: typeof tx) => Promise<unknown>) => work(tx),
+    );
     tx.moderationCase.findFirst.mockResolvedValue(workflow);
     tx.moderationCase.create.mockResolvedValue(workflow);
     tx.$queryRaw.mockResolvedValue([{ id: workflow.id }]);
@@ -126,5 +128,103 @@ describe('ReportsRepository creation retry boundaries', () => {
     );
     expect(tx.report.create).not.toHaveBeenCalled();
     expect(tx.moderationCase.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('ReportsRepository case transitions', () => {
+  const tx = {
+    report: { findUnique: jest.fn(), findUniqueOrThrow: jest.fn() },
+    moderationCase: { updateMany: jest.fn() },
+  };
+  const prisma = { $transaction: jest.fn() };
+  const audit = jest.fn();
+  const context = { gameId: 'game', audit };
+  const repository = new ReportsRepository(prisma as unknown as PrismaService);
+  beforeEach(() => {
+    jest.resetAllMocks();
+    prisma.$transaction.mockImplementation(
+      (work: (client: typeof tx) => Promise<unknown>) => work(tx),
+    );
+    tx.report.findUnique.mockResolvedValue({ caseId: 'shared-case' });
+    tx.moderationCase.updateMany.mockResolvedValue({ count: 1 });
+    tx.report.findUniqueOrThrow.mockResolvedValue({
+      id: 'report',
+      caseId: 'shared-case',
+      targetSnapshot: { secret: 'evidence' },
+      case: { status: 'IN_REVIEW', gameId: 'game' },
+    });
+  });
+  it('claims the report case with an OPEN-only scoped conditional update and audits inside the transaction', async () => {
+    const result = await repository.claim('report', 'moderator', context);
+    expect(tx.moderationCase.updateMany).toHaveBeenCalledWith({
+      where: { id: 'shared-case', gameId: 'game', status: { in: ['OPEN'] } },
+      data: { status: 'IN_REVIEW', assignedModeratorId: 'moderator' },
+    });
+    expect(audit).toHaveBeenCalledWith(result, tx);
+    expect(result).not.toHaveProperty('targetSnapshot');
+    expect(
+      tx.moderationCase.updateMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(audit.mock.invocationCallOrder[0]);
+  });
+  it.each(['RESOLVED', 'DISMISSED'] as const)(
+    'finalizes as %s without modifying assignment or complaint counts',
+    async (status) => {
+      await repository.finalize(
+        {
+          id: 'report',
+          status,
+          resolvedById: 'other-mod',
+          resolutionNote: 'Reviewed',
+        },
+        context,
+      );
+      expect(tx.moderationCase.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'shared-case',
+          gameId: 'game',
+          status: { in: ['OPEN', 'IN_REVIEW'] },
+        },
+        data: {
+          status,
+          resolvedById: 'other-mod',
+          resolutionNote: 'Reviewed',
+          resolvedAt: expect.any(Date) as Date,
+        },
+      });
+      expect(audit).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each(['claim', 'resolve', 'dismiss'])(
+    'does not audit or reload after a failed %s transition',
+    async (action) => {
+      tx.moderationCase.updateMany.mockResolvedValue({ count: 0 });
+      const result =
+        action === 'claim'
+          ? await repository.claim('report', 'mod', context)
+          : await repository.finalize(
+              {
+                id: 'report',
+                status: action === 'resolve' ? 'RESOLVED' : 'DISMISSED',
+                resolvedById: 'mod',
+              },
+              context,
+            );
+      expect(result).toBeNull();
+      expect(audit).not.toHaveBeenCalled();
+      expect(tx.report.findUniqueOrThrow).not.toHaveBeenCalled();
+    },
+  );
+  it('does not update or audit a missing report', async () => {
+    tx.report.findUnique.mockResolvedValue(null);
+    expect(await repository.claim('missing', 'mod', context)).toBeNull();
+    expect(tx.moderationCase.updateMany).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+  it('propagates audit rejection from the transaction callback', async () => {
+    const error = new Error('audit unavailable');
+    audit.mockRejectedValueOnce(error);
+    await expect(repository.claim('report', 'mod', context)).rejects.toBe(
+      error,
+    );
   });
 });

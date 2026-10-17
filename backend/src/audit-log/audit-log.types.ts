@@ -22,6 +22,9 @@ export type CommentAuditMetadata = { authorId: string; postId: string };
 
 /** Stored shape of `metadata` for report entries. Rows are permanent - change by adding optional keys only. */
 export type ReportAuditMetadata = {
+  /** Optional for historical entries created before case workflow. */
+  reportId?: string;
+  caseId?: string;
   reportedTargetType: string;
   reportedTargetId: string;
   resolutionNote?: string;

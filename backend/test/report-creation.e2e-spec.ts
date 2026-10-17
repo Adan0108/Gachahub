@@ -1,3 +1,20 @@
+type TestRequest = Request & {
+  user?: { id: string };
+  session?: { user: { id: string } };
+};
+
+type ApiBody = {
+  id: string;
+  caseId: string;
+  status: string;
+  assignedModeratorId: string | null;
+  resolvedById: string | null;
+  resolvedAt: string | null;
+  message: string | string[];
+  items: Array<{ id: string; [key: string]: unknown }>;
+  metrics: Array<{ id: string; value: number }>;
+};
+
 jest.mock('@thallesp/nestjs-better-auth', () => {
   const common =
     jest.requireActual<typeof import('@nestjs/common')>('@nestjs/common');
@@ -5,13 +22,14 @@ jest.mock('@thallesp/nestjs-better-auth', () => {
     Session: () =>
       common.createParamDecorator(
         (_: unknown, context: import('@nestjs/common').ExecutionContext) =>
-          context.switchToHttp().getRequest().session,
+          context.switchToHttp().getRequest<TestRequest>().session,
       )(),
   };
 });
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import { Test } from '@nestjs/testing';
+import type { Request } from 'express';
 import {
   ValidationPipe,
   UnauthorizedException,
@@ -48,14 +66,21 @@ import { UsersRepository } from '../src/users/users.repository';
 // Real HTTP, validation, account/visibility policy, PostgreSQL transactions,
 // row locks and partial index. Auth sessions are injected. No Kafka, Redis,
 // Cloudinary or background workers are started; failures are explicitly injected.
-describe('Stage A report creation (real PostgreSQL)', () => {
+describe('Report creation and case workflow (real PostgreSQL)', () => {
   jest.setTimeout(120_000);
   const prefix = `report-stage-a-${randomUUID()}`;
   const author = `${prefix}-author`;
   const commenter = `${prefix}-commenter`;
   const admin = `${prefix}-admin`;
   const moderator = `${prefix}-mod`;
-  const userIds = new Set([author, commenter, admin, moderator]);
+  const secondModerator = `${prefix}-mod-2`;
+  const userIds = new Set([
+    author,
+    commenter,
+    admin,
+    moderator,
+    secondModerator,
+  ]);
   const targets = new Set<string>();
   let app: INestApplication;
   let db: PrismaService;
@@ -111,7 +136,10 @@ describe('Stage A report creation (real PostgreSQL)', () => {
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    return { status: response.status, body: await response.json() };
+    return {
+      status: response.status,
+      body: (await response.json()) as ApiBody,
+    };
   }
   const submit = (
     targetId: string,
@@ -137,20 +165,25 @@ describe('Stage A report creation (real PostgreSQL)', () => {
     makeClient: (tx: Prisma.TransactionClient) => Prisma.TransactionClient,
     onError?: (error: unknown) => void,
   ) {
-    const transaction = db.$transaction.bind(db);
-    return jest.spyOn(db, '$transaction').mockImplementation(((
-      work: unknown,
-      options: unknown,
-    ) => {
-      if (typeof work !== 'function')
-        return transaction(work as never, options as never);
-      return transaction((tx) => work(makeClient(tx)), options as never).catch(
-        (error) => {
+    const transaction = db.$transaction.bind(
+      db,
+    ) as PrismaService['$transaction'];
+    return jest
+      .spyOn(db, '$transaction')
+      .mockImplementation((work: unknown, options: unknown) => {
+        if (typeof work !== 'function')
+          return transaction(work as never, options as never);
+        return transaction(
+          (tx) =>
+            (work as (client: Prisma.TransactionClient) => Promise<unknown>)(
+              makeClient(tx),
+            ),
+          options as never,
+        ).catch((error) => {
           onError?.(error);
           throw error;
-        },
-      );
-    }) as never);
+        });
+      });
   }
 
   beforeAll(async () => {
@@ -192,20 +225,21 @@ describe('Stage A report creation (real PostgreSQL)', () => {
         },
         {
           provide: DiscordLoggerService,
-          useValue: { sendError: async () => {} },
+          useValue: { sendError: () => Promise.resolve() },
         },
       ],
     }).compile();
     app = module.createNestApplication();
-    app.use((req: any, _res: unknown, next: () => void) => {
-      const id = req.headers['x-test-user'];
+    app.use((req: TestRequest, _res: unknown, next: () => void) => {
+      const header = req.headers['x-test-user'];
+      const id = typeof header === 'string' ? header : undefined;
       req.user = id ? { id } : undefined;
       req.session = id ? { user: { id } } : undefined;
       next();
     });
     app.useGlobalGuards({
       canActivate: (context) => {
-        if (!context.switchToHttp().getRequest().session)
+        if (!context.switchToHttp().getRequest<TestRequest>().session)
           throw new UnauthorizedException();
         return true;
       },
@@ -230,11 +264,16 @@ describe('Stage A report creation (real PostgreSQL)', () => {
     });
     gameId = (await db.game.create({ data: { name: 'Stage A fixture', slug } }))
       .id;
-    await db.gameModerator.create({ data: { gameId, userId: moderator } });
+    await db.gameModerator.createMany({
+      data: [moderator, secondModerator].map((userId) => ({ gameId, userId })),
+    });
   });
   afterAll(async () => {
     try {
       if (db) {
+        await db.auditLog.deleteMany({
+          where: { actorId: { in: [...userIds] } },
+        });
         await db.moderationCase.deleteMany({
           where: { targetId: { in: [...targets] } },
         });
@@ -422,10 +461,10 @@ describe('Stage A report creation (real PostgreSQL)', () => {
     const hook = intercept(
       (tx) =>
         new Proxy(tx, {
-          get(target, key) {
+          get(target, key): unknown {
             if (key !== 'moderationCase') return Reflect.get(target, key);
             return new Proxy(target.moderationCase, {
-              get(owner, method) {
+              get(owner, method): unknown {
                 if (method === 'update')
                   return () => {
                     throw new Error('Injected append counter failure');
@@ -537,12 +576,12 @@ describe('Stage A report creation (real PostgreSQL)', () => {
       const hook = intercept(
         (tx) =>
           new Proxy(tx, {
-            get(target, key) {
-              const delegate = Reflect.get(target, key);
+            get(target, key): unknown {
+              const delegate = Reflect.get(target, key) as object;
               if (key !== (failure === 'report' ? 'report' : 'moderationCase'))
                 return delegate;
               return new Proxy(delegate, {
-                get(owner, method) {
+                get(owner, method): unknown {
                   if (method === (failure === 'report' ? 'create' : 'update'))
                     return () => {
                       throw new Error(`Injected ${failure} write failure`);
@@ -581,10 +620,10 @@ describe('Stage A report creation (real PostgreSQL)', () => {
       const hook = intercept(
         (tx) =>
           new Proxy(tx, {
-            get(target, key) {
+            get(target, key): unknown {
               if (key !== 'moderationCase') return Reflect.get(target, key);
               return new Proxy(target.moderationCase, {
-                get(owner, method) {
+                get(owner, method): unknown {
                   if (method !== 'findFirst') return Reflect.get(owner, method);
                   return async (args: Prisma.ModerationCaseFindFirstArgs) => {
                     const found = await owner.findFirst(args);
@@ -730,7 +769,333 @@ describe('Stage A report creation (real PostgreSQL)', () => {
     expect(await cases(source.id)).toHaveLength(1);
   });
 
-  it('new complaints preserve admin/game queues, content/dashboard reads and intentional moderation 501s', async () => {
+  describe('Stage B case workflow', () => {
+    async function fixture(
+      personal = false,
+      targetType: 'POST' | 'COMMENT' = 'POST',
+    ) {
+      const source = await post(!personal);
+      const target = targetType === 'POST' ? source : await comment(source.id);
+      const first = await submit(target.id, await user(), targetType);
+      const second = await submit(target.id, await user(), targetType);
+      expect([first.status, second.status]).toEqual([201, 201]);
+      return { source, target, first: first.body, second: second.body };
+    }
+    const act = (id: string, action: string, as = moderator, body = {}) =>
+      api(`/games/${slug}/reports/${id}/${action}`, as, body, 'PATCH');
+
+    it.each([
+      ['resolve', false, false, 'POST'],
+      ['resolve', true, false, 'POST'],
+      ['resolve', true, true, 'COMMENT'],
+      ['dismiss', false, false, 'COMMENT'],
+      ['dismiss', true, false, 'POST'],
+      ['dismiss', true, true, 'COMMENT'],
+    ] as const)(
+      '%s claimed=%s different resolver=%s target=%s',
+      async (action, claimed, different, targetType) => {
+        const { first, second, source, target } = await fixture(
+          false,
+          targetType,
+        );
+        const before = await db.moderationCase.findUniqueOrThrow({
+          where: { id: first.caseId },
+        });
+        if (claimed) {
+          const response = await act(second.id, 'claim');
+          expect(response.status).toBe(200);
+          expect(response.body).toMatchObject({
+            id: second.id,
+            status: 'IN_REVIEW',
+            assignedModeratorId: moderator,
+          });
+          expect(response.body).not.toHaveProperty('targetSnapshot');
+          expect(
+            (await app.get(ReportsRepository).findById(first.id))?.status,
+          ).toBe('IN_REVIEW');
+          expect((await act(first.id, 'claim', admin)).status).toBe(409);
+        }
+        const resolver = different ? secondModerator : moderator;
+        const response = await act(first.id, action, resolver, {
+          resolutionNote: '  Reviewed evidence  ',
+        });
+        expect(response.status).toBe(200);
+        const status = action === 'resolve' ? 'RESOLVED' : 'DISMISSED';
+        expect(response.body).toMatchObject({
+          id: first.id,
+          caseId: first.caseId,
+          status,
+          resolvedById: resolver,
+          resolutionNote: 'Reviewed evidence',
+        });
+        expect(response.body).not.toHaveProperty('targetSnapshot');
+        const current = await db.moderationCase.findUniqueOrThrow({
+          where: { id: first.caseId },
+        });
+        expect(current).toMatchObject({
+          status,
+          resolvedById: resolver,
+          resolutionNote: 'Reviewed evidence',
+          assignedModeratorId: claimed ? moderator : null,
+          reportCount: before.reportCount,
+          uniqueReporterCount: before.uniqueReporterCount,
+        });
+        expect(current.resolvedAt).toBeInstanceOf(Date);
+        expect(
+          (await app.get(ReportsRepository).findById(second.id))?.status,
+        ).toBe(status);
+        for (const closedAction of ['claim', 'resolve', 'dismiss'])
+          expect((await act(second.id, closedAction, admin)).status).toBe(409);
+        const logs = await db.auditLog.findMany({
+          where: { targetId: { in: [first.id, second.id] } },
+        });
+        expect(logs).toHaveLength(claimed ? 2 : 1);
+        expect(
+          logs.find((log) => log.action === `REPORT_${status}`),
+        ).toMatchObject({
+          targetType: 'REPORT',
+          targetId: first.id,
+          actorId: resolver,
+          gameId,
+          metadata: {
+            reportId: first.id,
+            caseId: first.caseId,
+            reportedTargetType: targetType,
+            reportedTargetId: target.id,
+            resolutionNote: 'Reviewed evidence',
+          },
+        });
+        expect(
+          (await db.post.findUniqueOrThrow({ where: { id: source.id } }))
+            .status,
+        ).toBe('PUBLISHED');
+        if (targetType === 'COMMENT')
+          expect(
+            (await db.comment.findUniqueOrThrow({ where: { id: target.id } }))
+              .status,
+          ).toBe('PUBLISHED');
+        // Historical report IDs must stay bound to the old closed case.
+        const newer = await submit(target.id, await user(), targetType);
+        expect(newer.status).toBe(201);
+        expect(newer.body.caseId).not.toBe(first.caseId);
+        expect((await act(first.id, 'resolve')).status).toBe(409);
+        expect(
+          (
+            await db.moderationCase.findUniqueOrThrow({
+              where: { id: newer.body.caseId },
+            })
+          ).status,
+        ).toBe('OPEN');
+      },
+    );
+
+    it('rejects unauthorized, inactive, wrong-game and personal actions before writes', async () => {
+      const { first } = await fixture();
+      const outsider = await user();
+      for (const action of ['claim', 'resolve', 'dismiss']) {
+        expect((await act(first.id, action, outsider)).status).toBe(403);
+        expect((await act('missing-report', action, outsider)).status).toBe(
+          403,
+        );
+      }
+      await db.user.update({
+        where: { id: outsider },
+        data: { status: 'SUSPENDED' },
+      });
+      expect((await act(first.id, 'claim', outsider)).status).toBe(403);
+      const personal = await fixture(true);
+      for (const action of ['claim', 'resolve', 'dismiss'])
+        expect((await act(personal.first.id, action, admin)).status).toBe(404);
+      const other = await db.game.create({
+        data: { name: 'Wrong scope', slug: `${prefix}-other` },
+      });
+      try {
+        expect(
+          (
+            await api(
+              `/games/${other.slug}/reports/${first.id}/claim`,
+              admin,
+              {},
+              'PATCH',
+            )
+          ).status,
+        ).toBe(404);
+      } finally {
+        await db.game.delete({ where: { id: other.id } });
+      }
+      expect(
+        await db.auditLog.count({
+          where: { targetId: { in: [first.id, personal.first.id] } },
+        }),
+      ).toBe(0);
+    });
+
+    it.each(['claim', 'resolve', 'dismiss'])(
+      'rolls back %s when transactional audit fails',
+      async (action) => {
+        const { first } = await fixture();
+        const before = await db.moderationCase.findUniqueOrThrow({
+          where: { id: first.caseId },
+        });
+        const spy = jest
+          .spyOn(app.get(AuditLogRepository), 'create')
+          .mockRejectedValueOnce(new Error('Stage B deliberate audit failure'));
+        try {
+          expect((await act(first.id, action)).status).toBe(500);
+        } finally {
+          spy.mockRestore();
+        }
+        expect(
+          await db.moderationCase.findUniqueOrThrow({
+            where: { id: first.caseId },
+          }),
+        ).toEqual(before);
+        expect(await db.auditLog.count({ where: { targetId: first.id } })).toBe(
+          0,
+        );
+      },
+    );
+
+    it.each([
+      ['claim', 'claim'],
+      ['resolve', 'dismiss'],
+    ])('serializes concurrent %s vs %s', async (left, right) => {
+      const { first, second } = await fixture();
+      let arrivals = 0;
+      let release!: () => void;
+      const barrier = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const spy = intercept(
+        (tx) =>
+          new Proxy(tx, {
+            get(target, key, receiver): unknown {
+              if (key !== 'moderationCase')
+                return Reflect.get(target, key, receiver);
+              return new Proxy(tx.moderationCase, {
+                get(delegate, method): unknown {
+                  if (method !== 'updateMany')
+                    return Reflect.get(delegate, method);
+                  return async (
+                    args: Parameters<typeof tx.moderationCase.updateMany>[0],
+                  ) => {
+                    if (args?.where?.id === first.caseId) {
+                      arrivals++;
+                      if (arrivals === 2) release();
+                      await barrier;
+                    }
+                    return delegate.updateMany(args);
+                  };
+                },
+              });
+            },
+          }),
+      );
+      let results: Awaited<ReturnType<typeof act>>[];
+      try {
+        results = await Promise.all([
+          act(first.id, left, moderator),
+          act(second.id, right, secondModerator),
+        ]);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(arrivals).toBe(2);
+      expect(results.map((result) => result.status).sort()).toEqual([200, 409]);
+      const winner = results.find((result) => result.status === 200)!;
+      const current = await db.moderationCase.findUniqueOrThrow({
+        where: { id: first.caseId },
+      });
+      expect(current).toMatchObject({
+        status: winner.body.status,
+        reportCount: 2,
+        uniqueReporterCount: 2,
+      });
+      if (left === 'claim')
+        expect(current.assignedModeratorId).toBe(
+          winner.body.assignedModeratorId,
+        );
+      else {
+        expect(current.resolvedById).toBe(winner.body.resolvedById);
+        expect(current.resolvedAt?.toISOString()).toBe(winner.body.resolvedAt);
+      }
+      expect(
+        await db.auditLog.count({
+          where: { targetId: { in: [first.id, second.id] } },
+        }),
+      ).toBe(1);
+    });
+
+    it.each(['resolve', 'dismiss'])(
+      'preserves filtered legacy listings, admin content and overview through %s',
+      async (terminal) => {
+        const { first, second, target } = await fixture();
+        for (const [action, status] of [
+          [null, 'PENDING'],
+          ['claim', 'IN_REVIEW'],
+          [terminal, terminal === 'resolve' ? 'RESOLVED' : 'DISMISSED'],
+        ] as const) {
+          if (action)
+            expect(
+              (await act(first.id, action, admin, { resolutionNote: '   ' }))
+                .status,
+            ).toBe(200);
+          for (const path of [`/games/${slug}/reports`, `/admin/reports`]) {
+            const listing = await api(
+              `${path}?status=${status}&limit=100`,
+              admin,
+            );
+            expect(listing.status).toBe(200);
+            for (const id of [first.id, second.id])
+              expect(listing.body.items).toContainEqual(
+                expect.objectContaining({ id, status }),
+              );
+            const other = await api(
+              `${path}?status=${status === 'PENDING' ? 'RESOLVED' : 'PENDING'}&limit=100`,
+              admin,
+            );
+            expect(
+              other.body.items.some(
+                (row: { id: string }) => row.id === first.id,
+              ),
+            ).toBe(false);
+            expect(
+              listing.body.items.every(
+                (row: object) => !('targetSnapshot' in row),
+              ),
+            ).toBe(true);
+          }
+          const content = await api('/admin/content?limit=100', admin);
+          expect(content.status).toBe(200);
+          expect(
+            content.body.items.some(
+              (row: { id: string }) => row.id === target.id,
+            ),
+          ).toBe(action !== terminal);
+          const overview = await api('/admin/overview', admin);
+          expect(overview.status).toBe(200);
+          expect(
+            overview.body.metrics.find(
+              (row: { id: string }) => row.id === 'reports',
+            )!.value,
+          ).toBe(
+            await db.report.count({
+              where: { case: { status: { in: ['OPEN', 'IN_REVIEW'] } } },
+            }),
+          );
+        }
+        expect(
+          (
+            await db.moderationCase.findUniqueOrThrow({
+              where: { id: first.caseId },
+            })
+          ).resolutionNote,
+        ).toBeNull();
+      },
+    );
+  });
+
+  it('new complaints preserve admin/game queues, content/dashboard reads and restored case moderation', async () => {
     const personal = await post();
     const community = await post(true);
     const a = await submit(personal.id, await user());
@@ -766,14 +1131,18 @@ describe('Stage A report creation (real PostgreSQL)', () => {
     const overview = await api('/admin/overview', admin);
     expect(overview.status).toBe(200);
     expect(
-      overview.body.metrics.find((row: { id: string }) => row.id === 'reports')
+      overview.body.metrics.find((row: { id: string }) => row.id === 'reports')!
         .value,
     ).toBe(
       await db.report.count({
         where: { case: { status: { in: ['OPEN', 'IN_REVIEW'] } } },
       }),
     );
-    for (const action of ['claim', 'resolve', 'dismiss'])
+    for (const [action, status] of [
+      ['claim', 200],
+      ['resolve', 200],
+      ['dismiss', 409],
+    ] as const)
       expect(
         (
           await api(
@@ -783,7 +1152,7 @@ describe('Stage A report creation (real PostgreSQL)', () => {
             'PATCH',
           )
         ).status,
-      ).toBe(501);
+      ).toBe(status);
     expect(
       (
         await api(
@@ -811,7 +1180,9 @@ describe('Stage A report creation (real PostgreSQL)', () => {
       }),
     ).toBe(0);
     expect(
-      await db.auditLog.count({ where: { actorId: { in: [...userIds] } } }),
-    ).toBe(0);
+      await db.auditLog.count({
+        where: { targetId: { in: [a.body.id, b.body.id] } },
+      }),
+    ).toBe(2);
   });
 });

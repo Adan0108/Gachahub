@@ -102,7 +102,7 @@ import type {
 // category/type immutability; all four counter writers; retention and races;
 // detail/profile/search/latest/trending/For You; save/like/comment/reply;
 // interest deltas/ranking; admin/game permissions/audits; report creation/null
-// reads and the still-deferred moderation 501 responses.
+// reads and the restored case moderation transitions.
 // Sessions are injected, with a test auth gate matching OPTIONAL metadata.
 // Real outbox/mentions/media attachment/notification dispatch; no Kafka broker,
 // Cloudinary requests or Socket.IO delivery. Only Redis storage is in memory;
@@ -1617,7 +1617,7 @@ describe('Optional-game comprehensive API/integration verification', () => {
     });
 
     it.each([false, true])(
-      'creates null/game reports while keeping moderation writes at 501: game=%s',
+      'creates null/game reports with game-scoped case moderation: game=%s',
       async (game) => {
         const post = await (game ? community() : create());
         const comment = await http()
@@ -1660,12 +1660,16 @@ describe('Optional-game comprehensive API/integration verification', () => {
         const projection = await reports.findById(report.id);
         expect(projection?.gameId).toBe(game ? gameId : null);
         if (game) {
-          for (const action of ['claim', 'resolve', 'dismiss']) {
+          for (const [action, status] of [
+            ['claim', 200],
+            ['resolve', 200],
+            ['dismiss', 409],
+          ] as const) {
             await http()
               .patch(`/games/${slug}/reports/${report.id}/${action}`)
               .set('x-test-user', moderator)
               .send({})
-              .expect(501);
+              .expect(status);
           }
         } else {
           await http()
@@ -1673,28 +1677,19 @@ describe('Optional-game comprehensive API/integration verification', () => {
             .set('x-test-user', admin)
             .expect(404);
         }
-        await expect(reports.claim(report.id, admin)).rejects.toMatchObject({
-          status: 501,
-        });
-        await expect(
-          reports.finalize({
-            id: report.id,
-            status: 'RESOLVED',
-            resolvedById: admin,
-          }),
-        ).rejects.toMatchObject({ status: 501 });
         const content = await http()
           .get('/admin/content?limit=100')
           .set('x-test-user', admin)
           .expect(200);
-        expect(content.body.items).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              id: post.id,
-              gameSlug: game ? slug : null,
-            }),
-          ]),
-        );
+        const flaggedItems = content.body.items as Array<{
+          id: string;
+          gameSlug: string | null;
+        }>;
+        expect(flaggedItems.some((item) => item.id === post.id)).toBe(!game);
+        if (!game)
+          expect(flaggedItems).toContainEqual(
+            expect.objectContaining({ id: String(post.id), gameSlug: null }),
+          );
       },
     );
   });

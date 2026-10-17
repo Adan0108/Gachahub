@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  NotImplementedException,
-} from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import {
   Prisma,
   type PostStatus,
@@ -72,6 +68,11 @@ function toLegacyReport({
 }
 
 type LegacyReport = ReturnType<typeof toLegacyReport>;
+
+export interface CaseTransitionContext {
+  gameId: string;
+  audit: (report: LegacyReport, tx: Prisma.TransactionClient) => Promise<void>;
+}
 
 @Injectable()
 export class ReportsRepository {
@@ -391,22 +392,76 @@ export class ReportsRepository {
     return { items: items.map(toLegacyReport), total };
   }
 
-  // TODO(Stage 3): design case-scoped moderation writes and audit semantics.
-  // Updating a case here would silently resolve/claim every sibling report.
-  async claim(_id: string, _moderatorId: string): Promise<LegacyReport | null> {
-    throw new NotImplementedException(
-      'Report claiming is pending case-based moderation',
+  async claim(
+    id: string,
+    moderatorId: string,
+    context: CaseTransitionContext,
+  ): Promise<LegacyReport | null> {
+    return this.transition(
+      id,
+      context,
+      {
+        status: 'IN_REVIEW',
+        assignedModeratorId: moderatorId,
+      },
+      ['OPEN'],
     );
   }
 
-  async finalize(_params: {
-    id: string;
-    status: 'RESOLVED' | 'DISMISSED';
-    resolvedById: string;
-    resolutionNote?: string;
-  }): Promise<LegacyReport | null> {
-    throw new NotImplementedException(
-      'Report resolution is pending case-based moderation',
+  async finalize(
+    params: {
+      id: string;
+      status: 'RESOLVED' | 'DISMISSED';
+      resolvedById: string;
+      resolutionNote?: string;
+    },
+    context: CaseTransitionContext,
+  ): Promise<LegacyReport | null> {
+    return this.transition(
+      params.id,
+      context,
+      {
+        status: params.status,
+        resolvedById: params.resolvedById,
+        resolvedAt: new Date(),
+        resolutionNote: params.resolutionNote ?? null,
+      },
+      OPEN_CASE_STATUSES,
     );
+  }
+
+  private async transition(
+    reportId: string,
+    context: CaseTransitionContext,
+    data: Prisma.ModerationCaseUncheckedUpdateManyInput,
+    statuses: readonly ModerationCaseStatus[],
+  ): Promise<LegacyReport | null> {
+    return this.prisma.$transaction(async (tx) => {
+      const report = await tx.report.findUnique({
+        where: { id: reportId },
+        select: { caseId: true },
+      });
+      if (!report) return null;
+      // PostgreSQL rechecks this predicate after waiting for a competing
+      // writer. Scope is checked again here so a deleted game cannot turn
+      // an authorized game action into an action on a platform case.
+      const { count } = await tx.moderationCase.updateMany({
+        where: {
+          id: report.caseId,
+          gameId: context.gameId,
+          status: { in: [...statuses] },
+        },
+        data,
+      });
+      if (count === 0) return null;
+      const result = toLegacyReport(
+        await tx.report.findUniqueOrThrow({
+          where: { id: reportId },
+          include: reportInclude,
+        }),
+      );
+      await context.audit(result, tx);
+      return result;
+    });
   }
 }

@@ -7,6 +7,7 @@ import { QueryReportsAdminDto } from './dto/query-reports-admin.dto';
 import { QueryReportsDto } from './dto/query-reports.dto';
 import { ResolveReportDto } from './dto/resolve-report.dto';
 import { ReportsRepository } from './reports.repository';
+import type { Prisma } from '../generated/prisma/client';
 import { resolvePagination, toPaginated } from '../common/utils/paginated';
 
 /**
@@ -66,18 +67,24 @@ export class ReportModerationService {
       moderatorId,
     );
 
-    const claimed = await this.reportsRepository.claim(reportId, moderatorId);
+    const claimed = await this.reportsRepository.claim(reportId, moderatorId, {
+      gameId,
+      audit: (report, tx) =>
+        this.recordAudit(
+          'REPORT_CLAIMED',
+          {
+            gameId,
+            gameSlug,
+            moderatorId,
+            report,
+          },
+          tx,
+        ),
+    });
 
     if (!claimed) {
       throw new ConflictException('This report is no longer pending');
     }
-
-    await this.recordAudit('REPORT_CLAIMED', {
-      gameId,
-      gameSlug,
-      moderatorId,
-      report: claimed,
-    });
 
     return claimed;
   }
@@ -133,21 +140,27 @@ export class ReportModerationService {
     // moderator who can already see this queue can close it out. As with
     // claim(), the repository's conditional write is the only "still open?"
     // check, so an already-closed report always gets the same 409.
-    const finalized = await this.reportsRepository.finalize({
-      id: reportId,
-      status,
-      resolvedById: moderatorId,
-      resolutionNote: normalizeText(resolutionNote),
-    });
+    const finalized = await this.reportsRepository.finalize(
+      {
+        id: reportId,
+        status,
+        resolvedById: moderatorId,
+        resolutionNote: normalizeText(resolutionNote),
+      },
+      {
+        gameId,
+        audit: (report, tx) =>
+          this.recordAudit(
+            status === 'RESOLVED' ? 'REPORT_RESOLVED' : 'REPORT_DISMISSED',
+            { gameId, gameSlug, moderatorId, report },
+            tx,
+          ),
+      },
+    );
 
     if (!finalized) {
       throw new ConflictException('This report is already closed');
     }
-
-    await this.recordAudit(
-      status === 'RESOLVED' ? 'REPORT_RESOLVED' : 'REPORT_DISMISSED',
-      { gameId, gameSlug, moderatorId, report: finalized },
-    );
 
     return finalized;
   }
@@ -160,29 +173,36 @@ export class ReportModerationService {
       moderatorId: string;
       report: {
         id: string;
+        caseId: string;
         targetType: string;
         targetId: string;
         resolutionNote: string | null;
       };
     },
+    tx: Prisma.TransactionClient,
   ) {
     const { gameId, gameSlug, moderatorId, report } = params;
 
-    return this.auditLogService.record({
-      action,
-      actorId: moderatorId,
-      targetType: 'REPORT',
-      targetId: report.id,
-      gameId,
-      gameSlug,
-      metadata: {
-        reportedTargetType: report.targetType,
-        reportedTargetId: report.targetId,
-        ...(report.resolutionNote
-          ? { resolutionNote: report.resolutionNote }
-          : {}),
+    return this.auditLogService.recordOrThrow(
+      {
+        action,
+        actorId: moderatorId,
+        targetType: 'REPORT',
+        targetId: report.id,
+        gameId,
+        gameSlug,
+        metadata: {
+          reportId: report.id,
+          caseId: report.caseId,
+          reportedTargetType: report.targetType,
+          reportedTargetId: report.targetId,
+          ...(report.resolutionNote
+            ? { resolutionNote: report.resolutionNote }
+            : {}),
+        },
       },
-    });
+      tx,
+    );
   }
 
   private async listByGameId(

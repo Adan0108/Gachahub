@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
+import type { Prisma } from '../generated/prisma/client';
 import type { ReportsRepository } from './reports.repository';
 import type { GameModeratorsService } from '../game-moderators/game-moderators.service';
 import type { AuditLogService } from '../audit-log/audit-log.service';
@@ -30,8 +31,11 @@ describe('ReportModerationService', () => {
   const reportsRepository = {
     findById: jest.fn(),
     findMany: jest.fn(),
-    claim: jest.fn(),
-    finalize: jest.fn(),
+    claim: jest.fn<Promise<unknown>, Parameters<ReportsRepository['claim']>>(),
+    finalize: jest.fn<
+      Promise<unknown>,
+      Parameters<ReportsRepository['finalize']>
+    >(),
   };
 
   const gameModeratorsService = {
@@ -40,12 +44,14 @@ describe('ReportModerationService', () => {
     loadModeratableResource: jest.fn(),
   };
 
-  const auditLogService = { record: jest.fn() };
+  const auditLogService = { recordOrThrow: jest.fn() };
+  const tx = {} as Prisma.TransactionClient;
 
   let service: ReportModerationService;
 
   const baseReport = {
     id: 'report-1',
+    caseId: 'case-1',
     gameId: 'game-1',
     reporterId: 'reporter-1',
     targetType: 'POST',
@@ -55,7 +61,7 @@ describe('ReportModerationService', () => {
   };
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
     gameModeratorsService.resolveGameId.mockResolvedValue('game-1');
     gameModeratorsService.resolveModeratableGameId.mockResolvedValue('game-1');
     // A faithful fake of GameModeratorsService.loadModeratableResource's
@@ -178,17 +184,32 @@ describe('ReportModerationService', () => {
           notFoundMessage: 'Report not found',
         }),
       );
-      expect(reportsRepository.claim).toHaveBeenCalledWith('report-1', 'mod-1');
+      expect(reportsRepository.claim).toHaveBeenCalledWith(
+        'report-1',
+        'mod-1',
+        expect.objectContaining({
+          gameId: 'game-1',
+        }),
+      );
       expect(result.status).toBe('IN_REVIEW');
-      expect(auditLogService.record).toHaveBeenCalledWith({
-        action: 'REPORT_CLAIMED',
-        actorId: 'mod-1',
-        targetType: 'REPORT',
-        targetId: 'report-1',
-        gameId: 'game-1',
-        gameSlug: 'game-1',
-        metadata: { reportedTargetType: 'POST', reportedTargetId: 'post-1' },
-      });
+      await reportsRepository.claim.mock.calls[0][2].audit(result, tx);
+      expect(auditLogService.recordOrThrow).toHaveBeenCalledWith(
+        {
+          action: 'REPORT_CLAIMED',
+          actorId: 'mod-1',
+          targetType: 'REPORT',
+          targetId: 'report-1',
+          gameId: 'game-1',
+          gameSlug: 'game-1',
+          metadata: {
+            reportId: 'report-1',
+            caseId: 'case-1',
+            reportedTargetType: 'POST',
+            reportedTargetId: 'post-1',
+          },
+        },
+        tx,
+      );
     });
 
     it('answers 409 for a report that is not claimable - one code whether it was already claimed before this request or mid-request', async () => {
@@ -202,7 +223,7 @@ describe('ReportModerationService', () => {
         service.claim('game-1', 'report-1', 'mod-1'),
       ).rejects.toThrow(ConflictException);
 
-      expect(auditLogService.record).not.toHaveBeenCalled();
+      expect(auditLogService.recordOrThrow).not.toHaveBeenCalled();
     });
 
     it('rejects when the report belongs to a different game than the route', async () => {
@@ -252,18 +273,25 @@ describe('ReportModerationService', () => {
         resolutionNote: '  Hid the post  ',
       });
 
-      expect(reportsRepository.finalize).toHaveBeenCalledWith({
-        id: 'report-1',
-        status: 'RESOLVED',
-        resolvedById: 'mod-1',
-        resolutionNote: 'Hid the post',
-      });
+      expect(reportsRepository.finalize).toHaveBeenCalledWith(
+        {
+          id: 'report-1',
+          status: 'RESOLVED',
+          resolvedById: 'mod-1',
+          resolutionNote: 'Hid the post',
+        },
+        expect.objectContaining({
+          gameId: 'game-1',
+        }),
+      );
       expect(result.status).toBe('RESOLVED');
-      expect(auditLogService.record).toHaveBeenCalledWith(
+      await reportsRepository.finalize.mock.calls[0][1].audit(result, tx);
+      expect(auditLogService.recordOrThrow).toHaveBeenCalledWith(
         expect.objectContaining({
           action: 'REPORT_RESOLVED',
           targetId: 'report-1',
         }),
+        tx,
       );
     });
 
@@ -274,18 +302,25 @@ describe('ReportModerationService', () => {
         status: 'DISMISSED',
       });
 
-      await service.dismiss('game-1', 'report-1', 'mod-1', {
+      const result = await service.dismiss('game-1', 'report-1', 'mod-1', {
         resolutionNote: '   ',
       });
 
-      expect(reportsRepository.finalize).toHaveBeenCalledWith({
-        id: 'report-1',
-        status: 'DISMISSED',
-        resolvedById: 'mod-1',
-        resolutionNote: undefined,
-      });
-      expect(auditLogService.record).toHaveBeenCalledWith(
+      expect(reportsRepository.finalize).toHaveBeenCalledWith(
+        {
+          id: 'report-1',
+          status: 'DISMISSED',
+          resolvedById: 'mod-1',
+          resolutionNote: undefined,
+        },
+        expect.objectContaining({
+          gameId: 'game-1',
+        }),
+      );
+      await reportsRepository.finalize.mock.calls[0][1].audit(result, tx);
+      expect(auditLogService.recordOrThrow).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'REPORT_DISMISSED' }),
+        tx,
       );
     });
 
