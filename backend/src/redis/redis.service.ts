@@ -93,4 +93,67 @@ export class RedisService {
 
     return Number(result);
   }
+
+  /** Adds or refreshes a member's score in a sorted set, drops members not refreshed within staleAfterMs, and reports the live count and whether the member was new. */
+  async sortedSetTouch(
+    key: string,
+    member: string,
+    nowMs: number,
+    staleAfterMs: number,
+  ): Promise<{ count: number; added: boolean }> {
+    const redisKey = this.key(key);
+    const results = await this.client
+      .multi()
+      .zRemRangeByScore(redisKey, '-inf', nowMs - staleAfterMs)
+      .zAdd(redisKey, { score: nowMs, value: member })
+      .zCard(redisKey)
+      .expire(redisKey, Math.ceil((staleAfterMs * 2) / 1000))
+      .exec();
+
+    return { added: Number(results[1]) === 1, count: Number(results[2]) };
+  }
+
+  /** Removes one member, then reports how many live members are left. */
+  async sortedSetRemoveMember(
+    key: string,
+    member: string,
+    nowMs: number,
+    staleAfterMs: number,
+  ): Promise<number> {
+    const redisKey = this.key(key);
+    const results = await this.client
+      .multi()
+      .zRem(redisKey, member)
+      .zRemRangeByScore(redisKey, '-inf', nowMs - staleAfterMs)
+      .zCard(redisKey)
+      .exec();
+
+    return Number(results[2]);
+  }
+
+  /** How many members were refreshed within staleAfterMs. */
+  async sortedSetLiveCount(
+    key: string,
+    nowMs: number,
+    staleAfterMs: number,
+  ): Promise<number> {
+    return this.client.zCount(this.key(key), nowMs - staleAfterMs, '+inf');
+  }
+
+  async sortedSetAdd(key: string, member: string, score: number) {
+    await this.client.zAdd(this.key(key), { score, value: member });
+  }
+
+  async sortedSetRemove(key: string, member: string) {
+    await this.client.zRem(this.key(key), member);
+  }
+
+  /** Removes and returns the members whose score is at or below maxScore. */
+  async sortedSetPopDue(key: string, maxScore: number): Promise<string[]> {
+    const redisKey = this.key(key);
+    const due = await this.client.zRangeByScore(redisKey, '-inf', maxScore);
+    if (due.length > 0) await this.client.zRem(redisKey, due);
+
+    return due;
+  }
 }

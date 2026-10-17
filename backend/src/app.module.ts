@@ -25,6 +25,7 @@ import { NotificationModule } from './notifications/notification.module';
 import { OverviewModule } from './overview/overview.module';
 import { PostsModule } from './posts/posts.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { PresenceModule } from './presence/presence.module';
 import { RedisModule } from './redis/redis.module';
 import { UsersModule } from './users/users.module';
 import { AuditLogQueryModule } from './audit-log/audit-log-query.module';
@@ -59,6 +60,7 @@ import { MlsRetentionModule } from './mls-retention/mls-retention.module';
 
     ChatModule,
     CommunityChatModule,
+    PresenceModule,
     ChatDevicesModule,
     ChatBackupModule,
     MlsHandshakesModule,
