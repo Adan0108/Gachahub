@@ -2086,18 +2086,21 @@
   }
 }
 
+/* Near the top, clear of the message box; centred without a transform so the pop animation does not jump it. */
 .chat-row-toast {
   position: fixed;
-  bottom: 24px;
-  left: 50%;
+  top: 76px;
+  right: 0;
+  left: 0;
   z-index: 60;
+  width: fit-content;
+  margin-inline: auto;
   padding: 10px 16px;
   border-radius: var(--chat-radius);
   background: var(--text);
   color: var(--bg);
   font-size: 13px;
   font-weight: 600;
-  transform: translateX(-50%);
   animation: chat-request-accepted-pop 0.2s ease-out;
 }
 
