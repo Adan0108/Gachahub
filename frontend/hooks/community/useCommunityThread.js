@@ -71,8 +71,8 @@ export function useCommunityThread(chat) {
     setTimeout(() => element.classList.remove("flash"), FLASH_MS);
   };
 
-  const send = (content) => {
-    chat.send(content, replyTo);
+  const send = (content, files = []) => {
+    chat.send(content, replyTo, files);
     setReplyTo(null);
   };
 

@@ -28,6 +28,10 @@ import { CommunityChannelsService } from '../src/community-chat/community-channe
 import { CommunityMessagePresenter } from '../src/community-chat/community-message.presenter';
 import { CommunityMessagingService } from '../src/community-chat/community-messaging.service';
 import { GameModeratorsRepository } from '../src/game-moderators/game-moderators.repository';
+import { CloudinaryService } from '../src/cloudinary/cloudinary.service';
+import { MediaRepository } from '../src/media/media.repository';
+import { MediaService } from '../src/media/media.service';
+import { RedisService } from '../src/redis/redis.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 // Real HTTP controller, validation, services and PostgreSQL persistence, including the
@@ -57,6 +61,7 @@ describe('Community chat API (real database)', () => {
   let foreignEmoteId: string;
   const BASE = `/games/${slug}/chat`;
   const ZWSP = String.fromCodePoint(0x200b);
+  const destroyAsset = jest.fn().mockResolvedValue(undefined);
 
   const as = (user: string) => ({ 'x-test-user': user });
   const get = (user: string, path: string) =>
@@ -88,6 +93,10 @@ describe('Community chat API (real database)', () => {
         GameModeratorsRepository,
         BlocksService,
         BlocksRepository,
+        MediaService,
+        MediaRepository,
+        { provide: CloudinaryService, useValue: { deleteAsset: destroyAsset } },
+        { provide: RedisService, useValue: {} },
         {
           provide: CommunityChatRateLimiterService,
           useValue: { assertNotRateLimited: () => {} },
@@ -735,6 +744,257 @@ describe('Community chat API (real database)', () => {
     });
   });
 
+  describe('images', () => {
+    const upload = (userId: string, extra: object = {}) =>
+      db.mediaUpload.create({
+        data: {
+          userId,
+          purpose: 'COMMUNITY',
+          resourceType: 'IMAGE',
+          status: 'UPLOADED',
+          assetId: randomUUID(),
+          publicId: `gachahub/community/${userId}/${randomUUID()}`,
+          secureUrl: 'https://cdn.example.invalid/a.png',
+          format: 'png',
+          bytes: 1000,
+          width: 640,
+          height: 480,
+          ...extra,
+        },
+      });
+    const statusOf = async (uploadId: string) =>
+      (await db.mediaUpload.findUniqueOrThrow({ where: { id: uploadId } }))
+        .status;
+
+    beforeEach(() => destroyAsset.mockClear());
+
+    it('posts pictures with no text and lists them in order', async () => {
+      const [first, second] = await Promise.all([upload(ann), upload(ann)]);
+
+      const said = await send(ann, '', {
+        mediaUploadIds: [second.id, first.id],
+      }).expect(201);
+
+      expect(said.body.content).toBe('');
+      expect(said.body.media).toEqual([
+        expect.objectContaining({ width: 640, height: 480 }),
+        expect.objectContaining({ width: 640, height: 480 }),
+      ]);
+      expect(await statusOf(first.id)).toBe('ATTACHED');
+      const page = await messages(bo, '?limit=100');
+      const listed = page.items.find(
+        (item: { id: string }) => item.id === said.body.id,
+      );
+      expect(listed.media.map((m: { id: string }) => m.id)).toEqual(
+        said.body.media.map((m: { id: string }) => m.id),
+      );
+      const rows = await db.gameChannelMessageMedia.findMany({
+        where: { messageId: said.body.id },
+        orderBy: { sortOrder: 'asc' },
+      });
+      expect(rows.map((r) => r.mediaUploadId)).toEqual([second.id, first.id]);
+    });
+
+    it('keeps the text next to the picture', async () => {
+      const mine = await upload(ann);
+
+      const said = await send(ann, 'look at this', {
+        mediaUploadIds: [mine.id],
+      }).expect(201);
+
+      expect(said.body).toMatchObject({ content: 'look at this' });
+      expect(said.body.media).toHaveLength(1);
+    });
+
+    it('refuses a message with neither text nor pictures', async () => {
+      await send(ann, '').expect(400);
+    });
+
+    it('refuses more than four pictures', async () => {
+      const five = await Promise.all([1, 2, 3, 4, 5].map(() => upload(ann)));
+
+      await send(ann, 'too many', {
+        mediaUploadIds: five.map((u) => u.id),
+      }).expect(400);
+      expect(await statusOf(five[0].id)).toBe('UPLOADED');
+    });
+
+    it('refuses someone else upload, a chat upload and a video, and leaves them unused', async () => {
+      const theirs = await upload(bo);
+      const chat = await upload(ann, { purpose: 'CHAT' });
+      const video = await upload(ann, { resourceType: 'VIDEO', format: 'mp4' });
+
+      await send(ann, 'nope', { mediaUploadIds: [theirs.id] }).expect(403);
+      for (const bad of [chat, video]) {
+        await send(ann, 'nope', { mediaUploadIds: [bad.id] }).expect(400);
+      }
+      for (const bad of [theirs, chat, video]) {
+        expect(await statusOf(bad.id)).toBe('UPLOADED');
+      }
+    });
+
+    it('does not let one picture be posted twice', async () => {
+      const mine = await upload(ann);
+      await send(ann, 'once', { mediaUploadIds: [mine.id] }).expect(201);
+
+      await send(ann, 'twice', { mediaUploadIds: [mine.id] }).expect(400);
+    });
+
+    it('returns the earlier message for a retry, without using the picture again', async () => {
+      const mine = await upload(ann);
+      const clientMessageId = `retry-${randomUUID()}`;
+      const first = await send(ann, 'retry me', {
+        mediaUploadIds: [mine.id],
+        clientMessageId,
+      }).expect(201);
+
+      const again = await send(ann, 'retry me', {
+        mediaUploadIds: [mine.id],
+        clientMessageId,
+      }).expect(201);
+
+      expect(again.body.id).toBe(first.body.id);
+      expect(again.body.media).toHaveLength(1);
+    });
+
+    it('does not use up a picture when slow mode turns the message away', async () => {
+      await db.gameChannel.update({
+        where: { id: channelId },
+        data: { slowmodeSeconds: 30 },
+      });
+      const slow = id('slow');
+      await db.user.create({
+        data: { id: slow, name: 'Slow', email: `${slow}@example.invalid` },
+      });
+      await db.gameMember.create({ data: { gameId, userId: slow } });
+      try {
+        await send(slow, 'first').expect(201);
+        const mine = await upload(slow);
+
+        await send(slow, 'second', { mediaUploadIds: [mine.id] }).expect(429);
+
+        expect(await statusOf(mine.id)).toBe('UPLOADED');
+        expect(
+          await db.gameChannelMessageMedia.count({
+            where: { mediaUploadId: mine.id },
+          }),
+        ).toBe(0);
+      } finally {
+        await db.gameChannel.update({
+          where: { id: channelId },
+          data: { slowmodeSeconds: 0 },
+        });
+        await db.user.delete({ where: { id: slow } });
+      }
+    });
+
+    it('removes the pictures with the message: nothing is shown and the file is destroyed', async () => {
+      const mine = await upload(ann);
+      const said = await send(ann, 'oops', {
+        mediaUploadIds: [mine.id],
+      }).expect(201);
+
+      const removed = await request(app.getHttpServer())
+        .delete(`/games/${slug}/chat/messages/${said.body.id}`)
+        .set(as(ann))
+        .send({})
+        .expect(200);
+
+      expect(removed.body).toMatchObject({ deleted: true, media: [] });
+      expect(await statusOf(mine.id)).toBe('DELETED');
+      expect(destroyAsset).toHaveBeenCalledTimes(1);
+      const page = await messages(bo, '?limit=100');
+      expect(
+        page.items.find((item: { id: string }) => item.id === said.body.id),
+      ).toMatchObject({ deleted: true, media: [] });
+    });
+
+    it('keeps the removal even when the file cannot be destroyed, and flags it for retry', async () => {
+      const mine = await upload(ann);
+      const said = await send(ann, 'oops', {
+        mediaUploadIds: [mine.id],
+      }).expect(201);
+      destroyAsset.mockRejectedValueOnce(new Error('cloud down'));
+
+      await request(app.getHttpServer())
+        .delete(`/games/${slug}/chat/messages/${said.body.id}`)
+        .set(as(ann))
+        .send({})
+        .expect(200);
+
+      expect(await statusOf(mine.id)).toBe('RELEASE_FAILED');
+    });
+
+    it('hides the pictures from someone who blocked the author', async () => {
+      const mine = await upload(ann);
+      const said = await send(ann, 'blocked pic', {
+        mediaUploadIds: [mine.id],
+      }).expect(201);
+      await db.chatUserBlock.create({
+        data: { blockerId: bo, blockedId: ann },
+      });
+      try {
+        const page = await messages(bo, '?limit=100');
+        expect(
+          page.items.find((item: { id: string }) => item.id === said.body.id),
+        ).toMatchObject({ blocked: true, media: [] });
+      } finally {
+        await db.chatUserBlock.deleteMany({ where: { blockerId: bo } });
+      }
+    });
+
+    it('quotes a picture-only message as having a picture', async () => {
+      const mine = await upload(ann);
+      const target = await send(ann, '', { mediaUploadIds: [mine.id] }).expect(
+        201,
+      );
+
+      const reply = await send(bo, 'nice', {
+        replyToId: target.body.id,
+      }).expect(201);
+
+      expect(reply.body.replyTo).toMatchObject({ content: '', hasMedia: true });
+    });
+
+    it('takes the pictures away with a removed community', async () => {
+      const [game, member] = [`cc-img-${token}`, id('imgmember')];
+      await db.user.create({
+        data: { id: member, name: 'Img', email: `${member}@example.invalid` },
+      });
+      const created = await db.game.create({
+        data: { name: 'Img fixture', slug: game },
+      });
+      const room = await db.gameChannel.create({
+        data: { gameId: created.id, slug: 'general', name: 'general' },
+      });
+      const mine = await upload(member);
+      const message = await db.gameChannelMessage.create({
+        data: {
+          channelId: room.id,
+          authorId: member,
+          content: '',
+          media: {
+            create: {
+              mediaUploadId: mine.id,
+              publicId: mine.publicId,
+              url: 'https://cdn.example.invalid/a.png',
+            },
+          },
+        },
+      });
+
+      await db.game.delete({ where: { id: created.id } });
+
+      expect(
+        await db.gameChannelMessageMedia.count({
+          where: { messageId: message.id },
+        }),
+      ).toBe(0);
+      await db.mediaUpload.delete({ where: { id: mine.id } });
+      await db.user.delete({ where: { id: member } });
+    });
+  });
+
   describe('data kept by the migration', () => {
     it('keeps messages of an account that is gone, without an author', async () => {
       const ghost = id('ghost');
@@ -761,11 +1021,6 @@ describe('Community chat API (real database)', () => {
     });
 
     it('enforces the message length check even for a write that skips the API', async () => {
-      await expect(
-        db.gameChannelMessage.create({
-          data: { channelId, authorId: ann, content: '' },
-        }),
-      ).rejects.toThrow();
       await expect(
         db.gameChannelMessage.create({
           data: { channelId, authorId: ann, content: 'x'.repeat(2001) },

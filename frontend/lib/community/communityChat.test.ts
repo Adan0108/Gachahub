@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  quoteText,
   buildRows,
   canEditCommunityMessage,
   dayLabel,
@@ -24,6 +25,7 @@ const message = (id: string, extra: Partial<CommunityMessage> = {}): CommunityMe
   editedAt: null,
   author: { id: "ann", name: "Ann", image: null, badge: null },
   replyTo: null,
+  media: [],
   reactions: [],
   ...extra,
 });
@@ -188,7 +190,14 @@ describe("buildRows", () => {
   });
 
   it("starts a new header for a reply, so the quote has a name above it", () => {
-    const reply = { id: "m0", content: "hi", deleted: false, blocked: false, authorName: "Bob" };
+    const reply = {
+      id: "m0",
+      content: "hi",
+      deleted: false,
+      blocked: false,
+      hasMedia: false,
+      authorName: "Bob",
+    };
 
     expect(shape(rows([message("m1"), message("m2", { replyTo: reply })]))).toEqual([
       "day:Today",
@@ -228,5 +237,19 @@ describe("buildRows", () => {
 
   it("is empty for an empty room", () => {
     expect(rows([])).toEqual([]);
+  });
+});
+
+describe("quoteText", () => {
+  it("quotes the text of a message", () => {
+    expect(quoteText({ content: "hi", hasMedia: true })).toBe("hi");
+  });
+
+  it("says Photo for a message that is pictures alone", () => {
+    expect(quoteText({ content: "", hasMedia: true })).toBe("Photo");
+  });
+
+  it("quotes nothing for a message with neither", () => {
+    expect(quoteText({ content: null, hasMedia: false })).toBe("");
   });
 });

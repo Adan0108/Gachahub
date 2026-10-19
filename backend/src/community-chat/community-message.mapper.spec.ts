@@ -29,6 +29,7 @@ const row = (
   createdAt: at,
   author: { id: 'u1', name: 'Ann', image: null, role: 'USER' },
   replyTo: null,
+  media: [],
   reactions: [],
   ...extra,
 });
@@ -86,6 +87,7 @@ describe('toCommunityMessage', () => {
           content: long,
           deletedAt: null,
           author: { id: 'u3', name: 'Bo' },
+          media: [],
         },
       }),
       viewer(),
@@ -100,7 +102,13 @@ describe('toCommunityMessage', () => {
     const message = toCommunityMessage(
       row({
         replyToId: 'm0',
-        replyTo: { id: 'm0', content: 'secret', deletedAt: at, author: null },
+        replyTo: {
+          id: 'm0',
+          content: 'secret',
+          deletedAt: at,
+          author: null,
+          media: [],
+        },
       }),
       viewer(),
     );
@@ -109,8 +117,68 @@ describe('toCommunityMessage', () => {
       id: 'm0',
       deleted: true,
       blocked: false,
+      hasMedia: false,
       content: null,
       authorName: null,
+    });
+  });
+
+  describe('images', () => {
+    const image = {
+      id: 'i1',
+      mediaUploadId: 'up1',
+      url: 'https://cdn.example.com/a.png',
+      width: 640,
+      height: 480,
+    };
+
+    it('shows the images of a message without the upload behind them', () => {
+      const message = toCommunityMessage(row({ media: [image] }), viewer());
+
+      expect(message.media).toEqual([
+        {
+          id: 'i1',
+          url: 'https://cdn.example.com/a.png',
+          width: 640,
+          height: 480,
+        },
+      ]);
+    });
+
+    it('shows none once the message was removed', () => {
+      const message = toCommunityMessage(
+        row({ media: [image], deletedAt: at }),
+        viewer(),
+      );
+
+      expect(message.media).toEqual([]);
+    });
+
+    it('shows none for a viewer who blocked the author', () => {
+      const message = toCommunityMessage(
+        row({ media: [image] }),
+        viewer({ blockedIds: new Set(['u1']) }),
+      );
+
+      expect(message.media).toEqual([]);
+    });
+
+    it('says a quoted message has pictures, so a picture-only one can still be quoted', () => {
+      const message = toCommunityMessage(
+        row({
+          replyToId: 'm0',
+          replyTo: {
+            id: 'm0',
+            content: '',
+            deletedAt: null,
+            author: { id: 'u3', name: 'Bo' },
+            media: [{ id: 'i1' }],
+          },
+        }),
+        viewer(),
+      );
+
+      expect(message.replyTo).toMatchObject({ content: '', hasMedia: true });
     });
   });
 
@@ -126,6 +194,7 @@ describe('toCommunityMessage', () => {
             content: 'mine',
             deletedAt: null,
             author: { id: 'me', name: 'Me' },
+            media: [],
           },
           reactions: [
             { userId: 'u2', emoji: '👍', emoteId: null, emote: null },
@@ -171,6 +240,7 @@ describe('toCommunityMessage', () => {
             content: 'secret words',
             deletedAt: null,
             author: { id: 'u1', name: 'Ann' },
+            media: [],
           },
         }),
         blocked,
@@ -180,6 +250,7 @@ describe('toCommunityMessage', () => {
         id: 'm0',
         deleted: false,
         blocked: true,
+        hasMedia: false,
         content: null,
         authorName: null,
       });

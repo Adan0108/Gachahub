@@ -16,6 +16,7 @@ describe('CommunityActionsService', () => {
   const access = { scope: jest.fn(), messageIn: jest.fn() };
   const presenter = { one: jest.fn() };
   const realtime = { changed: jest.fn() };
+  const media = { releaseReplacedUpload: jest.fn() };
 
   let service: CommunityActionsService;
 
@@ -33,6 +34,7 @@ describe('CommunityActionsService', () => {
       access as never,
       presenter as never,
       realtime as never,
+      media as never,
     );
   });
 
@@ -50,6 +52,19 @@ describe('CommunityActionsService', () => {
       expect(repository.updateContent).toHaveBeenCalledWith('m1', 'fixed');
       expect(message).toMatchObject({ content: 'fixed' });
       expect(message?.editedAt).not.toBeNull();
+    });
+
+    it('lets a message with pictures end up with no text, but not one without', async () => {
+      access.messageIn.mockResolvedValue(
+        row({ media: [{ id: 'i1', mediaUploadId: 'up1' }] }),
+      );
+      repository.updateContent.mockResolvedValue(row({ content: '' }));
+
+      await edit('   ');
+      expect(repository.updateContent).toHaveBeenCalledWith('m1', '');
+
+      access.messageIn.mockResolvedValue(row());
+      await expect(edit('   ')).rejects.toThrow(BadRequestException);
     });
 
     it('tells the room when the text changed, not when it did not', async () => {
@@ -137,6 +152,25 @@ describe('CommunityActionsService', () => {
       await remove('  spam  ');
 
       expect(repository.softDelete).toHaveBeenCalledWith('m1', 'me', 'spam');
+    });
+
+    it('destroys the pictures of a removed message', async () => {
+      const withImages = row({
+        media: [
+          { id: 'i1', mediaUploadId: 'up1' },
+          { id: 'i2', mediaUploadId: 'up2' },
+        ],
+      });
+      access.messageIn.mockResolvedValue(withImages);
+      repository.softDelete.mockResolvedValue({
+        ...withImages,
+        deletedAt: new Date(),
+      });
+
+      await remove();
+
+      expect(media.releaseReplacedUpload).toHaveBeenCalledWith('up1');
+      expect(media.releaseReplacedUpload).toHaveBeenCalledWith('up2');
     });
 
     it('does nothing the second time', async () => {

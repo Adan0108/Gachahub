@@ -27,9 +27,20 @@ export interface CommunityMessage {
     content: string | null;
     deleted: boolean;
     blocked: boolean;
+    /** The quoted message has pictures, so the client can say Photo when there is no text. */
+    hasMedia: boolean;
     authorName: string | null;
   } | null;
+  /** Images shown with the message; none once it is removed or its author is blocked. */
+  media: CommunityMedia[];
   reactions: CommunityReaction[];
+}
+
+export interface CommunityMedia {
+  id: string;
+  url: string;
+  width: number | null;
+  height: number | null;
 }
 
 export type CommunityReaction = CommunityReactionRow;
@@ -38,6 +49,15 @@ export type CommunityReaction = CommunityReactionRow;
 export interface CommunityReactions {
   id: string;
   reactions: CommunityReaction[];
+}
+
+function toMedia(media: CommunityMessageRow['media'][number]): CommunityMedia {
+  return {
+    id: media.id,
+    url: media.url,
+    width: media.width,
+    height: media.height,
+  };
 }
 
 function toReaction(reaction: CommunityReactionRow): CommunityReaction {
@@ -73,6 +93,7 @@ function presentReply(
     id: reply.id,
     deleted,
     blocked,
+    hasMedia: !deleted && !blocked && reply.media.length > 0,
     content: deleted || blocked ? null : snippet(reply.content),
     authorName: blocked ? null : (reply.author?.name ?? null),
   };
@@ -112,6 +133,7 @@ export function toCommunityMessage(
       editedAt: null,
       author: null,
       replyTo: null,
+      media: [],
       reactions: [],
     };
   }
@@ -133,6 +155,7 @@ export function toCommunityMessage(
         }
       : null,
     replyTo: row.replyTo ? presentReply(row.replyTo, blockedIds) : null,
+    media: deleted ? [] : row.media.map(toMedia),
     reactions: row.reactions.map(toReaction),
   };
 }

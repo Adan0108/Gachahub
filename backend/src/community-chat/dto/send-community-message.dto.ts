@@ -1,13 +1,37 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
-import { COMMUNITY_MESSAGE_MAX_CHARS } from '../community-chat.constants';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ArrayMaxSize,
+  ArrayUnique,
+  IsArray,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
+import {
+  COMMUNITY_MESSAGE_MAX_CHARS,
+  COMMUNITY_MESSAGE_MAX_IMAGES,
+} from '../community-chat.constants';
 
 export class SendCommunityMessageDto {
-  @ApiProperty({ example: 'Anyone running the new banner tonight?' })
+  @ApiPropertyOptional({
+    example: 'Anyone running the new banner tonight?',
+    description: 'Required unless the message carries images.',
+  })
+  @IsOptional()
   @IsString()
-  @MinLength(1)
   @MaxLength(COMMUNITY_MESSAGE_MAX_CHARS)
-  content!: string;
+  content?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Confirmed COMMUNITY uploads to show with the message.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(COMMUNITY_MESSAGE_MAX_IMAGES)
+  @ArrayUnique()
+  @IsString({ each: true })
+  mediaUploadIds?: string[];
 
   @ApiPropertyOptional({
     description: 'Message in the same channel this one replies to.',

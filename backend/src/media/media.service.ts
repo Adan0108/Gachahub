@@ -617,6 +617,14 @@ export class MediaService {
       }
     }
 
+    if (dto.purpose === MediaPurposeDto.COMMUNITY) {
+      if (videos > 0 || images > 4) {
+        throw new BadRequestException(
+          'A community message supports up to four images',
+        );
+      }
+    }
+
     if (
       SINGLE_IMAGE_PURPOSES.has(dto.purpose) &&
       (dto.items.length !== 1 || videos > 0)

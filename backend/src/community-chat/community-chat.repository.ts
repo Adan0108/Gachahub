@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
+import { claimUploadsForAttachment } from '../media/media.repository';
 import { PrismaService } from '../prisma/prisma.service';
 import { COMMUNITY_DEFAULT_CHANNEL } from './community-chat.constants';
 
@@ -22,6 +23,24 @@ const reactionSelect = {
   emote: { select: emoteSelect },
 } satisfies Prisma.GameChannelReactionSelect;
 
+const mediaSelect = {
+  id: true,
+  url: true,
+  width: true,
+  height: true,
+  mediaUploadId: true,
+} satisfies Prisma.GameChannelMessageMediaSelect;
+
+export interface CommunityMediaInput {
+  mediaUploadId: string;
+  publicId: string;
+  url: string;
+  width: number | null;
+  height: number | null;
+  bytes: number | null;
+  format: string | null;
+}
+
 const messageInclude = {
   author: { select: { id: true, name: true, image: true, role: true } },
   replyTo: {
@@ -30,8 +49,10 @@ const messageInclude = {
       content: true,
       deletedAt: true,
       author: { select: { id: true, name: true } },
+      media: { select: { id: true }, take: 1 },
     },
   },
+  media: { orderBy: { sortOrder: 'asc' }, select: mediaSelect },
   reactions: { orderBy: { createdAt: 'asc' }, select: reactionSelect },
 } satisfies Prisma.GameChannelMessageInclude;
 
@@ -158,6 +179,7 @@ export class CommunityChatRepository {
   /**
    * Saves a message. With slow mode on, the wait check and the insert happen under one lock per
    * person and room, so two requests at once cannot both pass; the loser gets how long to wait.
+   * Images are claimed in the same transaction, so a message never points at an upload someone else took.
    */
   async createMessage(
     data: {
@@ -168,8 +190,9 @@ export class CommunityChatRepository {
       clientMessageId?: string;
     },
     slowmodeSeconds = 0,
+    media: CommunityMediaInput[] = [],
   ): Promise<{ created: CommunityMessageRow } | { waitMs: number }> {
-    if (slowmodeSeconds <= 0) {
+    if (slowmodeSeconds <= 0 && media.length === 0) {
       const created = await this.prisma.gameChannelMessage.create({
         data,
         include: messageInclude,
@@ -178,21 +201,36 @@ export class CommunityChatRepository {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${data.channelId}:${data.authorId}`}, 0))`;
+      if (slowmodeSeconds > 0) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${data.channelId}:${data.authorId}`}, 0))`;
 
-      const last = await tx.gameChannelMessage.findFirst({
-        where: { channelId: data.channelId, authorId: data.authorId },
-        orderBy: { createdAt: 'desc' },
-        select: { createdAt: true },
-      });
-      if (last) {
-        const waitMs =
-          slowmodeSeconds * 1000 - (Date.now() - last.createdAt.getTime());
-        if (waitMs > 0) return { waitMs };
+        const last = await tx.gameChannelMessage.findFirst({
+          where: { channelId: data.channelId, authorId: data.authorId },
+          orderBy: { createdAt: 'desc' },
+          select: { createdAt: true },
+        });
+        if (last) {
+          const waitMs =
+            slowmodeSeconds * 1000 - (Date.now() - last.createdAt.getTime());
+          if (waitMs > 0) return { waitMs };
+        }
+      }
+
+      if (media.length > 0) {
+        await claimUploadsForAttachment(tx, {
+          ids: media.map((item) => item.mediaUploadId),
+          userId: data.authorId,
+          purpose: 'COMMUNITY',
+        });
       }
 
       const created = await tx.gameChannelMessage.create({
-        data,
+        data: {
+          ...data,
+          media: {
+            create: media.map((item, sortOrder) => ({ ...item, sortOrder })),
+          },
+        },
         include: messageInclude,
       });
       return { created };

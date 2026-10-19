@@ -39,6 +39,7 @@ export const row = (extra: Record<string, unknown> = {}) =>
     createdAt: new Date(),
     author: { id: 'me', name: 'Me', image: null, role: 'USER' },
     replyTo: null,
+    media: [],
     reactions: [],
     channel: { id: 'c1', gameId: 'g1', isLocked: false },
     ...extra,

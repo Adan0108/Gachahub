@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { BlocksModule } from '../blocks/blocks.module';
 import { GameModeratorsModule } from '../game-moderators/game-moderators.module';
+import { MediaModule } from '../media/media.module';
 import { WebsocketModule } from '../websocket/websocket.module';
 import { CommunityAccessService } from './community-access.service';
 import { CommunityActionsService } from './community-actions.service';
@@ -15,7 +16,7 @@ import { CommunityRealtimeService } from './community-realtime.service';
 
 /** Public chat rooms for game communities; plaintext so moderators can read and remove messages. */
 @Module({
-  imports: [BlocksModule, GameModeratorsModule, WebsocketModule],
+  imports: [BlocksModule, GameModeratorsModule, MediaModule, WebsocketModule],
   controllers: [CommunityChatController],
   providers: [
     CommunityChatRepository,

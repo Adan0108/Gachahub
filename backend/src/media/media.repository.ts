@@ -153,6 +153,9 @@ export class MediaRepository {
       this.prisma.chatMessageMedia.deleteMany({
         where: { mediaUploadId: id },
       }),
+      this.prisma.gameChannelMessageMedia.deleteMany({
+        where: { mediaUploadId: id },
+      }),
     ]);
   }
 

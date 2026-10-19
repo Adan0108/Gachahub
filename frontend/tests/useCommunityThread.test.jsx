@@ -24,6 +24,7 @@ const message = (id, minute) => ({
   editedAt: null,
   author: { id: "ann", name: "Ann", image: null, badge: null },
   replyTo: null,
+  media: [],
   reactions: [],
 });
 
@@ -175,8 +176,18 @@ describe("useCommunityThread", () => {
 
       act(() => result.current.send("hi"));
 
-      expect(chat.send).toHaveBeenCalledWith("hi", target);
+      expect(chat.send).toHaveBeenCalledWith("hi", target, []);
       expect(result.current.replyTo).toBeNull();
+    });
+
+    it("hands the pictures on with the message", () => {
+      const chat = makeChat();
+      const { result } = setup(chat);
+      const files = [new File(["x"], "a.png", { type: "image/png" })];
+
+      act(() => result.current.send("hi", files));
+
+      expect(chat.send).toHaveBeenCalledWith("hi", null, files);
     });
 
     it("sends without a reply target when none was chosen", () => {
@@ -185,7 +196,7 @@ describe("useCommunityThread", () => {
 
       act(() => result.current.send("hi"));
 
-      expect(chat.send).toHaveBeenCalledWith("hi", null);
+      expect(chat.send).toHaveBeenCalledWith("hi", null, []);
     });
   });
 

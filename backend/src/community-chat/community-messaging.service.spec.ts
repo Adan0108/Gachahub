@@ -26,6 +26,7 @@ describe('CommunityMessagingService', () => {
   const rateLimiter = { assertNotRateLimited: jest.fn() };
   const presenter = { page: jest.fn(), one: jest.fn() };
   const realtime = { changed: jest.fn() };
+  const media = { resolveAttachableMedia: jest.fn() };
 
   let service: CommunityMessagingService;
 
@@ -35,6 +36,7 @@ describe('CommunityMessagingService', () => {
     access.channelIn.mockResolvedValue(channel);
     repository.findByClientMessageId.mockResolvedValue(null);
     repository.findMessageInChannel.mockResolvedValue({ id: 'm0' });
+    media.resolveAttachableMedia.mockResolvedValue([]);
     repository.createMessage.mockImplementation(
       (data: { content: string; channelId: string }) =>
         Promise.resolve({
@@ -55,6 +57,7 @@ describe('CommunityMessagingService', () => {
       rateLimiter as never,
       presenter as never,
       realtime as never,
+      media as never,
     );
   });
 
@@ -154,6 +157,7 @@ describe('CommunityMessagingService', () => {
           clientMessageId: undefined,
         },
         0,
+        [],
       );
       expect(presenter.one).toHaveBeenCalledTimes(1);
       expect(message).toMatchObject({ content: 'hi there', channelId: 'c1' });
@@ -172,6 +176,111 @@ describe('CommunityMessagingService', () => {
       await send({ content: ` ${ZWSP} ` }).catch(() => undefined);
 
       expect(realtime.changed).not.toHaveBeenCalled();
+    });
+
+    describe('with images', () => {
+      const upload = {
+        id: 'up1',
+        publicId: 'gachahub/community/me/up1',
+        secureUrl: 'https://cdn.example.com/up1.png',
+        width: 640,
+        height: 480,
+        bytes: 1000,
+        format: 'png',
+      };
+
+      beforeEach(() => {
+        media.resolveAttachableMedia.mockResolvedValue([upload]);
+      });
+
+      it('claims only COMMUNITY uploads of up to four images for the sender', async () => {
+        await send({ mediaUploadIds: ['up1'] });
+
+        expect(media.resolveAttachableMedia).toHaveBeenCalledWith(
+          expect.objectContaining({
+            ids: ['up1'],
+            userId: 'me',
+            purpose: 'COMMUNITY',
+            maxImages: 4,
+            maxVideos: 0,
+          }),
+        );
+      });
+
+      it('saves the images with the message', async () => {
+        await send({ mediaUploadIds: ['up1'] });
+
+        expect(repository.createMessage).toHaveBeenCalledWith(
+          expect.objectContaining({ content: 'hello' }),
+          0,
+          [
+            {
+              mediaUploadId: 'up1',
+              publicId: 'gachahub/community/me/up1',
+              url: 'https://cdn.example.com/up1.png',
+              width: 640,
+              height: 480,
+              bytes: 1000,
+              format: 'png',
+            },
+          ],
+        );
+      });
+
+      it('keeps the pictures in the order the sender picked', async () => {
+        media.resolveAttachableMedia.mockResolvedValue([
+          { ...upload, id: 'up1' },
+          { ...upload, id: 'up2' },
+        ]);
+
+        await send({ mediaUploadIds: ['up2', 'up1'] });
+
+        const [, , saved] = repository.createMessage.mock.calls[0] as [
+          unknown,
+          unknown,
+          Array<{ mediaUploadId: string }>,
+        ];
+        expect(saved.map((item) => item.mediaUploadId)).toEqual(['up2', 'up1']);
+      });
+
+      it('lets pictures carry a message with no text', async () => {
+        await send({ content: undefined, mediaUploadIds: ['up1'] });
+        await send({ content: ` ${ZWSP} `, mediaUploadIds: ['up1'] });
+
+        expect(repository.createMessage).toHaveBeenCalledTimes(2);
+        expect(repository.createMessage).toHaveBeenCalledWith(
+          expect.objectContaining({ content: '' }),
+          0,
+          expect.any(Array),
+        );
+      });
+
+      it('still refuses an empty message when there are no images', async () => {
+        await expect(send({ content: undefined })).rejects.toThrow(
+          BadRequestException,
+        );
+      });
+
+      it('refuses uploads that are not the sender own, and saves nothing', async () => {
+        media.resolveAttachableMedia.mockRejectedValue(
+          new BadRequestException('Media uploads cannot be attached: up9'),
+        );
+
+        await expect(send({ mediaUploadIds: ['up9'] })).rejects.toThrow(
+          /cannot be attached/,
+        );
+        expect(repository.createMessage).not.toHaveBeenCalled();
+      });
+
+      it('does not look at uploads for a retry that already went through', async () => {
+        repository.findByClientMessageId.mockResolvedValue(
+          row({ id: 'again' }),
+        );
+
+        await send({ clientMessageId: 'c1', mediaUploadIds: ['up1'] });
+
+        expect(media.resolveAttachableMedia).not.toHaveBeenCalled();
+      });
     });
 
     it('refuses a message that is empty once cleaned', async () => {
@@ -245,6 +354,7 @@ describe('CommunityMessagingService', () => {
       expect(repository.createMessage).toHaveBeenCalledWith(
         expect.objectContaining({ replyToId: 'm0' }),
         0,
+        [],
       );
     });
 
@@ -301,6 +411,7 @@ describe('CommunityMessagingService', () => {
         expect(repository.createMessage).toHaveBeenCalledWith(
           expect.anything(),
           10,
+          [],
         );
         expect(realtime.changed).not.toHaveBeenCalled();
       });
@@ -312,6 +423,7 @@ describe('CommunityMessagingService', () => {
         expect(repository.createMessage).toHaveBeenLastCalledWith(
           expect.anything(),
           60,
+          [],
         );
 
         asModerator();
@@ -319,6 +431,7 @@ describe('CommunityMessagingService', () => {
         expect(repository.createMessage).toHaveBeenLastCalledWith(
           expect.anything(),
           0,
+          [],
         );
       });
     });

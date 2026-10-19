@@ -161,13 +161,36 @@ export function useCommunityChat(slug, { enabled = true } = {}) {
   // Messages on their way out, kept apart from the room so a failure can be retried or dropped.
   const [pending, setPending] = useState([]);
 
+  // Uploads the pictures that are not up yet; the ones that made it are kept on the entry, so a retry only sends the rest.
+  const uploadImages = useCallback(async (entry) => {
+    const files = entry.files ?? [];
+    const uploaded = [...(entry.uploaded ?? [])];
+    const todo = files.filter((file) => !uploaded.some((item) => item.file === file));
+    const results = await Promise.allSettled(
+      todo.map((file) => api.uploadSingleImage(file, "COMMUNITY")),
+    );
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        uploaded.push({ file: todo[index], mediaUploadId: result.value.mediaUploadId });
+      }
+    });
+    setPending((list) =>
+      list.map((item) => (item.clientId === entry.clientId ? { ...item, uploaded } : item)),
+    );
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure) throw new Error(failure.reason?.message || "Could not upload an image.");
+    return files.map((file) => uploaded.find((item) => item.file === file).mediaUploadId);
+  }, []);
+
   const sendNow = useCallback(
     async (entry) => {
       try {
+        const mediaUploadIds = await uploadImages(entry);
         const message = await api.sendCommunityMessage(slug, channelId, {
           content: entry.content,
           replyToId: entry.replyTo?.id,
           clientMessageId: entry.clientId,
+          ...(mediaUploadIds.length ? { mediaUploadIds } : {}),
         });
         putMessage(message);
         setPending((list) => list.filter((item) => item.clientId !== entry.clientId));
@@ -182,14 +205,16 @@ export function useCommunityChat(slug, { enabled = true } = {}) {
         );
       }
     },
-    [slug, channelId, putMessage, queryClient],
+    [slug, channelId, putMessage, queryClient, uploadImages],
   );
 
   const send = useCallback(
-    (content, replyTo) => {
+    (content, replyTo, files = []) => {
       const entry = {
         clientId: crypto.randomUUID(),
         content,
+        files,
+        uploaded: [],
         replyTo: replyTo ?? null,
         status: "sending",
         error: null,

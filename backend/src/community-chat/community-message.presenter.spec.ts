@@ -58,6 +58,7 @@ describe('CommunityMessagePresenter', () => {
             content: 'hi',
             deletedAt: null,
             author: { id: 'cy', name: 'Cy' },
+            media: [],
           },
         }),
       ]);
@@ -130,6 +131,7 @@ describe('CommunityMessagePresenter', () => {
           content: 'hi',
           deletedAt: null,
           author: { id: 'bo', name: 'Bo' },
+          media: [],
         },
       });
 
@@ -149,6 +151,7 @@ describe('CommunityMessagePresenter', () => {
           content: 'mine',
           deletedAt: null,
           author: { id: 'me', name: 'Me' },
+          media: [],
         },
       });
 

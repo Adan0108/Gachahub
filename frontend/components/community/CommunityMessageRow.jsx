@@ -9,7 +9,9 @@ import { ReactionChips } from "../chat/ReactionChips";
 import {
   COMMUNITY_MESSAGE_MAX_CHARS,
   canEditCommunityMessage,
+  quoteText,
 } from "../../lib/community/communityChat";
+import { CommunityImages } from "./CommunityImages";
 
 const BADGE_LABEL = { ADMIN: "Admin", MODERATOR: "Mod" };
 
@@ -30,7 +32,7 @@ function Author({ author }) {
 }
 
 /** Edits a message in place: Enter saves, Escape cancels. */
-function EditBox({ initial, isSaving, error, onSave, onCancel }) {
+function EditBox({ initial, allowEmpty, isSaving, error, onSave, onCancel }) {
   const [draft, setDraft] = useState(initial);
   const unchanged = draft.trim() === initial.trim();
 
@@ -45,7 +47,7 @@ function EditBox({ initial, isSaving, error, onSave, onCancel }) {
           if (event.key === "Escape") onCancel();
           if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault();
-            if (!unchanged && draft.trim()) onSave(draft);
+            if (!unchanged && (allowEmpty || draft.trim())) onSave(draft);
           }
         }}
         rows={2}
@@ -63,7 +65,7 @@ function EditBox({ initial, isSaving, error, onSave, onCancel }) {
         </button>
         <button
           className="primary"
-          disabled={isSaving || unchanged || !draft.trim()}
+          disabled={isSaving || unchanged || !(allowEmpty || draft.trim())}
           onClick={() => onSave(draft)}
           type="button"
         >
@@ -159,7 +161,7 @@ export function CommunityMessageRow({
                 ? "Blocked message"
                 : message.replyTo.deleted
                   ? "Message removed"
-                  : message.replyTo.content}
+                  : quoteText(message.replyTo)}
             </span>
           </button>
         )}
@@ -168,6 +170,7 @@ export function CommunityMessageRow({
           <p className="community-removed">Message removed</p>
         ) : isEditing ? (
           <EditBox
+            allowEmpty={message.media.length > 0}
             error={editState.error}
             initial={message.content}
             isSaving={editState.isPending}
@@ -178,11 +181,15 @@ export function CommunityMessageRow({
             onSave={save}
           />
         ) : (
-          <p className="community-text">
-            <LinkifiedText text={message.content} />
-            {message.editedAt && <small className="community-edited"> (edited)</small>}
-          </p>
+          (message.content || message.editedAt) && (
+            <p className="community-text">
+              <LinkifiedText text={message.content} />
+              {message.editedAt && <small className="community-edited"> (edited)</small>}
+            </p>
+          )
         )}
+
+        {!message.deleted && !isEditing && <CommunityImages images={message.media} />}
 
         {!message.deleted && (
           <ReactionChips
@@ -195,7 +202,7 @@ export function CommunityMessageRow({
 
       {!message.deleted && !isEditing && (
         <MessageActions
-          canCopy
+          canCopy={Boolean(message.content)}
           canEdit={canEdit}
           canRemove={isOwn || canModerate}
           onCopy={() => navigator.clipboard?.writeText(message.content)}

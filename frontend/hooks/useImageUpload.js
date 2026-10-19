@@ -10,15 +10,21 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 // Mirrors the policy MediaService enforces at confirm time (see backend .env.example for the
 // Cloudinary preset limits) - this is only for instant feedback.
-function assertAcceptableImage(file) {
+export function imageFileProblem(file) {
   // An empty type means the browser couldn't infer one, not that the file is wrong; the
   // backend decides by the real format after upload.
   if (file.type && !IMAGE_ACCEPT.split(",").includes(file.type)) {
-    throw new Error("Use a JPG, PNG, WebP or GIF image");
+    return "Use a JPG, PNG, WebP or GIF image";
   }
   if (file.size > MAX_IMAGE_BYTES) {
-    throw new Error("Image must be 10 MB or smaller");
+    return "Image must be 10 MB or smaller";
   }
+  return null;
+}
+
+function assertAcceptableImage(file) {
+  const problem = imageFileProblem(file);
+  if (problem) throw new Error(problem);
 }
 
 /**

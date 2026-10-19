@@ -530,12 +530,13 @@ model GameChannelMessage {
 
   createdAt DateTime @default(now())
 
-  channel   GameChannel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  author    User?                 @relation("GameChannelMessageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
-  deletedBy User?                 @relation("GameChannelMessageDeleter", fields: [deletedById], references: [id], onDelete: SetNull)
-  replyTo   GameChannelMessage?   @relation("GameChannelMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies   GameChannelMessage[]  @relation("GameChannelMessageReplies")
+  channel   GameChannel               @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author    User?                     @relation("GameChannelMessageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  deletedBy User?                     @relation("GameChannelMessageDeleter", fields: [deletedById], references: [id], onDelete: SetNull)
+  replyTo   GameChannelMessage?       @relation("GameChannelMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   GameChannelMessage[]      @relation("GameChannelMessageReplies")
   reactions GameChannelReaction[]
+  media     GameChannelMessageMedia[]
 
   @@unique([authorId, clientMessageId])
   @@index([channelId, createdAt, id])
@@ -601,6 +602,31 @@ model GameChannelReadState {
   @@id([userId, channelId])
   @@index([channelId])
   @@map("game_channel_read_states")
+}
+
+/// An image attached to a community chat message.
+model GameChannelMessageMedia {
+  id            String @id @default(cuid())
+  messageId     String
+  mediaUploadId String @unique
+
+  publicId String
+  url      String
+
+  sortOrder Int @default(0)
+
+  width  Int?
+  height Int?
+  bytes  Int?
+  format String?
+
+  createdAt DateTime @default(now())
+
+  message     GameChannelMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  mediaUpload MediaUpload        @relation(fields: [mediaUploadId], references: [id], onDelete: Restrict)
+
+  @@index([messageId, sortOrder])
+  @@map("game_channel_message_media")
 }
 
 model ChatMessageMedia {
@@ -884,6 +910,7 @@ enum MediaPurpose {
   GAME_ICON
   GAME_BANNER
   GROUP_PHOTO
+  COMMUNITY
 }
 
 enum MediaResourceType {
@@ -943,13 +970,14 @@ model MediaUpload {
   attachedAt DateTime?
   deletedAt  DateTime?
 
-  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  postMedia         PostMedia?
-  chatMessageMedia  ChatMessageMedia?
-  gameIconFor       Game?             @relation("GameIconUpload")
-  gameBannerFor     Game?             @relation("GameBannerUpload")
-  avatarFor         User?             @relation("UserAvatarUpload")
-  chatGroupPhotoFor ChatConversation? @relation("ChatGroupPhotoUpload")
+  user                  User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postMedia             PostMedia?
+  chatMessageMedia      ChatMessageMedia?
+  gameIconFor           Game?                    @relation("GameIconUpload")
+  gameBannerFor         Game?                    @relation("GameBannerUpload")
+  avatarFor             User?                    @relation("UserAvatarUpload")
+  chatGroupPhotoFor     ChatConversation?        @relation("ChatGroupPhotoUpload")
+  communityMessageMedia GameChannelMessageMedia?
 
   @@index([userId, status, createdAt])
   @@index([status, createdAt])

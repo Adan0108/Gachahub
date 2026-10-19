@@ -1,5 +1,6 @@
 export const COMMUNITY_MESSAGE_MAX_CHARS = 2000;
 export const COMMUNITY_DELETE_REASON_MAX_CHARS = 200;
+export const COMMUNITY_MESSAGE_MAX_IMAGES = 4;
 /** The badge shows "99+" past this, so counting further is wasted work. */
 export const COMMUNITY_UNREAD_CAP = 99;
 export const COMMUNITY_HISTORY_DEFAULT_LIMIT = 50;

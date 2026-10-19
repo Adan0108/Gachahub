@@ -8,6 +8,7 @@ import {
   MESSAGE_EDIT_WINDOW_MS,
   isEditWindowOpen,
 } from '../chat/message-edit-policy';
+import { MediaService } from '../media/media.service';
 import { CommunityAccessService } from './community-access.service';
 import { CommunityChatRepository } from './community-chat.repository';
 import { toCommunityReactions } from './community-message.mapper';
@@ -25,6 +26,7 @@ export class CommunityActionsService {
     private readonly access: CommunityAccessService,
     private readonly presenter: CommunityMessagePresenter,
     private readonly realtime: CommunityRealtimeService,
+    private readonly media: MediaService,
   ) {}
 
   async edit(
@@ -48,7 +50,7 @@ export class CommunityActionsService {
       );
     }
 
-    const content = validMessageContent(dto.content);
+    const content = validMessageContent(dto.content, message.media.length > 0);
     if (content === message.content) return this.presenter.one(scope, message);
 
     const updated = await this.repository.updateContent(message.id, content);
@@ -79,6 +81,12 @@ export class CommunityActionsService {
       reason,
     );
     this.realtime.changed(message.channelId, message.id);
+    // Pictures are not kept as evidence: the files are destroyed, a failure is retried hourly
+    await Promise.all(
+      message.media.map((item) =>
+        this.media.releaseReplacedUpload(item.mediaUploadId),
+      ),
+    );
     return this.presenter.one(scope, removed);
   }
 

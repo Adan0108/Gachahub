@@ -1,6 +1,8 @@
 import type { ChatEmote, RawReaction } from "../chat/chatReactions";
 
 export const COMMUNITY_MESSAGE_MAX_CHARS = 2000;
+/** Pictures one message can carry; the server enforces the same limit. */
+export const COMMUNITY_MAX_IMAGES = 4;
 /** The counter only appears this close to the limit, so it does not nag while typing. */
 export const COMMUNITY_COUNTER_FROM_CHARS = 1800;
 /** Same window as the server: authors can edit for this long. */
@@ -9,6 +11,13 @@ export const COMMUNITY_EDIT_WINDOW_MS = 15 * 60 * 1000;
 export const COMMUNITY_GROUP_WINDOW_MS = 5 * 60 * 1000;
 
 export type CommunityBadge = "ADMIN" | "MODERATOR";
+
+export interface CommunityMedia {
+  id: string;
+  url: string;
+  width: number | null;
+  height: number | null;
+}
 
 /** One message of a community room as the server sends it; mirrors CommunityMessage in backend/src/community-chat/community-message.mapper.ts. */
 export interface CommunityMessage {
@@ -27,8 +36,12 @@ export interface CommunityMessage {
     content: string | null;
     deleted: boolean;
     blocked: boolean;
+    /** The quoted message has pictures, so a quote with no text can say Photo. */
+    hasMedia: boolean;
     authorName: string | null;
   } | null;
+  /** Pictures shown with the message, in the order they were picked; none once it is removed. */
+  media: CommunityMedia[];
   reactions: Array<RawReaction & { emote: ChatEmote | null }>;
 }
 
@@ -91,6 +104,11 @@ export function patchMessage(
       items: page.items.map((item) => (item.id === messageId ? update(item) : item)),
     })),
   };
+}
+
+/** What a quote of a message shows: its text, or Photo when it is pictures alone. */
+export function quoteText(quote: { content: string | null; hasMedia?: boolean }): string {
+  return quote.content || (quote.hasMedia ? "Photo" : "");
 }
 
 /** Whether this person can still edit this message. */
