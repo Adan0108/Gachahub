@@ -815,4 +815,124 @@ describe('Community chat API (real database)', () => {
       ).toBe(0);
     });
   });
+
+  describe('two requests at once', () => {
+    const roomWith = async (slug: string, slowmodeSeconds = 0) =>
+      db.gameChannel.create({
+        data: { gameId, slug, name: slug, slowmodeSeconds },
+      });
+
+    it('lets only one of two simultaneous messages through slow mode, the other gets 429', async () => {
+      for (let round = 0; round < 5; round += 1) {
+        const room = await roomWith(`race-slow-${round}`, 60);
+        // Their last message is long enough ago, so slow mode would allow exactly one more.
+        await db.gameChannelMessage.create({
+          data: {
+            channelId: room.id,
+            authorId: ann,
+            content: 'old',
+            createdAt: new Date(Date.now() - 120_000),
+          },
+        });
+
+        const results = await Promise.all(
+          ['one', 'two'].map((content) =>
+            post(ann, `${BASE}/channels/${room.id}/messages`, { content }),
+          ),
+        );
+
+        expect(results.map((result) => result.status).sort()).toEqual([
+          201, 429,
+        ]);
+        expect(
+          await db.gameChannelMessage.count({
+            where: {
+              channelId: room.id,
+              authorId: ann,
+              content: { not: 'old' },
+            },
+          }),
+        ).toBe(1);
+      }
+    });
+
+    it('does not make a different member wait because of someone else sending', async () => {
+      const room = await roomWith('race-slow-others', 60);
+
+      const results = await Promise.all(
+        [ann, bo].map((user) =>
+          post(user, `${BASE}/channels/${room.id}/messages`, { content: 'hi' }),
+        ),
+      );
+
+      expect(results.map((result) => result.status)).toEqual([201, 201]);
+    });
+
+    it('never moves the read position back when an older mark lands after a newer one', async () => {
+      const repository = app.get(CommunityChatRepository);
+      const room = await roomWith('race-read');
+      const older = await db.gameChannelMessage.create({
+        data: {
+          channelId: room.id,
+          authorId: ann,
+          content: 'older',
+          createdAt: new Date(Date.now() - 60_000),
+        },
+      });
+      const newer = await db.gameChannelMessage.create({
+        data: {
+          channelId: room.id,
+          authorId: ann,
+          content: 'newer',
+          createdAt: new Date(Date.now() - 10_000),
+        },
+      });
+      const mark = (message: { id: string; createdAt: Date }) =>
+        repository.markRead({
+          userId: bo,
+          channelId: room.id,
+          at: message.createdAt,
+          messageId: message.id,
+        });
+      const position = async () =>
+        db.gameChannelReadState.findUniqueOrThrow({
+          where: { userId_channelId: { userId: bo, channelId: room.id } },
+        });
+
+      // The older one finishing last, which is what two tabs can do.
+      await mark(newer);
+      await mark(older);
+      expect((await position()).lastReadAt).toEqual(newer.createdAt);
+      expect((await position()).lastReadMessageId).toBe(newer.id);
+
+      // Many overlapping marks in any order end at the newest.
+      for (let round = 0; round < 20; round += 1) {
+        await Promise.all(
+          [older, newer, older, newer, older].map((message) => mark(message)),
+        );
+        expect((await position()).lastReadAt).toEqual(newer.createdAt);
+      }
+    });
+
+    it('moves the position forward, and creates it the first time', async () => {
+      const repository = app.get(CommunityChatRepository);
+      const room = await roomWith('race-read-forward');
+      const first = new Date(Date.now() - 60_000);
+      const second = new Date(Date.now() - 30_000);
+      const read = () =>
+        db.gameChannelReadState.findUnique({
+          where: { userId_channelId: { userId: ann, channelId: room.id } },
+        });
+
+      await repository.markRead({ userId: ann, channelId: room.id, at: first });
+      expect((await read())?.lastReadAt).toEqual(first);
+
+      await repository.markRead({
+        userId: ann,
+        channelId: room.id,
+        at: second,
+      });
+      expect((await read())?.lastReadAt).toEqual(second);
+    });
+  });
 });

@@ -94,7 +94,6 @@ export class CommunityMessagingService {
         throw new ForbiddenException('This channel is locked');
       }
       this.rateLimiter.assertNotRateLimited(user.id, channel.id);
-      await this.assertSlowmodeElapsed(channel, user.id);
     }
 
     if (dto.replyToId) {
@@ -108,15 +107,21 @@ export class CommunityMessagingService {
     }
 
     try {
-      const created = await this.repository.createMessage({
-        channelId: channel.id,
-        authorId: user.id,
-        content,
-        replyToId: dto.replyToId,
-        clientMessageId: dto.clientMessageId,
-      });
+      // Moderators are exempt from slow mode; for everyone else the wait is checked as the message is saved.
+      const saved = await this.repository.createMessage(
+        {
+          channelId: channel.id,
+          authorId: user.id,
+          content,
+          replyToId: dto.replyToId,
+          clientMessageId: dto.clientMessageId,
+        },
+        canModerate ? 0 : channel.slowmodeSeconds,
+      );
+      if ('waitMs' in saved) throwSlowMode(saved.waitMs);
+
       this.realtime.changed(channel.id);
-      return await this.presenter.one(scope, created);
+      return await this.presenter.one(scope, saved.created);
     } catch (error) {
       // Two sends with one client id at once: the loser gets the winner's message.
       if (
@@ -132,24 +137,12 @@ export class CommunityMessagingService {
       throw error;
     }
   }
+}
 
-  private async assertSlowmodeElapsed(
-    channel: { id: string; slowmodeSeconds: number },
-    userId: string,
-  ) {
-    if (channel.slowmodeSeconds <= 0) return;
-
-    const last = await this.repository.lastMessageAtBy(channel.id, userId);
-    if (!last) return;
-
-    const waitMs =
-      channel.slowmodeSeconds * 1000 - (Date.now() - last.getTime());
-    if (waitMs > 0) {
-      const seconds = Math.ceil(waitMs / 1000);
-      throw new RateLimitedException(
-        `Slow mode is on, wait ${seconds}s before sending again`,
-        seconds,
-      );
-    }
-  }
+function throwSlowMode(waitMs: number): never {
+  const seconds = Math.ceil(waitMs / 1000);
+  throw new RateLimitedException(
+    `Slow mode is on, wait ${seconds}s before sending again`,
+    seconds,
+  );
 }

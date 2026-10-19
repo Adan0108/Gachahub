@@ -17,7 +17,6 @@ describe('CommunityMessagingService', () => {
     findByClientMessageId: jest.fn(),
     findMessageInChannel: jest.fn(),
     createMessage: jest.fn(),
-    lastMessageAtBy: jest.fn(),
   };
   const access = { scope: jest.fn(), channelIn: jest.fn() };
   const rateLimiter = { assertNotRateLimited: jest.fn() };
@@ -32,12 +31,11 @@ describe('CommunityMessagingService', () => {
     access.channelIn.mockResolvedValue(channel);
     repository.findByClientMessageId.mockResolvedValue(null);
     repository.findMessageInChannel.mockResolvedValue({ id: 'm0' });
-    repository.lastMessageAtBy.mockResolvedValue(null);
     repository.createMessage.mockImplementation(
       (data: { content: string; channelId: string }) =>
-        Promise.resolve(
-          row({ content: data.content, channelId: data.channelId }),
-        ),
+        Promise.resolve({
+          created: row({ content: data.content, channelId: data.channelId }),
+        }),
     );
     // The presenter is covered by its own spec; here it just echoes what it was given.
     presenter.page.mockImplementation(
@@ -125,13 +123,16 @@ describe('CommunityMessagingService', () => {
     it('posts the cleaned text and returns the presented message', async () => {
       const message = await send({ content: `  hi${ZWSP} there  ` });
 
-      expect(repository.createMessage).toHaveBeenCalledWith({
-        channelId: 'c1',
-        authorId: 'me',
-        content: 'hi there',
-        replyToId: undefined,
-        clientMessageId: undefined,
-      });
+      expect(repository.createMessage).toHaveBeenCalledWith(
+        {
+          channelId: 'c1',
+          authorId: 'me',
+          content: 'hi there',
+          replyToId: undefined,
+          clientMessageId: undefined,
+        },
+        0,
+      );
       expect(presenter.one).toHaveBeenCalledTimes(1);
       expect(message).toMatchObject({ content: 'hi there', channelId: 'c1' });
     });
@@ -221,6 +222,7 @@ describe('CommunityMessagingService', () => {
 
       expect(repository.createMessage).toHaveBeenCalledWith(
         expect.objectContaining({ replyToId: 'm0' }),
+        0,
       );
     });
 
@@ -266,39 +268,36 @@ describe('CommunityMessagingService', () => {
         expect(rateLimiter.assertNotRateLimited).not.toHaveBeenCalled();
       });
 
-      it('makes a member wait out slow mode', async () => {
+      it('makes a member wait out slow mode, the check being part of saving the message', async () => {
         access.channelIn.mockResolvedValue({ ...channel, slowmodeSeconds: 10 });
-        repository.lastMessageAtBy.mockResolvedValue(
-          new Date(Date.now() - 3000),
-        );
+        repository.createMessage.mockResolvedValue({ waitMs: 6500 });
 
         const failure = await send().catch((error: unknown) => error);
 
         expect(failure).toBeInstanceOf(RateLimitedException);
-        const { retryAfterSeconds } = failure as RateLimitedException;
-        expect(retryAfterSeconds).toBeGreaterThan(0);
-        expect(retryAfterSeconds).toBeLessThanOrEqual(7);
-      });
-
-      it('lets a member send once slow mode has passed, or the first time', async () => {
-        access.channelIn.mockResolvedValue({ ...channel, slowmodeSeconds: 10 });
-
-        repository.lastMessageAtBy.mockResolvedValue(
-          new Date(Date.now() - 11_000),
+        expect((failure as RateLimitedException).retryAfterSeconds).toBe(7);
+        expect(repository.createMessage).toHaveBeenCalledWith(
+          expect.anything(),
+          10,
         );
-        await expect(send()).resolves.toBeDefined();
-
-        repository.lastMessageAtBy.mockResolvedValue(null);
-        await expect(send()).resolves.toBeDefined();
+        expect(realtime.changed).not.toHaveBeenCalled();
       });
 
-      it('does not hold a moderator to slow mode', async () => {
-        asModerator();
+      it('passes the room slow mode to members and none for moderators', async () => {
         access.channelIn.mockResolvedValue({ ...channel, slowmodeSeconds: 60 });
 
         await send();
+        expect(repository.createMessage).toHaveBeenLastCalledWith(
+          expect.anything(),
+          60,
+        );
 
-        expect(repository.lastMessageAtBy).not.toHaveBeenCalled();
+        asModerator();
+        await send();
+        expect(repository.createMessage).toHaveBeenLastCalledWith(
+          expect.anything(),
+          0,
+        );
       });
     });
   });

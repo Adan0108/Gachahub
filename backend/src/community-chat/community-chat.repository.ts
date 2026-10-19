@@ -155,25 +155,47 @@ export class CommunityChatRepository {
     });
   }
 
-  async lastMessageAtBy(channelId: string, authorId: string) {
-    const last = await this.prisma.gameChannelMessage.findFirst({
-      where: { channelId, authorId },
-      orderBy: { createdAt: 'desc' },
-      select: { createdAt: true },
-    });
-    return last?.createdAt ?? null;
-  }
+  /**
+   * Saves a message. With slow mode on, the wait check and the insert happen under one lock per
+   * person and room, so two requests at once cannot both pass; the loser gets how long to wait.
+   */
+  async createMessage(
+    data: {
+      channelId: string;
+      authorId: string;
+      content: string;
+      replyToId?: string;
+      clientMessageId?: string;
+    },
+    slowmodeSeconds = 0,
+  ): Promise<{ created: CommunityMessageRow } | { waitMs: number }> {
+    if (slowmodeSeconds <= 0) {
+      const created = await this.prisma.gameChannelMessage.create({
+        data,
+        include: messageInclude,
+      });
+      return { created };
+    }
 
-  createMessage(data: {
-    channelId: string;
-    authorId: string;
-    content: string;
-    replyToId?: string;
-    clientMessageId?: string;
-  }) {
-    return this.prisma.gameChannelMessage.create({
-      data,
-      include: messageInclude,
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${data.channelId}:${data.authorId}`}, 0))`;
+
+      const last = await tx.gameChannelMessage.findFirst({
+        where: { channelId: data.channelId, authorId: data.authorId },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
+      if (last) {
+        const waitMs =
+          slowmodeSeconds * 1000 - (Date.now() - last.createdAt.getTime());
+        if (waitMs > 0) return { waitMs };
+      }
+
+      const created = await tx.gameChannelMessage.create({
+        data,
+        include: messageInclude,
+      });
+      return { created };
     });
   }
 
@@ -240,13 +262,6 @@ export class CommunityChatRepository {
     });
   }
 
-  findReadState(userId: string, channelId: string) {
-    return this.prisma.gameChannelReadState.findUnique({
-      where: { userId_channelId: { userId, channelId } },
-      select: { lastReadAt: true },
-    });
-  }
-
   /** Where this person has read up to in each of these rooms, in one query. */
   findReadStates(userId: string, channelIds: string[]) {
     return this.prisma.gameChannelReadState.findMany({
@@ -255,19 +270,22 @@ export class CommunityChatRepository {
     });
   }
 
-  markRead(params: {
+  /** Moves the read position forward only; an older position arriving late, from another tab, changes nothing. */
+  async markRead(params: {
     userId: string;
     channelId: string;
     at: Date;
     messageId?: string;
   }) {
     const { userId, channelId, at, messageId } = params;
-    const data = { lastReadAt: at, lastReadMessageId: messageId ?? null };
-    return this.prisma.gameChannelReadState.upsert({
-      where: { userId_channelId: { userId, channelId } },
-      update: data,
-      create: { userId, channelId, ...data },
-    });
+    await this.prisma.$executeRaw`
+      INSERT INTO "game_channel_read_states" ("userId", "channelId", "lastReadAt", "lastReadMessageId", "updatedAt")
+      VALUES (${userId}, ${channelId}, ${at}, ${messageId ?? null}, NOW())
+      ON CONFLICT ("userId", "channelId") DO UPDATE
+      SET "lastReadAt" = EXCLUDED."lastReadAt",
+          "lastReadMessageId" = EXCLUDED."lastReadMessageId",
+          "updatedAt" = NOW()
+      WHERE "game_channel_read_states"."lastReadAt" < EXCLUDED."lastReadAt"`;
   }
 
   /** Messages from other people after `since`, up to `limit` and one more; enough for a "99+" badge without counting a whole backlog. */

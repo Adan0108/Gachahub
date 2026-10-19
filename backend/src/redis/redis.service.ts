@@ -162,12 +162,15 @@ export class RedisService {
     await this.client.zRem(this.key(key), member);
   }
 
-  /** Removes and returns the members whose score is at or below maxScore. */
+  /** Takes the members whose score is at or below maxScore, in one step, so a member rescheduled meanwhile is never removed and two callers never get the same one. */
   async sortedSetPopDue(key: string, maxScore: number): Promise<string[]> {
-    const redisKey = this.key(key);
-    const due = await this.client.zRangeByScore(redisKey, '-inf', maxScore);
-    if (due.length > 0) await this.client.zRem(redisKey, due);
+    const due = await this.client.eval(
+      `local due = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
+      for _, member in ipairs(due) do redis.call('ZREM', KEYS[1], member) end
+      return due`,
+      { keys: [this.key(key)], arguments: [String(maxScore)] },
+    );
 
-    return due;
+    return due as string[];
   }
 }
