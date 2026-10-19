@@ -62,6 +62,8 @@ import { useStickToBottom } from "../../hooks/chat/useStickToBottom";
 import { useTypingNames } from "../../hooks/chat/useTypingNames";
 import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
 import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
+import { ComposerEmojiButton } from "../../components/chat/ComposerEmojiButton";
+import { encodeEmotes } from "../../lib/emoji/emoteText";
 import { useThreadData } from "../../hooks/chat/useThreadData";
 import { sendEncryptedChatMessage, sendEncryptedEdit } from "../../lib/mls/messaging/sendEncryptedMessage";
 
@@ -308,6 +310,26 @@ export default function ChatPage() {
   };
 
   const composerInputRef = useRef(null);
+  // Emotes picked into the draft, by name: the box shows :name:, the message carries the token.
+  const pickedEmotesRef = useRef(new Map());
+  const insertIntoDraft = (piece) => {
+    const input = composerInputRef.current;
+    const start = input?.selectionStart ?? draft.length;
+    const end = input?.selectionEnd ?? draft.length;
+    setDraft(`${draft.slice(0, start)}${piece}${draft.slice(end)}`);
+    requestAnimationFrame(() => {
+      input?.focus();
+      input?.setSelectionRange(start + piece.length, start + piece.length);
+    });
+  };
+  const pickEmoji = (choice) => {
+    if (choice.kind === "emote") {
+      pickedEmotesRef.current.set(choice.emote.shortcode, choice.emote);
+      insertIntoDraft(`:${choice.emote.shortcode}: `);
+    } else {
+      insertIntoDraft(choice.emoji);
+    }
+  };
   const messageEdit = useMessageEdit({
     draft,
     setDraft,
@@ -1314,7 +1336,7 @@ export default function ChatPage() {
                     onSubmit={(event) => {
                       event.preventDefault();
                       if (messageEdit.target) return messageEdit.submit();
-                      const text = draft.trim();
+                      const text = encodeEmotes(draft.trim(), pickedEmotesRef.current);
                       const files = attachmentPicker.files;
                       if (!text && files.length === 0) return;
                       const clientId = crypto.randomUUID();
@@ -1375,6 +1397,7 @@ export default function ChatPage() {
                     ref={composerInputRef}
                     value={draft}
                   />
+                  <ComposerEmojiButton disabled={Boolean(messageEdit.target)} onPick={pickEmoji} />
                   <button
                     aria-label={messageEdit.target ? "Save edit" : "Send"}
                     disabled={

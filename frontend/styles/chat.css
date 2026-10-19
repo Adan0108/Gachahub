@@ -3282,6 +3282,13 @@
   object-fit: contain;
 }
 
+/* Emotes written into a message are a little bigger than an inline emoji. */
+.chat-message .emote-picture {
+  width: 1.7em;
+  height: 1.7em;
+  vertical-align: -0.45em;
+}
+
 .emote-label {
   color: var(--muted);
   font-size: 0.85em;

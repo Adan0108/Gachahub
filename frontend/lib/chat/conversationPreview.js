@@ -1,3 +1,4 @@
+import { emotesAsText } from "../emoji/emoteText";
 import { attachmentKind, envelopeView } from "../mls/media/attachmentView";
 
 function attachmentLabel(files) {
@@ -20,7 +21,7 @@ export function previewLine(envelope, { mine }) {
   if (!view) return null;
 
   const text = previewText(view);
-  const oneLine = text.replace(/\s+/g, " ").trim();
+  const oneLine = emotesAsText(text).replace(/\s+/g, " ").trim();
   if (!oneLine) return null;
 
   return mine ? `You: ${oneLine}` : oneLine;
