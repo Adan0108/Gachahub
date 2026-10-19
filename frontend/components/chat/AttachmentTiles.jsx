@@ -6,6 +6,7 @@ import { useAttachmentBlobUrl } from "../../hooks/chat/useAttachmentBlobUrl";
 import { useOpenAttachment } from "../../lib/mls/media/attachmentLightboxContext";
 import { autoLoadsWithoutTap } from "../../lib/mls/media/attachmentView";
 import { DownloadButton } from "./AttachmentFileChip";
+import { ChatVideoPlayer } from "./ChatVideoPlayer";
 import "./ChatAttachments.css";
 
 // Bigger images wait for the lightbox instead of downloading as soon as they scroll into the thread.
@@ -67,7 +68,7 @@ export function VideoTile({ file, source, thumbSource, uniform }) {
   return (
     <div>
       {video.status === "ready" ? (
-        <video autoPlay className="chat-attachment-tile" controls src={video.url} />
+        <ChatVideoPlayer autoPlay label={file.name} poster={poster.status === "ready" ? poster.url : undefined} src={video.url} />
       ) : (
         <button
           aria-label={`Play ${file.name}`}
