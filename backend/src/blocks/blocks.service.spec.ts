@@ -11,6 +11,7 @@ describe('BlocksService', () => {
     findBlockedIdsAmong: jest.fn(),
     findBlocksBetween: jest.fn(),
     findBlockedUsers: jest.fn(),
+    findBlockersAmong: jest.fn(),
     create: jest.fn(),
     delete: jest.fn(),
   };
@@ -161,6 +162,20 @@ describe('BlocksService', () => {
       repository.findBlockedUsers.mockResolvedValue([]);
 
       await expect(service.listBlockedUsers('me')).resolves.toEqual([]);
+    });
+  });
+
+  describe('getBlockersAmong', () => {
+    it('gives the people among the candidates who blocked this person', async () => {
+      repository.findBlockersAmong.mockResolvedValue([{ blockerId: 'bo' }]);
+
+      const blockers = await service.getBlockersAmong('me', ['bo', 'cy']);
+
+      expect([...blockers]).toEqual(['bo']);
+      expect(repository.findBlockersAmong).toHaveBeenCalledWith('me', [
+        'bo',
+        'cy',
+      ]);
     });
   });
 });

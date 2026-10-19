@@ -381,6 +381,8 @@ export class ChatRepository {
       conversationId: string;
       senderId: string;
       participantUserIds: string[];
+      /** Recipients whose receipt starts read, so the message never counts as unread for them. */
+      alreadyReadUserIds?: string[];
       ciphertext: string;
       encryptionMeta?: Prisma.InputJsonValue;
       contentType?: ChatMessageContentType;
@@ -408,6 +410,8 @@ export class ChatRepository {
       conversationId: string;
       senderId: string;
       participantUserIds: string[];
+      /** Recipients whose receipt starts read, so the message never counts as unread for them. */
+      alreadyReadUserIds?: string[];
       ciphertext: string;
       encryptionMeta?: Prisma.InputJsonValue;
       contentType?: ChatMessageContentType;
@@ -417,6 +421,7 @@ export class ChatRepository {
     },
   ) {
     const now = new Date();
+    const alreadyRead = new Set(params.alreadyReadUserIds);
 
     const message = await tx.chatMessage.create({
       data: {
@@ -431,7 +436,10 @@ export class ChatRepository {
           create: params.participantUserIds.map((userId) => ({
             userId,
             deliveredAt: userId === params.senderId ? now : undefined,
-            readAt: userId === params.senderId ? now : undefined,
+            readAt:
+              userId === params.senderId || alreadyRead.has(userId)
+                ? now
+                : undefined,
           })),
         },
       },

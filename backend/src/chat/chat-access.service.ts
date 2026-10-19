@@ -94,6 +94,17 @@ export class ChatAccessService {
   }
 
   /**
+   * Which of these recipients have blocked the sender. Their copy of the chat must not come
+   * back, light up or notify because of this sender; the sender is never told.
+   */
+  findRecipientsWhoBlocked(
+    senderId: string,
+    recipientIds: string[],
+  ): Promise<Set<string>> {
+    return this.blocksService.getBlockersAmong(senderId, recipientIds);
+  }
+
+  /**
    * Verifies the user can interact with a specific message.
    *
    * Reactions are message-level action, but permission is based on whether the
