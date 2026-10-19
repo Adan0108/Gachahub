@@ -8,12 +8,18 @@ function attachmentLabel(files) {
   return "Sent a file";
 }
 
+function previewText(view) {
+  if (view.kind === "text") return view.text;
+  if (view.kind === "post") return view.caption || "Shared a post";
+  return view.caption || attachmentLabel(view.files);
+}
+
 /** The one-line text for a decrypted message in the chat list; null when there is nothing readable. */
 export function previewLine(envelope, { mine }) {
   const view = envelopeView(envelope);
   if (!view) return null;
 
-  const text = view.kind === "text" ? view.text : view.caption || attachmentLabel(view.files);
+  const text = previewText(view);
   const oneLine = text.replace(/\s+/g, " ").trim();
   if (!oneLine) return null;
 

@@ -28,6 +28,7 @@ import { AvatarFace } from "./AvatarFace";
 import { artTones, glyph } from "./constants";
 import { MentionInput } from "./MentionInput";
 import { MentionText } from "./MentionText";
+import { SharePostDialog } from "./SharePostDialog";
 
 function relativeTime(value) {
   const date = value ? new Date(value) : null;
@@ -193,6 +194,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
   const [likeOverride, setLikeOverride] = useState(null);
   const [spoilerRevealed, setSpoilerRevealed] = useState(false);
   const [expandedImage, setExpandedImage] = useState(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("UNMARKED_SPOILERS");
@@ -422,7 +424,11 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
         >
           <FiMessageCircle /> {post.commentCount || 0}
         </button>
-        <button onClick={sharePost} type="button">
+        <button
+          aria-haspopup="dialog"
+          onClick={() => (isAuthenticated ? setShareOpen(true) : sharePost())}
+          type="button"
+        >
           <FiShare2 /> Share
         </button>
         {detail && canFollow && (
@@ -488,6 +494,14 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
             <small className="post-action-error">{createComment.error.message}</small>
           )}
         </section>
+      )}
+      {shareOpen && (
+        <SharePostDialog
+          onClose={() => setShareOpen(false)}
+          onCopyLink={copyPostLink}
+          onNativeShare={typeof navigator !== "undefined" && navigator.share ? sharePost : undefined}
+          postId={post.id}
+        />
       )}
       {expandedImage &&
         createPortal(

@@ -1,5 +1,7 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { decodeMlsMessage } from 'ts-mls';
+import { ratchetTreeFromExtension } from 'ts-mls/groupInfo.js';
+import { leafToNodeIndex, type LeafIndex } from 'ts-mls/treemath.js';
 // Not re-exported from the package root - reachable via ts-mls's own "./*.js" subpath export map.
 import { verifyFramedContentSignature } from 'ts-mls/framedContent.js';
 import { bytesEqual } from '../common/utils/bytes';
@@ -10,9 +12,11 @@ export interface ExternalJoiner {
   userId: string;
   deviceId: string;
   signatureKey: Uint8Array;
+  /** Set when the commit also removes a leaf: a device replacing its own old one. */
+  removedLeafIndex?: number;
 }
 
-/** Reads a device's request to join by itself; accepts only a single ExternalInit proposal with a path carrying the joiner's own leaf. */
+/** Reads a device's request to join by itself; accepts one ExternalInit, plus at most one Remove (its own old leaf), with a path carrying the joiner's own leaf. */
 export function readExternalJoin(
   payload: Uint8Array,
   conversationId: string,
@@ -51,14 +55,24 @@ export function readExternalJoin(
   }
 
   const { proposals, path } = content.commit;
-  const [only] = proposals;
+  const inits = proposals.filter(
+    (entry) =>
+      entry.proposalOrRefType === 'proposal' &&
+      entry.proposal.proposalType === 'external_init',
+  );
+  const removes = proposals.flatMap((entry) =>
+    entry.proposalOrRefType === 'proposal' &&
+    entry.proposal.proposalType === 'remove'
+      ? [entry.proposal.remove.removed]
+      : [],
+  );
   if (
-    proposals.length !== 1 ||
-    only.proposalOrRefType !== 'proposal' ||
-    only.proposal.proposalType !== 'external_init'
+    inits.length !== 1 ||
+    removes.length > 1 ||
+    proposals.length !== inits.length + removes.length
   ) {
     throw new BadRequestException(
-      'A join commit must contain exactly one ExternalInit proposal',
+      'A join commit must contain exactly one ExternalInit proposal, and at most one Remove of its own old leaf',
     );
   }
   if (!path) {
@@ -68,6 +82,7 @@ export function readExternalJoin(
   return {
     ...readIdentity(path.leafNode.credential),
     signatureKey: path.leafNode.signaturePublicKey,
+    ...(removes.length === 1 ? { removedLeafIndex: Number(removes[0]) } : {}),
   };
 }
 
@@ -148,6 +163,44 @@ export async function assertExternalJoinSigned(
   if (!valid) {
     throw new ForbiddenException(
       'The join commit is not signed by this device',
+    );
+  }
+}
+
+/** A resync may only replace the calling device's own leaf: the leaf at that index in the stored snapshot must be this device, with its registered key. */
+export function assertRemovedLeafIsJoiner(
+  removedLeafIndex: number,
+  storedGroupInfoPayload: Uint8Array,
+  expected: {
+    userId: string;
+    deviceId: string;
+    signaturePublicKey: Uint8Array;
+  },
+): void {
+  const snapshot = decodeMlsMessage(storedGroupInfoPayload, 0)?.[0];
+  if (snapshot?.wireformat !== 'mls_group_info') {
+    throw new BadRequestException('Cannot verify this join commit');
+  }
+  const tree = ratchetTreeFromExtension(snapshot.groupInfo);
+  if (!tree) {
+    throw new BadRequestException(
+      'The stored snapshot carries no ratchet_tree',
+    );
+  }
+
+  const node = tree[leafToNodeIndex(removedLeafIndex as LeafIndex)];
+  if (node?.nodeType !== 'leaf') {
+    throw new BadRequestException('The removed leaf is not in this group');
+  }
+
+  const leaf = readIdentity(node.leaf.credential);
+  if (
+    leaf.userId !== expected.userId ||
+    leaf.deviceId !== expected.deviceId ||
+    !bytesEqual(node.leaf.signaturePublicKey, expected.signaturePublicKey)
+  ) {
+    throw new ForbiddenException(
+      'A join may only replace the leaf of the device that is joining',
     );
   }
 }

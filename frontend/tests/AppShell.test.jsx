@@ -18,6 +18,7 @@ vi.mock("../hooks/chat/useDeviceIdentity", () => ({ useDeviceIdentity: vi.fn() }
 vi.mock("../hooks/chat/useChatSocket", () => ({ useChatSocket: vi.fn() }));
 vi.mock("../hooks/useAppSocket", () => ({ useAppSocket: vi.fn() }));
 vi.mock("../hooks/useNotificationSocket", () => ({ useNotificationSocket: vi.fn() }));
+vi.mock("../hooks/presence/usePresenceSocket", () => ({ usePresenceSocket: vi.fn() }));
 vi.mock("../components/DevToolsPanel", () => ({ DevToolsPanel: () => null }));
 vi.mock("../components/Topbar", () => ({
   Topbar: ({ onMenu, menuButtonRef }) => (

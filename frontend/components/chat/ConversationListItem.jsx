@@ -7,10 +7,13 @@ import {
   conversationDisplayName,
   conversationImage,
   conversationMute,
+  conversationPeer,
   typingLabel,
 } from "../../lib/chat/chatDisplay";
 import { compactRelativeTime } from "../../lib/time";
+import { usePresenceOf } from "../../hooks/presence/usePresenceOf";
 import { AvatarFace } from "../AvatarFace";
+import { PresenceDot } from "../PresenceDot";
 import { ConversationRowMenu } from "./ConversationRowMenu";
 
 /** One row of the chat list: name, then either who is typing or the last message with how long ago, then the unread count; hovering it offers a menu of actions. */
@@ -24,6 +27,8 @@ export function ConversationListItem({
   onGone,
 }) {
   const typingNames = useTypingNames(conversation, userId);
+  const peerId = conversation.type === "GROUP" ? undefined : conversationPeer(conversation, userId)?.id;
+  const presence = usePresenceOf(peerId);
   const displayName = conversationDisplayName(conversation, userId);
   const isGroup = conversation.type === "GROUP";
   const { isMuted } = conversationMute(conversation, userId);
@@ -37,8 +42,11 @@ export function ConversationListItem({
         onClick={() => onSelect(conversation.id)}
         type="button"
       >
-        <span className="chat-avatar">
-          <AvatarFace image={conversationImage(conversation, userId)} name={displayName} />
+        <span className="avatar-with-presence">
+          <span className="chat-avatar">
+            <AvatarFace image={conversationImage(conversation, userId)} name={displayName} />
+          </span>
+          <PresenceDot status={presence} />
         </span>
         <span>
           <b>{displayName}</b>

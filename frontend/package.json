@@ -4,7 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "emoji": "node scripts/copy-emoji-svg.mjs",
+    "predev": "npm run emoji",
     "dev": "next dev --port 5173",
+    "prebuild": "npm run emoji",
     "build": "next build",
     "lint": "eslint .",
     "test": "vitest run",
@@ -15,8 +18,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@emoji-mart/data": "^1.2.1",
     "@noble/hashes": "^2.4.0",
     "@tanstack/react-query": "^5.90.0",
+    "emoji-mart": "^5.6.0",
     "next": "^16.2.12",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
@@ -29,6 +34,7 @@
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.7",
+    "@twemoji/svg": "15.0.0",
     "@types/node": "26.6.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

@@ -19,6 +19,7 @@ import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { ChatMessagingService } from './chat-messaging.service';
 import { ChatGroupService } from './chat-group.service';
 import { ChatInboxService } from './chat-inbox.service';
+import { ChatEmotesService } from './chat-emotes.service';
 import { ChatMessageActionsService } from './chat-message-actions.service';
 import { ChatMessageEditService } from './chat-message-edit.service';
 import { ChatReceiptsService } from './chat-receipts.service';
@@ -54,6 +55,7 @@ export class ChatController {
     private readonly chatGroupService: ChatGroupService,
     private readonly chatInboxService: ChatInboxService,
     private readonly chatMessageActionsService: ChatMessageActionsService,
+    private readonly chatEmotesService: ChatEmotesService,
     private readonly chatMessageEditService: ChatMessageEditService,
     private readonly chatReceiptsService: ChatReceiptsService,
   ) {}
@@ -644,6 +646,13 @@ export class ChatController {
       conversationId,
       dto,
     );
+  }
+
+  /** The emotes the current user can react with: global ones and those of the games they belong to. */
+  @Get('emotes')
+  @ApiOperation({ summary: 'List the chat emotes the current user can use' })
+  listEmotes(@Session() session: UserSession) {
+    return this.chatEmotesService.listUsable(session.user.id);
   }
 
   /**

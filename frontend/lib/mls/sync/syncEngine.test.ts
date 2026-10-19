@@ -407,7 +407,7 @@ describe('SyncEngine', () => {
       await storage.save('conv-1', await bobSession.serialize());
       const bobEngine = new SyncEngine(bob.factory, bob.deviceId, bob.userId, storage);
       await serveRosterOf(aliceSession);
-      return { alice, bob, aliceSession, bobEngine, bobStorage: storage };
+      return { alice, bob, aliceSession, bobEngine, bobStorage: storage, groupInfo: addBob.groupInfo };
     }
 
     async function serveHandshake(handshake: unknown) {
@@ -433,6 +433,33 @@ describe('SyncEngine', () => {
       );
 
       await expect(bobEngine.syncCommits('conv-1')).resolves.toBe(2);
+    });
+
+    it('applies a member rejoining in place as no change of people, and records no join', async () => {
+      const { alice, bob, bobStorage, groupInfo } = await groupWithBobVerifying();
+      const log = new MembershipEventLog(new InMemoryMembershipEventStorage());
+      const bobEngine = new SyncEngine(
+        bob.factory,
+        bob.deviceId,
+        bob.userId,
+        bobStorage,
+        undefined,
+        log,
+      );
+      // alice lost her saved state: the same device replaces its own old leaf
+      const rejoined = await alice.factory.joinExternally('conv-1', groupInfo);
+      await serveHandshake(
+        fakeHandshake({
+          epoch: 1,
+          senderDeviceId: alice.deviceId,
+          payload: rejoined.commitBytes,
+          declared: { addedDevices: [], removedDevices: [] },
+        }),
+      );
+
+      await expect(bobEngine.syncCommits('conv-1')).resolves.toBe(2);
+
+      await expect(log.list('conv-1')).resolves.toEqual([]);
     });
 
     it('records a join only from a commit it verified, and nothing from a refused one', async () => {
@@ -1388,7 +1415,7 @@ describe('SyncEngine', () => {
           return { outcome: 'accepted' };
         },
       );
-      return { api, alice, aliceSession, carol, submittedCommit: () => submitted };
+      return { api, alice, aliceSession, bob, carol, submittedCommit: () => submitted };
     }
 
     it('joins, saves the group, and reads what the members send afterwards', async () => {
@@ -1409,6 +1436,28 @@ describe('SyncEngine', () => {
       await expect(carol.engine.processIncoming('conv-1', wireBytes)).resolves.toMatchObject({
         kind: 'application',
         envelope: { body: 'welcome carol' },
+      });
+    });
+
+    it('lets a member that lost its saved group rejoin in place, with one leaf and no change of people', async () => {
+      const { alice, aliceSession, bob, submittedCommit } = await groupWithPublishedSnapshot();
+
+      // bob is in the group's tree and the roster, but this device has no saved state for it
+      await expect(bob.engine.joinByExternalCommit('conv-1')).resolves.toBe(true);
+
+      const seen = await aliceSession.process(submittedCommit()!);
+      if (seen.kind !== 'commit') throw new Error('expected a commit');
+      expect(seen.membershipChange).toEqual({ added: [], removed: [] });
+      await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(2);
+      await saveSession(alice, aliceSession);
+      const { wireBytes } = await alice.engine.encryptMessage('conv-1', {
+        v: 1,
+        type: 'text',
+        body: 'welcome back',
+      });
+      await expect(bob.engine.processIncoming('conv-1', wireBytes)).resolves.toMatchObject({
+        kind: 'application',
+        envelope: { body: 'welcome back' },
       });
     });
 
