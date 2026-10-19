@@ -17,7 +17,11 @@ export class NotificationController {
     @Session() session: UserSession,
     @Query() query: GetNotificationsQueryDto,
   ) {
-    return this.notificationService.getNotifications(session.user.id, query);
+    return this.notificationService.getNotifications(
+      session.user.id,
+      query,
+      session.session.id,
+    );
   }
 
   /**
@@ -25,7 +29,10 @@ export class NotificationController {
    */
   @Get('unread-count')
   getUnreadCount(@Session() session: UserSession) {
-    return this.notificationService.getUnreadCount(session.user.id);
+    return this.notificationService.getUnreadCount(
+      session.user.id,
+      session.session.id,
+    );
   }
 
   /**

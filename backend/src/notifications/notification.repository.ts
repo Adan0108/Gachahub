@@ -84,12 +84,15 @@ export class NotificationRepository {
     recipientId: string;
     limit: number;
     cursor?: string;
+    /** Notifications left out of the list, such as chat messages this device could never read. */
+    excludeIds?: string[];
   }) {
-    const { recipientId, limit, cursor } = params;
+    const { recipientId, limit, cursor, excludeIds } = params;
 
     return this.prisma.notification.findMany({
       where: {
         recipientId,
+        ...(excludeIds?.length ? { id: { notIn: excludeIds } } : {}),
       },
       include: {
         actor: {
@@ -130,13 +133,49 @@ export class NotificationRepository {
     });
   }
 
-  countUnread(recipientId: string) {
+  countUnread(recipientId: string, excludeIds?: string[]) {
     return this.prisma.notification.count({
       where: {
         recipientId,
         readAt: null,
+        ...(excludeIds?.length ? { id: { notIn: excludeIds } } : {}),
       },
     });
+  }
+
+  /** When the chat device behind this login was registered; null when the login has no active device. */
+  async findDeviceStart(
+    sessionId: string,
+    userId: string,
+  ): Promise<Date | null> {
+    const rows = await this.prisma.$queryRaw<Array<{ createdAt: Date }>>`
+      SELECT d."createdAt"
+      FROM session s
+      JOIN chat_devices d ON d.id = s."chatDeviceId"
+      WHERE s.id = ${sessionId}
+        AND s."userId" = ${userId}
+        AND d."revokedAt" IS NULL
+    `;
+
+    return rows[0]?.createdAt ?? null;
+  }
+
+  /** This person's chat message notifications for messages sent before `since`: ones a device registered at `since` can never read. */
+  async findMessageNotificationIdsBefore(
+    recipientId: string,
+    since: Date,
+  ): Promise<string[]> {
+    const rows = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT n.id
+      FROM notifications n
+      JOIN chat_messages m ON m.id = n."entityId"
+      WHERE n."recipientId" = ${recipientId}
+        AND n."entityType" = 'MESSAGE'
+        AND n."type" IN ('MESSAGE_RECEIVED', 'MESSAGE_REPLIED')
+        AND m."createdAt" < ${since}
+    `;
+
+    return rows.map((row) => row.id);
   }
 
   markAsRead(params: {

@@ -216,12 +216,17 @@ export class NotificationService {
   async getNotifications(
     recipientId: string,
     params: GetNotificationsQueryDto,
+    sessionId?: string,
   ) {
     if (!recipientId) {
       throw new BadRequestException('recipientId is required');
     }
 
     await this.settleReadMessageNotifications(recipientId);
+    const excludeIds = await this.idsThisDeviceCannotRead(
+      recipientId,
+      sessionId,
+    );
 
     const limit = params.limit ?? NotificationService.DEFAULT_PAGE_SIZE;
     const cursor = params.cursor;
@@ -230,6 +235,7 @@ export class NotificationService {
       recipientId,
       limit: limit + 1,
       cursor,
+      excludeIds,
     });
 
     const hasMore = notifications.length > limit;
@@ -261,6 +267,37 @@ export class NotificationService {
     };
   }
 
+  /**
+   * Chat message notifications for messages sent before this login's device existed. That device
+   * can never decrypt them, so a new device or a reset one does not light the bell for history it
+   * cannot open; the person's other devices still show them.
+   */
+  private async idsThisDeviceCannotRead(
+    recipientId: string,
+    sessionId: string | undefined,
+  ): Promise<string[]> {
+    if (!sessionId) return [];
+
+    try {
+      const deviceStart = await this.notificationRepository.findDeviceStart(
+        sessionId,
+        recipientId,
+      );
+      if (!deviceStart) return [];
+
+      return await this.notificationRepository.findMessageNotificationIdsBefore(
+        recipientId,
+        deviceStart,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Could not tell which notifications ${recipientId}'s device cannot read`,
+        error,
+      );
+      return [];
+    }
+  }
+
   /** Best effort: a failure here must not stop the bell from answering. */
   private async settleReadMessageNotifications(recipientId: string) {
     try {
@@ -276,13 +313,20 @@ export class NotificationService {
   /**
    * Returns the number of unread notifications for a recipient.
    */
-  async getUnreadCount(recipientId: string) {
+  async getUnreadCount(recipientId: string, sessionId?: string) {
     if (!recipientId) {
       throw new BadRequestException('recipientId is required');
     }
 
     await this.settleReadMessageNotifications(recipientId);
-    const count = await this.notificationRepository.countUnread(recipientId);
+    const excludeIds = await this.idsThisDeviceCannotRead(
+      recipientId,
+      sessionId,
+    );
+    const count = await this.notificationRepository.countUnread(
+      recipientId,
+      excludeIds,
+    );
 
     return {
       count,
