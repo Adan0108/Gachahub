@@ -4351,3 +4351,10 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* The group photo slot takes a dropped file too. */
+.group-photo-drop.dragging {
+  outline: 2px dashed var(--purple, #8b6cff);
+  outline-offset: 4px;
+  border-radius: 12px;
+}

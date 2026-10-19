@@ -9,6 +9,7 @@ import { api } from "../../lib/api";
 import { AvatarFace } from "../AvatarFace";
 import { PresenceDot } from "../PresenceDot";
 import { activeMembers, myParticipant } from "../../lib/chat/chatDisplay";
+import { GroupPhotoEditor } from "./GroupPhotoEditor";
 import { SafetyBadge } from "./SafetyStatus";
 import { UserPicker } from "./UserPicker";
 
@@ -42,15 +43,11 @@ export function GroupSettingsModal({
   const conversationId = conversation?.id;
 
   const [title, setTitle] = useState(conversation?.title || "");
-  const [photoUrl, setPhotoUrl] = useState(conversation?.photoUrl || "");
   const [newMembers, setNewMembers] = useState([]);
 
   const updateGroupDetails = useMutation({
     mutationFn: () =>
-      api.updateGroupChat(conversationId, {
-        title: title.trim(),
-        photoUrl: photoUrl.trim() || undefined,
-      }),
+      api.updateGroupChat(conversationId, { title: title.trim() }),
     onSuccess: refreshChat,
   });
   const addMembers = useMutation({
@@ -111,6 +108,15 @@ export function GroupSettingsModal({
         </div>
 
         {canManageGroup && (
+          <GroupPhotoEditor
+            conversationId={conversationId}
+            name={conversation.title}
+            onChanged={refreshChat}
+            photoUrl={conversation.photoUrl}
+          />
+        )}
+
+        {canManageGroup && (
           <form
             className="group-settings-details"
             onSubmit={(event) => {
@@ -125,15 +131,6 @@ export function GroupSettingsModal({
                 id="group-settings-title"
                 onChange={(event) => setTitle(event.target.value)}
                 value={title}
-              />
-            </label>
-            <label htmlFor="group-settings-photo">
-              Photo URL
-              <input
-                id="group-settings-photo"
-                onChange={(event) => setPhotoUrl(event.target.value)}
-                placeholder="https://..."
-                value={photoUrl}
               />
             </label>
             <button

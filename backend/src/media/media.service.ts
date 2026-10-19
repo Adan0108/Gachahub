@@ -46,6 +46,7 @@ const SINGLE_IMAGE_PURPOSES = new Set([
   MediaPurposeDto.BANNER,
   MediaPurposeDto.GAME_ICON,
   MediaPurposeDto.GAME_BANNER,
+  MediaPurposeDto.GROUP_PHOTO,
 ]);
 
 @Injectable()

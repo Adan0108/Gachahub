@@ -242,7 +242,6 @@ export class ChatRepository {
     params: {
       creatorId: string;
       title: string;
-      photoUrl?: string;
       members: Array<{ userId: string; state: 'ACTIVE' | 'PENDING' }>;
     },
   ) {
@@ -252,7 +251,6 @@ export class ChatRepository {
       data: {
         type: 'GROUP',
         title: params.title,
-        photoUrl: params.photoUrl,
         createdBy: params.creatorId,
         participants: {
           create: [

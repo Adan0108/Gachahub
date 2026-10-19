@@ -107,6 +107,7 @@ export const backendRoutes = {
     `/chat/conversations/${encodePathParam(conversationId)}/notification-level`,
   chatGroups: '/chat/groups',
   chatGroup: (conversationId) => `/chat/groups/${encodePathParam(conversationId)}`,
+  chatGroupPhoto: (conversationId) => `/chat/groups/${encodePathParam(conversationId)}/photo`,
   chatGroupMembers: (conversationId) =>
     `/chat/groups/${encodePathParam(conversationId)}/members`,
   chatGroupTransferOwnership: (conversationId) =>
@@ -883,10 +884,14 @@ export const api = {
       { notificationLevel, mutedUntil },
       { method: 'PATCH' },
     ),
-  createGroupChat: ({ title, photoUrl, memberUserIds }) =>
-    mutation(backendRoutes.chatGroups, { title, photoUrl, memberUserIds }),
-  updateGroupChat: (conversationId, { title, photoUrl }) =>
-    mutation(backendRoutes.chatGroup(conversationId), { title, photoUrl }, { method: 'PATCH' }),
+  createGroupChat: ({ title, memberUserIds }) =>
+    mutation(backendRoutes.chatGroups, { title, memberUserIds }),
+  updateGroupChat: (conversationId, { title }) =>
+    mutation(backendRoutes.chatGroup(conversationId), { title }, { method: 'PATCH' }),
+  setGroupPhoto: (conversationId, photoMediaUploadId) =>
+    mutation(backendRoutes.chatGroupPhoto(conversationId), { photoMediaUploadId }, { method: 'PATCH' }),
+  removeGroupPhoto: (conversationId) =>
+    mutation(backendRoutes.chatGroupPhoto(conversationId), undefined, { method: 'DELETE' }),
   addGroupMembers: (conversationId, userIds) =>
     mutation(backendRoutes.chatGroupMembers(conversationId), { userIds }),
   removeGroupMembers: (conversationId, userIds) =>

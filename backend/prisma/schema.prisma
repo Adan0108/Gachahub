@@ -343,13 +343,15 @@ enum ChatEmoteScope {
 }
 
 model ChatConversation {
-  id            String                 @id @default(cuid())
-  type          ChatConversationType   @default(DIRECT)
-  status        ChatConversationStatus @default(ACTIVE)
-  title         String?
-  photoUrl      String?
-  createdBy     String?
-  lastMessageId String?
+  id                 String                 @id @default(cuid())
+  type               ChatConversationType   @default(DIRECT)
+  status             ChatConversationStatus @default(ACTIVE)
+  title              String?
+  photoUrl           String?
+  /// MediaUpload behind `photoUrl`, so replacing or removing the photo can release the old asset.
+  photoMediaUploadId String?                @unique
+  createdBy          String?
+  lastMessageId      String?
 
   /// MLS group epoch; advanced only by an atomic compare-and-set so one Commit wins each epoch.
   mlsEpoch Int @default(0)
@@ -361,15 +363,16 @@ model ChatConversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  creator         User?             @relation("ChatConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
-  participants    ChatParticipant[]
-  directPair      ChatDirectPair?
-  messages        ChatMessage[]
-  mlsHandshakes   MlsHandshake[]
-  mlsWelcomes     MlsWelcome[]
-  mlsMembers      MlsGroupMember[]
-  mlsCommitFaults MlsCommitFault[]
-  mlsGroupInfo    MlsGroupInfo?
+  creator          User?             @relation("ChatConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  photoMediaUpload MediaUpload?      @relation("ChatGroupPhotoUpload", fields: [photoMediaUploadId], references: [id], onDelete: SetNull)
+  participants     ChatParticipant[]
+  directPair       ChatDirectPair?
+  messages         ChatMessage[]
+  mlsHandshakes    MlsHandshake[]
+  mlsWelcomes      MlsWelcome[]
+  mlsMembers       MlsGroupMember[]
+  mlsCommitFaults  MlsCommitFault[]
+  mlsGroupInfo     MlsGroupInfo?
 
   @@index([type])
   @@index([status])
@@ -880,6 +883,7 @@ enum MediaPurpose {
   BANNER
   GAME_ICON
   GAME_BANNER
+  GROUP_PHOTO
 }
 
 enum MediaResourceType {
@@ -939,12 +943,13 @@ model MediaUpload {
   attachedAt DateTime?
   deletedAt  DateTime?
 
-  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  postMedia        PostMedia?
-  chatMessageMedia ChatMessageMedia?
-  gameIconFor      Game?             @relation("GameIconUpload")
-  gameBannerFor    Game?             @relation("GameBannerUpload")
-  avatarFor        User?             @relation("UserAvatarUpload")
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postMedia         PostMedia?
+  chatMessageMedia  ChatMessageMedia?
+  gameIconFor       Game?             @relation("GameIconUpload")
+  gameBannerFor     Game?             @relation("GameBannerUpload")
+  avatarFor         User?             @relation("UserAvatarUpload")
+  chatGroupPhotoFor ChatConversation? @relation("ChatGroupPhotoUpload")
 
   @@index([userId, status, createdAt])
   @@index([status, createdAt])

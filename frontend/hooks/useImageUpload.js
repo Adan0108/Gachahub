@@ -55,17 +55,25 @@ export function useImageUpload({ purpose, currentUrl, save, getUrl, onSaved }) {
   // clears, so a failed save never leaves a not-actually-saved image on screen.
   const previewUrl = useLocalFileUrl(file, Boolean(file) && mutation.isPending);
 
-  // For an <input type="file" onChange>; resets the input so picking the same file twice still fires.
-  const pickFile = (event) => {
-    const selected = event.target.files?.[0];
-    event.target.value = "";
+  const start = (selected) => {
     if (!selected) return;
     setFile(selected);
     mutation.mutate(selected);
   };
 
+  // For an <input type="file" onChange>; resets the input so picking the same file twice still fires.
+  const pickFile = (event) => {
+    const selected = event.target.files?.[0];
+    event.target.value = "";
+    start(selected);
+  };
+
+  // For files dropped onto the slot: the first one is used.
+  const pickDropped = (files) => start(files?.[0]);
+
   return {
     pickFile,
+    pickDropped,
     displayUrl: previewUrl || resolvedOverride || currentUrl,
     isPending: mutation.isPending,
     error: mutation.isError ? mutation.error.message || "Upload failed" : null,
