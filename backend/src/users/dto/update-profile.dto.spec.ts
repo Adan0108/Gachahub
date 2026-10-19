@@ -85,4 +85,46 @@ describe('UpdateProfileDto', () => {
       expect(errors[0].property).toBe('sendReadReceipts');
     });
   });
+
+  describe('name', () => {
+    it('trims the name and allows 2 to 50 characters', async () => {
+      const dto = plainToInstance(UpdateProfileDto, { name: '  Yumemi  ' });
+
+      expect(await validate(dto)).toHaveLength(0);
+      expect(dto.name).toBe('Yumemi');
+    });
+
+    it.each([null, 5, '', ' a ', 'x'.repeat(51)])(
+      'rejects %p',
+      async (value) => {
+        const dto = plainToInstance(UpdateProfileDto, { name: value });
+
+        const errors = await validate(dto);
+
+        expect(errors).toHaveLength(1);
+        expect(errors[0].property).toBe('name');
+      },
+    );
+  });
+
+  describe('bio', () => {
+    it('allows up to 160 characters, and an empty one that clears it', async () => {
+      for (const bio of ['', 'x'.repeat(160), '  hello  ']) {
+        const dto = plainToInstance(UpdateProfileDto, { bio });
+        expect(await validate(dto)).toHaveLength(0);
+      }
+      expect(plainToInstance(UpdateProfileDto, { bio: '  hello  ' }).bio).toBe(
+        'hello',
+      );
+    });
+
+    it.each([null, 5, 'x'.repeat(161)])('rejects %p', async (value) => {
+      const dto = plainToInstance(UpdateProfileDto, { bio: value });
+
+      const errors = await validate(dto);
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0].property).toBe('bio');
+    });
+  });
 });

@@ -21,7 +21,7 @@ vi.mock("@tanstack/react-query", () => ({
               {
                 id: "comment-1",
                 content: "Original comment",
-                author: { name: "Reviewer" },
+                author: { id: "reviewer", name: "Reviewer", username: "rev" },
                 replyCount: 0,
               },
             ],
@@ -214,6 +214,35 @@ describe("PostList", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /close image preview/i }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("links the author's picture on a feed post to their profile", () => {
+    render(
+      <PostList
+        posts={[{ id: "p1", title: "Hello", author: "Rover", authorId: "rover-1", time: "Now" }]}
+        variant="feed"
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "Rover's profile" })).toHaveAttribute(
+      "href",
+      "/user/rover-1",
+    );
+  });
+
+  it("links a comment's author to their profile", () => {
+    const { container } = render(
+      <PostList
+        posts={[{ id: "post-1", title: "Test post", author: "A", authorId: "a", commentCount: 1 }]}
+      />,
+    );
+
+    fireEvent.click(container.querySelector(".post-social button:nth-child(2)"));
+
+    expect(screen.getByRole("link", { name: /Reviewer/ })).toHaveAttribute(
+      "href",
+      "/user/reviewer",
+    );
   });
 
   it("keeps compact lists text-only", () => {

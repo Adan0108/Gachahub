@@ -11,6 +11,9 @@ import { BlocksModule } from '../blocks/blocks.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { SessionTerminatorModule } from '../auth/session-terminator.module';
 import { MediaModule } from '../media/media.module';
+import { FollowsModule } from '../follows/follows.module';
+import { ProfileAccessModule } from '../profile-access/profile-access.module';
+import { UserProfileService } from './profile/user-profile.service';
 import { UserAvatarController } from './avatar/user-avatar.controller';
 import { UserAvatarRepository } from './avatar/user-avatar.repository';
 import { UserAvatarService } from './avatar/user-avatar.service';
@@ -24,6 +27,8 @@ import { UserBannerService } from './banner/user-banner.service';
     AuditLogModule,
     SessionTerminatorModule,
     MediaModule,
+    FollowsModule,
+    ProfileAccessModule,
   ],
   controllers: [
     UsersController,
@@ -33,6 +38,7 @@ import { UserBannerService } from './banner/user-banner.service';
   ],
   providers: [
     UsersService,
+    UserProfileService,
     UserModerationService,
     UsersRepository,
     UserAvatarService,

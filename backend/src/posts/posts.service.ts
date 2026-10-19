@@ -179,6 +179,10 @@ export class PostsService {
     );
   }
 
+  countByAuthorPublic(authorId: string, userId?: string) {
+    return this.postsRepository.countPublicByAuthor(authorId, userId);
+  }
+
   async findByAuthorPublic(
     query: PaginationQueryDto,
     authorId: string,

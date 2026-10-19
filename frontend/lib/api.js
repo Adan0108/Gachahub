@@ -61,6 +61,10 @@ export const backendRoutes = {
   forYouFeed: "/feed/for-you",
   gameFeed: (gameSlug) => `/games/${encodePathParam(gameSlug)}/feed`,
   postLike: (postId) => `/posts/${encodePathParam(postId)}/like`,
+  userProfile: (userId) => `/users/${encodePathParam(userId)}`,
+  userPosts: (userId) => `/users/${encodePathParam(userId)}/posts`,
+  userFollowers: (userId) => `/users/${encodePathParam(userId)}/followers`,
+  userFollowing: (userId) => `/users/${encodePathParam(userId)}/following`,
   userFollow: (userId) => `/users/${encodePathParam(userId)}/follow`,
   followStatus: (userId) => `/users/${encodePathParam(userId)}/follow-status`,
   postComments: (postId) => `/posts/${encodePathParam(postId)}/comments`,
@@ -702,6 +706,19 @@ export const api = {
     api.getFeedCollection(backendRoutes.gameFeed(gameSlug), query, options),
   likePost: (postId) => mutation(backendRoutes.postLike(postId)),
   unlikePost: (postId) => mutation(backendRoutes.postLike(postId), undefined, { method: 'DELETE' }),
+  getUserProfile: (userId, options = {}) => request(backendRoutes.userProfile(userId), options),
+  getUserPosts: async (userId, query = {}, options = {}) => {
+    const response = await request(withQuery(backendRoutes.userPosts(userId), query), options);
+    const items = Array.isArray(response) ? response : response.items || [];
+    return {
+      items: items.map(normalizePostResponse),
+      meta: response.meta || { total: items.length },
+    };
+  },
+  getFollowers: (userId, query = {}, options = {}) =>
+    request(withQuery(backendRoutes.userFollowers(userId), query), options),
+  getFollowing: (userId, query = {}, options = {}) =>
+    request(withQuery(backendRoutes.userFollowing(userId), query), options),
   getFollowStatus: (userId, options = {}) => request(backendRoutes.followStatus(userId), options),
   followUser: (userId) => mutation(backendRoutes.userFollow(userId)),
   unfollowUser: (userId) =>

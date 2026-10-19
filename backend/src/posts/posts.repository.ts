@@ -129,6 +129,13 @@ export class PostsRepository {
   }
 
   // No optional visibility/status with a permissive default - a caller must state whose eyes these posts are for.
+  /** How many posts of this author anyone, or this viewer, may see. */
+  countPublicByAuthor(authorId: string, userId?: string) {
+    return this.prisma.post.count({
+      where: { authorId, ...viewablePostWhere(userId) },
+    });
+  }
+
   async findByAuthorId(
     authorId: string,
     params: {

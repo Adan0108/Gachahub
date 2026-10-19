@@ -28,6 +28,7 @@ import { AvatarFace } from "./AvatarFace";
 import { artTones, glyph } from "./constants";
 import { MentionInput } from "./MentionInput";
 import { MentionText } from "./MentionText";
+import "./profile/ProfileSocial.css";
 
 function relativeTime(value) {
   const date = value ? new Date(value) : null;
@@ -40,6 +41,21 @@ function videoMimeType(format) {
   if (!format) return undefined;
   const normalizedFormat = format.toLowerCase().replace(/^\./, "");
   return normalizedFormat === "mov" ? "video/quicktime" : `video/${normalizedFormat}`;
+}
+
+/** A comment's author: name and handle, linking to their profile. */
+function CommentAuthor({ author }) {
+  const label = (
+    <>
+      <b>{author?.name || "GachaHub user"}</b>
+      {author?.username && <span className="post-comment-handle">@{author.username}</span>}
+    </>
+  );
+  return (
+    <span className="post-comment-author">
+      {author?.id ? <Link href={`/user/${encodeURIComponent(author.id)}`}>{label}</Link> : label}
+    </span>
+  );
 }
 
 function CommentItem({ comment }) {
@@ -79,12 +95,7 @@ function CommentItem({ comment }) {
   return (
     <article className="post-comment">
       <div className="post-comment-head">
-        <span className="post-comment-author">
-          <b>{comment.author?.name || "GachaHub user"}</b>
-          {comment.author?.username && (
-            <span className="post-comment-handle">@{comment.author.username}</span>
-          )}
-        </span>
+        <CommentAuthor author={comment.author} />
         <small>{relativeTime(comment.createdAt)}</small>
       </div>
       <p>
@@ -134,12 +145,7 @@ function CommentItem({ comment }) {
           {replies.isError && <small className="post-action-error">Could not load replies.</small>}
           {(replies.data?.items || []).map((item) => (
             <div className="post-reply" key={item.id}>
-              <span className="post-comment-author">
-                <b>{item.author?.name || "GachaHub user"}</b>
-                {item.author?.username && (
-                  <span className="post-comment-handle">@{item.author.username}</span>
-                )}
-              </span>
+              <CommentAuthor author={item.author} />
               <p>
                 <MentionText content={item.content} usernames={item.mentions} />
               </p>
@@ -246,7 +252,10 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
       followStatus.data?.following
         ? api.unfollowUser(post.authorId)
         : api.followUser(post.authorId),
-    onSuccess: (result) => queryClient.setQueryData(queryKeys.followStatus(post.authorId), result),
+    onSuccess: (result) => {
+      queryClient.setQueryData(queryKeys.followStatus(post.authorId), result);
+      queryClient.invalidateQueries({ queryKey: queryKeys.userProfile(post.authorId) });
+    },
   });
 
   const createComment = useMutation({
@@ -318,10 +327,16 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
       {!detail && !isFeed && <span className="rank">{index + 1}</span>}
       <div className={`post-thumb art-${artTones[index % artTones.length]}`}>
         {isFeed ? (
-          <AvatarFace
-            fallback={(post.author || "G").charAt(0).toUpperCase()}
-            image={post.authorImage}
-          />
+          <Link
+            aria-label={`${post.author}'s profile`}
+            className="post-author-link"
+            href={`/user/${encodeURIComponent(post.authorId)}`}
+          >
+            <AvatarFace
+              fallback={(post.author || "G").charAt(0).toUpperCase()}
+              image={post.authorImage}
+            />
+          </Link>
         ) : (
           glyph.sparkle
         )}

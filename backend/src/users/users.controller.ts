@@ -4,6 +4,7 @@ import { Session, OptionalAuth } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { PostsService } from '../posts/posts.service';
+import { UserProfileService } from './profile/user-profile.service';
 import { UsersService } from './users.service';
 import { SearchUsersQueryDto } from './dto/search-users-query.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -16,6 +17,7 @@ export class UsersController {
   constructor(
     private readonly postsService: PostsService,
     private readonly usersService: UsersService,
+    private readonly profiles: UserProfileService,
   ) {}
 
   @Get('me')
@@ -90,6 +92,6 @@ export class UsersController {
     @Param('userId') userId: string,
     @Session() session?: UserSession,
   ) {
-    return this.usersService.getPublicProfile(userId, session?.user.id);
+    return this.profiles.getPublicProfile(userId, session?.user.id);
   }
 }

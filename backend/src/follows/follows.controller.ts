@@ -1,7 +1,8 @@
-import { Controller, Delete, Get, Param, Post } from '@nestjs/common';
+import { Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Session } from '@thallesp/nestjs-better-auth';
+import { OptionalAuth, Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
+import { ListFollowsQueryDto } from './dto/list-follows-query.dto';
 import { FollowsService } from './follows.service';
 
 @ApiTags('Follows')
@@ -25,6 +26,28 @@ export class FollowsController {
   })
   unfollow(@Param('userId') userId: string, @Session() session: UserSession) {
     return this.followsService.unfollow(session.user.id, userId);
+  }
+
+  @Get(':userId/followers')
+  @OptionalAuth()
+  @ApiOperation({ summary: "A user's followers, newest first" })
+  followers(
+    @Param('userId') userId: string,
+    @Query() query: ListFollowsQueryDto,
+    @Session() session?: UserSession,
+  ) {
+    return this.followsService.listFollowers(userId, session?.user.id, query);
+  }
+
+  @Get(':userId/following')
+  @OptionalAuth()
+  @ApiOperation({ summary: 'The people a user follows, newest first' })
+  following(
+    @Param('userId') userId: string,
+    @Query() query: ListFollowsQueryDto,
+    @Session() session?: UserSession,
+  ) {
+    return this.followsService.listFollowing(userId, session?.user.id, query);
   }
 
   @Get(':userId/follow-status')

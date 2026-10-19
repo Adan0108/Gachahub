@@ -23,6 +23,23 @@ export class BlocksService {
     return new Set(blocks.map((block) => block.blockedId));
   }
 
+  /** Blocked in either direction - what a two-way visibility rule needs. Returns the other person of each block. */
+  async getMutuallyBlockedIdsAmong(
+    userId: string,
+    candidateIds: string[],
+  ): Promise<Set<string>> {
+    const blocks = await this.blocksRepository.findBlocksBetween(
+      userId,
+      candidateIds,
+    );
+
+    return new Set(
+      blocks.map((block) =>
+        block.blockerId === userId ? block.blockedId : block.blockerId,
+      ),
+    );
+  }
+
   block(blockerId: string, blockedId: string) {
     if (blockerId === blockedId) {
       throw new BadRequestException('You cannot block yourself');

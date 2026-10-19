@@ -9,6 +9,7 @@ describe('BlocksService', () => {
   const repository = {
     find: jest.fn(),
     findBlockedIdsAmong: jest.fn(),
+    findBlocksBetween: jest.fn(),
     create: jest.fn(),
     delete: jest.fn(),
   };
@@ -104,6 +105,31 @@ describe('BlocksService', () => {
       const result = await service.unblock('user-1', 'user-2');
 
       expect(result).toBe(0);
+    });
+  });
+
+  describe('getMutuallyBlockedIdsAmong', () => {
+    it('gives the other person of each block, whichever way it went', async () => {
+      repository.findBlocksBetween.mockResolvedValue([
+        { blockerId: 'me', blockedId: 'bo' },
+        { blockerId: 'cy', blockedId: 'me' },
+      ]);
+
+      const blocked = await service.getMutuallyBlockedIdsAmong('me', [
+        'bo',
+        'cy',
+        'di',
+      ]);
+
+      expect([...blocked].sort()).toEqual(['bo', 'cy']);
+    });
+
+    it('is empty when there are no blocks', async () => {
+      repository.findBlocksBetween.mockResolvedValue([]);
+
+      await expect(
+        service.getMutuallyBlockedIdsAmong('me', ['bo']),
+      ).resolves.toEqual(new Set());
     });
   });
 });

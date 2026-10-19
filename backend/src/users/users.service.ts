@@ -89,6 +89,9 @@ export class UsersService {
     return this.prisma.user.update({
       where: { id: userId },
       data: {
+        name: dto.name,
+        // An empty bio clears it.
+        bio: dto.bio === undefined ? undefined : dto.bio || null,
         messageRequestSetting: dto.messageRequestSetting,
         sendReadReceipts: dto.sendReadReceipts,
         sendLinkPreviews: dto.sendLinkPreviews,
@@ -170,31 +173,5 @@ export class UsersService {
     });
 
     return !existing;
-  }
-
-  /** Public profile of another user; isBlockedByMe reflects only the viewer's own block. */
-  async getPublicProfile(userId: string, viewerId?: string) {
-    const user = await this.prisma.user.findFirst({
-      where: { id: userId, status: 'ACTIVE' },
-      select: {
-        id: true,
-        name: true,
-        username: true,
-        image: true,
-        bannerPresetId: true,
-        createdAt: true,
-      },
-    });
-
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    const isBlockedByMe =
-      viewerId && viewerId !== userId
-        ? await this.blocksService.isBlocked(viewerId, userId)
-        : false;
-
-    return { ...user, isBlockedByMe };
   }
 }

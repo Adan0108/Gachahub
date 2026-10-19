@@ -14,5 +14,6 @@ export const ME_SELECT = {
   sendReadReceipts: true,
   sendLinkPreviews: true,
   username: true,
+  bio: true,
   onboarded: true,
 } as const;

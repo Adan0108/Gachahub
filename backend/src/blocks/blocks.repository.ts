@@ -33,21 +33,50 @@ export class BlocksRepository {
     });
   }
 
-  // upsert keeps blocking idempotent
-  create(blockerId: string, blockedId: string) {
-    return this.prisma.chatUserBlock.upsert({
+  /** Blocks between this person and any of the candidates, whichever of them blocked. */
+  async findBlocksBetween(userId: string, candidateIds: string[]) {
+    if (candidateIds.length === 0) {
+      return [];
+    }
+
+    return this.prisma.chatUserBlock.findMany({
       where: {
-        blockerId_blockedId: {
+        OR: [
+          { blockerId: userId, blockedId: { in: candidateIds } },
+          { blockedId: userId, blockerId: { in: candidateIds } },
+        ],
+      },
+      select: { blockerId: true, blockedId: true },
+    });
+  }
+
+  // upsert keeps blocking idempotent; a block also ends any follow between the two, either way
+  async create(blockerId: string, blockedId: string) {
+    const [block] = await this.prisma.$transaction([
+      this.prisma.chatUserBlock.upsert({
+        where: {
+          blockerId_blockedId: {
+            blockerId,
+            blockedId,
+          },
+        },
+        create: {
           blockerId,
           blockedId,
         },
-      },
-      create: {
-        blockerId,
-        blockedId,
-      },
-      update: {},
-    });
+        update: {},
+      }),
+      this.prisma.userFollow.deleteMany({
+        where: {
+          OR: [
+            { followerId: blockerId, followingId: blockedId },
+            { followerId: blockedId, followingId: blockerId },
+          ],
+        },
+      }),
+    ]);
+
+    return block;
   }
 
   delete(blockerId: string, blockedId: string) {
