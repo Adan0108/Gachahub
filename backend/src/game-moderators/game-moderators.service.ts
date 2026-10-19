@@ -5,12 +5,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { UserRole, type GameStatus } from '../generated/prisma/client';
+import { type GameStatus } from '../generated/prisma/client';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { loadActiveUser } from '../common/guards/active-user.util';
 import { AssignGameModeratorDto } from './dto/assign-game-moderator.dto';
 import { GameModeratorsRepository } from './game-moderators.repository';
+import { hasPlatformModerationCapability } from '../common/guards/moderation-capabilities';
 
 /**
  * Service responsible for game moderator business logic.
@@ -20,8 +21,9 @@ import { GameModeratorsRepository } from './game-moderators.repository';
  * - list moderators of a game
  * - remove a moderator from a game
  *
- * Game moderators are scoped to one game.
- * They are not platform-level admins.
+ * GameModerator assignments remain scoped to individual games.
+ * Platform moderators and admins may moderate any game without an assignment,
+ * but assignment management remains an admin responsibility.
  */
 @Injectable()
 export class GameModeratorsService {
@@ -64,20 +66,20 @@ export class GameModeratorsService {
   }
 
   /**
-   * Asserts the user can moderate the given game: either an ADMIN, or an
-   * assigned moderator of that game. Shared so callers outside chat (posts,
-   * comments) don't each duplicate the same admin-or-moderator check.
+   * Asserts that the user can moderate the given game.
    *
-   * Delegates the "does this account exist and is it ACTIVE" gate to
-   * loadActiveUser - the same function AdminGuard uses - rather than
-   * re-checking it here, so a caller invoking this with no guard in front
-   * of it (or a banned account whose session predates the ban) is rejected
-   * the same way, with the same 401-vs-403 split, everywhere in the app.
+   * Allowed:
+   * - ADMIN
+   * - PLATFORM_MODERATOR
+   * - a GameModerator assigned to this game
+   *
+   * PLATFORM_MODERATOR and ADMIN have platform-wide moderation capability,
+   * while ordinary game moderators remain scoped to their assignments.
    */
   async assertCanModerateGame(gameId: string, userId: string): Promise<void> {
     const user = await loadActiveUser(this.prisma, userId);
 
-    if (user.role === UserRole.ADMIN) {
+    if (hasPlatformModerationCapability(user.role)) {
       return;
     }
 
