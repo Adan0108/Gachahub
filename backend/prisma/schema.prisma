@@ -154,6 +154,7 @@ model UserFollow {
 
 enum UserRole {
   USER
+  PLATFORM_MODERATOR
   ADMIN
 }
 
