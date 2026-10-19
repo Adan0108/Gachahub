@@ -21,6 +21,7 @@ const message = (id: string, minute: number, contentType?: string, senderId = 'a
   senderId,
   createdAt: at(minute),
   contentType,
+  status: undefined as string | undefined,
 });
 const decrypted = (statuses: Record<string, Status>) =>
   Object.fromEntries(Object.entries(statuses).map(([id, status]) => [id, { status }]));
@@ -54,6 +55,41 @@ describe('eventsForDisplay', () => {
 });
 
 describe('buildThreadItems', () => {
+  describe('a message still being decrypted', () => {
+    const build = (messages: ReturnType<typeof message>[], states: Record<string, Status>) =>
+      buildThreadItems({ messages, decrypted: decrypted(states), events: [], collapseLeading: false });
+
+    it('leaves no divider behind, since nothing is drawn for it', () => {
+      const items = build([message('a', 0), message('b', 120), message('c', 240)], { a: 'ok', b: 'pending' });
+
+      // b is not drawn yet, and c has no decrypt state either, so only a is on screen
+      expect(shape(items)).toEqual(['timestamp', 'a']);
+    });
+
+    it('does not break the gap logic for the messages around it', () => {
+      const items = build([message('a', 0), message('b', 10), message('c', 20)], { a: 'ok', b: 'pending', c: 'ok' });
+
+      // a and c are 20 minutes apart: no divider, same as if b were not there
+      expect(shape(items)).toEqual(['timestamp', 'a', 'c']);
+    });
+
+    it('gets its divider once it can be drawn', () => {
+      const messages = [message('a', 0), message('b', 120)];
+
+      expect(shape(build(messages, { a: 'ok', b: 'pending' }))).toEqual(['timestamp', 'a']);
+      expect(shape(build(messages, { a: 'ok', b: 'ok' }))).toEqual(['timestamp', 'a', 'timestamp', 'b']);
+    });
+
+    it('still counts an unsent message, a start marker and an unavailable message as drawn', () => {
+      const items = build(
+        [{ ...message('a', 0), status: 'DELETED' }, message('b', 120, 'SYSTEM'), message('c', 240)],
+        { c: 'unavailable' },
+      );
+
+      expect(shape(items)).toEqual(['timestamp', 'a', 'timestamp', 'c']);
+    });
+  });
+
   it('collapses leading undecryptable messages into one banner', () => {
     const items = buildThreadItems({
       messages: [message('a', 1), message('b', 2), message('c', 3)],
@@ -74,14 +110,14 @@ describe('buildThreadItems', () => {
     expect(shape(items)).toEqual(['timestamp', 'a', 'b', 'c']);
   });
 
-  it('steps over the conversation-started row and pending messages while collapsing', () => {
+  it('steps over the conversation-started row, and leaves out pending messages, while collapsing', () => {
     const items = buildThreadItems({
       messages: [message('s', 0, 'SYSTEM'), message('a', 1), message('p', 2), message('c', 3)],
       decrypted: decrypted({ a: 'unavailable', p: 'pending', c: 'ok' }),
       events: [],
       collapseLeading: true,
     });
-    expect(shape(items)).toEqual(['history-banner', 'timestamp', 'p', 'c']);
+    expect(shape(items)).toEqual(['history-banner', 'timestamp', 'c']);
   });
 
   it('shows no banner when nothing is unreadable, and keeps everything when told not to collapse', () => {

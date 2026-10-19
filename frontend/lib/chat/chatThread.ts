@@ -5,6 +5,7 @@ interface ThreadMessage {
   senderId?: string;
   createdAt?: string;
   contentType?: string;
+  status?: string;
 }
 
 type DecryptState = { status: 'pending' | 'ok' | 'unavailable' } | undefined;
@@ -23,6 +24,13 @@ export type ThreadItem<M extends ThreadMessage = ThreadMessage> =
       groupedWithNext: boolean;
     }
   | { kind: 'event'; event: MembershipEvent };
+
+/** A message the thread draws nothing for yet: still being decrypted, so it must not leave a divider or a gap behind. */
+function isStillDecrypting(message: ThreadMessage, decrypted: Record<string, DecryptState>): boolean {
+  if (message.contentType === 'SYSTEM' || message.status === 'DELETED') return false;
+  const state = decrypted[message.id];
+  return state === undefined || state.status === 'pending';
+}
 
 /** A gap this long gets its own timestamp divider. */
 export const TIMESTAMP_DIVIDER_GAP_MS = 45 * 60 * 1000;
@@ -80,7 +88,7 @@ export function buildThreadItems<M extends ThreadMessage>(input: {
   );
   let prevAt: number | undefined;
   messages.forEach((message, index) => {
-    if (hidden.has(message.id)) return;
+    if (hidden.has(message.id) || isStillDecrypting(message, decrypted)) return;
     if (message.contentType === 'SYSTEM' && hasWrittenMessage) return;
     const sentAt = message.createdAt ? Date.parse(message.createdAt) : Number.NaN;
     while (pendingEvents[0] && !Number.isNaN(sentAt) && pendingEvents[0].at <= sentAt) {
