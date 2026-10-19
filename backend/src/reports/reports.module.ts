@@ -1,3 +1,5 @@
+import { CommonModule } from '../common/common.module';
+import { PlatformReportModerationController } from './platform-report-moderation.controller';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { Module } from '@nestjs/common';
 import { PostVisibilityModule } from '../post-visibility/post-visibility.module';
@@ -11,9 +13,15 @@ import { ReportsRepository } from './reports.repository';
 import { ReportsService } from './reports.service';
 
 @Module({
-  imports: [GameModeratorsModule, PostVisibilityModule, AuditLogModule],
+  imports: [
+    CommonModule,
+    GameModeratorsModule,
+    PostVisibilityModule,
+    AuditLogModule,
+  ],
   controllers: [
     ReportsController,
+    PlatformReportModerationController,
     ReportModerationController,
     AdminReportsController,
   ],

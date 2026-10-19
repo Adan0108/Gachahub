@@ -361,8 +361,9 @@ export class ReportsRepository {
     return Array.from(counts, ([gameId, count]) => ({ gameId, count }));
   }
 
+  // undefined: all cases; null: platform cases; string: one game.
   async findMany(params: {
-    gameId?: string;
+    gameId?: string | null;
     status?: LegacyReportStatus;
     targetType?: ReportTargetType;
     page: number;
@@ -370,7 +371,7 @@ export class ReportsRepository {
   }) {
     const where: Prisma.ReportWhereInput = {
       case: {
-        ...(params.gameId ? { gameId: params.gameId } : {}),
+        ...(params.gameId !== undefined ? { gameId: params.gameId } : {}),
         ...(params.status ? { status: toCaseStatus(params.status) } : {}),
       },
       ...(params.targetType ? { targetType: params.targetType } : {}),

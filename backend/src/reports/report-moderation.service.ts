@@ -1,4 +1,13 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { loadActiveUser } from '../common/guards/active-user.util';
+import { hasPlatformModerationCapability } from '../common/guards/moderation-capabilities';
+import { QueryPlatformReportsDto } from './dto/query-platform-reports.dto';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { normalizeText } from '../common/utils/normalize-text';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import type { ReportAuditAction } from '../audit-log/audit-log.types';
@@ -22,7 +31,35 @@ export class ReportModerationService {
     private readonly reportsRepository: ReportsRepository,
     private readonly gameModeratorsService: GameModeratorsService,
     private readonly auditLogService: AuditLogService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  /** Read-only report rows; recheck live capability for direct service callers. */
+  async listForPlatform(userId: string, query: QueryPlatformReportsDto) {
+    const user = await loadActiveUser(this.prisma, userId);
+    if (!hasPlatformModerationCapability(user.role)) {
+      throw new ForbiddenException('PlatformModerator permission required');
+    }
+
+    // Cross-field rules also apply outside the HTTP ValidationPipe.
+    const scope = query.scope ?? 'all';
+    if (
+      !['all', 'platform', 'game'].includes(scope) ||
+      (scope === 'game'
+        ? typeof query.gameSlug !== 'string' || !query.gameSlug.trim()
+        : query.gameSlug !== undefined)
+    ) {
+      throw new BadRequestException('gameSlug is required only for scope=game');
+    }
+
+    const gameId =
+      scope === 'game'
+        ? await this.gameModeratorsService.resolveGameId(query.gameSlug!)
+        : scope === 'platform'
+          ? null
+          : undefined;
+    return this.listByGameId(gameId, query);
+  }
 
   /**
    * Lists reports for one game. Admin or a moderator assigned to that game.
@@ -206,7 +243,7 @@ export class ReportModerationService {
   }
 
   private async listByGameId(
-    gameId: string | undefined,
+    gameId: string | null | undefined,
     query: QueryReportsDto,
   ) {
     const { page, limit } = resolvePagination(query);

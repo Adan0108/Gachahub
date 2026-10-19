@@ -1,3 +1,4 @@
+import { PlatformReportModerationController } from '../src/reports/platform-report-moderation.controller';
 type TestRequest = Request & {
   user?: { id: string };
   session?: { user: { id: string } };
@@ -190,6 +191,7 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
     const module = await Test.createTestingModule({
       controllers: [
         ReportsController,
+        PlatformReportModerationController,
         AdminReportsController,
         ReportModerationController,
         AdminContentController,
@@ -1184,5 +1186,69 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         where: { targetId: { in: [a.body.id, b.body.id] } },
       }),
     ).toBe(2);
+  });
+  it('platform queue enforces live roles, all/platform/game scopes and report-level projection over HTTP/PostgreSQL', async () => {
+    const platformModerator = await user();
+    await db.user.update({
+      where: { id: platformModerator },
+      data: { role: 'PLATFORM_MODERATOR' },
+    });
+    const personal = await post();
+    const community = await post(true);
+    const a = await submit(personal.id, await user());
+    const b = await submit(community.id, await user());
+    const c = await submit(community.id, await user());
+    expect([a.status, b.status, c.status]).toEqual([201, 201, 201]);
+    const queue = '/moderation/reports';
+    const all = await api(queue, platformModerator);
+    expect(all.status).toBe(200);
+    expect(all.body.items.map((row) => row.id)).toEqual(
+      expect.arrayContaining([a.body.id, b.body.id, c.body.id]),
+    );
+    for (const row of all.body.items) {
+      expect(row).not.toHaveProperty('targetSnapshot');
+      expect(row).not.toHaveProperty('case');
+    }
+    const platform = await api(`${queue}?scope=platform`, platformModerator);
+    expect(platform.status).toBe(200);
+    expect(platform.body.items.map((row) => row.id)).toContain(a.body.id);
+    expect(platform.body.items.every((row) => row.gameId === null)).toBe(true);
+    const game = await api(
+      `${queue}?scope=game&gameSlug=${slug}`,
+      platformModerator,
+    );
+    expect(game.status).toBe(200);
+    expect(game.body.items.map((row) => row.id)).toEqual(
+      expect.arrayContaining([b.body.id, c.body.id]),
+    );
+    expect(game.body.items.every((row) => row.gameId === gameId)).toBe(true);
+    expect((await api(queue, admin)).status).toBe(200);
+    expect((await api(queue, author)).status).toBe(403);
+    expect((await api(queue, moderator)).status).toBe(403);
+    expect((await api(queue, null)).status).toBe(401);
+    expect(
+      (
+        await api(
+          `${queue}?scope=game&gameSlug=missing-${prefix}`,
+          platformModerator,
+        )
+      ).status,
+    ).toBe(404);
+    for (const query of [
+      'scope=platform&gameSlug=x',
+      'scope=all&gameSlug=x',
+      'scope=game',
+      'scope=invalid',
+      'limit=101',
+    ]) {
+      expect((await api(`${queue}?${query}`, platformModerator)).status).toBe(
+        400,
+      );
+    }
+    await db.user.update({
+      where: { id: platformModerator },
+      data: { status: 'SUSPENDED' },
+    });
+    expect((await api(queue, platformModerator)).status).toBe(403);
   });
 });

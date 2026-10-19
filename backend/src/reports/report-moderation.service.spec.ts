@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
+import type { PrismaService } from '../prisma/prisma.service';
 import type { Prisma } from '../generated/prisma/client';
 import type { ReportsRepository } from './reports.repository';
 import type { GameModeratorsService } from '../game-moderators/game-moderators.service';
@@ -13,6 +14,8 @@ import type { AuditLogService } from '../audit-log/audit-log.service';
  * Unit test only mocks service dependencies. Do not load their real
  * implementations because they eventually import Prisma.
  */
+jest.mock('../prisma/prisma.service', () => ({ PrismaService: class {} }));
+
 jest.mock('./reports.repository', () => ({
   ReportsRepository: class {},
 }));
@@ -44,6 +47,7 @@ describe('ReportModerationService', () => {
     loadModeratableResource: jest.fn(),
   };
 
+  const prisma = { user: { findUnique: jest.fn() } };
   const auditLogService = { recordOrThrow: jest.fn() };
   const tx = {} as Prisma.TransactionClient;
 
@@ -87,6 +91,98 @@ describe('ReportModerationService', () => {
       reportsRepository as unknown as ReportsRepository,
       gameModeratorsService as unknown as GameModeratorsService,
       auditLogService as unknown as AuditLogService,
+      prisma as unknown as PrismaService,
+    );
+  });
+
+  describe('listForPlatform', () => {
+    beforeEach(() => {
+      prisma.user.findUnique.mockResolvedValue({
+        role: 'PLATFORM_MODERATOR',
+        status: 'ACTIVE',
+      });
+      reportsRepository.findMany.mockResolvedValue({
+        items: [baseReport],
+        total: 1,
+      });
+    });
+    it.each(['ADMIN', 'PLATFORM_MODERATOR'])(
+      'allows live %s role and preserves report pagination',
+      async (role) => {
+        prisma.user.findUnique.mockResolvedValue({ role, status: 'ACTIVE' });
+        const result = await service.listForPlatform('actor', {
+          page: 2,
+          limit: 3,
+          status: 'PENDING',
+          targetType: 'POST',
+        });
+        expect(prisma.user.findUnique).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: 'actor' } }),
+        );
+        expect(reportsRepository.findMany).toHaveBeenCalledWith({
+          gameId: undefined,
+          page: 2,
+          limit: 3,
+          status: 'PENDING',
+          targetType: 'POST',
+        });
+        expect(result.items).toEqual([baseReport]);
+        expect(result.meta.total).toBe(1);
+      },
+    );
+    it.each([
+      ['all', undefined],
+      ['platform', null],
+      ['game', 'game-1'],
+    ] as const)('maps %s scope', async (scope, gameId) => {
+      await service.listForPlatform('actor', {
+        scope,
+        ...(scope === 'game' ? { gameSlug: 'slug' } : {}),
+      });
+      expect(reportsRepository.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ gameId }),
+      );
+      if (scope === 'game')
+        expect(gameModeratorsService.resolveGameId).toHaveBeenCalledWith(
+          'slug',
+        );
+      else expect(gameModeratorsService.resolveGameId).not.toHaveBeenCalled();
+    });
+    it.each([
+      { scope: 'game' as const },
+      { scope: 'game' as const, gameSlug: '' },
+      { scope: 'platform' as const, gameSlug: 'slug' },
+      { scope: 'all' as const, gameSlug: 'slug' },
+    ])('rejects contradictory or missing slug: %j', async (query) => {
+      await expect(service.listForPlatform('actor', query)).rejects.toThrow(
+        'gameSlug is required only',
+      );
+      expect(reportsRepository.findMany).not.toHaveBeenCalled();
+    });
+    it('preserves unknown game 404', async () => {
+      gameModeratorsService.resolveGameId.mockRejectedValue(
+        new NotFoundException(),
+      );
+      await expect(
+        service.listForPlatform('actor', {
+          scope: 'game',
+          gameSlug: 'missing',
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+    it.each([
+      { role: 'USER', status: 'ACTIVE' },
+      { role: 'PLATFORM_MODERATOR', status: 'BANNED' },
+    ])(
+      'denies unauthorized users before any lookup, including assigned game moderators: %j',
+      async (user) => {
+        prisma.user.findUnique.mockResolvedValue(user);
+        await expect(
+          service.listForPlatform('actor', { scope: 'game', gameSlug: 'slug' }),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        expect(gameModeratorsService.resolveGameId).not.toHaveBeenCalled();
+        expect(reportsRepository.findMany).not.toHaveBeenCalled();
+      },
     );
   });
 

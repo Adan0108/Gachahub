@@ -228,3 +228,55 @@ describe('ReportsRepository case transitions', () => {
     );
   });
 });
+
+describe('ReportsRepository queue filters', () => {
+  it.each([undefined, null, 'game-1'])(
+    'preserves gameId %s semantics, filters, order and pagination',
+    async (gameId) => {
+      const row = {
+        id: 'report',
+        targetSnapshot: { secret: true },
+        case: { gameId, status: 'OPEN' },
+      };
+      const prisma = {
+        report: {
+          findMany: jest
+            .fn()
+            .mockResolvedValue([row, { ...row, id: 'report-2' }]),
+          count: jest.fn().mockResolvedValue(2),
+        },
+        $transaction: jest.fn((queries: Promise<unknown>[]) =>
+          Promise.all(queries),
+        ),
+      };
+      const repository = new ReportsRepository(
+        prisma as unknown as PrismaService,
+      );
+      const result = await repository.findMany({
+        gameId,
+        status: 'PENDING',
+        targetType: 'POST',
+        page: 2,
+        limit: 10,
+      });
+      const where = {
+        case: { ...(gameId !== undefined ? { gameId } : {}), status: 'OPEN' },
+        targetType: 'POST',
+      };
+      expect(prisma.report.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where,
+          skip: 10,
+          take: 10,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        }),
+      );
+      expect(prisma.report.count).toHaveBeenCalledWith({ where });
+      expect(result.total).toBe(2);
+      expect(result.items).toHaveLength(2);
+      expect(result.items[0].status).toBe('PENDING');
+      expect(result.items[0]).not.toHaveProperty('targetSnapshot');
+      expect(result.items[0]).not.toHaveProperty('case');
+    },
+  );
+});
