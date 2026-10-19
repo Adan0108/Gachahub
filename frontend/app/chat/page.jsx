@@ -65,6 +65,7 @@ import { useStickToBottom } from "../../hooks/chat/useStickToBottom";
 import { useTypingNames } from "../../hooks/chat/useTypingNames";
 import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
 import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
+import { useToast } from "../../hooks/useToast";
 import { ComposerEmojiButton } from "../../components/chat/ComposerEmojiButton";
 import { encodeEmotes } from "../../lib/emoji/emoteText";
 import { useThreadData } from "../../hooks/chat/useThreadData";
@@ -665,7 +666,12 @@ function ChatPageContent() {
   const closeIfOpen = (conversationId) => {
     if (conversationId === activeId) setSelectedId("");
   };
-  const conversationActions = useConversationActions({ onGone: closeIfOpen });
+  const { notice: actionNotice, showNotice: showActionNotice } = useToast();
+  const conversationActions = useConversationActions({
+    userId: user?.id,
+    onGone: closeIfOpen,
+    notify: showActionNotice,
+  });
 
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [groupTitle, setGroupTitle] = useState("");
@@ -736,9 +742,7 @@ function ChatPageContent() {
     pendingMessages.length === 0;
   const actionError =
     acceptRequest.error ||
-    declineRequest.error ||
-    conversationActions.block.error ||
-    conversationActions.unblock.error;
+    declineRequest.error;
   // Only claim end-to-end encryption when this device can actually use the group.
   const encryptionStatus = groupProblem
     ? "Encryption problem on this device"
@@ -812,6 +816,7 @@ function ChatPageContent() {
 
   return (
     <div className="page chat-page">
+      {actionNotice && floatingPortal(<div className="chat-row-toast" role="status">{actionNotice}</div>)}
       <div className={`chat-layout ${isConversationInfoOpen && activeConversation ? "info-open" : ""}`}>
         <aside className="panel chat-sidebar">
           <div className="chat-sidebar-head">

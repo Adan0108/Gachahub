@@ -31,9 +31,9 @@ export function ConversationRowMenu({ conversation, userId, view, onGone }) {
   const buttonRef = useRef(null);
   const menuRef = useRef(null);
   const position = useFloatingPosition(isOpen, buttonRef, menuRef, { align: "end" });
-  const actions = useConversationActions({ onGone });
-  const mute = useConversationMute(conversation.id);
   const { notice, showNotice } = useToast();
+  const actions = useConversationActions({ userId, onGone, notify: showNotice });
+  const mute = useConversationMute(conversation.id);
   const { isMuted } = conversationMute(conversation, userId);
   const isGroup = conversation.type === "GROUP";
   const blockedPeer = blockedPeerOf(conversation, userId);
@@ -56,7 +56,7 @@ export function ConversationRowMenu({ conversation, userId, view, onGone }) {
   };
   const run = (mutation) => {
     close();
-    mutation.mutate(conversation.id, { onError: () => showNotice("Couldn't do that. Try again.") });
+    mutation.mutate(conversation.id);
   };
   const choose = (option) => {
     close();
@@ -113,9 +113,7 @@ export function ConversationRowMenu({ conversation, userId, view, onGone }) {
                     <button
                       onClick={() => {
                         close();
-                        actions.unblock.mutate(blockedPeer.userId, {
-                          onError: () => showNotice("Couldn't unblock. Try again."),
-                        });
+                        actions.unblock.mutate(blockedPeer.userId);
                       }}
                       role="menuitem"
                       type="button"
@@ -164,11 +162,13 @@ export function ConversationRowMenu({ conversation, userId, view, onGone }) {
         <ConfirmChatActionDialog
           body={confirmation.body}
           confirmLabel={confirmation.confirmLabel}
-          error={confirmMutation.isError ? confirmation.error : ""}
           isOpen
           isPending={confirmMutation.isPending}
           onClose={() => setConfirming(null)}
-          onConfirm={() => confirmMutation.mutate(conversation.id, { onSuccess: () => setConfirming(null) })}
+          onConfirm={() => {
+            setConfirming(null);
+            confirmMutation.mutate(conversation.id);
+          }}
           title={confirmation.title(name)}
         />
       )}

@@ -30,7 +30,7 @@ function setup(options) {
   const invalidate = vi.spyOn(client, "invalidateQueries");
   const wrapper = ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   const { result } = renderHook(() => useConversationActions(options), { wrapper });
-  return { actions: result, invalidate };
+  return { actions: result, invalidate, client };
 }
 
 describe("useConversationActions", () => {
@@ -83,19 +83,17 @@ describe("useConversationActions", () => {
     expect(onGone).not.toHaveBeenCalled();
   });
 
-  it("tells onGone only after the lists have been refreshed", async () => {
-    const order = [];
-    const onGone = vi.fn(() => order.push("gone"));
-    const { actions, invalidate } = setup({ onGone });
-    invalidate.mockImplementation(async () => {
-      await Promise.resolve();
-      order.push("refreshed");
-    });
+  it("tells onGone only once the server has agreed", async () => {
+    let finish = () => {};
+    mocks.remove.mockReturnValue(new Promise((resolve) => (finish = () => resolve({}))));
+    const onGone = vi.fn();
+    const { actions } = setup({ onGone });
 
-    await act(() => actions.current.remove.mutateAsync("c1"));
+    act(() => actions.current.remove.mutate("c1"));
+    expect(onGone).not.toHaveBeenCalled();
+    await act(async () => finish());
 
-    expect(order.at(-1)).toBe("gone");
-    expect(order.filter((entry) => entry === "refreshed")).toHaveLength(4);
+    await waitFor(() => expect(onGone).toHaveBeenCalledWith("c1"));
   });
 
   it("works without an onGone", async () => {
@@ -104,14 +102,13 @@ describe("useConversationActions", () => {
     await expect(act(() => actions.current.block.mutateAsync("c1"))).resolves.not.toThrow();
   });
 
-  it("does not refresh or call onGone when the server refuses", async () => {
+  it("does not call onGone when the server refuses", async () => {
     mocks.remove.mockRejectedValue(new Error("nope"));
     const onGone = vi.fn();
-    const { actions, invalidate } = setup({ onGone });
+    const { actions } = setup({ onGone });
 
     await act(() => actions.current.remove.mutateAsync("c1").catch(() => {}));
 
-    expect(invalidate).not.toHaveBeenCalled();
     expect(onGone).not.toHaveBeenCalled();
     await waitFor(() => expect(actions.current.remove.isError).toBe(true));
   });
@@ -125,5 +122,126 @@ describe("useConversationActions", () => {
     await waitFor(() => expect(actions.current.block.isPending).toBe(true));
     expect(actions.current.archive.isPending).toBe(false);
     expect(actions.current.remove.isPending).toBe(false);
+  });
+
+  describe("at once, before the server answers", () => {
+    const direct = (id, peerBlocked = false) => ({
+      id,
+      type: "DIRECT",
+      participants: [
+        { userId: "me", isMuted: false },
+        { userId: `peer-${id}`, isBlockedByMe: peerBlocked },
+      ],
+    });
+    const never = () => new Promise(() => {});
+    const lists = (client) => ({
+      inbox: client.getQueryData(["chat", "conversations"]),
+      archived: client.getQueryData(["chat", "archived"]),
+      requests: client.getQueryData(["chat", "requests"]),
+    });
+
+    function setupLists(options) {
+      const view = setup({ userId: "me", ...options });
+      view.client.setQueryData(["chat", "conversations"], [direct("c1"), direct("c2")]);
+      view.client.setQueryData(["chat", "archived"], [direct("c3")]);
+      view.client.setQueryData(["chat", "requests"], [direct("c4")]);
+      return view;
+    }
+
+    it("marks the other person blocked, keeps the chat in the list, and says so", async () => {
+      mocks.block.mockReturnValue(never());
+      const notify = vi.fn();
+      const { actions, client } = setupLists({ notify });
+
+      act(() => actions.current.block.mutate("c1"));
+
+      await waitFor(() => expect(notify).toHaveBeenCalledWith("Blocked."));
+      const inbox = lists(client).inbox;
+      expect(inbox.map((chat) => chat.id)).toEqual(["c1", "c2"]);
+      expect(inbox[0].participants[1].isBlockedByMe).toBe(true);
+      expect(inbox[1].participants[1].isBlockedByMe).toBe(false);
+    });
+
+    it("takes a blocked request out of the requests", async () => {
+      mocks.block.mockReturnValue(never());
+      const { actions, client } = setupLists();
+
+      act(() => actions.current.block.mutate("c4"));
+
+      await waitFor(() => expect(lists(client).requests).toEqual([]));
+    });
+
+    it("marks the person unblocked everywhere, and says so", async () => {
+      mocks.unblock.mockReturnValue(never());
+      const notify = vi.fn();
+      const { actions, client } = setup({ userId: "me", notify });
+      client.setQueryData(["chat", "conversations"], [direct("c1", true)]);
+
+      act(() => actions.current.unblock.mutate("peer-c1"));
+
+      await waitFor(() => expect(notify).toHaveBeenCalledWith("Unblocked."));
+      expect(lists(client).inbox[0].participants[1].isBlockedByMe).toBe(false);
+    });
+
+    it("takes the person off the Blocked list when they are unblocked", async () => {
+      mocks.unblock.mockReturnValue(never());
+      const { actions, client } = setup({ userId: "me" });
+      client.setQueryData(["chat", "blocked"], {
+        items: [{ id: "bo", name: "Bo" }, { id: "cy", name: "Cy" }],
+      });
+
+      act(() => actions.current.unblock.mutate("bo"));
+
+      await waitFor(() =>
+        expect(client.getQueryData(["chat", "blocked"]).items.map((person) => person.id)).toEqual(["cy"]),
+      );
+    });
+
+    it("moves a chat out of the inbox when it is archived, and out of the archive when it is not", async () => {
+      mocks.archive.mockReturnValue(never());
+      mocks.unarchive.mockReturnValue(never());
+      const notify = vi.fn();
+      const { actions, client } = setupLists({ notify });
+
+      act(() => actions.current.archive.mutate("c1"));
+      await waitFor(() => expect(lists(client).inbox.map((chat) => chat.id)).toEqual(["c2"]));
+      expect(notify).toHaveBeenCalledWith("Chat archived.");
+
+      act(() => actions.current.unarchive.mutate("c3"));
+      await waitFor(() => expect(lists(client).archived).toEqual([]));
+      expect(notify).toHaveBeenCalledWith("Moved back to your inbox.");
+    });
+
+    it("drops a deleted chat from every list, and says so", async () => {
+      mocks.remove.mockReturnValue(never());
+      const notify = vi.fn();
+      const { actions, client } = setupLists({ notify });
+
+      act(() => actions.current.remove.mutate("c3"));
+
+      await waitFor(() => expect(notify).toHaveBeenCalledWith("Chat deleted."));
+      expect(lists(client).archived).toEqual([]);
+      expect(lists(client).inbox).toHaveLength(2);
+    });
+
+    it("puts the lists back and says so when the server refuses", async () => {
+      mocks.archive.mockRejectedValue(new Error("nope"));
+      const notify = vi.fn();
+      const { actions, client } = setupLists({ notify });
+
+      await act(() => actions.current.archive.mutateAsync("c1").catch(() => {}));
+
+      await waitFor(() => expect(notify).toHaveBeenLastCalledWith("Couldn't archive. Try again."));
+      expect(lists(client).inbox.map((chat) => chat.id)).toEqual(["c1", "c2"]);
+    });
+
+    it("asks the server for the truth once it has answered, either way", async () => {
+      mocks.archive.mockRejectedValue(new Error("nope"));
+      const { actions, invalidate } = setupLists();
+
+      await act(() => actions.current.archive.mutateAsync("c1").catch(() => {}));
+
+      await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat", "conversations"] }));
+    });
   });
 });
