@@ -60,6 +60,8 @@ model User {
   gameChannelDeletions GameChannelMessage[]   @relation("GameChannelMessageDeleter")
   gameChannelReactions GameChannelReaction[]
   gameChannelReads     GameChannelReadState[]
+  chatTimeouts         GameChatTimeout[]      @relation("GameChatTimeoutMember")
+  chatTimeoutsGiven    GameChatTimeout[]      @relation("GameChatTimeoutIssuer")
   blockedUsers         ChatUserBlock[]        @relation("ChatUserBlockBlocker")
   blockedBy            ChatUserBlock[]        @relation("ChatUserBlockBlocked")
 
@@ -210,6 +212,7 @@ model Game {
   members         GameMember[]
   chatEmotes      ChatEmote[]
   channels        GameChannel[]
+  chatTimeouts    GameChatTimeout[]
   moderationCases ModerationCase[]
   auditLogs       AuditLog[]
 
@@ -561,6 +564,25 @@ model GameChannelReaction {
 }
 
 /// Where one member has read up to in one channel; unread is counted from here.
+/// A member barred from the community chat until a time, set by a moderator; one row per member, replaced on a new timeout.
+model GameChatTimeout {
+  id          String   @id @default(cuid())
+  gameId      String
+  userId      String
+  until       DateTime
+  reason      String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  game      Game  @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user      User  @relation("GameChatTimeoutMember", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("GameChatTimeoutIssuer", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([gameId, userId])
+  @@index([until])
+  @@map("game_chat_timeouts")
+}
+
 model GameChannelReadState {
   userId    String
   channelId String
@@ -1085,6 +1107,11 @@ enum AuditAction {
   GAME_ARCHIVED
   GAME_RESTORED
   GAME_FLAGGED
+  CHAT_USER_TIMED_OUT
+  CHAT_TIMEOUT_LIFTED
+  CHAT_CHANNEL_CREATED
+  CHAT_CHANNEL_UPDATED
+  CHAT_MESSAGE_REMOVED
 }
 
 enum AuditTargetType {
@@ -1093,6 +1120,8 @@ enum AuditTargetType {
   REPORT
   USER
   GAME
+  CHANNEL
+  CHAT_MESSAGE
 }
 
 // Append-only record of moderator/admin actions. actorId and gameId are SetNull so the trail

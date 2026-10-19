@@ -14,6 +14,30 @@ export type GameAuditAction =
   | 'GAME_RESTORED'
   | 'GAME_FLAGGED';
 
+export type ChatTimeoutAuditAction =
+  | 'CHAT_USER_TIMED_OUT'
+  | 'CHAT_TIMEOUT_LIFTED';
+export type ChatChannelAuditAction =
+  | 'CHAT_CHANNEL_CREATED'
+  | 'CHAT_CHANNEL_UPDATED';
+
+/** Stored shape of `metadata` for chat timeout entries. Rows are permanent - change by adding optional keys only. */
+export type ChatTimeoutAuditMetadata = { until?: string; reason?: string };
+
+/** Stored shape of `metadata` for chat room entries. Rows are permanent - change by adding optional keys only. */
+export type ChatChannelAuditMetadata = {
+  name: string;
+  /** The settings that changed, as they are now. */
+  changes?: Record<string, string | number | boolean | null>;
+};
+
+/** Stored shape of `metadata` for a message a moderator removed. Rows are permanent - change by adding optional keys only. */
+export type ChatMessageAuditMetadata = {
+  authorId: string | null;
+  channelId: string;
+  reason?: string;
+};
+
 /** Stored shape of `metadata` for post entries. Rows are permanent - change by adding optional keys only. */
 export type PostAuditMetadata = { authorId: string; postTitle: string };
 
@@ -84,5 +108,20 @@ export type AuditEntry = AuditEntryBase &
         action: GameAuditAction;
         targetType: 'GAME';
         metadata?: GameAuditMetadata;
+      }
+    | {
+        action: ChatTimeoutAuditAction;
+        targetType: 'USER';
+        metadata?: ChatTimeoutAuditMetadata;
+      }
+    | {
+        action: ChatChannelAuditAction;
+        targetType: 'CHANNEL';
+        metadata: ChatChannelAuditMetadata;
+      }
+    | {
+        action: 'CHAT_MESSAGE_REMOVED';
+        targetType: 'CHAT_MESSAGE';
+        metadata: ChatMessageAuditMetadata;
       }
   );

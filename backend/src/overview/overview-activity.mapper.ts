@@ -1,5 +1,6 @@
 import { AuditTargetType } from '../generated/prisma/client';
 import type {
+  ChatChannelAuditMetadata,
   CommentAuditMetadata,
   PostAuditMetadata,
   ReportAuditMetadata,
@@ -68,6 +69,11 @@ function resolveTargetName(
     case AuditTargetType.GAME:
       // Already denormalized on the row - no extra lookup needed.
       return entry.gameSlug ?? null;
+    case AuditTargetType.CHANNEL:
+      return (entry.metadata as ChatChannelAuditMetadata | null)?.name ?? null;
+    case AuditTargetType.CHAT_MESSAGE:
+      // A message has no title of its own; the room it was in is the useful context.
+      return null;
     default: {
       const exhaustiveCheck: never = entry.targetType;
       return exhaustiveCheck;
