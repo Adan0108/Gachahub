@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 
@@ -27,6 +28,7 @@ import { CreateNotificationInput } from './notification.types';
 export class NotificationService {
   private static readonly DEFAULT_PAGE_SIZE = 20;
   private static readonly DEDUPE_WINDOW_MS = 60_000;
+  private readonly logger = new Logger(NotificationService.name);
 
   constructor(
     private readonly notificationRepository: NotificationRepository,
@@ -219,6 +221,8 @@ export class NotificationService {
       throw new BadRequestException('recipientId is required');
     }
 
+    await this.settleReadMessageNotifications(recipientId);
+
     const limit = params.limit ?? NotificationService.DEFAULT_PAGE_SIZE;
     const cursor = params.cursor;
 
@@ -257,6 +261,18 @@ export class NotificationService {
     };
   }
 
+  /** Best effort: a failure here must not stop the bell from answering. */
+  private async settleReadMessageNotifications(recipientId: string) {
+    try {
+      await this.notificationRepository.settleMessageNotifications(recipientId);
+    } catch (error) {
+      this.logger.warn(
+        `Could not settle message notifications for ${recipientId}`,
+        error,
+      );
+    }
+  }
+
   /**
    * Returns the number of unread notifications for a recipient.
    */
@@ -265,6 +281,7 @@ export class NotificationService {
       throw new BadRequestException('recipientId is required');
     }
 
+    await this.settleReadMessageNotifications(recipientId);
     const count = await this.notificationRepository.countUnread(recipientId);
 
     return {

@@ -158,6 +158,40 @@ export class NotificationRepository {
     });
   }
 
+  /**
+   * Marks a recipient's unread chat message notifications read when the message no longer needs
+   * them: it was read (the notification can be saved just after the read lands), or it was
+   * unsent or is gone. The receipts are the truth for what is read, so this brings the bell back
+   * in line with them whatever path left a notification behind. Returns how many it settled.
+   */
+  settleMessageNotifications(recipientId: string): Promise<number> {
+    return this.prisma.$executeRaw`
+      UPDATE notifications n
+      SET "readAt" = COALESCE(
+            (SELECT r."readAt" FROM chat_message_receipts r
+              WHERE r."messageId" = n."entityId" AND r."userId" = n."recipientId"),
+            NOW()
+          ),
+          "updatedAt" = NOW()
+      WHERE n."recipientId" = ${recipientId}
+        AND n."readAt" IS NULL
+        AND n."entityType" = 'MESSAGE'
+        AND n."type" IN ('MESSAGE_RECEIVED', 'MESSAGE_REPLIED')
+        AND (
+          EXISTS (
+            SELECT 1 FROM chat_message_receipts r
+            WHERE r."messageId" = n."entityId"
+              AND r."userId" = n."recipientId"
+              AND r."readAt" IS NOT NULL
+          )
+          OR NOT EXISTS (
+            SELECT 1 FROM chat_messages m
+            WHERE m.id = n."entityId" AND m.status = 'SENT'
+          )
+        )
+    `;
+  }
+
   /** The conversation each of these messages is in, so a chat notification can open it. */
   async findConversationIdsByMessageIds(
     messageIds: string[],

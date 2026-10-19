@@ -41,6 +41,9 @@ type NotificationRepositoryMock = {
   findConversationIdsByMessageIds: jest.MockedFunction<
     NotificationRepository['findConversationIdsByMessageIds']
   >;
+  settleMessageNotifications: jest.MockedFunction<
+    NotificationRepository['settleMessageNotifications']
+  >;
 };
 
 describe('NotificationService', () => {
@@ -59,6 +62,7 @@ describe('NotificationService', () => {
     markMessageNotificationsAsRead: jest.fn(),
     findExisting: jest.fn(),
     findConversationIdsByMessageIds: jest.fn(),
+    settleMessageNotifications: jest.fn(),
   };
 
   const commentsRepositoryMock = {
@@ -113,6 +117,7 @@ describe('NotificationService', () => {
     jest.clearAllMocks();
     commentsRepositoryMock.findPostIdsByCommentIds.mockResolvedValue([]);
     repositoryMock.findConversationIdsByMessageIds.mockResolvedValue([]);
+    repositoryMock.settleMessageNotifications.mockResolvedValue(0);
   });
 
   describe('createNotification', () => {
@@ -688,6 +693,32 @@ describe('NotificationService', () => {
       ]);
     });
 
+    it('settles message notifications whose message was already read before listing', async () => {
+      repositoryMock.findByRecipient.mockResolvedValue([]);
+
+      await service.getNotifications(recipientId, {});
+
+      expect(repositoryMock.settleMessageNotifications).toHaveBeenCalledWith(
+        recipientId,
+      );
+      expect(
+        repositoryMock.settleMessageNotifications.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        repositoryMock.findByRecipient.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('still lists when settling fails', async () => {
+      repositoryMock.settleMessageNotifications.mockRejectedValue(
+        new Error('db down'),
+      );
+      repositoryMock.findByRecipient.mockResolvedValue([]);
+
+      await expect(service.getNotifications(recipientId, {})).resolves.toEqual(
+        expect.objectContaining({ items: [] }),
+      );
+    });
+
     it('should use default page size', async () => {
       repositoryMock.findByRecipient.mockResolvedValue([]);
 
@@ -732,6 +763,16 @@ describe('NotificationService', () => {
       });
 
       expect(repositoryMock.countUnread).toHaveBeenCalledWith(recipientId);
+    });
+
+    it('settles read message notifications first, so the count agrees with the chat', async () => {
+      repositoryMock.countUnread.mockResolvedValue(1);
+
+      await service.getUnreadCount(recipientId);
+
+      expect(
+        repositoryMock.settleMessageNotifications.mock.invocationCallOrder[0],
+      ).toBeLessThan(repositoryMock.countUnread.mock.invocationCallOrder[0]);
     });
 
     it('should throw when recipientId is missing', async () => {
