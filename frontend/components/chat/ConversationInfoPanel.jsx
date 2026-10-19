@@ -20,6 +20,7 @@ import { ImageTile, VideoTile } from "./AttachmentTiles";
 import { ConfirmChatActionDialog } from "./ConfirmChatActionDialog";
 import { ConversationSearchView } from "./ConversationSearchView";
 import { CONFIRMATIONS } from "../../lib/chat/chatActionConfirmations";
+import { blockedPeerOf } from "../../lib/chat/chatDisplay";
 import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightboxContext";
 import { attachmentKind } from "../../lib/mls/media/attachmentView";
 import { AvatarFace } from "../AvatarFace";
@@ -46,6 +47,8 @@ export function ConversationInfoPanel({
   onVerify,
   onBlock,
   isBlockPending,
+  onUnblock,
+  isUnblockPending,
   isGroup,
   onManageGroup,
   manageButtonRef,
@@ -59,6 +62,7 @@ export function ConversationInfoPanel({
   const [appliedSeed, setAppliedSeed] = useState(searchSeed);
   const [toast, setToast] = useState(null);
   const [isConfirmingBlock, setIsConfirmingBlock] = useState(false);
+  const isBlocked = Boolean(blockedPeerOf(conversation, userId));
   const toastTimerRef = useRef(null);
 
   useEffect(() => () => window.clearTimeout(toastTimerRef.current), []);
@@ -147,20 +151,29 @@ export function ConversationInfoPanel({
                   <FiShield /> {verifyLabel}
                 </button>
               )}
-              {/* Block is a per-conversation lockout with no way to undo it (chat-inbox.service.ts) -
-                  fine for leaving a DM behind for good, but on a group it would just cut this user
-                  off from the whole group instead of the person they actually want gone. Leaving is
-                  the group-appropriate equivalent, already inside Manage group. */}
-              {!isGroup && (
-                <button
-                  className="chat-info-row danger"
-                  disabled={isBlockPending}
-                  onClick={() => setIsConfirmingBlock(true)}
-                  type="button"
-                >
-                  <FiUserX /> Block
-                </button>
-              )}
+              {/* Block only exists for a direct chat: on a group it would cut this user off from
+                  the whole group instead of the person they want gone. Leaving is the group
+                  equivalent, already inside Manage group. */}
+              {!isGroup &&
+                (isBlocked ? (
+                  <button
+                    className="chat-info-row"
+                    disabled={isUnblockPending}
+                    onClick={onUnblock}
+                    type="button"
+                  >
+                    <FiUserX /> Unblock
+                  </button>
+                ) : (
+                  <button
+                    className="chat-info-row danger"
+                    disabled={isBlockPending}
+                    onClick={() => setIsConfirmingBlock(true)}
+                    type="button"
+                  >
+                    <FiUserX /> Block
+                  </button>
+                ))}
               <button
                 className="chat-info-row danger"
                 onClick={() => notImplemented("Reporting")}

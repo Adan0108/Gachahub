@@ -209,14 +209,63 @@ describe('ChatInboxService', () => {
       });
     });
 
-    it('blockConversation sets the participant state to BLOCKED', async () => {
-      await service.blockConversation('user-1', 'conversation-1');
+    describe('blockConversation', () => {
+      const direct = {
+        id: 'conversation-1',
+        type: 'DIRECT',
+        participants: [
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE' },
+        ],
+      };
 
-      expect(repository.updateParticipantState).toHaveBeenCalledWith(
-        'conversation-1',
-        'user-1',
-        'BLOCKED',
-      );
+      beforeEach(() => {
+        repository.findConversationWithParticipants.mockResolvedValue(direct);
+        repository.findUserById.mockResolvedValue({
+          id: 'user-2',
+          status: 'ACTIVE',
+        });
+        blocksService.block.mockResolvedValue({});
+      });
+
+      it('blocks the other person and leaves the conversation as it is', async () => {
+        const result = await service.blockConversation(
+          'user-1',
+          'conversation-1',
+        );
+
+        expect(blocksService.block).toHaveBeenCalledWith('user-1', 'user-2');
+        expect(repository.updateParticipantState).not.toHaveBeenCalled();
+        expect(result).toEqual({ blockedUserId: 'user-2' });
+      });
+
+      it('also takes an unaccepted message request out of the requests', async () => {
+        repository.findParticipant.mockResolvedValue({
+          userId: 'user-1',
+          state: 'PENDING',
+        });
+
+        await service.blockConversation('user-1', 'conversation-1');
+
+        expect(blocksService.block).toHaveBeenCalledWith('user-1', 'user-2');
+        expect(repository.updateParticipantState).toHaveBeenCalledWith(
+          'conversation-1',
+          'user-1',
+          'DECLINED',
+        );
+      });
+
+      it('refuses a group chat', async () => {
+        repository.findConversationWithParticipants.mockResolvedValue({
+          ...direct,
+          type: 'GROUP',
+        });
+
+        await expect(
+          service.blockConversation('user-1', 'conversation-1'),
+        ).rejects.toThrow(BadRequestException);
+        expect(blocksService.block).not.toHaveBeenCalled();
+      });
     });
 
     it('setNotificationLevel sets NOTHING with a mute expiry', async () => {

@@ -6,6 +6,7 @@ import { ConversationRowMenu } from "../components/chat/ConversationRowMenu";
 
 const mocks = vi.hoisted(() => ({
   block: vi.fn(),
+  unblock: vi.fn(),
   archive: vi.fn(),
   unarchive: vi.fn(),
   remove: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock("../hooks/useCurrentUser", () => ({
 vi.mock("../lib/api", () => ({
   api: {
     blockChatConversation: mocks.block,
+    unblockChatUser: mocks.unblock,
     archiveChatConversation: mocks.archive,
     unarchiveChatConversation: mocks.unarchive,
     deleteChatConversation: mocks.remove,
@@ -372,11 +374,11 @@ describe("ConversationRowMenu", () => {
       fireEvent.click(item("Block"));
 
       const dialog = screen.getByRole("dialog", { name: "Block Bob?" });
-      expect(within(dialog).getByText(/read or send messages/)).toBeInTheDocument();
+      expect(within(dialog).getByText(/send them messages/)).toBeInTheDocument();
       expect(mocks.block).not.toHaveBeenCalled();
     });
 
-    it("blocks when confirmed and tells the list it is gone", async () => {
+    it("blocks when confirmed, and the chat stays in the list", async () => {
       const { onGone } = setup();
       open();
       fireEvent.click(item("Block"));
@@ -384,7 +386,24 @@ describe("ConversationRowMenu", () => {
       fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Block" }));
 
       await waitFor(() => expect(mocks.block).toHaveBeenCalledWith("c1"));
-      await waitFor(() => expect(onGone).toHaveBeenCalledWith("c1"));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(onGone).not.toHaveBeenCalled();
+    });
+
+    it("offers Unblock for someone you blocked, and unblocks them without asking", async () => {
+      mocks.unblock.mockResolvedValue({ unblockedCount: 1 });
+      setup(
+        dm({
+          participants: [member("me", "Me", { isMuted: false }), member("peer", "Bob", { isBlockedByMe: true })],
+        }),
+      );
+      open();
+
+      expect(screen.queryByRole("menuitem", { name: /^Block/ })).not.toBeInTheDocument();
+      fireEvent.click(item("Unblock"));
+
+      await waitFor(() => expect(mocks.unblock).toHaveBeenCalledWith("peer"));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
 
     it("does nothing when cancelled", () => {

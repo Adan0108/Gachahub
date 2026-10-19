@@ -19,6 +19,7 @@ import {
   FiSearch,
   FiSend,
   FiShield,
+  FiUserX,
   FiUsers,
   FiX,
 } from "react-icons/fi";
@@ -83,6 +84,7 @@ import { conversationMatches } from "../../lib/chat/conversationSearch";
 import { MIN_SEARCH_CHARS, parseSearchQuery } from "../../lib/chat/searchFolding";
 import {
   activeMembers,
+  blockedPeerOf,
   conversationDisplayName,
   conversationImage,
   conversationPeer,
@@ -715,7 +717,11 @@ function ChatPageContent() {
     displayMessages.length > 0 &&
     displayMessages.every((message) => message.contentType === "SYSTEM") &&
     pendingMessages.length === 0;
-  const actionError = acceptRequest.error || declineRequest.error || conversationActions.block.error;
+  const actionError =
+    acceptRequest.error ||
+    declineRequest.error ||
+    conversationActions.block.error ||
+    conversationActions.unblock.error;
   // Only claim end-to-end encryption when this device can actually use the group.
   const encryptionStatus = groupProblem
     ? "Encryption problem on this device"
@@ -749,8 +755,10 @@ function ChatPageContent() {
     canSendMessages &&
     activeConversation?.type === "GROUP" &&
     otherActiveMemberIds(activeConversation, user?.id).length === 0;
+  // You blocked this person: the chat stays, read-only, until you unblock them.
+  const blockedPeer = blockedPeerOf(activeConversation, user?.id);
   const composerReady =
-    canSendMessages && !isGroupAwaitingAcceptance && isDeviceReady && Boolean(syncEngine);
+    canSendMessages && !isGroupAwaitingAcceptance && !blockedPeer && isDeviceReady && Boolean(syncEngine);
 
   const handleThreadDragEnter = (event) => {
     if (!composerReady || !event.dataTransfer?.types?.includes("Files")) return;
@@ -1319,6 +1327,21 @@ function ChatPageContent() {
                     </small>
                   </div>
                 </div>
+              ) : blockedPeer ? (
+                <div className="chat-composer-disabled">
+                  <FiUserX />
+                  <div>
+                    <b>You blocked {blockedPeer.user?.name || "this person"}</b>
+                    <small>Unblock them to send messages again. They are not told.</small>
+                  </div>
+                  <button
+                    disabled={conversationActions.unblock.isPending}
+                    onClick={() => conversationActions.unblock.mutate(blockedPeer.userId)}
+                    type="button"
+                  >
+                    Unblock
+                  </button>
+                </div>
               ) : isGroupAwaitingAcceptance ? (
                 <div className="chat-composer-disabled">
                   <FiLock />
@@ -1481,6 +1504,8 @@ function ChatPageContent() {
           key={activeId || "no-conversation"}
           manageButtonRef={groupSettingsButtonRef}
           onBlock={() => conversationActions.block.mutate(activeId)}
+          onUnblock={() => blockedPeer && conversationActions.unblock.mutate(blockedPeer.userId)}
+          isUnblockPending={conversationActions.unblock.isPending}
           onClose={() => setIsConversationInfoOpen(false)}
           onManageGroup={() => setIsGroupSettingsOpen(true)}
           onOpenAttachment={setLightboxKey}

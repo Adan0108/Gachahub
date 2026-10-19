@@ -28,7 +28,13 @@ const person = (id, name) => ({ userId: id, state: "ACTIVE", user: { id, name } 
 const direct = { id: "c1", type: "DIRECT", participants: [person("me", "Me"), person("peer", "Mado")] };
 const group = { id: "g1", type: "GROUP", title: "Squad", participants: [person("me", "Me"), person("a", "Ann")] };
 
-function renderPanel({ conversation = direct, isBlockPending = false, onBlock = vi.fn() } = {}) {
+function renderPanel({
+  conversation = direct,
+  isBlockPending = false,
+  isUnblockPending = false,
+  onBlock = vi.fn(),
+  onUnblock = vi.fn(),
+} = {}) {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <ConversationInfoPanel
@@ -39,7 +45,9 @@ function renderPanel({ conversation = direct, isBlockPending = false, onBlock = 
         isBlockPending={isBlockPending}
         isGroup={conversation.type === "GROUP"}
         isOpen
+        isUnblockPending={isUnblockPending}
         onBlock={onBlock}
+        onUnblock={onUnblock}
         onClose={vi.fn()}
         onOpenAttachment={vi.fn()}
         search={{ messagesById: new Map(), hiddenMessageIds: new Set(), history: {}, onJump: vi.fn() }}
@@ -48,7 +56,7 @@ function renderPanel({ conversation = direct, isBlockPending = false, onBlock = 
       />
     </QueryClientProvider>,
   );
-  return { onBlock };
+  return { onBlock, onUnblock };
 }
 
 const blockRow = () => screen.getByRole("button", { name: "Block" });
@@ -68,7 +76,7 @@ describe("ConversationInfoPanel blocking", () => {
 
     fireEvent.click(blockRow());
 
-    expect(within(screen.getByRole("dialog")).getByText(/read or send messages/)).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByText(/send them messages/)).toBeInTheDocument();
   });
 
   it("starts on Cancel, so a stray Enter does not block anyone", () => {
@@ -134,6 +142,29 @@ describe("ConversationInfoPanel blocking", () => {
     renderPanel({ isBlockPending: true });
 
     expect(blockRow()).toBeDisabled();
+  });
+
+  describe("a person you blocked", () => {
+    const blockedDirect = {
+      ...direct,
+      participants: [person("me", "Me"), { ...person("peer", "Mado"), isBlockedByMe: true }],
+    };
+
+    it("offers Unblock instead of Block, with no question asked", () => {
+      const { onUnblock } = renderPanel({ conversation: blockedDirect });
+
+      expect(screen.queryByRole("button", { name: "Block" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Unblock" }));
+
+      expect(onUnblock).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("cannot be unblocked twice while it is going through", () => {
+      renderPanel({ conversation: blockedDirect, isUnblockPending: true });
+
+      expect(screen.getByRole("button", { name: "Unblock" })).toBeDisabled();
+    });
   });
 
   it("has no Block on a group, where it would cut you off from everyone", () => {

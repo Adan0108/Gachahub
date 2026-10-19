@@ -96,6 +96,7 @@ export const backendRoutes = {
   chatAcceptRequest: (conversationId) => `/chat/requests/${encodePathParam(conversationId)}/accept`,
   chatDeclineRequest: (conversationId) =>
     `/chat/requests/${encodePathParam(conversationId)}/decline`,
+  chatUserBlock: (userId) => `/chat/users/${encodePathParam(userId)}/block`,
   chatBlockConversation: (conversationId) =>
     `/chat/conversations/${encodePathParam(conversationId)}/block`,
   chatConversation: (conversationId) => `/chat/conversations/${encodePathParam(conversationId)}`,
@@ -862,6 +863,8 @@ export const api = {
   acceptChatRequest: (conversationId) => mutation(backendRoutes.chatAcceptRequest(conversationId)),
   declineChatRequest: (conversationId) =>
     mutation(backendRoutes.chatDeclineRequest(conversationId)),
+  unblockChatUser: (userId) =>
+    mutation(backendRoutes.chatUserBlock(userId), undefined, { method: 'DELETE' }),
   blockChatConversation: (conversationId) =>
     mutation(backendRoutes.chatBlockConversation(conversationId)),
   archiveChatConversation: (conversationId) =>

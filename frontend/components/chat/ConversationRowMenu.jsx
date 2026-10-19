@@ -18,7 +18,7 @@ import { useConversationMute } from "../../hooks/chat/useConversationMute";
 import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
 import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
 import { useToast } from "../../hooks/useToast";
-import { conversationDisplayName, conversationMute } from "../../lib/chat/chatDisplay";
+import { blockedPeerOf, conversationDisplayName, conversationMute } from "../../lib/chat/chatDisplay";
 import { CONFIRMATIONS } from "../../lib/chat/chatActionConfirmations";
 import { MUTE_OPTIONS, UNMUTE, muteChange } from "../../lib/chat/muteDurations";
 import { ConfirmChatActionDialog } from "./ConfirmChatActionDialog";
@@ -36,6 +36,7 @@ export function ConversationRowMenu({ conversation, userId, view, onGone }) {
   const { notice, showNotice } = useToast();
   const { isMuted } = conversationMute(conversation, userId);
   const isGroup = conversation.type === "GROUP";
+  const blockedPeer = blockedPeerOf(conversation, userId);
   const name = conversationDisplayName(conversation, userId);
 
   const close = useCallback(() => {
@@ -107,11 +108,25 @@ export function ConversationRowMenu({ conversation, userId, view, onGone }) {
                   </button>
                 )}
                 <div className="chat-menu-divider" role="separator" />
-                {!isGroup && (
-                  <button className="danger" onClick={() => ask("block")} role="menuitem" type="button">
-                    <FiUserX aria-hidden="true" /> Block
-                  </button>
-                )}
+                {!isGroup &&
+                  (blockedPeer ? (
+                    <button
+                      onClick={() => {
+                        close();
+                        actions.unblock.mutate(blockedPeer.userId, {
+                          onError: () => showNotice("Couldn't unblock. Try again."),
+                        });
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <FiUserX aria-hidden="true" /> Unblock
+                    </button>
+                  ) : (
+                    <button className="danger" onClick={() => ask("block")} role="menuitem" type="button">
+                      <FiUserX aria-hidden="true" /> Block
+                    </button>
+                  ))}
                 {view === "archived" && (
                   <button onClick={() => run(actions.unarchive)} role="menuitem" type="button">
                     <FiInbox aria-hidden="true" /> Unarchive chat

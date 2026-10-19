@@ -3,11 +3,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useConversationActions } from "../hooks/chat/useConversationActions";
 
-const mocks = vi.hoisted(() => ({ block: vi.fn(), archive: vi.fn(), unarchive: vi.fn(), remove: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  block: vi.fn(),
+  unblock: vi.fn(),
+  archive: vi.fn(),
+  unarchive: vi.fn(),
+  remove: vi.fn(),
+}));
 
 vi.mock("../lib/api", () => ({
   api: {
     blockChatConversation: mocks.block,
+    unblockChatUser: mocks.unblock,
     archiveChatConversation: mocks.archive,
     unarchiveChatConversation: mocks.unarchive,
     deleteChatConversation: mocks.remove,
@@ -54,13 +61,25 @@ describe("useConversationActions", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat", "archived"] });
   });
 
-  it.each([["block"], ["archive"], ["unarchive"], ["remove"]])("%s tells onGone which chat left the list", async (action) => {
+  it.each([["archive"], ["unarchive"], ["remove"]])("%s tells onGone which chat left the list", async (action) => {
     const onGone = vi.fn();
     const { actions } = setup({ onGone });
 
     await act(() => actions.current[action].mutateAsync("c7"));
 
     expect(onGone).toHaveBeenCalledWith("c7");
+  });
+
+  it("block and unblock refresh the lists but never say a chat left: it stays in the list", async () => {
+    const onGone = vi.fn();
+    const { actions, invalidate } = setup({ onGone });
+
+    await act(() => actions.current.block.mutateAsync("c7"));
+    await act(() => actions.current.unblock.mutateAsync("user-9"));
+
+    expect(mocks.unblock).toHaveBeenCalledWith("user-9");
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat", "conversations"] });
+    expect(onGone).not.toHaveBeenCalled();
   });
 
   it("tells onGone only after the lists have been refreshed", async () => {
