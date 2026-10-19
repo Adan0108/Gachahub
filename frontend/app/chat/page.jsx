@@ -7,6 +7,7 @@ import {
   FiArchive,
   FiCheck,
   FiCheckCircle,
+  FiChevronLeft,
   FiEdit2,
   FiInfo,
   FiLock,
@@ -817,7 +818,9 @@ function ChatPageContent() {
   return (
     <div className="page chat-page">
       {actionNotice && floatingPortal(<div className="chat-row-toast" role="status">{actionNotice}</div>)}
-      <div className={`chat-layout ${isConversationInfoOpen && activeConversation ? "info-open" : ""}`}>
+      <div
+        className={`chat-layout ${isConversationInfoOpen && activeConversation ? "info-open" : ""} ${activeConversation ? "has-chat" : ""}`}
+      >
         <aside className="panel chat-sidebar">
           <div className="chat-sidebar-head">
             <span>Conversations</span>
@@ -1137,6 +1140,14 @@ function ChatPageContent() {
             <>
               <header className="chat-thread-head">
                 <div>
+                  <button
+                    aria-label="Back to conversations"
+                    className="chat-back-button"
+                    onClick={() => setSelectedId("")}
+                    type="button"
+                  >
+                    <FiChevronLeft />
+                  </button>
                   <span className="avatar-with-presence">
                     <span className="chat-avatar">
                       <AvatarFace image={activeConversationImage} name={activeConversationName} />

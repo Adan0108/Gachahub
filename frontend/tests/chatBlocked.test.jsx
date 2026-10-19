@@ -131,4 +131,28 @@ describe("a chat with someone you blocked", () => {
       expect(await screen.findByText("You have not blocked anyone.")).toBeInTheDocument();
     });
   });
+
+  describe("on a narrow window", () => {
+    it("has a way back from an open chat to the list", async () => {
+      mocks.conversations = [conversation(false)];
+      renderChat();
+      fireEvent.click(await screen.findByRole("button", { name: OPEN_ROW }));
+      const back = await screen.findByRole("button", { name: "Back to conversations" });
+
+      fireEvent.click(back);
+
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Back to conversations" })).not.toBeInTheDocument());
+      expect(screen.getByRole("button", { name: OPEN_ROW })).toBeInTheDocument();
+    });
+
+    it("marks the layout so the stylesheet can show the list or the chat, not both", async () => {
+      mocks.conversations = [conversation(false)];
+      const { container } = renderChat();
+      expect(container.querySelector(".chat-layout")).not.toHaveClass("has-chat");
+
+      fireEvent.click(await screen.findByRole("button", { name: OPEN_ROW }));
+
+      await waitFor(() => expect(container.querySelector(".chat-layout")).toHaveClass("has-chat"));
+    });
+  });
 });
