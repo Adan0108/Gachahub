@@ -51,7 +51,7 @@ describe("useConversationActions", () => {
     expect(mocks[mock]).toHaveBeenCalledWith("c42");
   });
 
-  it("refreshes the inbox, the requests and the archived list afterwards", async () => {
+  it("refreshes the inbox, the requests, the archived and the blocked list afterwards", async () => {
     const { actions, invalidate } = setup();
 
     await act(() => actions.current.archive.mutateAsync("c1"));
@@ -59,6 +59,7 @@ describe("useConversationActions", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat", "conversations"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat", "requests"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat", "archived"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat", "blocked"] });
   });
 
   it.each([["archive"], ["unarchive"], ["remove"]])("%s tells onGone which chat left the list", async (action) => {
@@ -94,7 +95,7 @@ describe("useConversationActions", () => {
     await act(() => actions.current.remove.mutateAsync("c1"));
 
     expect(order.at(-1)).toBe("gone");
-    expect(order.filter((entry) => entry === "refreshed")).toHaveLength(3);
+    expect(order.filter((entry) => entry === "refreshed")).toHaveLength(4);
   });
 
   it("works without an onGone", async () => {

@@ -13,6 +13,7 @@ export function useConversationActions({ onGone } = {}) {
       queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations }),
       queryClient.invalidateQueries({ queryKey: queryKeys.chatRequests }),
       queryClient.invalidateQueries({ queryKey: queryKeys.chatArchivedConversations }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatBlockedUsers }),
     ]);
 
   const options = (mutationFn) => ({

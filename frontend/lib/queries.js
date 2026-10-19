@@ -66,6 +66,7 @@ export const queryKeys = {
   chatConversations: ["chat", "conversations"],
   chatArchivedConversations: ["chat", "archived"],
   chatRequests: ["chat", "requests"],
+  chatBlockedUsers: ["chat", "blocked"],
   chatMessages: (conversationId) => ["chat", "messages", conversationId],
   chatEmotes: ["chat", "emotes"],
   communityChannels: (slug) => ["community-chat", slug, "channels"],
@@ -273,6 +274,12 @@ export const queries = {
     retry: 1,
     staleTime: 30_000,
     refetchInterval: 60_000,
+  }),
+  chatBlockedUsers: () => ({
+    queryKey: queryKeys.chatBlockedUsers,
+    queryFn: ({ signal }) => api.getBlockedChatUsers({ signal }),
+    retry: 1,
+    staleTime: 15_000,
   }),
   chatArchivedConversations: () => ({
     queryKey: queryKeys.chatArchivedConversations,

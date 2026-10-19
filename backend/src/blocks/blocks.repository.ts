@@ -33,6 +33,21 @@ export class BlocksRepository {
     });
   }
 
+  /** The people this person has blocked, newest block first. */
+  findBlockedUsers(blockerId: string, limit: number) {
+    return this.prisma.chatUserBlock.findMany({
+      where: { blockerId, blocked: { status: 'ACTIVE' } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+      select: {
+        createdAt: true,
+        blocked: {
+          select: { id: true, name: true, username: true, image: true },
+        },
+      },
+    });
+  }
+
   /** Blocks between this person and any of the candidates, whichever of them blocked. */
   async findBlocksBetween(userId: string, candidateIds: string[]) {
     if (candidateIds.length === 0) {

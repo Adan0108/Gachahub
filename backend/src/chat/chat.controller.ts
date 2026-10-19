@@ -427,6 +427,15 @@ export class ChatController {
     );
   }
 
+  /** The people the current user has blocked, for the Blocked list. */
+  @Get('users/blocked')
+  @ApiOperation({ summary: 'List the people you have blocked' })
+  async listBlockedUsers(@Session() session: UserSession) {
+    return {
+      items: await this.chatInboxService.listBlockedUsers(session.user.id),
+    };
+  }
+
   /**
    * Blocks another user globally for chat.
    *

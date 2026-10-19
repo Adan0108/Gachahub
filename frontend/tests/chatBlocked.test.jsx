@@ -7,6 +7,7 @@ import ChatPage from "../app/chat/page";
 const mocks = vi.hoisted(() => ({
   unblock: vi.fn(() => Promise.resolve({ unblockedCount: 1 })),
   conversations: [],
+  blocked: [],
 }));
 
 vi.mock("next/navigation", () => ({
@@ -22,6 +23,7 @@ vi.mock("../lib/api", () => ({
     getChatRequests: vi.fn(() => Promise.resolve([])),
     getChatMessages: vi.fn(() => Promise.resolve({ items: [] })),
     unblockChatUser: mocks.unblock,
+    getBlockedChatUsers: vi.fn(() => Promise.resolve({ items: mocks.blocked })),
     markChatDelivered: vi.fn(() => Promise.resolve()),
     markChatRead: vi.fn(() => Promise.resolve()),
   },
@@ -87,5 +89,46 @@ describe("a chat with someone you blocked", () => {
     fireEvent.click(await screen.findByRole("button", { name: OPEN_ROW }));
 
     await waitFor(() => expect(screen.queryByText("You blocked Sender")).not.toBeInTheDocument());
+  });
+
+  describe("the Blocked list", () => {
+    const openBlockedList = async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /more/i }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: /blocked/i }));
+    };
+
+    it("shows who you blocked, with Unblock, from the menu", async () => {
+      mocks.conversations = [];
+      mocks.blocked = [{ id: "sender", name: "Sender", username: "sender", image: null }];
+      renderChat();
+
+      await openBlockedList();
+
+      expect(await screen.findByRole("list", { name: "Blocked people" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Unblock" }));
+      await waitFor(() => expect(mocks.unblock).toHaveBeenCalledWith("sender"));
+    });
+
+    it("opens the chat you already have with a blocked person", async () => {
+      mocks.conversations = [conversation(true)];
+      mocks.blocked = [{ id: "sender", name: "Sender", username: null, image: null }];
+      renderChat();
+
+      await openBlockedList();
+      fireEvent.click(await screen.findByRole("button", { name: "Open chat" }));
+
+      expect(await screen.findByText("You blocked Sender")).toBeInTheDocument();
+      expect(screen.queryByRole("list", { name: "Blocked people" })).not.toBeInTheDocument();
+    });
+
+    it("says nobody is blocked when the list is empty", async () => {
+      mocks.conversations = [];
+      mocks.blocked = [];
+      renderChat();
+
+      await openBlockedList();
+
+      expect(await screen.findByText("You have not blocked anyone.")).toBeInTheDocument();
+    });
   });
 });

@@ -4265,3 +4265,86 @@
   border-width: 0;
   font-size: 8px;
 }
+
+/* The Blocked view of the conversation sidebar: people, not conversations. */
+.chat-blocked-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 4px 8px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.chat-blocked-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 12px;
+}
+
+.chat-blocked-avatar {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--panel2);
+}
+
+.chat-blocked-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.chat-blocked-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-blocked-text b,
+.chat-blocked-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-blocked-text small,
+.chat-blocked-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chat-blocked-note {
+  margin: 12px 16px;
+}
+
+.chat-blocked-link {
+  border: 0;
+  background: none;
+  color: var(--purple, #8b6cff);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chat-blocked-unblock {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chat-blocked-unblock:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

@@ -296,6 +296,11 @@ export class ChatInboxService {
     return this.blocksService.block(blockerId, blockedId);
   }
 
+  /** Everyone the caller has blocked, so they can see and undo it. */
+  listBlockedUsers(userId: string) {
+    return this.blocksService.listBlockedUsers(userId);
+  }
+
   /**
    * Removes the caller's global chat block for another user.
    *

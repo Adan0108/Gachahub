@@ -97,6 +97,7 @@ describe('ChatInboxService', () => {
     getBlockedIdsAmong: jest.fn(),
     block: jest.fn(),
     unblock: jest.fn(),
+    listBlockedUsers: jest.fn(),
   };
 
   const gameModeratorsService = {
@@ -425,6 +426,16 @@ describe('ChatInboxService', () => {
       await service.blockUser('user-1', 'user-2');
 
       expect(blocksService.block).toHaveBeenCalledWith('user-1', 'user-2');
+    });
+  });
+
+  describe('listBlockedUsers', () => {
+    it('lists the people the caller blocked', async () => {
+      const people = [{ id: 'user-2', name: 'Bo', blockedAt: new Date() }];
+      blocksService.listBlockedUsers.mockResolvedValue(people);
+
+      await expect(service.listBlockedUsers('user-1')).resolves.toBe(people);
+      expect(blocksService.listBlockedUsers).toHaveBeenCalledWith('user-1');
     });
   });
 

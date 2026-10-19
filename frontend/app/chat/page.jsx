@@ -27,6 +27,7 @@ import { PresenceDot } from "../../components/PresenceDot";
 import { QueryNotice } from "../../components/QueryNotice";
 import { ConversationInfoPanel } from "../../components/chat/ConversationInfoPanel";
 import { GroupSettingsModal } from "../../components/chat/GroupSettingsModal";
+import { BlockedPeopleList } from "../../components/chat/BlockedPeopleList";
 import { SafetyNumberModal } from "../../components/chat/SafetyNumberModal";
 import { SafetyChangedBanner } from "../../components/chat/SafetyStatus";
 import { UserPicker } from "../../components/chat/UserPicker";
@@ -135,6 +136,8 @@ function ChatSkeleton() {
   );
 }
 
+const VIEW_TITLES = { requests: "Requests", archived: "Archived", blocked: "Blocked" };
+
 export default function ChatPage() {
   return (
     <Suspense fallback={null}>
@@ -176,8 +179,22 @@ function ChatPageContent() {
   useEffect(() => {
     if (requestedId) router.replace("/chat");
   }, [requestedId, router]);
-  const listByView = { inbox: conversations, requests, archived };
+  const blockedUsers = useQuery({
+    ...queries.chatBlockedUsers(),
+    enabled: isAuthenticated && view === "blocked",
+  });
+  // The blocked view lists people, not conversations; the inbox stays the list behind it.
+  const listByView = { inbox: conversations, requests, archived, blocked: conversations };
   const listQuery = listByView[view];
+  const directChatByUserId = new Map(
+    (conversations.data ?? [])
+      .filter((conversation) => conversation.type === "DIRECT")
+      .flatMap((conversation) =>
+        conversation.participants
+          .filter((participant) => participant.userId !== user?.id)
+          .map((participant) => [participant.userId, conversation.id]),
+      ),
+  );
   const rawList = listQuery.data || [];
   const searchTerms = parseSearchQuery(search);
   const isFiltering = searchTerms.length > 0;
@@ -864,6 +881,16 @@ function ChatPageContent() {
                       >
                         <FiArchive /> Archived
                       </button>
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          setView((current) => (current === "blocked" ? "inbox" : "blocked"));
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <FiUserX /> Blocked
+                      </button>
                     </div>,
                   )}
               </div>
@@ -918,7 +945,7 @@ function ChatPageContent() {
           </div>
           {view !== "inbox" && (
             <div className="chat-view-banner">
-              <span>{view === "requests" ? "Requests" : "Archived"}</span>
+              <span>{VIEW_TITLES[view]}</span>
               <button onClick={() => setView("inbox")} type="button">
                 <FiX /> All chats
               </button>
@@ -1025,13 +1052,29 @@ function ChatPageContent() {
           {search.trim().length >= MIN_SEARCH_CHARS && search.trim() !== messageQuery && (
             <small className="chat-sidebar-search-hint">Press Enter to search messages</small>
           )}
-          {listQuery.isLoading && (
+          {view === "blocked" ? (
+            <BlockedPeopleList
+              chatIdByUserId={directChatByUserId}
+              isError={blockedUsers.isError}
+              isLoading={blockedUsers.isLoading}
+              onOpenChat={(conversationId) => {
+                setSelectedId(conversationId);
+                setView("inbox");
+              }}
+              onRetry={() => blockedUsers.refetch()}
+              onUnblock={(userId) => conversationActions.unblock.mutate(userId)}
+              people={blockedUsers.data?.items ?? []}
+              unblockingId={conversationActions.unblock.isPending ? conversationActions.unblock.variables : null}
+            />
+          ) : null}
+          {view !== "blocked" && listQuery.isLoading && (
             <div aria-busy="true" aria-label="Loading conversations" className="chat-skeleton-list">
               {[0, 1, 2, 3, 4].map((index) => (
                 <ChatSkeletonRow key={index} />
               ))}
             </div>
           )}
+          {view !== "blocked" && (
           <QueryNotice
             isError={listQuery.isError}
             isEmpty={!listQuery.isLoading && !currentList.length}
@@ -1045,6 +1088,8 @@ function ChatPageContent() {
                     : "No conversations yet."
             }
           />
+          )}
+          {view !== "blocked" && (
           <div className="chat-conversation-list">
             {currentList.map((conversation) => (
               <ConversationListItem
@@ -1059,6 +1104,7 @@ function ChatPageContent() {
               />
             ))}
           </div>
+          )}
           {messageQuery !== null && (
             <SidebarMessageSearch
               conversations={listQuery.data}

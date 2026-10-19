@@ -23,6 +23,19 @@ export class BlocksService {
     return new Set(blocks.map((block) => block.blockedId));
   }
 
+  /** Everyone this person has blocked, newest first, for a list they can unblock from. */
+  async listBlockedUsers(blockerId: string, limit = 200) {
+    const blocks = await this.blocksRepository.findBlockedUsers(
+      blockerId,
+      limit,
+    );
+
+    return blocks.map((block) => ({
+      ...block.blocked,
+      blockedAt: block.createdAt,
+    }));
+  }
+
   /** Blocked in either direction - what a two-way visibility rule needs. Returns the other person of each block. */
   async getMutuallyBlockedIdsAmong(
     userId: string,
