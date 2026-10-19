@@ -519,6 +519,7 @@ export class NotificationConsumerService
             type: 'MESSAGE_REPLIED',
             entityType: 'MESSAGE',
             entityId: payload.messageId,
+            conversationId: payload.conversationId,
           },
           transaction,
         )
@@ -529,14 +530,14 @@ export class NotificationConsumerService
       (id) => id !== repliedToUserId,
     );
 
+    // One stacked row per person and conversation, not one per message
     const receivedNotifications =
-      await this.notificationService.createManyNotifications(
+      await this.notificationService.stackMessageNotifications(
         {
           recipientIds: receivedRecipientIds,
           actorId: payload.senderId,
-          type: 'MESSAGE_RECEIVED',
-          entityType: 'MESSAGE',
-          entityId: payload.messageId,
+          messageId: payload.messageId,
+          conversationId: payload.conversationId,
         },
         transaction,
       );

@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import {
   NotificationEntityType,
   NotificationType,
+  type Notification,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { Prisma } from '../generated/prisma/client';
@@ -18,6 +19,7 @@ export class NotificationRepository {
       type: NotificationType;
       entityType: NotificationEntityType;
       entityId: string;
+      conversationId?: string | null;
     },
     transaction?: Prisma.TransactionClient,
   ) {
@@ -229,6 +231,54 @@ export class NotificationRepository {
           )
         )
     `;
+  }
+
+  /**
+   * One unread "sent you messages" row per person and conversation: a new message opens it, and
+   * every later one while it is unread only bumps its count, latest message and time. The partial
+   * unique index makes that safe when two messages arrive together. Returns the rows as they now are.
+   */
+  upsertMessageStack(
+    params: {
+      recipientIds: string[];
+      actorId: string;
+      messageId: string;
+      conversationId: string;
+    },
+    transaction: Prisma.TransactionClient,
+  ) {
+    const { recipientIds, actorId, messageId, conversationId } = params;
+
+    return transaction.$queryRaw<Notification[]>`
+      INSERT INTO notifications
+        (id, "recipientId", "actorId", "type", "entityType", "entityId", "conversationId", "count", "createdAt", "updatedAt")
+      SELECT gen_random_uuid()::text, recipient, ${actorId}, 'MESSAGE_RECEIVED'::"NotificationType",
+             'MESSAGE'::"NotificationEntityType", ${messageId}, ${conversationId}, 1, now(), now()
+      FROM unnest(${recipientIds}::text[]) AS recipient
+      ON CONFLICT ("recipientId", "conversationId")
+        WHERE "type" = 'MESSAGE_RECEIVED' AND "readAt" IS NULL AND "conversationId" IS NOT NULL
+      DO UPDATE SET
+        "count" = notifications."count" + 1,
+        "entityId" = EXCLUDED."entityId",
+        "actorId" = EXCLUDED."actorId",
+        "createdAt" = now(),
+        "updatedAt" = now()
+      RETURNING *
+    `;
+  }
+
+  /** The kind and name of these conversations, so a chat notification can say where it is from. */
+  findConversationSummaries(
+    conversationIds: string[],
+  ): Promise<Array<{ id: string; type: string; title: string | null }>> {
+    if (conversationIds.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.prisma.chatConversation.findMany({
+      where: { id: { in: conversationIds } },
+      select: { id: true, type: true, title: true },
+    });
   }
 
   /** The conversation each of these messages is in, so a chat notification can open it. */

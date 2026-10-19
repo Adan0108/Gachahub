@@ -3,6 +3,7 @@ import { NotificationEntityType } from '../generated/prisma/client';
 interface MappableNotification {
   entityType: NotificationEntityType;
   entityId: string;
+  conversationId?: string | null;
 }
 
 /** The comments among these notifications - the only ones that need a post looked up. */
@@ -41,10 +42,30 @@ export function withConversationIds<T extends MappableNotification>(
   return items.map((item) => ({
     ...item,
     conversationId:
-      item.entityType === NotificationEntityType.MESSAGE
+      item.conversationId ??
+      (item.entityType === NotificationEntityType.MESSAGE
         ? (conversationIdByMessageId.get(item.entityId) ?? null)
         : item.entityType === NotificationEntityType.CONVERSATION
           ? item.entityId
-          : null,
+          : null),
   }));
+}
+
+/** Chat notifications also say what kind of conversation they are from and, for a group, its name; every other kind carries null. */
+export function withConversations<T extends { conversationId: string | null }>(
+  items: T[],
+  summaryById: Map<string, { id: string; type: string; title: string | null }>,
+) {
+  return items.map((item) => {
+    const summary = item.conversationId
+      ? summaryById.get(item.conversationId)
+      : undefined;
+
+    return {
+      ...item,
+      conversation: summary
+        ? { type: summary.type, title: summary.title }
+        : null,
+    };
+  });
 }

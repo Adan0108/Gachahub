@@ -3,6 +3,7 @@ import {
   commentEntityIds,
   messageEntityIds,
   withConversationIds,
+  withConversations,
   withPostIds,
 } from './notification.mapper';
 
@@ -79,6 +80,46 @@ describe('notification mapper', () => {
         withConversationIds([message('n1', 'gone')], new Map())[0]
           .conversationId,
       ).toBeNull();
+    });
+  });
+
+  describe('stacked chat notifications', () => {
+    it('trusts the conversation a row carries over looking it up through the message', () => {
+      const result = withConversationIds(
+        [
+          {
+            id: 'n1',
+            entityType: NotificationEntityType.MESSAGE,
+            entityId: 'm1',
+            conversationId: 'c-own',
+          },
+        ],
+        new Map([['m1', 'c-lookup']]),
+      );
+
+      expect(result[0].conversationId).toBe('c-own');
+    });
+
+    it('says what kind of conversation a chat notification is from, and its name', () => {
+      const result = withConversations(
+        [
+          { id: 'n1', conversationId: 'c-group' },
+          { id: 'n2', conversationId: 'c-dm' },
+          { id: 'n3', conversationId: null },
+          { id: 'n4', conversationId: 'c-gone' },
+        ],
+        new Map([
+          ['c-group', { id: 'c-group', type: 'GROUP', title: 'Squad' }],
+          ['c-dm', { id: 'c-dm', type: 'DIRECT', title: null }],
+        ]),
+      );
+
+      expect(result.map((item) => item.conversation)).toEqual([
+        { type: 'GROUP', title: 'Squad' },
+        { type: 'DIRECT', title: null },
+        null,
+        null,
+      ]);
     });
   });
 });

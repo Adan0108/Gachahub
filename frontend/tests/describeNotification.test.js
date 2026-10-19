@@ -85,4 +85,47 @@ describe("describeNotification", () => {
       ).toBe("/chat?c=a%26b");
     });
   });
+
+  describe("stacked chat notifications", () => {
+    const stack = (extra) => ({ ...base, type: "MESSAGE_RECEIVED", entityType: "MESSAGE", ...extra });
+    const dm = { type: "DIRECT", title: null };
+    const squad = { type: "GROUP", title: "Squad" };
+
+    it("counts the messages of a direct chat", () => {
+      expect(describeNotification(stack({ count: 1, conversation: dm })).action).toBe("sent you a message");
+      expect(describeNotification(stack({ count: 5, conversation: dm })).action).toBe("sent you 5 messages");
+    });
+
+    it("names the group and counts the messages", () => {
+      expect(describeNotification(stack({ count: 1, conversation: squad })).action).toBe("sent a message in Squad");
+      expect(describeNotification(stack({ count: 12, conversation: squad })).action).toBe("sent 12 messages in Squad");
+    });
+
+    it("falls back to the old wording for a row with no count or conversation", () => {
+      expect(describeNotification(stack({})).action).toBe("sent you a message");
+    });
+
+    it("says which kind of chat a row is from, and nothing for other kinds", () => {
+      expect(describeNotification(stack({ count: 1, conversation: squad })).scope).toBe("Group");
+      expect(describeNotification(stack({ count: 1, conversation: dm })).scope).toBe("Direct");
+      expect(describeNotification(stack({})).scope).toBeUndefined();
+      expect(describeNotification({ ...base, type: "POST_LIKED", entityType: "POST" }).scope).toBeUndefined();
+    });
+
+    it("names the group in replies, additions and invites", () => {
+      const row = (type, entityType) => ({ ...base, type, entityType, conversation: squad });
+
+      expect(describeNotification(row("MESSAGE_REPLIED", "MESSAGE")).action).toBe("replied to your message in Squad");
+      expect(describeNotification(row("GROUP_ADDED", "CONVERSATION")).action).toBe("added you to Squad");
+      expect(describeNotification(row("GROUP_INVITE_PENDING", "CONVERSATION")).action).toBe("invited you to Squad");
+    });
+
+    it("says a group when it has no name", () => {
+      const untitled = { type: "GROUP", title: null };
+
+      expect(describeNotification({ ...base, type: "GROUP_ADDED", entityType: "CONVERSATION", conversation: untitled }).action).toBe(
+        "added you to a group",
+      );
+    });
+  });
 });

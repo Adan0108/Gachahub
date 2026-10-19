@@ -4399,3 +4399,15 @@
   outline-offset: 4px;
   border-radius: 12px;
 }
+
+/* "Group" or "Direct" beside the name in a chat notification. */
+.notification-scope {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: middle;
+}

@@ -50,7 +50,7 @@ export function NotificationDrawer({ notifications, drawerRef, onClose }) {
       )}
       <div className="notification-list">
         {items.map((notification) => {
-          const { actor, action, href } = describeNotification(notification);
+          const { actor, action, href, scope } = describeNotification(notification);
           const className = `notification-row ${notification.readAt ? "read" : "unread"}`;
           const body = (
             <>
@@ -59,6 +59,7 @@ export function NotificationDrawer({ notifications, drawerRef, onClose }) {
               </span>
               <div>
                 <b>{actor}</b>
+                {scope && <span className="notification-scope">{scope}</span>}
                 <small>{action}</small>
               </div>
               <time dateTime={notification.createdAt}>{relativeTime(notification.createdAt)}</time>

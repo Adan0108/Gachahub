@@ -19,6 +19,7 @@ import {
   commentEntityIds,
   messageEntityIds,
   withConversationIds,
+  withConversations,
   withPostIds,
 } from './notification.mapper';
 import { NotificationRepository } from './notification.repository';
@@ -55,7 +56,8 @@ export class NotificationService {
     input: CreateNotificationInput,
     transaction?: Prisma.TransactionClient,
   ) {
-    const { recipientId, actorId, type, entityType, entityId } = input;
+    const { recipientId, actorId, type, entityType, entityId, conversationId } =
+      input;
 
     // 1. Basic runtime validation.
     if (!recipientId) {
@@ -139,6 +141,7 @@ export class NotificationService {
         type,
         entityType,
         entityId,
+        conversationId,
       },
       transaction,
     );
@@ -162,6 +165,8 @@ export class NotificationService {
       type: NotificationType;
       entityType: NotificationEntityType;
       entityId: string;
+      conversationId: string | null;
+      count: number;
       readAt: Date | null;
       createdAt: Date;
       updatedAt: Date;
@@ -198,6 +203,8 @@ export class NotificationService {
       type: input.type,
       entityType: input.entityType,
       entityId: input.entityId,
+      conversationId: null,
+      count: 1,
       readAt: null,
       createdAt: now,
       updatedAt: now,
@@ -206,6 +213,47 @@ export class NotificationService {
     await this.notificationRepository.createMany(rows, transaction);
 
     return rows;
+  }
+
+  /**
+   * "Sent you a message" for people in a conversation, stacked: each person has one unread row for
+   * the conversation that counts its messages, instead of one row per message. People who cannot
+   * be notified (gone or banned) are left out; the sender never notifies themselves.
+   */
+  async stackMessageNotifications(
+    input: {
+      recipientIds: readonly string[];
+      actorId: string;
+      messageId: string;
+      conversationId: string;
+    },
+    transaction: Prisma.TransactionClient,
+  ) {
+    const candidateIds = input.recipientIds.filter(
+      (recipientId) => recipientId !== input.actorId,
+    );
+    if (candidateIds.length === 0) {
+      return [];
+    }
+
+    const notifiableIds =
+      await this.notificationRepository.findNotifiableRecipientIds(
+        candidateIds,
+        transaction,
+      );
+    if (notifiableIds.length === 0) {
+      return [];
+    }
+
+    return this.notificationRepository.upsertMessageStack(
+      {
+        recipientIds: notifiableIds,
+        actorId: input.actorId,
+        messageId: input.messageId,
+        conversationId: input.conversationId,
+      },
+      transaction,
+    );
   }
 
   /**
@@ -247,20 +295,32 @@ export class NotificationService {
 
     const [comments, messages] = await Promise.all([
       this.commentsRepository.findPostIdsByCommentIds(commentEntityIds(items)),
+      // Rows made before a row carried its own conversation find it through the message
       this.notificationRepository.findConversationIdsByMessageIds(
-        messageEntityIds(items),
+        messageEntityIds(items.filter((item) => !item.conversationId)),
       ),
     ]);
 
+    const located = withConversationIds(
+      withPostIds(
+        items,
+        new Map(comments.map((comment) => [comment.id, comment.postId])),
+      ),
+      new Map(messages.map((message) => [message.id, message.conversationId])),
+    );
+    const summaries =
+      await this.notificationRepository.findConversationSummaries([
+        ...new Set(
+          located.flatMap((item) =>
+            item.conversationId ? [item.conversationId] : [],
+          ),
+        ),
+      ]);
+
     return {
-      items: withConversationIds(
-        withPostIds(
-          items,
-          new Map(comments.map((comment) => [comment.id, comment.postId])),
-        ),
-        new Map(
-          messages.map((message) => [message.id, message.conversationId]),
-        ),
+      items: withConversations(
+        located,
+        new Map(summaries.map((summary) => [summary.id, summary])),
       ),
       nextCursor,
       hasMore,

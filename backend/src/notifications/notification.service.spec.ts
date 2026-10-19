@@ -5,6 +5,7 @@ import {
   NotificationEntityType,
   NotificationType,
   UserStatus,
+  type Prisma,
 } from '../generated/prisma/client';
 
 import { CommentsRepository } from '../comments/comments.repository';
@@ -44,6 +45,12 @@ type NotificationRepositoryMock = {
   settleMessageNotifications: jest.MockedFunction<
     NotificationRepository['settleMessageNotifications']
   >;
+  findConversationSummaries: jest.MockedFunction<
+    NotificationRepository['findConversationSummaries']
+  >;
+  upsertMessageStack: jest.MockedFunction<
+    NotificationRepository['upsertMessageStack']
+  >;
   findDeviceStart: jest.MockedFunction<
     NotificationRepository['findDeviceStart']
   >;
@@ -69,6 +76,8 @@ describe('NotificationService', () => {
     findExisting: jest.fn(),
     findConversationIdsByMessageIds: jest.fn(),
     settleMessageNotifications: jest.fn(),
+    findConversationSummaries: jest.fn(),
+    upsertMessageStack: jest.fn(),
     findDeviceStart: jest.fn(),
     findMessageNotificationIdsBefore: jest.fn(),
   };
@@ -91,6 +100,8 @@ describe('NotificationService', () => {
     type: NotificationType.POST_LIKED,
     entityType: NotificationEntityType.POST,
     entityId,
+    conversationId: null,
+    count: 1,
     readAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -127,6 +138,7 @@ describe('NotificationService', () => {
     repositoryMock.findConversationIdsByMessageIds.mockResolvedValue([]);
     repositoryMock.settleMessageNotifications.mockResolvedValue(0);
     repositoryMock.findDeviceStart.mockResolvedValue(null);
+    repositoryMock.findConversationSummaries.mockResolvedValue([]);
     repositoryMock.findMessageNotificationIdsBefore.mockResolvedValue([]);
   });
 
@@ -620,8 +632,8 @@ describe('NotificationService', () => {
 
       expect(result).toEqual({
         items: [
-          { ...n1, postId: null, conversationId: null },
-          { ...n2, postId: null, conversationId: null },
+          { ...n1, postId: null, conversationId: null, conversation: null },
+          { ...n2, postId: null, conversationId: null, conversation: null },
         ],
         nextCursor: 'notification-2',
         hasMore: true,
@@ -637,7 +649,12 @@ describe('NotificationService', () => {
 
       expect(result).toEqual({
         items: [
-          { ...notificationWithActor, postId: null, conversationId: null },
+          {
+            ...notificationWithActor,
+            postId: null,
+            conversationId: null,
+            conversation: null,
+          },
         ],
         nextCursor: null,
         hasMore: false,
@@ -799,6 +816,61 @@ describe('NotificationService', () => {
       });
     });
 
+    it('says what kind of conversation a chat notification is from', async () => {
+      repositoryMock.findByRecipient.mockResolvedValue([
+        {
+          ...notificationWithActor,
+          id: 'n-stack',
+          type: NotificationType.MESSAGE_RECEIVED,
+          entityType: NotificationEntityType.MESSAGE,
+          entityId: 'message-9',
+          conversationId: 'conversation-group',
+          count: 4,
+        },
+      ]);
+      repositoryMock.findConversationSummaries.mockResolvedValue([
+        { id: 'conversation-group', type: 'GROUP', title: 'Squad' },
+      ]);
+
+      const result = await service.getNotifications(recipientId, {});
+
+      expect(repositoryMock.findConversationSummaries).toHaveBeenCalledWith([
+        'conversation-group',
+      ]);
+      expect(result.items[0]).toMatchObject({
+        count: 4,
+        conversationId: 'conversation-group',
+        conversation: { type: 'GROUP', title: 'Squad' },
+      });
+    });
+
+    it('only looks up messages for rows that do not carry their conversation', async () => {
+      repositoryMock.findByRecipient.mockResolvedValue([
+        {
+          ...notificationWithActor,
+          id: 'n-new',
+          type: NotificationType.MESSAGE_RECEIVED,
+          entityType: NotificationEntityType.MESSAGE,
+          entityId: 'message-new',
+          conversationId: 'c1',
+        },
+        {
+          ...notificationWithActor,
+          id: 'n-old',
+          type: NotificationType.MESSAGE_RECEIVED,
+          entityType: NotificationEntityType.MESSAGE,
+          entityId: 'message-old',
+          conversationId: null,
+        },
+      ]);
+
+      await service.getNotifications(recipientId, {});
+
+      expect(
+        repositoryMock.findConversationIdsByMessageIds,
+      ).toHaveBeenCalledWith(['message-old']);
+    });
+
     it('should use default page size', async () => {
       repositoryMock.findByRecipient.mockResolvedValue([]);
 
@@ -829,6 +901,65 @@ describe('NotificationService', () => {
     it('should throw when recipientId is missing', async () => {
       await expect(service.getNotifications('', {})).rejects.toThrow(
         new BadRequestException('recipientId is required'),
+      );
+    });
+  });
+
+  describe('stackMessageNotifications', () => {
+    const tx = {} as Prisma.TransactionClient;
+    const input = {
+      recipientIds: ['bo', 'cy', 'actor-1'],
+      actorId: 'actor-1',
+      messageId: 'm1',
+      conversationId: 'c1',
+    };
+
+    beforeEach(() => {
+      repositoryMock.findNotifiableRecipientIds.mockImplementation(
+        (ids: readonly string[]) => Promise.resolve([...ids]),
+      );
+      repositoryMock.upsertMessageStack.mockResolvedValue([]);
+    });
+
+    it('stacks for everyone notifiable except the sender', async () => {
+      await service.stackMessageNotifications(input, tx);
+
+      expect(repositoryMock.upsertMessageStack).toHaveBeenCalledWith(
+        {
+          recipientIds: ['bo', 'cy'],
+          actorId: 'actor-1',
+          messageId: 'm1',
+          conversationId: 'c1',
+        },
+        tx,
+      );
+    });
+
+    it('leaves out people who cannot be notified', async () => {
+      repositoryMock.findNotifiableRecipientIds.mockResolvedValue(['cy']);
+
+      await service.stackMessageNotifications(input, tx);
+
+      expect(repositoryMock.upsertMessageStack).toHaveBeenCalledWith(
+        expect.objectContaining({ recipientIds: ['cy'] }),
+        tx,
+      );
+    });
+
+    it('does nothing when nobody is left', async () => {
+      repositoryMock.findNotifiableRecipientIds.mockResolvedValue([]);
+
+      await expect(
+        service.stackMessageNotifications(input, tx),
+      ).resolves.toEqual([]);
+      expect(repositoryMock.upsertMessageStack).not.toHaveBeenCalled();
+
+      await service.stackMessageNotifications(
+        { ...input, recipientIds: ['actor-1'] },
+        tx,
+      );
+      expect(repositoryMock.findNotifiableRecipientIds).toHaveBeenCalledTimes(
+        1,
       );
     });
   });
