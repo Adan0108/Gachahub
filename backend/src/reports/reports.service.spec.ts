@@ -8,7 +8,7 @@ import {
 import type { ReportsRepository } from './reports.repository';
 import type { FollowsService } from '../follows/follows.service';
 import { PostVisibilityService } from '../post-visibility/post-visibility.service';
-import type { ReportRateLimiterService } from './report-rate-limiter.service';
+import type { ReportRateLimiterService } from './infrastructure/report-rate-limiter.service';
 import type { PrismaService } from '../prisma/prisma.service';
 
 /*
@@ -25,7 +25,7 @@ jest.mock('../follows/follows.service', () => ({
   FollowsService: class {},
 }));
 
-jest.mock('./report-rate-limiter.service', () => ({
+jest.mock('./infrastructure/report-rate-limiter.service', () => ({
   ReportRateLimiterService: class {},
 }));
 

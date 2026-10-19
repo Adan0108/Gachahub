@@ -1,5 +1,5 @@
 import { IsOptional, IsString } from 'class-validator';
-import { QueryReportsDto } from './query-reports.dto';
+import { QueryReportsDto } from '../dto/query-reports.dto';
 
 /**
  * Adds an optional cross-game filter on top of QueryReportsDto - the

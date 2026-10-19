@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { RateLimitedException } from '../common/exceptions/rate-limited.exception';
+import { RateLimitedException } from '../../common/exceptions/rate-limited.exception';
 import {
   evictOldestIfAtCapacity,
   pruneOldTimestamps,
   touch,
-} from '../common/utils/bounded-map';
+} from '../../common/utils/bounded-map';
 
 /**
  * Rate limits how fast one user can file reports. In-memory, single-instance -

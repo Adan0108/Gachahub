@@ -1,8 +1,8 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { AdminGuard } from '../common/guards/admin.guard';
-import { QueryReportsAdminDto } from './dto/query-reports-admin.dto';
-import { ReportModerationService } from './report-moderation.service';
+import { AdminGuard } from '../../common/guards/admin.guard';
+import { QueryReportsAdminDto } from './query-reports-admin.dto';
+import { ReportModerationService } from '../moderation/report-moderation.service';
 
 /**
  * Cross-game report listing. Purely an admin action with no other

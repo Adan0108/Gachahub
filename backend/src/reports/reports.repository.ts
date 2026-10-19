@@ -8,8 +8,11 @@ import {
   type ReportTargetType,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { type LegacyReportStatus, toCaseStatus } from './report-status.compat';
-import type { ReportTargetSnapshot } from './report-target-snapshot';
+import {
+  type LegacyReportStatus,
+  toCaseStatus,
+} from './domain/report-status.compat';
+import type { ReportTargetSnapshot } from './domain/report-target-snapshot';
 
 const reportInclude = {
   reporter: {

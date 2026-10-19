@@ -4,7 +4,7 @@ import type {
   PostVisibility,
   PostMediaType,
   CommentStatus,
-} from '../generated/prisma/client';
+} from '../../generated/prisma/client';
 
 /** Versioned, backend-only evidence. No user/account credentials or remote bytes. */
 export type ReportTargetSnapshot = PostReportSnapshot | CommentReportSnapshot;

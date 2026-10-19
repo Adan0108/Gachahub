@@ -1,6 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { QueryPlatformReportsDto } from './query-platform-reports.dto';
+import { QueryPlatformReportsDto } from '../dto/platform-moderation/query-platform-reports.dto';
 
 describe('QueryPlatformReportsDto', () => {
   it('defaults scope and pagination', () => {

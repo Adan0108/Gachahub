@@ -9,7 +9,7 @@ import { normalizeText } from '../common/utils/normalize-text';
 import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReportDto } from './dto/create-report.dto';
-import { ReportRateLimiterService } from './report-rate-limiter.service';
+import { ReportRateLimiterService } from './infrastructure/report-rate-limiter.service';
 import {
   ReportsRepository,
   type ReportableTargetInfo,

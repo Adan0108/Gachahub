@@ -3,7 +3,7 @@ import { ConflictException } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { ReportsRepository } from './reports.repository';
 import type { PrismaService } from '../prisma/prisma.service';
-import type { PostReportSnapshot } from './report-target-snapshot';
+import type { PostReportSnapshot } from './domain/report-target-snapshot';
 
 describe('ReportsRepository creation retry boundaries', () => {
   const snapshot: PostReportSnapshot = {

@@ -1,23 +1,23 @@
-import { PrismaService } from '../prisma/prisma.service';
-import { loadActiveUser } from '../common/guards/active-user.util';
-import { hasPlatformModerationCapability } from '../common/guards/moderation-capabilities';
-import { QueryPlatformReportsDto } from './dto/query-platform-reports.dto';
+import { PrismaService } from '../../prisma/prisma.service';
+import { loadActiveUser } from '../../common/guards/active-user.util';
+import { hasPlatformModerationCapability } from '../../common/guards/moderation-capabilities';
+import { QueryPlatformReportsDto } from '../dto/platform-moderation/query-platform-reports.dto';
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { normalizeText } from '../common/utils/normalize-text';
-import { AuditLogService } from '../audit-log/audit-log.service';
-import type { ReportAuditAction } from '../audit-log/audit-log.types';
-import { GameModeratorsService } from '../game-moderators/game-moderators.service';
-import { QueryReportsAdminDto } from './dto/query-reports-admin.dto';
-import { QueryReportsDto } from './dto/query-reports.dto';
-import { ResolveReportDto } from './dto/resolve-report.dto';
-import { ReportsRepository } from './reports.repository';
-import type { Prisma } from '../generated/prisma/client';
-import { resolvePagination, toPaginated } from '../common/utils/paginated';
+import { normalizeText } from '../../common/utils/normalize-text';
+import { AuditLogService } from '../../audit-log/audit-log.service';
+import type { ReportAuditAction } from '../../audit-log/audit-log.types';
+import { GameModeratorsService } from '../../game-moderators/game-moderators.service';
+import { QueryReportsAdminDto } from '../admin/query-reports-admin.dto';
+import { QueryReportsDto } from '../dto/query-reports.dto';
+import { ResolveReportDto } from '../dto/resolve-report.dto';
+import { ReportsRepository } from '../reports.repository';
+import type { Prisma } from '../../generated/prisma/client';
+import { resolvePagination, toPaginated } from '../../common/utils/paginated';
 
 /**
  * Moderator/admin actions on reports: listing a queue, and closing a report

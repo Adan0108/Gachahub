@@ -86,11 +86,11 @@ import { AdminAuditLogController } from '../src/audit-log/admin-audit-log.contro
 import { GameAuditLogController } from '../src/audit-log/game-audit-log.controller';
 import { AuditLogQueryService } from '../src/audit-log/audit-log-query.service';
 import { ReportsController } from '../src/reports/reports.controller';
-import { AdminReportsController } from '../src/reports/admin-reports.controller';
-import { ReportModerationController } from '../src/reports/report-moderation.controller';
+import { AdminReportsController } from '../src/reports/admin/admin-reports.controller';
+import { ReportModerationController } from '../src/reports/game-moderation/report-moderation.controller';
 import { ReportsService } from '../src/reports/reports.service';
-import { ReportModerationService } from '../src/reports/report-moderation.service';
-import { ReportRateLimiterService } from '../src/reports/report-rate-limiter.service';
+import { ReportModerationService } from '../src/reports/moderation/report-moderation.service';
+import { ReportRateLimiterService } from '../src/reports/infrastructure/report-rate-limiter.service';
 import type {
   Prisma,
   PostType,

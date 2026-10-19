@@ -12,9 +12,9 @@ import {
 } from '@nestjs/swagger';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
-import { PlatformModeratorGuard } from '../common/guards/platform-moderator.guard';
-import { QueryPlatformReportsDto } from './dto/query-platform-reports.dto';
-import { ReportModerationService } from './report-moderation.service';
+import { PlatformModeratorGuard } from '../../common/guards/platform-moderator.guard';
+import { QueryPlatformReportsDto } from '../dto/platform-moderation/query-platform-reports.dto';
+import { ReportModerationService } from '../moderation/report-moderation.service';
 
 @ApiTags('Reports')
 @ApiCookieAuth('better-auth.session_token')

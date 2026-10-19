@@ -1,17 +1,17 @@
 jest.mock('@thallesp/nestjs-better-auth', () => ({
   Session: () => () => undefined,
 }));
-jest.mock('./report-moderation.service', () => ({
+jest.mock('../../moderation/report-moderation.service', () => ({
   ReportModerationService: class {},
 }));
-jest.mock('../common/guards/platform-moderator.guard', () => ({
+jest.mock('../../../common/guards/platform-moderator.guard', () => ({
   PlatformModeratorGuard: class {},
 }));
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
-import { PlatformModeratorGuard } from '../common/guards/platform-moderator.guard';
-import { ReportModerationService } from './report-moderation.service';
-import { PlatformReportModerationController } from './platform-report-moderation.controller';
+import { PlatformModeratorGuard } from '../../../common/guards/platform-moderator.guard';
+import { ReportModerationService } from '../../moderation/report-moderation.service';
+import { PlatformReportModerationController } from '../../platform-moderation/platform-report-moderation.controller';
 
 describe('PlatformReportModerationController', () => {
   it('forwards authenticated ID and query unchanged', () => {

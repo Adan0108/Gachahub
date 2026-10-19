@@ -1,4 +1,4 @@
-import type { ModerationCaseStatus } from '../generated/prisma/client';
+import type { ModerationCaseStatus } from '../../generated/prisma/client';
 
 // Temporary wire compatibility for existing report routes. Workflow state is
 // stored only on ModerationCase; PENDING is the legacy spelling of OPEN.

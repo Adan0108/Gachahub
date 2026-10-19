@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
-import { QueryReportsDto } from './query-reports.dto';
+import { QueryReportsDto } from '../query-reports.dto';
 
 export class QueryPlatformReportsDto extends QueryReportsDto {
   @ApiPropertyOptional({

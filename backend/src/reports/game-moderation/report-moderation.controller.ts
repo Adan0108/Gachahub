@@ -7,9 +7,9 @@ import {
 } from '@nestjs/swagger';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
-import { QueryReportsDto } from './dto/query-reports.dto';
-import { ResolveReportDto } from './dto/resolve-report.dto';
-import { ReportModerationService } from './report-moderation.service';
+import { QueryReportsDto } from '../dto/query-reports.dto';
+import { ResolveReportDto } from '../dto/resolve-report.dto';
+import { ReportModerationService } from '../moderation/report-moderation.service';
 
 /**
  * Moderator/admin actions on reports, scoped to the game they belong to.

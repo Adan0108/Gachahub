@@ -4,27 +4,27 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
-import type { PrismaService } from '../prisma/prisma.service';
-import type { Prisma } from '../generated/prisma/client';
-import type { ReportsRepository } from './reports.repository';
-import type { GameModeratorsService } from '../game-moderators/game-moderators.service';
-import type { AuditLogService } from '../audit-log/audit-log.service';
+import type { PrismaService } from '../../prisma/prisma.service';
+import type { Prisma } from '../../generated/prisma/client';
+import type { ReportsRepository } from '../reports.repository';
+import type { GameModeratorsService } from '../../game-moderators/game-moderators.service';
+import type { AuditLogService } from '../../audit-log/audit-log.service';
 
 /*
  * Unit test only mocks service dependencies. Do not load their real
  * implementations because they eventually import Prisma.
  */
-jest.mock('../prisma/prisma.service', () => ({ PrismaService: class {} }));
+jest.mock('../../prisma/prisma.service', () => ({ PrismaService: class {} }));
 
-jest.mock('./reports.repository', () => ({
+jest.mock('../reports.repository', () => ({
   ReportsRepository: class {},
 }));
 
-jest.mock('../audit-log/audit-log.service', () => ({
+jest.mock('../../audit-log/audit-log.service', () => ({
   AuditLogService: class {},
 }));
 
-jest.mock('../game-moderators/game-moderators.service', () => ({
+jest.mock('../../game-moderators/game-moderators.service', () => ({
   GameModeratorsService: class {},
 }));
 

@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { ReportRateLimiterService } from './report-rate-limiter.service';
-import { RateLimitedException } from '../common/exceptions/rate-limited.exception';
+import { RateLimitedException } from '../../common/exceptions/rate-limited.exception';
 
 describe('ReportRateLimiterService', () => {
   let service: ReportRateLimiterService;

@@ -1,4 +1,4 @@
-import { PlatformReportModerationController } from '../src/reports/platform-report-moderation.controller';
+import { PlatformReportModerationController } from '../src/reports/platform-moderation/platform-report-moderation.controller';
 type TestRequest = Request & {
   user?: { id: string };
   session?: { user: { id: string } };
@@ -41,10 +41,10 @@ import { Prisma } from '../src/generated/prisma/client';
 import { ReportsController } from '../src/reports/reports.controller';
 import { ReportsService } from '../src/reports/reports.service';
 import { ReportsRepository } from '../src/reports/reports.repository';
-import { ReportRateLimiterService } from '../src/reports/report-rate-limiter.service';
-import { ReportModerationController } from '../src/reports/report-moderation.controller';
-import { AdminReportsController } from '../src/reports/admin-reports.controller';
-import { ReportModerationService } from '../src/reports/report-moderation.service';
+import { ReportRateLimiterService } from '../src/reports/infrastructure/report-rate-limiter.service';
+import { ReportModerationController } from '../src/reports/game-moderation/report-moderation.controller';
+import { AdminReportsController } from '../src/reports/admin/admin-reports.controller';
+import { ReportModerationService } from '../src/reports/moderation/report-moderation.service';
 import { PostVisibilityService } from '../src/post-visibility/post-visibility.service';
 import { FollowsService } from '../src/follows/follows.service';
 import { FollowsRepository } from '../src/follows/follows.repository';
