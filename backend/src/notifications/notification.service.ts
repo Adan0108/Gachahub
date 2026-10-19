@@ -14,7 +14,12 @@ import {
 
 import { CommentsRepository } from '../comments/comments.repository';
 import { GetNotificationsQueryDto } from './dto/get-notifications-query.dto';
-import { commentEntityIds, withPostIds } from './notification.mapper';
+import {
+  commentEntityIds,
+  messageEntityIds,
+  withConversationIds,
+  withPostIds,
+} from './notification.mapper';
 import { NotificationRepository } from './notification.repository';
 import { CreateNotificationInput } from './notification.types';
 
@@ -230,14 +235,22 @@ export class NotificationService {
     const nextCursor =
       hasMore && items.length > 0 ? items[items.length - 1].id : null;
 
-    const comments = await this.commentsRepository.findPostIdsByCommentIds(
-      commentEntityIds(items),
-    );
+    const [comments, messages] = await Promise.all([
+      this.commentsRepository.findPostIdsByCommentIds(commentEntityIds(items)),
+      this.notificationRepository.findConversationIdsByMessageIds(
+        messageEntityIds(items),
+      ),
+    ]);
 
     return {
-      items: withPostIds(
-        items,
-        new Map(comments.map((comment) => [comment.id, comment.postId])),
+      items: withConversationIds(
+        withPostIds(
+          items,
+          new Map(comments.map((comment) => [comment.id, comment.postId])),
+        ),
+        new Map(
+          messages.map((message) => [message.id, message.conversationId]),
+        ),
       ),
       nextCursor,
       hasMore,

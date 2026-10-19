@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FiArchive,
@@ -134,11 +134,22 @@ function ChatSkeleton() {
 }
 
 export default function ChatPage() {
+  return (
+    <Suspense fallback={null}>
+      <ChatPageContent />
+    </Suspense>
+  );
+}
+
+function ChatPageContent() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
   const [view, setView] = useState("inbox");
   const [selectedId, setSelectedId] = useState("");
+  // /chat?c=<conversation id> (a clicked notification) opens that conversation; the id is then taken off the address.
+  const requestedId = useSearchParams().get("c") ?? "";
+  const [handledRequestId, setHandledRequestId] = useState("");
   const [search, setSearch] = useState("");
   // The text message search was last run for (on Enter); null until it has been used.
   const [messageQuery, setMessageQuery] = useState(null);
@@ -148,6 +159,21 @@ export default function ChatPage() {
     ...queries.chatArchivedConversations(),
     enabled: isAuthenticated && view === "archived",
   });
+  // The conversation can be an inbox chat or a request, so it is opened once both lists are in.
+  const [pendingOpenId, setPendingOpenId] = useState("");
+  if (requestedId !== handledRequestId) {
+    setHandledRequestId(requestedId);
+    if (requestedId) setPendingOpenId(requestedId);
+  }
+  const listsReady = (conversations.data || conversations.isError) && (requests.data || requests.isError);
+  if (pendingOpenId && listsReady) {
+    setPendingOpenId("");
+    setSelectedId(pendingOpenId);
+    setView(requests.data?.some((conversation) => conversation.id === pendingOpenId) ? "requests" : "inbox");
+  }
+  useEffect(() => {
+    if (requestedId) router.replace("/chat");
+  }, [requestedId, router]);
   const listByView = { inbox: conversations, requests, archived };
   const listQuery = listByView[view];
   const rawList = listQuery.data || [];

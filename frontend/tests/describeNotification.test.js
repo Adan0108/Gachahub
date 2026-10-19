@@ -59,4 +59,30 @@ describe("describeNotification", () => {
       href: null,
     });
   });
+
+  describe("chat notifications", () => {
+    it.each([
+      ["MESSAGE_RECEIVED", "MESSAGE"],
+      ["MESSAGE_REPLIED", "MESSAGE"],
+      ["USER_MENTIONED", "MESSAGE"],
+      ["GROUP_ADDED", "CONVERSATION"],
+      ["GROUP_INVITE_PENDING", "CONVERSATION"],
+    ])("opens the conversation for %s", (type, entityType) => {
+      const notification = { ...base, type, entityType, conversationId: "c1" };
+
+      expect(describeNotification(notification).href).toBe("/chat?c=c1");
+    });
+
+    it("just opens the chat when the conversation is not known", () => {
+      expect(
+        describeNotification({ ...base, type: "MESSAGE_RECEIVED", entityType: "MESSAGE", conversationId: null }).href,
+      ).toBe("/chat");
+    });
+
+    it("escapes the id in the link", () => {
+      expect(
+        describeNotification({ ...base, type: "MESSAGE_RECEIVED", entityType: "MESSAGE", conversationId: "a&b" }).href,
+      ).toBe("/chat?c=a%26b");
+    });
+  });
 });

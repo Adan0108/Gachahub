@@ -4,10 +4,12 @@ const postHref = (notification) => {
   return notification.postId ? `/post/${notification.postId}` : null;
 };
 
-const mentionHref = (notification) =>
-  notification.entityType === "MESSAGE" ? "/chat" : postHref(notification);
+// The backend says which conversation a chat notification belongs to; without it the chat just opens.
+const chatHref = (notification) =>
+  notification.conversationId ? `/chat?c=${encodeURIComponent(notification.conversationId)}` : "/chat";
 
-const chatHref = () => "/chat";
+const mentionHref = (notification) =>
+  notification.entityType === "MESSAGE" ? chatHref(notification) : postHref(notification);
 
 /** Per type: the sentence, and where it leads (`href` returning null = nowhere to go, on purpose). */
 const NOTIFICATION_KINDS = {

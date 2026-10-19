@@ -38,6 +38,9 @@ type NotificationRepositoryMock = {
     NotificationRepository['markMessageNotificationsAsRead']
   >;
   findExisting: jest.MockedFunction<NotificationRepository['findExisting']>;
+  findConversationIdsByMessageIds: jest.MockedFunction<
+    NotificationRepository['findConversationIdsByMessageIds']
+  >;
 };
 
 describe('NotificationService', () => {
@@ -55,6 +58,7 @@ describe('NotificationService', () => {
     markAllAsRead: jest.fn(),
     markMessageNotificationsAsRead: jest.fn(),
     findExisting: jest.fn(),
+    findConversationIdsByMessageIds: jest.fn(),
   };
 
   const commentsRepositoryMock = {
@@ -108,6 +112,7 @@ describe('NotificationService', () => {
 
     jest.clearAllMocks();
     commentsRepositoryMock.findPostIdsByCommentIds.mockResolvedValue([]);
+    repositoryMock.findConversationIdsByMessageIds.mockResolvedValue([]);
   });
 
   describe('createNotification', () => {
@@ -599,8 +604,8 @@ describe('NotificationService', () => {
 
       expect(result).toEqual({
         items: [
-          { ...n1, postId: null },
-          { ...n2, postId: null },
+          { ...n1, postId: null, conversationId: null },
+          { ...n2, postId: null, conversationId: null },
         ],
         nextCursor: 'notification-2',
         hasMore: true,
@@ -615,7 +620,9 @@ describe('NotificationService', () => {
       });
 
       expect(result).toEqual({
-        items: [{ ...notificationWithActor, postId: null }],
+        items: [
+          { ...notificationWithActor, postId: null, conversationId: null },
+        ],
         nextCursor: null,
         hasMore: false,
       });
@@ -643,6 +650,42 @@ describe('NotificationService', () => {
         commentsRepositoryMock.findPostIdsByCommentIds,
       ).toHaveBeenCalledWith(['comment-1']);
       expect(result.items.map((item) => item.postId)).toEqual(['post-9', null]);
+    });
+
+    it('gives chat notifications the conversation to open', async () => {
+      const messageNotification = {
+        ...notificationWithActor,
+        id: 'notification-message',
+        type: NotificationType.MESSAGE_RECEIVED,
+        entityType: NotificationEntityType.MESSAGE,
+        entityId: 'message-1',
+      };
+      const groupNotification = {
+        ...notificationWithActor,
+        id: 'notification-group',
+        type: NotificationType.GROUP_ADDED,
+        entityType: NotificationEntityType.CONVERSATION,
+        entityId: 'conversation-group',
+      };
+      repositoryMock.findByRecipient.mockResolvedValue([
+        messageNotification,
+        groupNotification,
+        notificationWithActor,
+      ]);
+      repositoryMock.findConversationIdsByMessageIds.mockResolvedValue([
+        { id: 'message-1', conversationId: 'conversation-dm' },
+      ]);
+
+      const result = await service.getNotifications(recipientId, {});
+
+      expect(
+        repositoryMock.findConversationIdsByMessageIds,
+      ).toHaveBeenCalledWith(['message-1']);
+      expect(result.items.map((item) => item.conversationId)).toEqual([
+        'conversation-dm',
+        'conversation-group',
+        null,
+      ]);
     });
 
     it('should use default page size', async () => {

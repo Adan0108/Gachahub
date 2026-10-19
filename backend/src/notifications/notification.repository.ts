@@ -158,6 +158,20 @@ export class NotificationRepository {
     });
   }
 
+  /** The conversation each of these messages is in, so a chat notification can open it. */
+  async findConversationIdsByMessageIds(
+    messageIds: string[],
+  ): Promise<Array<{ id: string; conversationId: string }>> {
+    if (messageIds.length === 0) {
+      return [];
+    }
+
+    return this.prisma.chatMessage.findMany({
+      where: { id: { in: messageIds } },
+      select: { id: true, conversationId: true },
+    });
+  }
+
   /** Marks a recipient's chat message notifications for these messages read. */
   markMessageNotificationsAsRead(params: {
     recipientId: string;
