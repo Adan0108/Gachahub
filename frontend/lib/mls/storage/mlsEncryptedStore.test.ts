@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  bindMlsAccount,
   encryptAndStore,
   loadAndDecrypt,
   loadAndDecryptOrMissing,
@@ -208,7 +209,7 @@ describe('a wipe racing other work', () => {
     await wipeAllLocalMlsSecrets();
     await vi.waitFor(() => expect(heard).toHaveBeenCalled());
 
-    otherTab.postMessage('wiped');
+    otherTab.postMessage('gachahub-mls');
     await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(2));
     otherTab.close();
   });
@@ -236,5 +237,119 @@ describe('opening while another tab holds an old version', () => {
     vi.useRealTimers();
     globalThis.indexedDB = real;
     await expect(openMlsDatabase()).resolves.toBeDefined();
+  });
+});
+
+describe('one database per account', () => {
+  const identity = (userId: string) => ({ credential: { userId, deviceId: `device-${userId}` } });
+
+  /** What the page did before accounts had their own database: everything in one shared one. */
+  async function seedLegacy(userId: string) {
+    const legacy = await openMlsDatabase();
+    await encryptAndStore(legacy, 'deviceIdentity', 'device-identity', identity(userId));
+    await encryptAndStore(legacy, 'groupSessions', 'conversation-1', { epoch: 3 });
+    resetMlsDatabaseForTests();
+  }
+
+  it('says whether an account is new to the page, the same, or a switch', () => {
+    expect(bindMlsAccount('a')).toBe('bound');
+    expect(bindMlsAccount('a')).toBe('same');
+    expect(bindMlsAccount('b')).toBe('switched');
+    // A switch changes nothing: the page keeps its first account until it reloads
+    expect(bindMlsAccount('a')).toBe('same');
+  });
+
+  it('keeps the data of each account apart, and finds it again when the account comes back', async () => {
+    bindMlsAccount('a');
+    await encryptAndStore(await openMlsDatabase(), 'groupSessions', 'g', { owner: 'a' });
+    resetMlsDatabaseForTests();
+
+    bindMlsAccount('b');
+    await expect(loadAndDecrypt(await openMlsDatabase(), 'groupSessions', 'g')).resolves.toBeUndefined();
+    await encryptAndStore(await openMlsDatabase(), 'groupSessions', 'g', { owner: 'b' });
+    resetMlsDatabaseForTests();
+
+    bindMlsAccount('a');
+    await expect(loadAndDecrypt(await openMlsDatabase(), 'groupSessions', 'g')).resolves.toEqual({ owner: 'a' });
+  });
+
+  it('wipes only the account that is open', async () => {
+    bindMlsAccount('a');
+    await encryptAndStore(await openMlsDatabase(), 'groupSessions', 'g', { owner: 'a' });
+    resetMlsDatabaseForTests();
+    bindMlsAccount('b');
+    await encryptAndStore(await openMlsDatabase(), 'groupSessions', 'g', { owner: 'b' });
+
+    await wipeAllLocalMlsSecrets();
+
+    await expect(loadAndDecrypt(await openMlsDatabase(), 'groupSessions', 'g')).resolves.toBeUndefined();
+    resetMlsDatabaseForTests();
+    bindMlsAccount('a');
+    await expect(loadAndDecrypt(await openMlsDatabase(), 'groupSessions', 'g')).resolves.toEqual({ owner: 'a' });
+  });
+
+  it('ignores a wipe announced for the database of another account', async () => {
+    bindMlsAccount('a');
+    const listener = vi.fn();
+    onMlsSecretsWiped(listener);
+    const otherTab = new BroadcastChannel('gachahub-mls-wipe');
+
+    otherTab.postMessage('gachahub-mls-b');
+    otherTab.postMessage('gachahub-mls-a');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    otherTab.close();
+  });
+
+  describe('data from before accounts had their own database', () => {
+    it('is taken over, once, by the account it belongs to', async () => {
+      await seedLegacy('a');
+
+      bindMlsAccount('a');
+      const db = await openMlsDatabase();
+
+      await expect(loadAndDecrypt(db, 'deviceIdentity', 'device-identity')).resolves.toEqual(identity('a'));
+      await expect(loadAndDecrypt(db, 'groupSessions', 'conversation-1')).resolves.toEqual({ epoch: 3 });
+    });
+
+    it('is emptied afterwards, so no other account can claim it', async () => {
+      await seedLegacy('a');
+      bindMlsAccount('a');
+      await openMlsDatabase();
+      resetMlsDatabaseForTests();
+
+      bindMlsAccount('b');
+      const other = await openMlsDatabase();
+
+      await expect(loadAndDecrypt(other, 'deviceIdentity', 'device-identity')).resolves.toBeUndefined();
+      resetMlsDatabaseForTests();
+      const legacy = await openMlsDatabase();
+      await expect(loadAndDecrypt(legacy, 'deviceIdentity', 'device-identity')).resolves.toBeUndefined();
+    });
+
+    it('is left alone by an account it does not belong to', async () => {
+      await seedLegacy('a');
+
+      bindMlsAccount('b');
+      const db = await openMlsDatabase();
+
+      await expect(loadAndDecrypt(db, 'deviceIdentity', 'device-identity')).resolves.toBeUndefined();
+      resetMlsDatabaseForTests();
+      const legacy = await openMlsDatabase();
+      await expect(loadAndDecrypt(legacy, 'deviceIdentity', 'device-identity')).resolves.toEqual(identity('a'));
+    });
+
+    it('does not replace an identity the account already has', async () => {
+      await seedLegacy('a');
+      bindMlsAccount('a');
+      await encryptAndStore(await openMlsDatabase(), 'deviceIdentity', 'device-identity', identity('a-own'));
+      resetMlsDatabaseForTests();
+
+      bindMlsAccount('a');
+      const db = await openMlsDatabase();
+
+      await expect(loadAndDecrypt(db, 'deviceIdentity', 'device-identity')).resolves.toEqual(identity('a-own'));
+    });
   });
 });

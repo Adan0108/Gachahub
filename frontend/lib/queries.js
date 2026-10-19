@@ -1,6 +1,7 @@
 import { keepPreviousData } from "@tanstack/react-query";
 import { cursorFeedOptions } from "./cursorFeed";
 import { api, fallbackCategories, fallbackGame, fallbackGames, fallbackPosts } from "./api";
+import { bindSignedInAccount } from "./mls/mlsAccountSession";
 
 // Normalizes an unpaginated, bare-array admin endpoint (categories, moderators) into the same
 // { items, meta } shape every paginated admin query already returns, so useAdminList's generic
@@ -145,7 +146,12 @@ export const queries = {
   }),
   currentUser: () => ({
     queryKey: queryKeys.currentUser,
-    queryFn: ({ signal }) => api.getCurrentUser({ signal }),
+    queryFn: async ({ signal }) => {
+      const user = await api.getCurrentUser({ signal });
+      // Before anything reads the user: local encrypted data is per account, and a different one reloads the page
+      bindSignedInAccount(user?.id);
+      return user;
+    },
     retry: false,
     staleTime: 30_000,
   }),

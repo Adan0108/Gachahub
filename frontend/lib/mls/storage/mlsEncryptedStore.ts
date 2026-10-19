@@ -1,6 +1,7 @@
 import { bytesToBase64, base64ToBytes } from './base64';
 
-const DB_NAME = 'gachahub-mls';
+// Before accounts had their own database, everyone's data lived here; it is only read to hand an account its own.
+const LEGACY_DB_NAME = 'gachahub-mls';
 const DB_VERSION = 4;
 const KEY_STORE = 'cryptoKeys';
 const ENCRYPTION_KEY_RECORD = 'local-encryption-key';
@@ -82,6 +83,9 @@ const WIPE_CHANNEL_NAME = 'gachahub-mls-wipe';
 
 let dbPromise: Promise<IDBDatabase> | undefined;
 let openConnection: IDBDatabase | undefined;
+// The signed-in account this page's local data belongs to: each account has its own database, so
+// signing in as someone else never touches (or destroys) the first account's keys and groups.
+let boundAccountId: string | undefined;
 // Bumped by every wipe, in this tab or another: a write that began under an older one is dropped
 let wipeGeneration = 0;
 const wipeListeners = new Set<() => void>();
@@ -91,6 +95,31 @@ let wipeChannel: BroadcastChannel | undefined;
 export function resetMlsDatabaseForTests(): void {
   dbPromise = undefined;
   openConnection = undefined;
+  boundAccountId = undefined;
+}
+
+function databaseName(): string {
+  return boundAccountId ? `${LEGACY_DB_NAME}-${boundAccountId}` : LEGACY_DB_NAME;
+}
+
+export type BindResult = 'bound' | 'same' | 'switched';
+
+/**
+ * Says which account's data this page works with; call it as soon as the signed-in user is known.
+ * 'bound' the first time, 'same' for the same account again, and 'switched' when it is a different
+ * account than the page started with: the page's in-memory state belongs to the first one, so the
+ * caller must reload instead of carrying on (nothing is changed here).
+ */
+export function bindMlsAccount(accountId: string): BindResult {
+  if (boundAccountId === accountId) return 'same';
+  if (boundAccountId !== undefined) return 'switched';
+
+  boundAccountId = accountId;
+  // Anything opened before the account was known used the old shared database
+  openConnection?.close();
+  openConnection = undefined;
+  dbPromise = undefined;
+  return 'bound';
 }
 
 /** Calls `listener` after local MLS data was wiped here or in another tab, so cached copies get dropped. */
@@ -120,15 +149,18 @@ function noteWipe(): void {
 function ensureWipeChannel(): BroadcastChannel | undefined {
   if (wipeChannel || typeof BroadcastChannel === 'undefined') return wipeChannel;
   wipeChannel = new BroadcastChannel(WIPE_CHANNEL_NAME);
-  wipeChannel.onmessage = noteWipe;
+  // Only a wipe of this account's data concerns this page; other accounts' tabs keep theirs
+  wipeChannel.onmessage = (event: MessageEvent) => {
+    if (event.data === databaseName()) noteWipe();
+  };
   // Node keeps its loop alive for an open channel; a browser has no such method
   (wipeChannel as { unref?: () => void }).unref?.();
   return wipeChannel;
 }
 
-function connect(): Promise<IDBDatabase> {
+function connect(name: string, { track = true } = {}): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(name, DB_VERSION);
     let gaveUp = false;
     let blockedTimer: ReturnType<typeof setTimeout> | undefined;
     request.onupgradeneeded = () => {
@@ -151,6 +183,10 @@ function connect(): Promise<IDBDatabase> {
       const db = request.result;
       if (gaveUp) {
         db.close();
+        return;
+      }
+      if (!track) {
+        resolve(db);
         return;
       }
       openConnection = db;
@@ -178,11 +214,73 @@ function connect(): Promise<IDBDatabase> {
 export function openMlsDatabase(): Promise<IDBDatabase> {
   ensureWipeChannel();
   // A failed open is not cached, so the next call retries
-  const opening: Promise<IDBDatabase> = (dbPromise ??= connect().catch((error: unknown) => {
-    if (dbPromise === opening) dbPromise = undefined;
-    throw error;
-  }));
+  const accountId = boundAccountId;
+  const opening: Promise<IDBDatabase> = (dbPromise ??= connect(databaseName())
+    .then(async (db) => {
+      if (accountId) await adoptLegacyDatabase(db, accountId);
+      return db;
+    })
+    .catch((error: unknown) => {
+      if (dbPromise === opening) dbPromise = undefined;
+      throw error;
+    }));
   return opening;
+}
+
+const ALL_STORE_NAMES = [KEY_STORE, ...DATA_STORE_NAMES];
+
+async function legacyDatabaseExists(): Promise<boolean> {
+  // Browsers that cannot list databases skip the hand-over rather than create an empty one by looking
+  if (typeof indexedDB.databases !== 'function') return false;
+  return (await indexedDB.databases()).some((info) => info.name === LEGACY_DB_NAME);
+}
+
+async function readEverything(db: IDBDatabase): Promise<Map<string, Array<[IDBValidKey, unknown]>>> {
+  const tx = db.transaction(ALL_STORE_NAMES, 'readonly');
+  const everything = new Map<string, Array<[IDBValidKey, unknown]>>();
+  for (const name of ALL_STORE_NAMES) {
+    const store = tx.objectStore(name);
+    // eslint-disable-next-line no-await-in-loop -- one transaction, read store by store
+    const [keys, values] = await Promise.all([idbRequest(store.getAllKeys()), idbRequest(store.getAll())]);
+    everything.set(name, keys.map((key, index) => [key, values[index]]));
+  }
+  return everything;
+}
+
+/**
+ * The first time an account opens its own database, takes over what the old shared database held
+ * if that was this account's (its device identity names its user): keys, groups and message
+ * cache move over, and the old copy is emptied so no other account can claim it.
+ */
+async function adoptLegacyDatabase(target: IDBDatabase, accountId: string): Promise<void> {
+  if ((await listRecordIds(target, 'deviceIdentity')).length > 0) return;
+  if (!(await legacyDatabaseExists())) return;
+
+  const legacy = await connect(LEGACY_DB_NAME, { track: false });
+  try {
+    const identity = await loadAndDecryptOrMissing<{ credential?: { userId?: string } }>(
+      legacy,
+      'deviceIdentity',
+      'device-identity',
+    );
+    if (identity?.credential?.userId !== accountId) return;
+
+    const everything = await readEverything(legacy);
+    const writeTx = target.transaction(ALL_STORE_NAMES, 'readwrite');
+    const written = transactionDone(writeTx);
+    for (const [name, records] of everything) {
+      const store = writeTx.objectStore(name);
+      for (const [key, value] of records) store.put(value, key);
+    }
+    await written;
+
+    const clearTx = legacy.transaction(ALL_STORE_NAMES, 'readwrite');
+    const cleared = transactionDone(clearTx);
+    for (const name of ALL_STORE_NAMES) clearTx.objectStore(name).clear();
+    await cleared;
+  } finally {
+    legacy.close();
+  }
 }
 
 /** Settles when the transaction has committed (or failed): a request succeeding only means it was queued. */
@@ -315,7 +413,7 @@ export async function deleteRecord(
 async function wipeStores(storeNames: readonly string[]): Promise<void> {
   // Before the first await: any write already under way is dropped from here on
   wipeGeneration += 1;
-  ensureWipeChannel()?.postMessage('wiped');
+  ensureWipeChannel()?.postMessage(databaseName());
   try {
     const db = await openMlsDatabase();
     const tx = db.transaction([...storeNames], 'readwrite');
