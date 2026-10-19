@@ -17,7 +17,7 @@ describe('PresenceService', () => {
     dropSocket: jest.fn(),
     popExpired: jest.fn(),
   };
-  const repository = {
+  const audience = {
     findVisibleAmong: jest.fn(),
     findAudienceIds: jest.fn(),
   };
@@ -40,10 +40,10 @@ describe('PresenceService', () => {
     store.stopLingering.mockResolvedValue(false);
     store.popExpired.mockResolvedValue([]);
     store.popLingerDue.mockResolvedValue([]);
-    repository.findAudienceIds.mockResolvedValue(['bo', 'cy']);
+    audience.findAudienceIds.mockResolvedValue(['bo', 'cy']);
     service = new PresenceService(
       store as never,
-      repository as never,
+      audience as never,
       registry as never,
     );
   });
@@ -81,7 +81,7 @@ describe('PresenceService', () => {
 
   describe('getVisible', () => {
     it('shows online only for visible, connected people who are not invisible', async () => {
-      repository.findVisibleAmong.mockResolvedValue(
+      audience.findVisibleAmong.mockResolvedValue(
         new Set(['on', 'hidden', 'away']),
       );
       store.onlineAmong.mockResolvedValue(new Set(['on', 'hidden']));
@@ -103,7 +103,7 @@ describe('PresenceService', () => {
     });
 
     it('does not even look up connection or choice for people the viewer may not see', async () => {
-      repository.findVisibleAmong.mockResolvedValue(new Set(['on']));
+      audience.findVisibleAmong.mockResolvedValue(new Set(['on']));
       store.onlineAmong.mockResolvedValue(new Set());
 
       await service.getVisible('me', ['on', 'stranger']);
@@ -220,7 +220,7 @@ describe('PresenceService', () => {
     });
 
     it('says nothing when nobody can see the person', async () => {
-      repository.findAudienceIds.mockResolvedValue([]);
+      audience.findAudienceIds.mockResolvedValue([]);
       store.touchSocket.mockResolvedValue({ added: true, count: 1 });
 
       await service.socketAlive('me', 's1');

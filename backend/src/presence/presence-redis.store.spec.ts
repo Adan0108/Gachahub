@@ -5,28 +5,30 @@ import {
   preferenceKey,
   socketsKey,
 } from './presence.constants';
-import { PresenceStore, isInvisible } from './presence.store';
+import { PresenceRedisStore, isInvisible } from './presence-redis.store';
 
-describe('PresenceStore', () => {
+describe('PresenceRedisStore', () => {
   const redis = {
     sortedSetTouch: jest.fn(),
     sortedSetRemoveMember: jest.fn(),
-    sortedSetLiveCount: jest.fn(),
+    sortedSetLiveCounts: jest.fn(),
     sortedSetAdd: jest.fn(),
     sortedSetRemove: jest.fn(),
     sortedSetPopDue: jest.fn(),
     sortedSetScore: jest.fn(),
+    sortedSetScores: jest.fn(),
     getJson: jest.fn(),
+    getManyJson: jest.fn(),
     setJson: jest.fn(),
     delete: jest.fn(),
     get: jest.fn(),
     deleteIfEquals: jest.fn(),
   };
-  let store: PresenceStore;
+  let store: PresenceRedisStore;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    store = new PresenceStore(redis as never);
+    store = new PresenceRedisStore(redis as never);
   });
 
   describe('sockets', () => {
@@ -58,13 +60,17 @@ describe('PresenceStore', () => {
     });
 
     it('lists who has at least one live socket', async () => {
-      redis.sortedSetLiveCount.mockImplementation((key: string) =>
-        Promise.resolve(key === socketsKey('u2') ? 0 : 2),
-      );
+      redis.sortedSetLiveCounts.mockResolvedValue([2, 0, 2]);
 
       const connected = await store.connectedAmong(['u1', 'u2', 'u3'], 5);
 
       expect([...connected].sort()).toEqual(['u1', 'u3']);
+      expect(redis.sortedSetLiveCounts).toHaveBeenCalledTimes(1);
+      expect(redis.sortedSetLiveCounts).toHaveBeenCalledWith(
+        [socketsKey('u1'), socketsKey('u2'), socketsKey('u3')],
+        5,
+        SOCKET_STALE_AFTER_MS,
+      );
     });
   });
 
@@ -101,8 +107,10 @@ describe('PresenceStore', () => {
         later: { until: 2000 },
         over: { until: 500 },
       };
-      redis.getJson.mockImplementation((key: string) =>
-        Promise.resolve(byUser[key.replace('presence:pref:', '')] ?? null),
+      redis.getManyJson.mockImplementation((keys: string[]) =>
+        Promise.resolve(
+          keys.map((key) => byUser[key.replace('presence:pref:', '')] ?? null),
+        ),
       );
 
       const invisible = await store.invisibleAmong(
@@ -111,6 +119,7 @@ describe('PresenceStore', () => {
       );
 
       expect([...invisible].sort()).toEqual(['forever', 'later']);
+      expect(redis.getManyJson).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -156,28 +165,25 @@ describe('PresenceStore', () => {
   });
 });
 
-describe('PresenceStore lingering', () => {
+describe('PresenceRedisStore lingering', () => {
   const redis = {
-    sortedSetLiveCount: jest.fn(),
+    sortedSetLiveCounts: jest.fn(),
+    sortedSetScores: jest.fn(),
     sortedSetScore: jest.fn(),
     sortedSetAdd: jest.fn(),
     sortedSetRemove: jest.fn(),
     sortedSetPopDue: jest.fn(),
   };
-  let store: PresenceStore;
+  let store: PresenceRedisStore;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    store = new PresenceStore(redis as never);
+    store = new PresenceRedisStore(redis as never);
   });
 
   it('counts someone who is connected, or lingering, as online', async () => {
-    redis.sortedSetLiveCount.mockImplementation((key: string) =>
-      Promise.resolve(key === socketsKey('here') ? 1 : 0),
-    );
-    redis.sortedSetScore.mockImplementation((_key: string, user: string) =>
-      Promise.resolve(user === 'gone' ? 5000 : user === 'over' ? 500 : null),
-    );
+    redis.sortedSetLiveCounts.mockResolvedValue([1, 0, 0, 0]);
+    redis.sortedSetScores.mockResolvedValue([null, 5000, 500, null]);
 
     const online = await store.onlineAmong(
       ['here', 'gone', 'over', 'never'],
@@ -185,6 +191,12 @@ describe('PresenceStore lingering', () => {
     );
 
     expect([...online].sort()).toEqual(['gone', 'here']);
+    expect(redis.sortedSetScores).toHaveBeenCalledWith(LINGER_KEY, [
+      'here',
+      'gone',
+      'over',
+      'never',
+    ]);
   });
 
   it('starts lingering with the end as the score', async () => {

@@ -89,4 +89,42 @@ describe('RedisService sorted-set queue (real Redis)', () => {
       expect(await service.sortedSetScore(queue, 'renewed')).toBe(999_999);
     }
   });
+
+  it('reads the scores of several members in one go, null for a missing one', async () => {
+    if (!client) return;
+    await service.sortedSetAdd(queue, 'a', 10);
+    await service.sortedSetAdd(queue, 'b', 20);
+
+    await expect(
+      service.sortedSetScores(queue, ['b', 'nobody', 'a']),
+    ).resolves.toEqual([20, null, 10]);
+    await expect(service.sortedSetScores(queue, [])).resolves.toEqual([]);
+  });
+
+  it('counts the live members of several sets in one go', async () => {
+    if (!client) return;
+    const keys = [`${queue}:one`, `${queue}:two`, `${queue}:none`];
+    await service.sortedSetAdd(keys[0], 'old', 100);
+    await service.sortedSetAdd(keys[0], 'fresh', 1000);
+    await service.sortedSetAdd(keys[1], 'fresh', 990);
+
+    await expect(service.sortedSetLiveCounts(keys, 1000, 50)).resolves.toEqual([
+      1, 1, 0,
+    ]);
+    await expect(service.sortedSetLiveCounts([], 1000, 50)).resolves.toEqual(
+      [],
+    );
+    await client.del(keys.map((key) => `${prefix}${key}`));
+  });
+
+  it('reads several JSON values in one go, null for an empty key', async () => {
+    if (!client) return;
+    await service.setJson(`${queue}:json1`, { until: 5 });
+
+    await expect(
+      service.getManyJson([`${queue}:json1`, `${queue}:json2`]),
+    ).resolves.toEqual([{ until: 5 }, null]);
+    await expect(service.getManyJson([])).resolves.toEqual([]);
+    await client.del(`${prefix}${queue}:json1`);
+  });
 });

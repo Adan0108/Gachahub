@@ -108,6 +108,34 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * Other people in an accepted chat with this person: ACTIVE and not deleted on both sides.
+   * `among` narrows it to those people; `limit` caps how many come back.
+   */
+  async findAcceptedChatPartnerIds(
+    userId: string,
+    limit: number,
+    among?: string[],
+  ): Promise<string[]> {
+    const rows = await this.prisma.chatParticipant.findMany({
+      where: {
+        userId: among ? { in: among, not: userId } : { not: userId },
+        state: 'ACTIVE',
+        deletedAt: null,
+        conversation: {
+          participants: {
+            some: { userId, state: 'ACTIVE', deletedAt: null },
+          },
+        },
+      },
+      select: { userId: true },
+      distinct: ['userId'],
+      take: limit,
+    });
+
+    return rows.map((row) => row.userId);
+  }
+
   /** Finds one participant row; participant state is the source of truth for permissions. */
   findParticipant(conversationId: string, userId: string) {
     return this.prisma.chatParticipant.findUnique({

@@ -83,5 +83,6 @@ import { NotificationModule } from '../notifications/notification.module';
       useClass: OpaqueMessageEncryptionService,
     },
   ],
+  exports: [ChatAccessService],
 })
 export class ChatModule {}
