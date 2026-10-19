@@ -55,7 +55,7 @@ describe('CommunityActionsService', () => {
     it('tells the room when the text changed, not when it did not', async () => {
       repository.updateContent.mockResolvedValue(row({ content: 'fixed' }));
       await edit();
-      expect(realtime.changed).toHaveBeenCalledWith('c1');
+      expect(realtime.changed).toHaveBeenCalledWith('c1', 'm1');
 
       realtime.changed.mockClear();
       access.messageIn.mockResolvedValue(row({ content: 'same' }));
@@ -112,7 +112,7 @@ describe('CommunityActionsService', () => {
     it('tells the room a message went, and not again the second time', async () => {
       repository.softDelete.mockResolvedValue(row({ deletedAt: new Date() }));
       await remove();
-      expect(realtime.changed).toHaveBeenCalledWith('c1');
+      expect(realtime.changed).toHaveBeenCalledWith('c1', 'm1');
 
       realtime.changed.mockClear();
       access.messageIn.mockResolvedValue(row({ deletedAt: new Date() }));
@@ -192,7 +192,7 @@ describe('CommunityActionsService', () => {
       await service.unreact('wuwa', 'm1', 'me');
 
       expect(realtime.changed).toHaveBeenCalledTimes(2);
-      expect(realtime.changed).toHaveBeenCalledWith('c1');
+      expect(realtime.changed).toHaveBeenCalledWith('c1', 'm1');
     });
 
     it('refuses to react to a removed message', async () => {

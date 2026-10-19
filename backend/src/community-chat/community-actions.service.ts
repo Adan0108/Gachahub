@@ -52,7 +52,7 @@ export class CommunityActionsService {
     if (content === message.content) return this.presenter.one(scope, message);
 
     const updated = await this.repository.updateContent(message.id, content);
-    this.realtime.changed(message.channelId);
+    this.realtime.changed(message.channelId, message.id);
     return this.presenter.one(scope, updated);
   }
 
@@ -78,7 +78,7 @@ export class CommunityActionsService {
       scope.user.id,
       reason,
     );
-    this.realtime.changed(message.channelId);
+    this.realtime.changed(message.channelId, message.id);
     return this.presenter.one(scope, removed);
   }
 
@@ -107,7 +107,7 @@ export class CommunityActionsService {
       emoji: dto.emoji,
       emoteId: dto.emoteId,
     });
-    this.realtime.changed(message.channelId);
+    this.realtime.changed(message.channelId, message.id);
     return this.reactionsOf(message.id);
   }
 
@@ -116,7 +116,7 @@ export class CommunityActionsService {
     const message = await this.access.messageIn(game.id, messageId);
 
     await this.repository.deleteReaction(message.id, user.id);
-    this.realtime.changed(message.channelId);
+    this.realtime.changed(message.channelId, message.id);
     return this.reactionsOf(message.id);
   }
 

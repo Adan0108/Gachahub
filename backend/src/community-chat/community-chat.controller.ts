@@ -78,6 +78,16 @@ export class CommunityChatController {
     return this.channels.markRead(slug, channelId, dto, session.user.id);
   }
 
+  @Get('messages/:messageId')
+  @ApiOperation({ summary: 'One message, as you see it' })
+  getMessage(
+    @Param('gameSlug') slug: string,
+    @Param('messageId') messageId: string,
+    @Session() session: UserSession,
+  ) {
+    return this.messaging.getMessage(slug, messageId, session.user.id);
+  }
+
   @Patch('messages/:messageId')
   @ApiOperation({ summary: 'Edit your own message (within 15 minutes)' })
   edit(

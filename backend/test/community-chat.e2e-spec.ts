@@ -371,6 +371,37 @@ describe('Community chat API (real database)', () => {
     });
   });
 
+  describe('one message', () => {
+    const one = (user: string, messageId: string) =>
+      get(user, `${BASE}/messages/${messageId}`);
+
+    it('returns a single message, and shows a removed one as removed', async () => {
+      const created = await send(ann, 'just this one').expect(201);
+
+      const found = await one(bo, created.body.id).expect(200);
+      expect(found.body).toMatchObject({
+        id: created.body.id,
+        content: 'just this one',
+        deleted: false,
+      });
+
+      await request(app.getHttpServer())
+        .delete(`${BASE}/messages/${created.body.id}`)
+        .set(as(ann))
+        .send({})
+        .expect(200);
+      const gone = await one(bo, created.body.id).expect(200);
+      expect(gone.body).toMatchObject({ deleted: true, content: null });
+    });
+
+    it('refuses someone who is not in the community, and an unknown message', async () => {
+      const created = await send(ann, 'members only').expect(201);
+
+      await one(outsider, created.body.id).expect(403);
+      await one(ann, randomUUID()).expect(404);
+    });
+  });
+
   describe('editing and removing', () => {
     it('lets the author edit, and marks it edited', async () => {
       const created = await send(ann, 'typo').expect(201);

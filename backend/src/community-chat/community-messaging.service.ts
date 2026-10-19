@@ -57,6 +57,17 @@ export class CommunityMessagingService {
     };
   }
 
+  /** One message as this person sees it, so a client can refresh just the one that changed. */
+  async getMessage(
+    slug: string,
+    messageId: string,
+    userId: string | undefined,
+  ) {
+    const scope = await this.access.scope(slug, userId);
+    const message = await this.access.messageIn(scope.game.id, messageId);
+    return this.presenter.one(scope, message);
+  }
+
   async send(
     slug: string,
     channelId: string,
@@ -120,7 +131,7 @@ export class CommunityMessagingService {
       );
       if ('waitMs' in saved) throwSlowMode(saved.waitMs);
 
-      this.realtime.changed(channel.id);
+      this.realtime.changed(channel.id, saved.created.id);
       return await this.presenter.one(scope, saved.created);
     } catch (error) {
       // Two sends with one client id at once: the loser gets the winner's message.

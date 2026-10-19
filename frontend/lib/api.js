@@ -919,6 +919,8 @@ export const api = {
   getCommunityChannels: (gameSlug) => request(backendRoutes.communityChat(gameSlug)),
   getCommunityMessages: (gameSlug, channelId, query = {}) =>
     request(withQuery(backendRoutes.communityChatMessages(gameSlug, channelId), query)),
+  getCommunityMessage: (gameSlug, messageId) =>
+    request(backendRoutes.communityChatMessage(gameSlug, messageId)),
   sendCommunityMessage: (gameSlug, channelId, message) =>
     mutation(backendRoutes.communityChatMessages(gameSlug, channelId), message),
   editCommunityMessage: (gameSlug, messageId, content) =>

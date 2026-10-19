@@ -18,7 +18,11 @@ describe('CommunityMessagingService', () => {
     findMessageInChannel: jest.fn(),
     createMessage: jest.fn(),
   };
-  const access = { scope: jest.fn(), channelIn: jest.fn() };
+  const access = {
+    scope: jest.fn(),
+    channelIn: jest.fn(),
+    messageIn: jest.fn(),
+  };
   const rateLimiter = { assertNotRateLimited: jest.fn() };
   const presenter = { page: jest.fn(), one: jest.fn() };
   const realtime = { changed: jest.fn() };
@@ -116,6 +120,24 @@ describe('CommunityMessagingService', () => {
     });
   });
 
+  describe('getMessage', () => {
+    it('returns the one message as the viewer sees it', async () => {
+      access.messageIn.mockResolvedValue(row({ id: 'm9' }));
+
+      const message = await service.getMessage('wuwa', 'm9', 'me');
+
+      expect(access.messageIn).toHaveBeenCalledWith('g1', 'm9');
+      expect(message).toMatchObject({ id: 'm9' });
+    });
+
+    it('refuses before looking when the viewer cannot use this chat', async () => {
+      access.scope.mockRejectedValue(new Error('no'));
+
+      await expect(service.getMessage('wuwa', 'm9', 'me')).rejects.toThrow();
+      expect(access.messageIn).not.toHaveBeenCalled();
+    });
+  });
+
   describe('send', () => {
     const send = (dto: Record<string, unknown> = {}, userId = 'me') =>
       service.send('wuwa', 'c1', { content: 'hello', ...dto }, userId);
@@ -140,7 +162,7 @@ describe('CommunityMessagingService', () => {
     it('tells the room something changed, once a message is saved', async () => {
       await send();
 
-      expect(realtime.changed).toHaveBeenCalledWith('c1');
+      expect(realtime.changed).toHaveBeenCalledWith('c1', 'm1');
     });
 
     it('says nothing for a retry that returns the earlier message, or a message that was refused', async () => {

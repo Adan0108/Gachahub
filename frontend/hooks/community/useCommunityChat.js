@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { withOptimisticReaction } from "../../lib/chat/chatReactions";
 import {
+  hasMessage,
   messagesOf,
   olderPageParam,
   patchMessage,
@@ -19,6 +20,8 @@ const PAGE_SIZE = 50;
 const LATEST_POLL_MS = 60_000;
 // A burst of changes (several people typing at once) is one pull.
 const PUSH_PULL_DELAY_MS = 150;
+// More changed messages than this are not fetched one by one; the loaded pages are reloaded instead.
+const MAX_MESSAGE_REFRESHES = 10;
 
 /**
  * One community's chat room: its messages (newest page first, older ones on demand), sending with
@@ -32,7 +35,8 @@ export function useCommunityChat(slug, { enabled = true } = {}) {
   // One room per community for now; the API already lists several.
   const channel = channelsQuery.data?.channels?.[0] ?? null;
   const channelId = channel?.id;
-  const messagesKey = queryKeys.communityMessages(slug, channelId);
+  // Memoized: a new array every render would restart every effect that depends on it.
+  const messagesKey = useMemo(() => queryKeys.communityMessages(slug, channelId), [slug, channelId]);
   const canLoad = enabled && Boolean(channelId);
 
   const history = useInfiniteQuery({
@@ -46,41 +50,90 @@ export function useCommunityChat(slug, { enabled = true } = {}) {
     retry: 1,
   });
 
+  const putMessage = useCallback(
+    (message) => queryClient.setQueryData(messagesKey, (data) => upsertMessage(data, message)),
+    [queryClient, messagesKey],
+  );
+
+  // Reloads every loaded page in order, which also rebuilds the chain of pages and catches changes to old messages.
+  const reconcileAll = useCallback(
+    () => queryClient.refetchQueries({ queryKey: messagesKey }),
+    [queryClient, messagesKey],
+  );
+
   // Folds the newest page into the room: new messages, and edits, removals and reactions on them.
   const pullLatest = useCallback(async () => {
     try {
       const page = await api.getCommunityMessages(slug, channelId, { limit: PAGE_SIZE });
+      const oldest = page.items[0];
+      // A page that does not reach the loaded messages leaves a gap nobody can scroll to.
+      if (page.hasMore && oldest && !hasMessage(queryClient.getQueryData(messagesKey), oldest.id)) {
+        await reconcileAll();
+        return;
+      }
       queryClient.setQueryData(messagesKey, (data) => page.items.reduce(upsertMessage, data));
     } catch {
       // The next push or pull tries again.
     }
-  }, [slug, channelId, messagesKey, queryClient]);
+  }, [slug, channelId, messagesKey, queryClient, reconcileAll]);
+
+  // Fetches the one message somebody changed, wherever it sits in the loaded pages.
+  const refreshMessage = useCallback(
+    async (messageId) => {
+      try {
+        putMessage(await api.getCommunityMessage(slug, messageId));
+      } catch {
+        // The next push or pull tries again.
+      }
+    },
+    [slug, putMessage],
+  );
+
+  const socket = useSharedSocket();
 
   // The first page just arrived, so the first pull waits a full interval; after that a hidden tab stays quiet.
   const polling = canLoad && history.isSuccess;
   useEffect(() => {
     if (!polling) return undefined;
     const timer = setInterval(() => {
-      if (document.visibilityState === "visible") pullLatest();
+      if (document.visibilityState !== "visible") return;
+      // Without a live connection nothing says which old message changed, so every loaded page is checked.
+      if (socket?.connected) pullLatest();
+      else reconcileAll();
     }, LATEST_POLL_MS);
     return () => clearInterval(timer);
-  }, [polling, pullLatest]);
+  }, [polling, socket, pullLatest, reconcileAll]);
 
   // Listens to the room, so a change by anyone shows up at once instead of on the next pull.
-  const socket = useSharedSocket();
   useEffect(() => {
     if (!polling || !socket) return undefined;
 
     let pullTimer;
+    let changedIds = new Set();
+    let unlabelled = false;
+    const flush = () => {
+      const cached = queryClient.getQueryData(messagesKey);
+      const ids = [...changedIds];
+      const known = ids.filter((id) => hasMessage(cached, id));
+      const hasNew = unlabelled || known.length < ids.length;
+      changedIds = new Set();
+      unlabelled = false;
+
+      if (hasNew) pullLatest();
+      if (known.length > MAX_MESSAGE_REFRESHES) reconcileAll();
+      else known.forEach(refreshMessage);
+    };
     const onActivity = (event) => {
       if (event?.channelId !== channelId) return;
+      if (event.messageId) changedIds.add(event.messageId);
+      else unlabelled = true;
       clearTimeout(pullTimer);
-      pullTimer = setTimeout(pullLatest, PUSH_PULL_DELAY_MS);
+      pullTimer = setTimeout(flush, PUSH_PULL_DELAY_MS);
     };
-    // After a reconnect the room must be joined again, and anything missed meanwhile is pulled.
+    // After a reconnect the room must be joined again, and anything missed meanwhile is reloaded.
     const join = () => {
       socket.emit("community:join", { slug, channelId });
-      pullLatest();
+      reconcileAll();
     };
 
     socket.on("community:activity", onActivity);
@@ -93,12 +146,17 @@ export function useCommunityChat(slug, { enabled = true } = {}) {
       socket.off("connect", join);
       if (socket.connected) socket.emit("community:leave", { channelId });
     };
-  }, [polling, socket, slug, channelId, pullLatest]);
-
-  const putMessage = useCallback(
-    (message) => queryClient.setQueryData(messagesKey, (data) => upsertMessage(data, message)),
-    [queryClient, messagesKey],
-  );
+  }, [
+    polling,
+    socket,
+    slug,
+    channelId,
+    messagesKey,
+    queryClient,
+    pullLatest,
+    reconcileAll,
+    refreshMessage,
+  ]);
 
   // Messages on their way out, kept apart from the room so a failure can be retried or dropped.
   const [pending, setPending] = useState([]);

@@ -51,6 +51,11 @@ export function messagesOf(data: CommunityPagesData | undefined): CommunityMessa
   return [...data.pages].reverse().flatMap((page) => page.items);
 }
 
+/** Whether this message is among the loaded ones. */
+export function hasMessage(data: CommunityPagesData | undefined, messageId: string): boolean {
+  return Boolean(data?.pages.some((page) => page.items.some((item) => item.id === messageId)));
+}
+
 /** Where to load from to get the page above the oldest one loaded; undefined when the start has been reached. */
 export function olderPageParam(lastPage: CommunityPage): string | undefined {
   return lastPage.hasMore ? lastPage.items[0]?.id : undefined;
