@@ -54,6 +54,7 @@ import { useConversationActions } from "../../hooks/chat/useConversationActions"
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
 import { useAcknowledgeUnreadable } from "../../hooks/chat/useAcknowledgeUnreadable";
+import { useConversationDrafts } from "../../hooks/chat/useConversationDrafts";
 import { usePresenceOf } from "../../hooks/presence/usePresenceOf";
 import { useMarkChatRead } from "../../hooks/chat/useMarkChatRead";
 import { useReadWhenSeen } from "../../hooks/chat/useReadWhenSeen";
@@ -212,9 +213,9 @@ export default function ChatPage() {
     followIfNearBottom,
     showJumpToBottom,
   } = useStickToBottom(messagesContainerRef);
-  const [draft, setDraft] = useState("");
   // { id, senderName, preview } of the message being replied to, or null.
   const [replyTarget, setReplyTarget] = useState(null);
+  const { draft, setDraft, setDraftFor } = useConversationDrafts(activeId);
   // Sent messages awaiting the network, keyed by a client-side id.
   const [pendingMessages, setPendingMessages] = useState([]);
   const attachmentPicker = useAttachmentPicker();
@@ -521,7 +522,11 @@ export default function ChatPage() {
     typingSignal.stop(replyLightboxOwnerId);
     setReplyLightboxOwnerId(activeId);
     setReplyTarget(null);
-    if (messageEdit.target) messageEdit.leave();
+    // The text being edited sat in the old conversation's box; give that box its own draft back.
+    if (messageEdit.target) {
+      setDraftFor(replyLightboxOwnerId, messageEdit.target.previousDraft ?? "");
+      messageEdit.leave({ restoreDraft: false });
+    }
     setRemoveTarget(null);
     setLightboxKey(null);
     setHiddenMessageIds(getHiddenMessageIds(activeId));
