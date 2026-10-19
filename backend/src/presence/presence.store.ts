@@ -126,10 +126,17 @@ export class PresenceStore {
     const expired: string[] = [];
 
     for (const userId of due) {
-      const preference = await this.getInvisible(userId);
-      // Someone who chose again after being queued has a newer end time: leave that one alone.
-      if (preference?.until != null && preference.until <= nowMs) {
-        await this.redis.delete(preferenceKey(userId));
+      const key = preferenceKey(userId);
+      const raw = await this.redis.get(key);
+      if (!raw) continue;
+
+      const preference = JSON.parse(raw) as InvisiblePreference;
+      // Only delete exactly what was read: someone who chose again meanwhile keeps the new choice.
+      if (
+        preference.until !== null &&
+        preference.until <= nowMs &&
+        (await this.redis.deleteIfEquals(key, raw))
+      ) {
         expired.push(userId);
       }
     }

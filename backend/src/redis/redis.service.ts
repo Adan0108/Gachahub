@@ -144,6 +144,16 @@ export class RedisService {
     await this.client.zAdd(this.key(key), { score, value: member });
   }
 
+  /** Deletes the key only if it still holds exactly this value, so a newer write is never lost. */
+  async deleteIfEquals(key: string, expected: string): Promise<boolean> {
+    const deleted = await this.client.eval(
+      `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end`,
+      { keys: [this.key(key)], arguments: [expected] },
+    );
+
+    return Number(deleted) === 1;
+  }
+
   async sortedSetScore(key: string, member: string): Promise<number | null> {
     return this.client.zScore(this.key(key), member);
   }

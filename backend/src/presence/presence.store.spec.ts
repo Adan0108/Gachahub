@@ -19,6 +19,8 @@ describe('PresenceStore', () => {
     getJson: jest.fn(),
     setJson: jest.fn(),
     delete: jest.fn(),
+    get: jest.fn(),
+    deleteIfEquals: jest.fn(),
   };
   let store: PresenceStore;
 
@@ -113,29 +115,43 @@ describe('PresenceStore', () => {
   });
 
   describe('popExpired', () => {
-    it('clears and returns those whose time is up', async () => {
+    beforeEach(() => redis.deleteIfEquals.mockResolvedValue(true));
+
+    it('clears and returns those whose time is up, deleting exactly what it read', async () => {
       redis.sortedSetPopDue.mockResolvedValue(['u1']);
-      redis.getJson.mockResolvedValue({ until: 900 });
+      redis.get.mockResolvedValue('{"until":900}');
 
       await expect(store.popExpired(1000)).resolves.toEqual(['u1']);
-      expect(redis.delete).toHaveBeenCalledWith(preferenceKey('u1'));
+      expect(redis.deleteIfEquals).toHaveBeenCalledWith(
+        preferenceKey('u1'),
+        '{"until":900}',
+      );
     });
 
     it('leaves someone who chose a later end after being queued', async () => {
       redis.sortedSetPopDue.mockResolvedValue(['u1']);
-      redis.getJson.mockResolvedValue({ until: 5000 });
+      redis.get.mockResolvedValue('{"until":5000}');
 
       await expect(store.popExpired(1000)).resolves.toEqual([]);
-      expect(redis.delete).not.toHaveBeenCalled();
+      expect(redis.deleteIfEquals).not.toHaveBeenCalled();
+    });
+
+    it('does not bring back, or delete, a choice renewed between the read and the delete', async () => {
+      redis.sortedSetPopDue.mockResolvedValue(['u1']);
+      redis.get.mockResolvedValue('{"until":900}');
+      redis.deleteIfEquals.mockResolvedValue(false);
+
+      await expect(store.popExpired(1000)).resolves.toEqual([]);
     });
 
     it('skips someone who already came back online or went invisible forever', async () => {
       redis.sortedSetPopDue.mockResolvedValue(['gone', 'forever']);
-      redis.getJson
+      redis.get
         .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({ until: null });
+        .mockResolvedValueOnce('{"until":null}');
 
       await expect(store.popExpired(1000)).resolves.toEqual([]);
+      expect(redis.deleteIfEquals).not.toHaveBeenCalled();
     });
   });
 });
