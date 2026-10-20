@@ -84,12 +84,11 @@ describe('ReportsService', () => {
 
   const baseReport = {
     id: 'report-1',
-    gameId: 'game-1',
+    caseId: 'case-1',
     reporterId: 'reporter-1',
     targetType: 'POST',
     targetId: 'post-1',
     reasonCode: 'HARASSMENT',
-    status: 'PENDING',
   };
 
   beforeEach(() => {

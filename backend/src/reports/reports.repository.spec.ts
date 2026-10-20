@@ -68,17 +68,17 @@ describe('ReportsRepository creation retry boundaries', () => {
     tx.moderationCase.create.mockResolvedValue(workflow);
     tx.$queryRaw.mockResolvedValue([{ id: workflow.id }]);
     tx.report.findFirst.mockResolvedValue(null);
-    tx.report.create.mockResolvedValue({ id: 'report' });
+    tx.report.create.mockResolvedValue({
+      id: 'report',
+      caseId: 'case',
+      targetType: 'POST',
+      targetId: 'post',
+    });
     tx.report.count.mockResolvedValue(3);
     tx.report.findMany.mockResolvedValue([
       { reporterId: 'a' },
       { reporterId: 'b' },
     ]);
-    tx.report.findUniqueOrThrow.mockResolvedValue({
-      id: 'report',
-      targetSnapshot: snapshot,
-      case: workflow,
-    });
   });
   it('retries a unique violation in a fresh transaction and re-reads the active case', async () => {
     prisma.$transaction.mockRejectedValueOnce(unique());
@@ -97,10 +97,24 @@ describe('ReportsRepository creation retry boundaries', () => {
     });
     expect(report).toMatchObject({
       id: 'report',
-      gameId: null,
-      status: 'PENDING',
+      caseId: 'case',
     });
     expect(report).not.toHaveProperty('targetSnapshot');
+    expect(report).not.toHaveProperty('status');
+    expect(tx.report.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: {
+          id: true,
+          caseId: true,
+          reporterId: true,
+          targetType: true,
+          targetId: true,
+          reasonCode: true,
+          details: true,
+          createdAt: true,
+        },
+      }),
+    );
   });
   it('bounds retries and returns a conflict instead of an unexpected unique-error 500', async () => {
     prisma.$transaction.mockRejectedValue(unique());
@@ -131,63 +145,66 @@ describe('ReportsRepository creation retry boundaries', () => {
   });
 });
 
-describe('ReportsRepository case transitions', () => {
+describe('ReportsRepository direct case transitions', () => {
   const tx = {
-    report: { findUnique: jest.fn(), findUniqueOrThrow: jest.fn() },
-    moderationCase: { updateMany: jest.fn() },
+    moderationCase: { updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
   };
   const prisma = { $transaction: jest.fn() };
   const audit = jest.fn();
-  const context = { gameId: 'game', audit };
   const repository = new ReportsRepository(prisma as unknown as PrismaService);
   beforeEach(() => {
     jest.resetAllMocks();
     prisma.$transaction.mockImplementation(
       (work: (client: typeof tx) => Promise<unknown>) => work(tx),
     );
-    tx.report.findUnique.mockResolvedValue({ caseId: 'shared-case' });
     tx.moderationCase.updateMany.mockResolvedValue({ count: 1 });
-    tx.report.findUniqueOrThrow.mockResolvedValue({
-      id: 'report',
-      caseId: 'shared-case',
-      targetSnapshot: { secret: 'evidence' },
-      case: { status: 'IN_REVIEW', gameId: 'game' },
+    tx.moderationCase.findUniqueOrThrow.mockResolvedValue({
+      id: 'case',
+      status: 'IN_REVIEW',
+      gameId: null,
     });
   });
-  it('claims the report case with an OPEN-only scoped conditional update and audits inside the transaction', async () => {
-    const result = await repository.claim('report', 'moderator', context);
-    expect(tx.moderationCase.updateMany).toHaveBeenCalledWith({
-      where: { id: 'shared-case', gameId: 'game', status: { in: ['OPEN'] } },
-      data: { status: 'IN_REVIEW', assignedModeratorId: 'moderator' },
-    });
-    expect(audit).toHaveBeenCalledWith(result, tx);
-    expect(result).not.toHaveProperty('targetSnapshot');
-    expect(
-      tx.moderationCase.updateMany.mock.invocationCallOrder[0],
-    ).toBeLessThan(audit.mock.invocationCallOrder[0]);
-  });
-  it.each(['RESOLVED', 'DISMISSED'] as const)(
-    'finalizes as %s without modifying assignment or complaint counts',
-    async (status) => {
-      await repository.finalize(
-        {
-          id: 'report',
-          status,
-          resolvedById: 'other-mod',
-          resolutionNote: 'Reviewed',
+  it.each([undefined, 'game'])(
+    'claims case directly with authoritative scope %s and atomic audit',
+    async (gameId) => {
+      const result = await repository.claimCase('case', 'mod', {
+        gameId,
+        audit,
+      });
+      expect(tx.moderationCase.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'case',
+          ...(gameId !== undefined ? { gameId } : {}),
+          status: { in: ['OPEN'] },
         },
-        context,
+        data: { status: 'IN_REVIEW', assignedModeratorId: 'mod' },
+      });
+      expect(tx.moderationCase.findUniqueOrThrow).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'case' } }),
+      );
+      expect(audit).toHaveBeenCalledWith(result, tx);
+      expect(
+        tx.moderationCase.updateMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(audit.mock.invocationCallOrder[0]);
+    },
+  );
+  it.each(['RESOLVED', 'DISMISSED'] as const)(
+    'finalizes native case as %s without changing counts/assignment',
+    async (status) => {
+      await repository.finalizeCase(
+        { id: 'case', status, resolvedById: 'other', resolutionNote: 'Done' },
+        { gameId: 'game', audit },
       );
       expect(tx.moderationCase.updateMany).toHaveBeenCalledWith({
         where: {
-          id: 'shared-case',
+          id: 'case',
           gameId: 'game',
           status: { in: ['OPEN', 'IN_REVIEW'] },
         },
         data: {
           status,
-          resolvedById: 'other-mod',
-          resolutionNote: 'Reviewed',
+          resolvedById: 'other',
+          resolutionNote: 'Done',
           resolvedAt: expect.any(Date) as Date,
         },
       });
@@ -195,90 +212,32 @@ describe('ReportsRepository case transitions', () => {
     },
   );
   it.each(['claim', 'resolve', 'dismiss'])(
-    'does not audit or reload after a failed %s transition',
+    'does not audit or reload losing/missing %s updates',
     async (action) => {
       tx.moderationCase.updateMany.mockResolvedValue({ count: 0 });
       const result =
         action === 'claim'
-          ? await repository.claim('report', 'mod', context)
-          : await repository.finalize(
+          ? await repository.claimCase('case', 'mod', { audit })
+          : await repository.finalizeCase(
               {
-                id: 'report',
+                id: 'case',
                 status: action === 'resolve' ? 'RESOLVED' : 'DISMISSED',
                 resolvedById: 'mod',
               },
-              context,
+              { audit },
             );
       expect(result).toBeNull();
+      expect(tx.moderationCase.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(audit).not.toHaveBeenCalled();
-      expect(tx.report.findUniqueOrThrow).not.toHaveBeenCalled();
     },
   );
-  it('does not update or audit a missing report', async () => {
-    tx.report.findUnique.mockResolvedValue(null);
-    expect(await repository.claim('missing', 'mod', context)).toBeNull();
-    expect(tx.moderationCase.updateMany).not.toHaveBeenCalled();
-    expect(audit).not.toHaveBeenCalled();
-  });
-  it('propagates audit rejection from the transaction callback', async () => {
-    const error = new Error('audit unavailable');
-    audit.mockRejectedValueOnce(error);
-    await expect(repository.claim('report', 'mod', context)).rejects.toBe(
+  it('propagates audit failure out of the same transaction', async () => {
+    const error = new Error('audit failed');
+    audit.mockRejectedValue(error);
+    await expect(repository.claimCase('case', 'mod', { audit })).rejects.toBe(
       error,
     );
   });
-});
-
-describe('ReportsRepository queue filters', () => {
-  it.each([undefined, null, 'game-1'])(
-    'preserves gameId %s semantics, filters, order and pagination',
-    async (gameId) => {
-      const row = {
-        id: 'report',
-        targetSnapshot: { secret: true },
-        case: { gameId, status: 'OPEN' },
-      };
-      const prisma = {
-        report: {
-          findMany: jest
-            .fn()
-            .mockResolvedValue([row, { ...row, id: 'report-2' }]),
-          count: jest.fn().mockResolvedValue(2),
-        },
-        $transaction: jest.fn((queries: Promise<unknown>[]) =>
-          Promise.all(queries),
-        ),
-      };
-      const repository = new ReportsRepository(
-        prisma as unknown as PrismaService,
-      );
-      const result = await repository.findMany({
-        gameId,
-        status: 'PENDING',
-        targetType: 'POST',
-        page: 2,
-        limit: 10,
-      });
-      const where = {
-        case: { ...(gameId !== undefined ? { gameId } : {}), status: 'OPEN' },
-        targetType: 'POST',
-      };
-      expect(prisma.report.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where,
-          skip: 10,
-          take: 10,
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        }),
-      );
-      expect(prisma.report.count).toHaveBeenCalledWith({ where });
-      expect(result.total).toBe(2);
-      expect(result.items).toHaveLength(2);
-      expect(result.items[0].status).toBe('PENDING');
-      expect(result.items[0]).not.toHaveProperty('targetSnapshot');
-      expect(result.items[0]).not.toHaveProperty('case');
-    },
-  );
 });
 
 describe('ReportsRepository native case reads', () => {

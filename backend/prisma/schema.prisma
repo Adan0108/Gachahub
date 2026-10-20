@@ -1038,7 +1038,7 @@ model Report {
   reasonCode ReportReason
   details    String?
 
-  /// Immutable moderation evidence; versioned shape in reports/report-target-snapshot.ts.
+  /// Immutable moderation evidence; versioned shape in reports/domain/report-target-snapshot.ts.
   targetSnapshot Json?
 
   createdAt DateTime @default(now())
@@ -1097,9 +1097,13 @@ enum AuditAction {
   POST_RESTORED
   COMMENT_HIDDEN
   COMMENT_RESTORED
+  // Historical audit labels; new workflow writes use CASE_* below.
   REPORT_CLAIMED
   REPORT_RESOLVED
   REPORT_DISMISSED
+  CASE_CLAIMED
+  CASE_RESOLVED
+  CASE_DISMISSED
   MODERATOR_ASSIGNED
   MODERATOR_REMOVED
   USER_BANNED
@@ -1118,7 +1122,8 @@ enum AuditAction {
 enum AuditTargetType {
   POST
   COMMENT
-  REPORT
+  REPORT // Historical audit targets remain readable.
+  MODERATION_CASE
   USER
   GAME
   CHANNEL

@@ -13,24 +13,18 @@ import {
   type ReportTargetType,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  type LegacyReportStatus,
-  toCaseStatus,
-} from './domain/report-status.compat';
 import type { ReportTargetSnapshot } from './domain/report-target-snapshot';
 
-const reportInclude = {
-  reporter: {
-    select: { id: true, name: true, image: true },
-  },
-  case: {
-    include: {
-      assignedModerator: { select: { id: true, name: true, image: true } },
-      resolvedBy: { select: { id: true, name: true, image: true } },
-      game: { select: { id: true, name: true, slug: true } },
-    },
-  },
-} satisfies Prisma.ReportInclude;
+const reportReceiptSelect = {
+  id: true,
+  caseId: true,
+  reporterId: true,
+  targetType: true,
+  targetId: true,
+  reasonCode: true,
+  details: true,
+  createdAt: true,
+} satisfies Prisma.ReportSelect;
 
 // Explicit API projections: adding schema fields cannot expose them through these reads.
 const caseSummarySelect = {
@@ -67,40 +61,17 @@ const OPEN_CASE_STATUSES = [
   'IN_REVIEW',
 ] as const satisfies ModerationCaseStatus[];
 
-type ReportWithCase = Prisma.ReportGetPayload<{
-  include: typeof reportInclude;
+type CaseDetail = Prisma.ModerationCaseGetPayload<{
+  select: typeof caseSummarySelect & { resolutionNote: true };
 }>;
 
-// TODO(Stage 3): retire this projection when the existing report APIs are
-// replaced with case APIs. It preserves their flat response fields for now.
-function toLegacyReport({
-  case: moderationCase,
-  targetSnapshot: _evidence,
-  ...report
-}: ReportWithCase) {
-  return {
-    ...report,
-    gameId: moderationCase.gameId,
-    game: moderationCase.game,
-    status:
-      moderationCase.status === 'OPEN'
-        ? ('PENDING' as const)
-        : moderationCase.status,
-    assignedModeratorId: moderationCase.assignedModeratorId,
-    assignedModerator: moderationCase.assignedModerator,
-    resolutionNote: moderationCase.resolutionNote,
-    resolvedById: moderationCase.resolvedById,
-    resolvedBy: moderationCase.resolvedBy,
-    resolvedAt: moderationCase.resolvedAt,
-    updatedAt: moderationCase.updatedAt,
-  };
-}
-
-type LegacyReport = ReturnType<typeof toLegacyReport>;
-
 export interface CaseTransitionContext {
-  gameId: string;
-  audit: (report: LegacyReport, tx: Prisma.TransactionClient) => Promise<void>;
+  // Platform actions omit this predicate; game actions must recheck exact ownership in the write.
+  gameId?: string;
+  audit: (
+    moderationCase: CaseDetail,
+    tx: Prisma.TransactionClient,
+  ) => Promise<void>;
 }
 
 @Injectable()
@@ -381,7 +352,7 @@ export class ReportsRepository {
     reasonCode: ReportReason;
     details?: string;
     snapshot: ReportTargetSnapshot;
-  }): Promise<LegacyReport> {
+  }) {
     // A PostgreSQL unique violation aborts its transaction: recovery must use
     // a fresh transaction, never another query in the failed transaction.
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -432,6 +403,7 @@ export class ReportsRepository {
               details: params.details,
               targetSnapshot: params.snapshot,
             },
+            select: reportReceiptSelect,
           });
           const reportCount = await tx.report.count({
             where: { caseId: moderationCase.id },
@@ -445,12 +417,9 @@ export class ReportsRepository {
             where: { id: moderationCase.id },
             data: { reportCount, uniqueReporterCount: reporters.length },
           });
-          return tx.report.findUniqueOrThrow({
-            where: { id: report.id },
-            include: reportInclude,
-          });
+          return report;
         });
-        if (result) return toLegacyReport(result);
+        if (result) return result;
       } catch (error) {
         if (
           !(
@@ -462,14 +431,6 @@ export class ReportsRepository {
       }
     }
     throw new ConflictException('The moderation case changed; please retry');
-  }
-
-  async findById(id: string) {
-    const report = await this.prisma.report.findUnique({
-      where: { id },
-      include: reportInclude,
-    });
-    return report ? toLegacyReport(report) : null;
   }
 
   /**
@@ -517,8 +478,7 @@ export class ReportsRepository {
       return [];
     }
 
-    // Compatibility read: count individual complaints, not case rows or
-    // the aggregate counters that will be maintained in a later stage.
+    // Dashboard metric counts surviving complaints, not workflow resources.
     const cases = await this.prisma.moderationCase.findMany({
       where: { status: { in: OPEN_CASE_STATUSES }, gameId: { in: gameIds } },
       select: { gameId: true, _count: { select: { reports: true } } },
@@ -535,45 +495,13 @@ export class ReportsRepository {
     return Array.from(counts, ([gameId, count]) => ({ gameId, count }));
   }
 
-  // undefined: all cases; null: platform cases; string: one game.
-  async findMany(params: {
-    gameId?: string | null;
-    status?: LegacyReportStatus;
-    targetType?: ReportTargetType;
-    page: number;
-    limit: number;
-  }) {
-    const where: Prisma.ReportWhereInput = {
-      case: {
-        ...(params.gameId !== undefined ? { gameId: params.gameId } : {}),
-        ...(params.status ? { status: toCaseStatus(params.status) } : {}),
-      },
-      ...(params.targetType ? { targetType: params.targetType } : {}),
-    };
-
-    const skip = (params.page - 1) * params.limit;
-
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.report.findMany({
-        where,
-        include: reportInclude,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        skip,
-        take: params.limit,
-      }),
-      this.prisma.report.count({ where }),
-    ]);
-
-    return { items: items.map(toLegacyReport), total };
-  }
-
-  async claim(
-    id: string,
+  async claimCase(
+    caseId: string,
     moderatorId: string,
     context: CaseTransitionContext,
-  ): Promise<LegacyReport | null> {
-    return this.transition(
-      id,
+  ): Promise<CaseDetail | null> {
+    return this.transitionCase(
+      caseId,
       context,
       {
         status: 'IN_REVIEW',
@@ -583,7 +511,7 @@ export class ReportsRepository {
     );
   }
 
-  async finalize(
+  async finalizeCase(
     params: {
       id: string;
       status: 'RESOLVED' | 'DISMISSED';
@@ -591,8 +519,8 @@ export class ReportsRepository {
       resolutionNote?: string;
     },
     context: CaseTransitionContext,
-  ): Promise<LegacyReport | null> {
-    return this.transition(
+  ): Promise<CaseDetail | null> {
+    return this.transitionCase(
       params.id,
       context,
       {
@@ -605,36 +533,27 @@ export class ReportsRepository {
     );
   }
 
-  private async transition(
-    reportId: string,
+  private async transitionCase(
+    caseId: string,
     context: CaseTransitionContext,
     data: Prisma.ModerationCaseUncheckedUpdateManyInput,
     statuses: readonly ModerationCaseStatus[],
-  ): Promise<LegacyReport | null> {
+  ): Promise<CaseDetail | null> {
     return this.prisma.$transaction(async (tx) => {
-      const report = await tx.report.findUnique({
-        where: { id: reportId },
-        select: { caseId: true },
-      });
-      if (!report) return null;
-      // PostgreSQL rechecks this predicate after waiting for a competing
-      // writer. Scope is checked again here so a deleted game cannot turn
-      // an authorized game action into an action on a platform case.
+      // PostgreSQL rechecks status and game ownership after competing writers finish.
       const { count } = await tx.moderationCase.updateMany({
         where: {
-          id: report.caseId,
-          gameId: context.gameId,
+          id: caseId,
+          ...(context.gameId !== undefined ? { gameId: context.gameId } : {}),
           status: { in: [...statuses] },
         },
         data,
       });
       if (count === 0) return null;
-      const result = toLegacyReport(
-        await tx.report.findUniqueOrThrow({
-          where: { id: reportId },
-          include: reportInclude,
-        }),
-      );
+      const result = await tx.moderationCase.findUniqueOrThrow({
+        where: { id: caseId },
+        select: { ...caseSummarySelect, resolutionNote: true },
+      });
       await context.audit(result, tx);
       return result;
     });

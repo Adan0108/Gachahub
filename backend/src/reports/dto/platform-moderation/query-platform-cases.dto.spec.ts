@@ -1,7 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { QueryPlatformCasesDto } from './query-platform-cases.dto';
-import { QueryCaseReportsDto } from './query-case-reports.dto';
+import { QueryCaseReportsDto } from '../query-case-reports.dto';
 
 describe('Native case query DTOs', () => {
   it('defaults scope and bounded pagination', () => {

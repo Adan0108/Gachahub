@@ -1,7 +1,17 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { ResolveModerationCaseDto } from '../dto/resolve-moderation-case.dto';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiCookieAuth,
+  ApiConflictResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -15,7 +25,7 @@ import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { PlatformModeratorGuard } from '../../common/guards/platform-moderator.guard';
 import { QueryPlatformCasesDto } from '../dto/platform-moderation/query-platform-cases.dto';
-import { QueryCaseReportsDto } from '../dto/platform-moderation/query-case-reports.dto';
+import { QueryCaseReportsDto } from '../dto/query-case-reports.dto';
 import { ReportModerationService } from '../moderation/report-moderation.service';
 
 @ApiTags('Moderation cases')
@@ -110,6 +120,63 @@ export class PlatformCaseModerationController {
       session.user.id,
       caseId,
       query,
+    );
+  }
+  @Patch(':caseId/claim')
+  @ApiParam({
+    name: 'caseId',
+    description: 'ModerationCase ID, never a Report ID.',
+  })
+  @ApiOperation({
+    summary: 'Claim an OPEN case. ADMIN / PLATFORM_MODERATOR only.',
+    description:
+      'OPEN -> IN_REVIEW. Returns native case workflow projection. Conditional write and CASE_CLAIMED audit commit atomically.',
+  })
+  @ApiConflictResponse({ description: 'Case is no longer OPEN.' })
+  claim(@Session() session: UserSession, @Param('caseId') caseId: string) {
+    return this.reportModerationService.claimCaseForPlatform(
+      session.user.id,
+      caseId,
+    );
+  }
+
+  @Patch(':caseId/resolve')
+  @ApiParam({ name: 'caseId', description: 'ModerationCase ID.' })
+  @ApiOperation({
+    summary: 'Resolve an OPEN/IN_REVIEW case. ADMIN / PLATFORM_MODERATOR only.',
+    description:
+      'Any authorized platform moderator may finalize; assignment ownership is not required. Native case projection and atomic CASE_RESOLVED audit.',
+  })
+  @ApiConflictResponse({ description: 'Case is closed.' })
+  resolve(
+    @Session() session: UserSession,
+    @Param('caseId') caseId: string,
+    @Body() dto: ResolveModerationCaseDto,
+  ) {
+    return this.reportModerationService.resolveCaseForPlatform(
+      session.user.id,
+      caseId,
+      dto,
+    );
+  }
+
+  @Patch(':caseId/dismiss')
+  @ApiParam({ name: 'caseId', description: 'ModerationCase ID.' })
+  @ApiOperation({
+    summary: 'Dismiss an OPEN/IN_REVIEW case. ADMIN / PLATFORM_MODERATOR only.',
+    description:
+      'Returns native case projection. Conditional write and CASE_DISMISSED audit commit atomically.',
+  })
+  @ApiConflictResponse({ description: 'Case is closed.' })
+  dismiss(
+    @Session() session: UserSession,
+    @Param('caseId') caseId: string,
+    @Body() dto: ResolveModerationCaseDto,
+  ) {
+    return this.reportModerationService.dismissCaseForPlatform(
+      session.user.id,
+      caseId,
+      dto,
     );
   }
 }

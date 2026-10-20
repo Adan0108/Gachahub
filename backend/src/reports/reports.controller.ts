@@ -1,5 +1,10 @@
 import { Body, Controller, Post } from '@nestjs/common';
-import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiCookieAuth,
+  ApiCreatedResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { CreateReportDto } from './dto/create-report.dto';
@@ -17,7 +22,15 @@ export class ReportsController {
 
   @Post()
   @ApiCookieAuth('better-auth.session_token')
-  @ApiOperation({ summary: 'Report a post or comment' })
+  @ApiOperation({
+    summary: 'File a complaint/evidence against a visible post or comment',
+    description:
+      'Creates/reuses an active ModerationCase. Report is evidence only; use caseId with moderation case APIs for workflow.',
+  })
+  @ApiCreatedResponse({
+    description:
+      'Complaint receipt: id, caseId, reporterId, targetType, targetId, reasonCode, details, createdAt. No workflow status, assignment, resolution, synthetic game fields or raw targetSnapshot.',
+  })
   create(@Body() dto: CreateReportDto, @Session() session: UserSession) {
     return this.reportsService.create(session.user.id, dto);
   }

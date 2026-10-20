@@ -1,3 +1,5 @@
+import { isolatedCaseDatabase } from './support/isolated-case-database';
+import { PlatformCaseModerationController } from '../src/reports/platform-moderation/platform-case-moderation.controller';
 jest.mock('@thallesp/nestjs-better-auth', () => {
   const common =
     jest.requireActual<typeof import('@nestjs/common')>('@nestjs/common');
@@ -86,8 +88,7 @@ import { AdminAuditLogController } from '../src/audit-log/admin-audit-log.contro
 import { GameAuditLogController } from '../src/audit-log/game-audit-log.controller';
 import { AuditLogQueryService } from '../src/audit-log/audit-log-query.service';
 import { ReportsController } from '../src/reports/reports.controller';
-import { AdminReportsController } from '../src/reports/admin/admin-reports.controller';
-import { ReportModerationController } from '../src/reports/game-moderation/report-moderation.controller';
+import { GameCaseModerationController } from '../src/reports/game-moderation/game-case-moderation.controller';
 import { ReportsService } from '../src/reports/reports.service';
 import { ReportModerationService } from '../src/reports/moderation/report-moderation.service';
 import { ReportRateLimiterService } from '../src/reports/infrastructure/report-rate-limiter.service';
@@ -121,6 +122,7 @@ describe('Optional-game comprehensive API/integration verification', () => {
   const mentionHandle = `v${runId.replaceAll('-', '').slice(0, 18)}`;
   let app: INestApplication;
   let db: PrismaService;
+  let isolated: Awaited<ReturnType<typeof isolatedCaseDatabase>>;
   let gameId: string;
   let otherGameId: string;
   let categoryId: string;
@@ -193,6 +195,7 @@ describe('Optional-game comprehensive API/integration verification', () => {
   }
 
   beforeAll(async () => {
+    isolated = await isolatedCaseDatabase();
     const module = await Test.createTestingModule({
       controllers: [
         PostSaveController,
@@ -212,11 +215,11 @@ describe('Optional-game comprehensive API/integration verification', () => {
         AdminAuditLogController,
         GameAuditLogController,
         ReportsController,
-        AdminReportsController,
-        ReportModerationController,
+        GameCaseModerationController,
+        PlatformCaseModerationController,
       ],
       providers: [
-        PrismaService,
+        { provide: PrismaService, useValue: isolated.prisma },
         PostsService,
         PostsRepository,
         PostModerationService,
@@ -428,7 +431,11 @@ describe('Optional-game comprehensive API/integration verification', () => {
         await db.tag.deleteMany({ where: { slug: { startsWith: prefix } } });
       }
     } finally {
-      await app?.close();
+      try {
+        await app?.close();
+      } finally {
+        await isolated?.cleanup();
+      }
     }
   });
 
@@ -1645,19 +1652,19 @@ describe('Optional-game comprehensive API/integration verification', () => {
         });
         caseIds.push(report.caseId);
         const listing = await http()
-          .get('/admin/reports?limit=100')
+          .get('/moderation/cases?limit=100')
           .set('x-test-user', admin)
           .expect(200);
         expect(listing.body.items).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
-              id: report.id,
+              id: report.caseId,
               gameId: game ? gameId : null,
               ...(game ? {} : { game: null }),
             }),
           ]),
         );
-        const projection = await reports.findById(report.id);
+        const projection = await reports.findModerationCaseById(report.caseId);
         expect(projection?.gameId).toBe(game ? gameId : null);
         if (game) {
           for (const [action, status] of [
@@ -1666,14 +1673,16 @@ describe('Optional-game comprehensive API/integration verification', () => {
             ['dismiss', 409],
           ] as const) {
             await http()
-              .patch(`/games/${slug}/reports/${report.id}/${action}`)
+              .patch(
+                `/games/${slug}/moderation/cases/${report.caseId}/${action}`,
+              )
               .set('x-test-user', moderator)
               .send({})
               .expect(status);
           }
         } else {
           await http()
-            .patch(`/games/${slug}/reports/${report.id}/claim`)
+            .patch(`/games/${slug}/moderation/cases/${report.caseId}/claim`)
             .set('x-test-user', admin)
             .expect(404);
         }
@@ -1923,7 +1932,7 @@ describe('Optional-game comprehensive API/integration verification', () => {
     });
 
     it.each([false, true])(
-      'lists reports in the correct Game scope: game=%s',
+      'lists cases in the correct Game scope: game=%s',
       async (game) => {
         const post = await (game ? community() : create());
         const moderationCase = await db.moderationCase.create({
@@ -1944,20 +1953,20 @@ describe('Optional-game comprehensive API/integration verification', () => {
           },
         });
         const listing = await http()
-          .get(`/games/${slug}/reports?limit=100`)
+          .get(`/games/${slug}/moderation/cases?limit=100`)
           .set('x-test-user', moderator)
           .expect(200);
         expect(
           listing.body.items.some(
-            (row: { id: string }) => row.id === report.id,
+            (row: { id: string }) => row.id === report.caseId,
           ),
         ).toBe(game);
         await http()
-          .get(`/games/${slug}/reports`)
+          .get(`/games/${slug}/moderation/cases`)
           .set('x-test-user', viewer)
           .expect(403);
         await http()
-          .get('/games/missing-final-gate/reports')
+          .get('/games/missing-final-gate/moderation/cases')
           .set('x-test-user', admin)
           .expect(404);
       },

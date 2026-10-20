@@ -23,6 +23,9 @@ describe('PlatformCaseModerationController', () => {
     listCasesForPlatform: jest.fn(),
     getCaseForPlatform: jest.fn(),
     listCaseReportsForPlatform: jest.fn(),
+    claimCaseForPlatform: jest.fn(),
+    resolveCaseForPlatform: jest.fn(),
+    dismissCaseForPlatform: jest.fn(),
   };
   const controller = new PlatformCaseModerationController(
     service as unknown as ReportModerationService,
@@ -48,7 +51,24 @@ describe('PlatformCaseModerationController', () => {
       query,
     );
   });
-  it('applies platform guard and only GET case routes', () => {
+  it('delegates all case mutations without reportId indirection', async () => {
+    const dto = { resolutionNote: 'Reviewed' };
+    await controller.claim(session, 'case');
+    await controller.resolve(session, 'case', dto);
+    await controller.dismiss(session, 'case', dto);
+    expect(service.claimCaseForPlatform).toHaveBeenCalledWith('actor', 'case');
+    expect(service.resolveCaseForPlatform).toHaveBeenCalledWith(
+      'actor',
+      'case',
+      dto,
+    );
+    expect(service.dismissCaseForPlatform).toHaveBeenCalledWith(
+      'actor',
+      'case',
+      dto,
+    );
+  });
+  it('applies platform guard and native case route metadata', () => {
     expect(
       Reflect.getMetadata(
         GUARDS_METADATA,
@@ -73,6 +93,18 @@ describe('PlatformCaseModerationController', () => {
       expect(Reflect.getMetadata(PATH_METADATA, method) as unknown).toBe(path);
       expect(Reflect.getMetadata(METHOD_METADATA, method) as unknown).toBe(
         RequestMethod.GET,
+      );
+    }
+    for (const name of ['claim', 'resolve', 'dismiss'] as const) {
+      const method = Object.getOwnPropertyDescriptor(
+        PlatformCaseModerationController.prototype,
+        name,
+      )!.value as object;
+      expect(Reflect.getMetadata(PATH_METADATA, method) as unknown).toBe(
+        `:caseId/${name}`,
+      );
+      expect(Reflect.getMetadata(METHOD_METADATA, method) as unknown).toBe(
+        RequestMethod.PATCH,
       );
     }
   });

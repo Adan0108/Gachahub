@@ -15,13 +15,7 @@ import {
   type ReportableTargetInfo,
 } from './reports.repository';
 
-/**
- * Filing a report. Split from the moderation queue (ReportModerationService)
- * the same way PostsService/PostModerationService are - this only needs
- * PostVisibilityService, the rate limiter, and an active-user check, none of
- * which the moderation queue uses; the queue only needs
- * GameModeratorsService, which filing never touches.
- */
+/** Filing complaints/evidence; moderation workflow belongs to ModerationCase. */
 @Injectable()
 export class ReportsService {
   constructor(

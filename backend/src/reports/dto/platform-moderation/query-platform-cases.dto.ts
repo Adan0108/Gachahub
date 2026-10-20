@@ -1,12 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
-import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
-import {
-  ModerationCaseStatus,
-  ReportTargetType,
-} from '../../../generated/prisma/client';
+import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { QueryModerationCasesDto } from '../query-moderation-cases.dto';
 
-export class QueryPlatformCasesDto extends PaginationQueryDto {
+export class QueryPlatformCasesDto extends QueryModerationCasesDto {
   @ApiPropertyOptional({
     enum: ['all', 'platform', 'game'],
     default: 'all',
@@ -24,17 +20,4 @@ export class QueryPlatformCasesDto extends PaginationQueryDto {
   @IsString()
   @MaxLength(200)
   gameSlug?: string;
-
-  @ApiPropertyOptional({
-    enum: ModerationCaseStatus,
-    description: 'Native case status. Omit to include every status.',
-  })
-  @IsOptional()
-  @IsEnum(ModerationCaseStatus)
-  status?: ModerationCaseStatus;
-
-  @ApiPropertyOptional({ enum: ReportTargetType })
-  @IsOptional()
-  @IsEnum(ReportTargetType)
-  targetType?: ReportTargetType;
 }

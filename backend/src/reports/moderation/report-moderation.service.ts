@@ -1,10 +1,3 @@
-import { QueryPlatformCasesDto } from '../dto/platform-moderation/query-platform-cases.dto';
-import { QueryCaseReportsDto } from '../dto/platform-moderation/query-case-reports.dto';
-import { decodeEvidenceCursor } from '../domain/report-evidence-pagination';
-import { PrismaService } from '../../prisma/prisma.service';
-import { loadActiveUser } from '../../common/guards/active-user.util';
-import { hasPlatformModerationCapability } from '../../common/guards/moderation-capabilities';
-import { QueryPlatformReportsDto } from '../dto/platform-moderation/query-platform-reports.dto';
 import {
   BadRequestException,
   ConflictException,
@@ -12,23 +5,30 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { loadActiveUser } from '../../common/guards/active-user.util';
+import { hasPlatformModerationCapability } from '../../common/guards/moderation-capabilities';
 import { normalizeText } from '../../common/utils/normalize-text';
-import { AuditLogService } from '../../audit-log/audit-log.service';
-import type { ReportAuditAction } from '../../audit-log/audit-log.types';
-import { GameModeratorsService } from '../../game-moderators/game-moderators.service';
-import { QueryReportsAdminDto } from '../admin/query-reports-admin.dto';
-import { QueryReportsDto } from '../dto/query-reports.dto';
-import { ResolveReportDto } from '../dto/resolve-report.dto';
-import { ReportsRepository } from '../reports.repository';
-import type { Prisma } from '../../generated/prisma/client';
 import { resolvePagination, toPaginated } from '../../common/utils/paginated';
+import { AuditLogService } from '../../audit-log/audit-log.service';
+import type { CaseAuditAction } from '../../audit-log/audit-log.types';
+import { GameModeratorsService } from '../../game-moderators/game-moderators.service';
+import { QueryPlatformCasesDto } from '../dto/platform-moderation/query-platform-cases.dto';
+import { QueryModerationCasesDto } from '../dto/query-moderation-cases.dto';
+import { QueryCaseReportsDto } from '../dto/query-case-reports.dto';
+import { ResolveModerationCaseDto } from '../dto/resolve-moderation-case.dto';
+import { decodeEvidenceCursor } from '../domain/report-evidence-pagination';
+import {
+  ReportsRepository,
+  type CaseTransitionContext,
+} from '../reports.repository';
 
-/**
- * Moderator/admin actions on reports: listing a queue, and closing a report
- * out (claim / resolve / dismiss). Split from ReportsService (filing) the
- * same way PostModerationService is split from PostsService - this only
- * needs GameModeratorsService, which filing never touches.
- */
+type CaseDetail = NonNullable<
+  Awaited<ReturnType<ReportsRepository['findModerationCaseById']>>
+>;
+type CaseAction = 'claim' | 'resolve' | 'dismiss';
+
+/** Scope-specific authorization around one shared case read/workflow implementation. */
 @Injectable()
 export class ReportModerationService {
   constructor(
@@ -38,16 +38,192 @@ export class ReportModerationService {
     private readonly prisma: PrismaService,
   ) {}
 
-  /** Read-only report rows; recheck live capability for direct service callers. */
-  async listForPlatform(userId: string, query: QueryPlatformReportsDto) {
-    await this.authorizePlatform(userId);
-    const gameId = await this.resolvePlatformGameId(query);
-    return this.listByGameId(gameId, query);
-  }
-
   async listCasesForPlatform(userId: string, query: QueryPlatformCasesDto) {
     await this.authorizePlatform(userId);
-    const gameId = await this.resolvePlatformGameId(query);
+    const scope = query.scope ?? 'all';
+    if (
+      !['all', 'platform', 'game'].includes(scope) ||
+      (scope === 'game'
+        ? typeof query.gameSlug !== 'string' || !query.gameSlug.trim()
+        : query.gameSlug !== undefined)
+    ) {
+      throw new BadRequestException('gameSlug is required only for scope=game');
+    }
+    const gameId =
+      scope === 'game'
+        ? await this.gameModeratorsService.resolveGameId(query.gameSlug!)
+        : scope === 'platform'
+          ? null
+          : undefined;
+    return this.listCases(gameId, query);
+  }
+
+  async getCaseForPlatform(userId: string, caseId: string) {
+    await this.authorizePlatform(userId);
+    return this.caseDetail(await this.loadCase(caseId));
+  }
+
+  async listCaseReportsForPlatform(
+    userId: string,
+    caseId: string,
+    query: QueryCaseReportsDto,
+  ) {
+    await this.authorizePlatform(userId);
+    await this.loadCase(caseId);
+    return this.caseReports(caseId, query);
+  }
+
+  async listCasesForGame(
+    gameSlug: string,
+    userId: string,
+    query: QueryModerationCasesDto,
+  ) {
+    const gameId = await this.gameModeratorsService.resolveModeratableGameId(
+      gameSlug,
+      userId,
+    );
+    return this.listCases(gameId, query);
+  }
+
+  async getCaseForGame(gameSlug: string, userId: string, caseId: string) {
+    return this.caseDetail(
+      await this.authorizeGameCase(gameSlug, userId, caseId),
+    );
+  }
+
+  async listCaseReportsForGame(
+    gameSlug: string,
+    userId: string,
+    caseId: string,
+    query: QueryCaseReportsDto,
+  ) {
+    await this.authorizeGameCase(gameSlug, userId, caseId);
+    return this.caseReports(caseId, query);
+  }
+
+  claimCaseForPlatform(userId: string, caseId: string) {
+    return this.mutateCase(userId, caseId, 'claim');
+  }
+  resolveCaseForPlatform(
+    userId: string,
+    caseId: string,
+    dto: ResolveModerationCaseDto,
+  ) {
+    return this.mutateCase(userId, caseId, 'resolve', dto.resolutionNote);
+  }
+  dismissCaseForPlatform(
+    userId: string,
+    caseId: string,
+    dto: ResolveModerationCaseDto,
+  ) {
+    return this.mutateCase(userId, caseId, 'dismiss', dto.resolutionNote);
+  }
+  claimCaseForGame(gameSlug: string, userId: string, caseId: string) {
+    return this.mutateCase(userId, caseId, 'claim', undefined, gameSlug);
+  }
+  resolveCaseForGame(
+    gameSlug: string,
+    userId: string,
+    caseId: string,
+    dto: ResolveModerationCaseDto,
+  ) {
+    return this.mutateCase(
+      userId,
+      caseId,
+      'resolve',
+      dto.resolutionNote,
+      gameSlug,
+    );
+  }
+  dismissCaseForGame(
+    gameSlug: string,
+    userId: string,
+    caseId: string,
+    dto: ResolveModerationCaseDto,
+  ) {
+    return this.mutateCase(
+      userId,
+      caseId,
+      'dismiss',
+      dto.resolutionNote,
+      gameSlug,
+    );
+  }
+
+  private async mutateCase(
+    userId: string,
+    caseId: string,
+    action: CaseAction,
+    note?: string,
+    gameSlug?: string,
+  ) {
+    let gameId: string | undefined;
+    if (gameSlug !== undefined) {
+      const moderationCase = await this.authorizeGameCase(
+        gameSlug,
+        userId,
+        caseId,
+      );
+      gameId = moderationCase.gameId!;
+    } else {
+      await this.authorizePlatform(userId);
+      await this.loadCase(caseId);
+    }
+    const auditAction: CaseAuditAction =
+      action === 'claim'
+        ? 'CASE_CLAIMED'
+        : action === 'resolve'
+          ? 'CASE_RESOLVED'
+          : 'CASE_DISMISSED';
+    const context: CaseTransitionContext = {
+      gameId,
+      audit: (moderationCase, tx) =>
+        this.auditLogService.recordOrThrow(
+          {
+            action: auditAction,
+            actorId: userId,
+            targetType: 'MODERATION_CASE',
+            targetId: moderationCase.id,
+            gameId: moderationCase.gameId ?? undefined,
+            gameSlug: moderationCase.game?.slug,
+            metadata: {
+              caseId: moderationCase.id,
+              targetType: moderationCase.targetType,
+              targetId: moderationCase.targetId,
+              gameId: moderationCase.gameId,
+              reportCount: moderationCase.reportCount,
+              ...(moderationCase.resolutionNote
+                ? { resolutionNote: moderationCase.resolutionNote }
+                : {}),
+            },
+          },
+          tx,
+        ),
+    };
+    // Conditional database update, not the earlier read, decides whether this action wins.
+    const result =
+      action === 'claim'
+        ? await this.reportsRepository.claimCase(caseId, userId, context)
+        : await this.reportsRepository.finalizeCase(
+            {
+              id: caseId,
+              status: action === 'resolve' ? 'RESOLVED' : 'DISMISSED',
+              resolvedById: userId,
+              resolutionNote: normalizeText(note),
+            },
+            context,
+          );
+    if (!result)
+      throw new ConflictException(
+        'This moderation case is no longer eligible for this action',
+      );
+    return result;
+  }
+
+  private async listCases(
+    gameId: string | null | undefined,
+    query: QueryModerationCasesDto,
+  ) {
     const { page, limit } = resolvePagination(query);
     const result = await this.reportsRepository.findModerationCases({
       gameId,
@@ -59,32 +235,24 @@ export class ReportModerationService {
     return toPaginated(result.items, { page, limit, total: result.total });
   }
 
-  async getCaseForPlatform(userId: string, caseId: string) {
-    await this.authorizePlatform(userId);
-    const moderationCase = await this.loadCase(caseId);
+  private async caseDetail(moderationCase: CaseDetail) {
     const [target, evidence] = await Promise.all([
       this.reportsRepository.findCaseTarget(
         moderationCase.targetType,
         moderationCase.targetId,
       ),
-      this.reportsRepository.findReportsByCaseId(caseId, 20),
+      this.reportsRepository.findReportsByCaseId(moderationCase.id, 20),
     ]);
     return { ...moderationCase, ...target, evidence };
   }
 
-  async listCaseReportsForPlatform(
-    userId: string,
-    caseId: string,
-    query: QueryCaseReportsDto,
-  ) {
-    await this.authorizePlatform(userId);
+  private caseReports(caseId: string, query: QueryCaseReportsDto) {
     const cursor =
       query.cursor === undefined
         ? undefined
         : decodeEvidenceCursor(query.cursor);
     if (cursor === null)
       throw new BadRequestException('Invalid evidence cursor');
-    await this.loadCase(caseId);
     return this.reportsRepository.findReportsByCaseId(
       caseId,
       query.limit ?? 20,
@@ -100,254 +268,24 @@ export class ReportModerationService {
     return moderationCase;
   }
 
-  private async authorizePlatform(userId: string) {
-    const user = await loadActiveUser(this.prisma, userId);
-    if (!hasPlatformModerationCapability(user.role)) {
-      throw new ForbiddenException('PlatformModerator permission required');
-    }
-  }
-
-  private async resolvePlatformGameId(query: {
-    scope?: 'all' | 'platform' | 'game';
-    gameSlug?: string;
-  }) {
-    // Shared cross-field semantics for native cases and compatibility reports.
-    const scope = query.scope ?? 'all';
-    if (
-      !['all', 'platform', 'game'].includes(scope) ||
-      (scope === 'game'
-        ? typeof query.gameSlug !== 'string' || !query.gameSlug.trim()
-        : query.gameSlug !== undefined)
-    ) {
-      throw new BadRequestException('gameSlug is required only for scope=game');
-    }
-    return scope === 'game'
-      ? this.gameModeratorsService.resolveGameId(query.gameSlug!)
-      : scope === 'platform'
-        ? null
-        : undefined;
-  }
-
-  /**
-   * Lists reports for one game. Admin or a moderator assigned to that game.
-   */
-  async listForModerator(
+  private async authorizeGameCase(
     gameSlug: string,
-    moderatorId: string,
-    query: QueryReportsDto,
+    userId: string,
+    caseId: string,
   ) {
     const gameId = await this.gameModeratorsService.resolveModeratableGameId(
       gameSlug,
-      moderatorId,
+      userId,
     );
-
-    return this.listByGameId(gameId, query);
+    const moderationCase = await this.loadCase(caseId);
+    if (moderationCase.gameId !== gameId)
+      throw new NotFoundException('Moderation case not found');
+    return moderationCase;
   }
 
-  /**
-   * Lists reports across every game. Admin only - the controller enforces
-   * that with AdminGuard, so there's no per-game permission check here.
-   */
-  async listAllForAdmin(query: QueryReportsAdminDto) {
-    const gameId = query.gameSlug
-      ? await this.gameModeratorsService.resolveGameId(query.gameSlug)
-      : undefined;
-
-    return this.listByGameId(gameId, query);
-  }
-
-  /**
-   * Marks a pending report as being worked on by the calling moderator.
-   *
-   * There's deliberately no separate "is it still pending?" pre-check: the
-   * conditional write in the repository is the one source of truth, so a
-   * report that isn't claimable gets the same 409 whether it was already
-   * IN_REVIEW before this request or got claimed by someone else mid-request.
-   */
-  async claim(gameSlug: string, reportId: string, moderatorId: string) {
-    const { gameId } = await this.authorizeReport(
-      gameSlug,
-      reportId,
-      moderatorId,
-    );
-
-    const claimed = await this.reportsRepository.claim(reportId, moderatorId, {
-      gameId,
-      audit: (report, tx) =>
-        this.recordAudit(
-          'REPORT_CLAIMED',
-          {
-            gameId,
-            gameSlug,
-            moderatorId,
-            report,
-          },
-          tx,
-        ),
-    });
-
-    if (!claimed) {
-      throw new ConflictException('This report is no longer pending');
-    }
-
-    return claimed;
-  }
-
-  async resolve(
-    gameSlug: string,
-    reportId: string,
-    moderatorId: string,
-    dto: ResolveReportDto,
-  ) {
-    return this.finalize({
-      gameSlug,
-      reportId,
-      moderatorId,
-      status: 'RESOLVED',
-      resolutionNote: dto.resolutionNote,
-    });
-  }
-
-  async dismiss(
-    gameSlug: string,
-    reportId: string,
-    moderatorId: string,
-    dto: ResolveReportDto,
-  ) {
-    return this.finalize({
-      gameSlug,
-      reportId,
-      moderatorId,
-      status: 'DISMISSED',
-      resolutionNote: dto.resolutionNote,
-    });
-  }
-
-  private async finalize(params: {
-    gameSlug: string;
-    reportId: string;
-    moderatorId: string;
-    status: 'RESOLVED' | 'DISMISSED';
-    resolutionNote?: string;
-  }) {
-    const { gameSlug, reportId, moderatorId, status, resolutionNote } = params;
-
-    const { gameId } = await this.authorizeReport(
-      gameSlug,
-      reportId,
-      moderatorId,
-    );
-
-    // Deliberately not restricted to the case's assignedModeratorId: with no
-    // "unclaim" path yet, locking resolve/dismiss to whoever claimed it
-    // would let one moderator going offline strand a report forever. Any
-    // moderator who can already see this queue can close it out. As with
-    // claim(), the repository's conditional write is the only "still open?"
-    // check, so an already-closed report always gets the same 409.
-    const finalized = await this.reportsRepository.finalize(
-      {
-        id: reportId,
-        status,
-        resolvedById: moderatorId,
-        resolutionNote: normalizeText(resolutionNote),
-      },
-      {
-        gameId,
-        audit: (report, tx) =>
-          this.recordAudit(
-            status === 'RESOLVED' ? 'REPORT_RESOLVED' : 'REPORT_DISMISSED',
-            { gameId, gameSlug, moderatorId, report },
-            tx,
-          ),
-      },
-    );
-
-    if (!finalized) {
-      throw new ConflictException('This report is already closed');
-    }
-
-    return finalized;
-  }
-
-  private recordAudit(
-    action: ReportAuditAction,
-    params: {
-      gameId: string;
-      gameSlug: string;
-      moderatorId: string;
-      report: {
-        id: string;
-        caseId: string;
-        targetType: string;
-        targetId: string;
-        resolutionNote: string | null;
-      };
-    },
-    tx: Prisma.TransactionClient,
-  ) {
-    const { gameId, gameSlug, moderatorId, report } = params;
-
-    return this.auditLogService.recordOrThrow(
-      {
-        action,
-        actorId: moderatorId,
-        targetType: 'REPORT',
-        targetId: report.id,
-        gameId,
-        gameSlug,
-        metadata: {
-          reportId: report.id,
-          caseId: report.caseId,
-          reportedTargetType: report.targetType,
-          reportedTargetId: report.targetId,
-          ...(report.resolutionNote
-            ? { resolutionNote: report.resolutionNote }
-            : {}),
-        },
-      },
-      tx,
-    );
-  }
-
-  private async listByGameId(
-    gameId: string | null | undefined,
-    query: QueryReportsDto,
-  ) {
-    const { page, limit } = resolvePagination(query);
-
-    const result = await this.reportsRepository.findMany({
-      gameId,
-      status: query.status,
-      targetType: query.targetType,
-      page,
-      limit,
-    });
-
-    return toPaginated(result.items, { page, limit, total: result.total });
-  }
-
-  /**
-   * Authorizes the caller for the report's game and confirms the report
-   * really belongs to the game in the route, via the shared moderation
-   * preamble (authorize first, so a non-moderator never learns whether a
-   * report exists).
-   */
-  private authorizeReport(
-    gameSlug: string,
-    reportId: string,
-    moderatorId: string,
-  ) {
-    return this.gameModeratorsService.loadModeratableResource({
-      gameSlug,
-      moderatorId,
-      notFoundMessage: 'Report not found',
-      load: async () => {
-        const report = await this.reportsRepository.findById(reportId);
-        // A platform case or deleted game cannot belong to a game-scoped route.
-        return report && report.gameId !== null
-          ? { ...report, gameId: report.gameId }
-          : null;
-      },
-    });
+  private async authorizePlatform(userId: string) {
+    const user = await loadActiveUser(this.prisma, userId);
+    if (!hasPlatformModerationCapability(user.role))
+      throw new ForbiddenException('PlatformModerator permission required');
   }
 }

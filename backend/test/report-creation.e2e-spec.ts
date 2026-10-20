@@ -1,5 +1,5 @@
+import { isolatedCaseDatabase } from './support/isolated-case-database';
 import { PlatformCaseModerationController } from '../src/reports/platform-moderation/platform-case-moderation.controller';
-import { PlatformReportModerationController } from '../src/reports/platform-moderation/platform-report-moderation.controller';
 type TestRequest = Request & {
   user?: { id: string };
   session?: { user: { id: string } };
@@ -53,8 +53,7 @@ import { ReportsController } from '../src/reports/reports.controller';
 import { ReportsService } from '../src/reports/reports.service';
 import { ReportsRepository } from '../src/reports/reports.repository';
 import { ReportRateLimiterService } from '../src/reports/infrastructure/report-rate-limiter.service';
-import { ReportModerationController } from '../src/reports/game-moderation/report-moderation.controller';
-import { AdminReportsController } from '../src/reports/admin/admin-reports.controller';
+import { GameCaseModerationController } from '../src/reports/game-moderation/game-case-moderation.controller';
 import { ReportModerationService } from '../src/reports/moderation/report-moderation.service';
 import { PostVisibilityService } from '../src/post-visibility/post-visibility.service';
 import { FollowsService } from '../src/follows/follows.service';
@@ -96,6 +95,7 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
   const targets = new Set<string>();
   let app: INestApplication;
   let db: PrismaService;
+  let isolated: Awaited<ReturnType<typeof isolatedCaseDatabase>>;
   let gameId: string;
   const slug = prefix;
   let baseUrl: string;
@@ -199,18 +199,17 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
   }
 
   beforeAll(async () => {
+    isolated = await isolatedCaseDatabase();
     const module = await Test.createTestingModule({
       controllers: [
         ReportsController,
-        PlatformReportModerationController,
         PlatformCaseModerationController,
-        AdminReportsController,
-        ReportModerationController,
+        GameCaseModerationController,
         AdminContentController,
         AdminOverviewController,
       ],
       providers: [
-        PrismaService,
+        { provide: PrismaService, useValue: isolated.prisma },
         ReportsService,
         ReportsRepository,
         ReportRateLimiterService,
@@ -296,7 +295,11 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         await db.game.deleteMany({ where: { slug } });
       }
     } finally {
-      await app?.close();
+      try {
+        await app?.close();
+      } finally {
+        await isolated?.cleanup();
+      }
     }
   });
 
@@ -330,10 +333,10 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         targetId: target.id,
         reporterId: reporter,
         details: 'Evidence details',
-        status: 'PENDING',
-        gameId: game ? gameId : null,
       });
       expect(response.body).not.toHaveProperty('targetSnapshot');
+      expect(response.body).not.toHaveProperty('status');
+      expect(response.body).not.toHaveProperty('assignedModeratorId');
       const report = await persistedReport(response.body.id);
       expect(report).toMatchObject({
         caseId: response.body.caseId,
@@ -436,7 +439,11 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
       evidence,
     );
     expect(
-      await app.get(ReportsRepository).findById(response.body.id),
+      (
+        await app
+          .get(ReportsRepository)
+          .findReportsByCaseId(response.body.caseId, 20)
+      ).items[0],
     ).not.toHaveProperty('targetSnapshot');
   });
 
@@ -783,7 +790,7 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
     expect(await cases(source.id)).toHaveLength(1);
   });
 
-  describe('Stage B case workflow', () => {
+  describe('native case workflow', () => {
     async function fixture(
       personal = false,
       targetType: 'POST' | 'COMMENT' = 'POST',
@@ -793,141 +800,165 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
       const first = await submit(target.id, await user(), targetType);
       const second = await submit(target.id, await user(), targetType);
       expect([first.status, second.status]).toEqual([201, 201]);
-      return { source, target, first: first.body, second: second.body };
+      expect(first.body.caseId).toBe(second.body.caseId);
+      return {
+        source,
+        target,
+        caseId: first.body.caseId,
+        reportIds: [first.body.id, second.body.id],
+      };
     }
-    const act = (id: string, action: string, as = moderator, body = {}) =>
-      api(`/games/${slug}/reports/${id}/${action}`, as, body, 'PATCH');
+    const act = (
+      caseId: string,
+      action: string,
+      as = moderator,
+      platform = false,
+      body = {},
+    ) =>
+      api(
+        platform
+          ? `/moderation/cases/${caseId}/${action}`
+          : `/games/${slug}/moderation/cases/${caseId}/${action}`,
+        as,
+        body,
+        'PATCH',
+      );
 
     it.each([
       ['resolve', false, false, 'POST'],
       ['resolve', true, false, 'POST'],
-      ['resolve', true, true, 'COMMENT'],
       ['dismiss', false, false, 'COMMENT'],
-      ['dismiss', true, false, 'POST'],
-      ['dismiss', true, true, 'COMMENT'],
+      ['dismiss', true, false, 'COMMENT'],
+      ['resolve', true, true, 'COMMENT'],
+      ['dismiss', false, true, 'POST'],
     ] as const)(
-      '%s claimed=%s different resolver=%s target=%s',
-      async (action, claimed, different, targetType) => {
-        const { first, second, source, target } = await fixture(
-          false,
+      '%s claimed=%s platform/personal=%s target=%s',
+      async (action, claimed, platform, targetType) => {
+        const { caseId, reportIds, source, target } = await fixture(
+          platform,
           targetType,
         );
+        const actor = platform ? admin : moderator;
         const before = await db.moderationCase.findUniqueOrThrow({
-          where: { id: first.caseId },
+          where: { id: caseId },
         });
         if (claimed) {
-          const response = await act(second.id, 'claim');
-          expect(response.status).toBe(200);
-          expect(response.body).toMatchObject({
-            id: second.id,
+          const claim = await act(caseId, 'claim', actor, platform);
+          expect(claim.status).toBe(200);
+          expect(claim.body).toMatchObject({
+            id: caseId,
             status: 'IN_REVIEW',
-            assignedModeratorId: moderator,
+            assignedModeratorId: actor,
           });
-          expect(response.body).not.toHaveProperty('targetSnapshot');
-          expect(
-            (await app.get(ReportsRepository).findById(first.id))?.status,
-          ).toBe('IN_REVIEW');
-          expect((await act(first.id, 'claim', admin)).status).toBe(409);
+          expect((await act(caseId, 'claim', actor, platform)).status).toBe(
+            409,
+          );
         }
-        const resolver = different ? secondModerator : moderator;
-        const response = await act(first.id, action, resolver, {
-          resolutionNote: '  Reviewed evidence  ',
-        });
-        expect(response.status).toBe(200);
+        const response = await act(
+          caseId,
+          action,
+          platform ? admin : secondModerator,
+          platform,
+          { resolutionNote: '  Reviewed evidence  ' },
+        );
         const status = action === 'resolve' ? 'RESOLVED' : 'DISMISSED';
+        expect(response.status).toBe(200);
         expect(response.body).toMatchObject({
-          id: first.id,
-          caseId: first.caseId,
+          id: caseId,
           status,
-          resolvedById: resolver,
+          reportCount: 2,
+          uniqueReporterCount: 2,
           resolutionNote: 'Reviewed evidence',
         });
-        expect(response.body).not.toHaveProperty('targetSnapshot');
+        expect(response.body).not.toHaveProperty('reports');
         const current = await db.moderationCase.findUniqueOrThrow({
-          where: { id: first.caseId },
+          where: { id: caseId },
         });
         expect(current).toMatchObject({
           status,
-          resolvedById: resolver,
-          resolutionNote: 'Reviewed evidence',
-          assignedModeratorId: claimed ? moderator : null,
+          assignedModeratorId: claimed ? actor : null,
           reportCount: before.reportCount,
-          uniqueReporterCount: before.uniqueReporterCount,
         });
         expect(current.resolvedAt).toBeInstanceOf(Date);
-        expect(
-          (await app.get(ReportsRepository).findById(second.id))?.status,
-        ).toBe(status);
         for (const closedAction of ['claim', 'resolve', 'dismiss'])
-          expect((await act(second.id, closedAction, admin)).status).toBe(409);
+          expect(
+            (await act(caseId, closedAction, actor, platform)).status,
+          ).toBe(409);
         const logs = await db.auditLog.findMany({
-          where: { targetId: { in: [first.id, second.id] } },
+          where: { targetId: caseId },
         });
         expect(logs).toHaveLength(claimed ? 2 : 1);
         expect(
-          logs.find((log) => log.action === `REPORT_${status}`),
+          logs.find((log) => log.action === `CASE_${status}`),
         ).toMatchObject({
-          targetType: 'REPORT',
-          targetId: first.id,
-          actorId: resolver,
-          gameId,
+          targetType: 'MODERATION_CASE',
+          targetId: caseId,
+          gameId: platform ? null : gameId,
           metadata: {
-            reportId: first.id,
-            caseId: first.caseId,
-            reportedTargetType: targetType,
-            reportedTargetId: target.id,
+            caseId,
+            targetType,
+            targetId: target.id,
+            reportCount: 2,
             resolutionNote: 'Reviewed evidence',
           },
         });
+        const reports = await db.report.findMany({ where: { caseId } });
+        expect(reports.map((row) => row.id).sort()).toEqual(reportIds.sort());
+        for (const report of reports)
+          for (const field of ['status', 'assignedModeratorId', 'resolvedById'])
+            expect(report).not.toHaveProperty(field);
         expect(
           (await db.post.findUniqueOrThrow({ where: { id: source.id } }))
             .status,
         ).toBe('PUBLISHED');
-        if (targetType === 'COMMENT')
-          expect(
-            (await db.comment.findUniqueOrThrow({ where: { id: target.id } }))
-              .status,
-          ).toBe('PUBLISHED');
-        // Historical report IDs must stay bound to the old closed case.
         const newer = await submit(target.id, await user(), targetType);
         expect(newer.status).toBe(201);
-        expect(newer.body.caseId).not.toBe(first.caseId);
-        expect((await act(first.id, 'resolve')).status).toBe(409);
-        expect(
-          (
-            await db.moderationCase.findUniqueOrThrow({
-              where: { id: newer.body.caseId },
-            })
-          ).status,
-        ).toBe('OPEN');
+        expect(newer.body.caseId).not.toBe(caseId);
+        expect((await act(caseId, 'resolve', actor, platform)).status).toBe(
+          409,
+        );
       },
     );
 
-    it('rejects unauthorized, inactive, wrong-game and personal actions before writes', async () => {
-      const { first } = await fixture();
-      const outsider = await user();
-      for (const action of ['claim', 'resolve', 'dismiss']) {
-        expect((await act(first.id, action, outsider)).status).toBe(403);
-        expect((await act('missing-report', action, outsider)).status).toBe(
-          403,
-        );
-      }
-      await db.user.update({
-        where: { id: outsider },
-        data: { status: 'SUSPENDED' },
-      });
-      expect((await act(first.id, 'claim', outsider)).status).toBe(403);
+    it('rejects wrong-game, personal, unauthorized and inactive game access before writes', async () => {
+      const { caseId, reportIds } = await fixture();
       const personal = await fixture(true);
-      for (const action of ['claim', 'resolve', 'dismiss'])
-        expect((await act(personal.first.id, action, admin)).status).toBe(404);
+      for (const suffix of ['', '/reports', '/claim', '/resolve', '/dismiss']) {
+        const method = ['', '/reports'].includes(suffix) ? 'GET' : 'PATCH';
+        expect(
+          (
+            await api(
+              `/games/${slug}/moderation/cases/${caseId}${suffix}`,
+              author,
+              method === 'PATCH' ? {} : undefined,
+              method,
+            )
+          ).status,
+        ).toBe(403);
+        expect(
+          (
+            await api(
+              `/games/${slug}/moderation/cases/${personal.caseId}${suffix}`,
+              admin,
+              method === 'PATCH' ? {} : undefined,
+              method,
+            )
+          ).status,
+        ).toBe(404);
+      }
+      expect((await act(reportIds[0], 'claim')).status).toBe(404);
       const other = await db.game.create({
         data: { name: 'Wrong scope', slug: `${prefix}-other` },
       });
       try {
         expect(
+          (await api(`/games/${other.slug}/moderation/cases/${caseId}`, admin))
+            .status,
+        ).toBe(404);
+        expect(
           (
             await api(
-              `/games/${other.slug}/reports/${first.id}/claim`,
+              `/games/${other.slug}/moderation/cases/${caseId}/claim`,
               admin,
               {},
               'PATCH',
@@ -937,34 +968,35 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
       } finally {
         await db.game.delete({ where: { id: other.id } });
       }
-      expect(
-        await db.auditLog.count({
-          where: { targetId: { in: [first.id, personal.first.id] } },
-        }),
-      ).toBe(0);
+      const inactive = await user();
+      await db.gameModerator.create({ data: { gameId, userId: inactive } });
+      await db.user.update({
+        where: { id: inactive },
+        data: { status: 'SUSPENDED' },
+      });
+      expect((await act(caseId, 'claim', inactive)).status).toBe(403);
+      expect(await db.auditLog.count({ where: { targetId: caseId } })).toBe(0);
     });
 
     it.each(['claim', 'resolve', 'dismiss'])(
-      'rolls back %s when transactional audit fails',
+      'rolls back %s and audit together on append failure',
       async (action) => {
-        const { first } = await fixture();
+        const { caseId } = await fixture(true);
         const before = await db.moderationCase.findUniqueOrThrow({
-          where: { id: first.caseId },
+          where: { id: caseId },
         });
-        const spy = jest
+        const hook = jest
           .spyOn(app.get(AuditLogRepository), 'create')
-          .mockRejectedValueOnce(new Error('Stage B deliberate audit failure'));
+          .mockRejectedValueOnce(new Error('Injected case audit failure'));
         try {
-          expect((await act(first.id, action)).status).toBe(500);
+          expect((await act(caseId, action, admin, true)).status).toBe(500);
         } finally {
-          spy.mockRestore();
+          hook.mockRestore();
         }
         expect(
-          await db.moderationCase.findUniqueOrThrow({
-            where: { id: first.caseId },
-          }),
+          await db.moderationCase.findUniqueOrThrow({ where: { id: caseId } }),
         ).toEqual(before);
-        expect(await db.auditLog.count({ where: { targetId: first.id } })).toBe(
+        expect(await db.auditLog.count({ where: { targetId: caseId } })).toBe(
           0,
         );
       },
@@ -973,166 +1005,114 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
     it.each([
       ['claim', 'claim'],
       ['resolve', 'dismiss'],
-    ])('serializes concurrent %s vs %s', async (left, right) => {
-      const { first, second } = await fixture();
-      let arrivals = 0;
-      let release!: () => void;
-      const barrier = new Promise<void>((resolve) => {
-        release = resolve;
+    ] as const)(
+      'arbitrates concurrent %s/%s with one case update/audit',
+      async (left, right) => {
+        const { caseId } = await fixture(true);
+        const responses = await Promise.all([
+          act(caseId, left, admin, true),
+          act(caseId, right, admin, true),
+        ]);
+        expect(responses.map((r) => r.status).sort()).toEqual([200, 409]);
+        const winner = responses.find((r) => r.status === 200)!;
+        expect(
+          (await db.moderationCase.findUniqueOrThrow({ where: { id: caseId } }))
+            .status,
+        ).toBe(winner.body.status);
+        expect(
+          await db.auditLog.count({
+            where: { targetId: caseId, targetType: 'MODERATION_CASE' },
+          }),
+        ).toBe(1);
+        expect(await db.report.count({ where: { caseId } })).toBe(2);
+      },
+    );
+
+    it('rechecks game scope atomically when Game deletion wins before the conditional update', async () => {
+      const { caseId } = await fixture();
+      const temporary = await db.game.create({
+        data: { name: 'Race game', slug: `${prefix}-scope-race` },
       });
-      const spy = intercept(
+      await db.moderationCase.update({
+        where: { id: caseId },
+        data: { gameId: temporary.id },
+      });
+      let deleted = false;
+      const hook = intercept(
         (tx) =>
           new Proxy(tx, {
-            get(target, key, receiver): unknown {
-              if (key !== 'moderationCase')
-                return Reflect.get(target, key, receiver);
+            get(target, key): unknown {
+              if (key !== 'moderationCase') return Reflect.get(target, key);
               return new Proxy(tx.moderationCase, {
-                get(delegate, method): unknown {
+                get(owner, method): unknown {
                   if (method !== 'updateMany')
-                    return Reflect.get(delegate, method);
-                  return async (
-                    args: Parameters<typeof tx.moderationCase.updateMany>[0],
-                  ) => {
-                    if (args?.where?.id === first.caseId) {
-                      arrivals++;
-                      if (arrivals === 2) release();
-                      await barrier;
+                    return Reflect.get(owner, method);
+                  return async (args: Prisma.ModerationCaseUpdateManyArgs) => {
+                    if (!deleted) {
+                      deleted = true;
+                      await db.game.delete({ where: { id: temporary.id } });
                     }
-                    return delegate.updateMany(args);
+                    return owner.updateMany(args);
                   };
                 },
               });
             },
           }),
       );
-      let results: Awaited<ReturnType<typeof act>>[];
       try {
-        results = await Promise.all([
-          act(first.id, left, moderator),
-          act(second.id, right, secondModerator),
-        ]);
-      } finally {
-        spy.mockRestore();
-      }
-      expect(arrivals).toBe(2);
-      expect(results.map((result) => result.status).sort()).toEqual([200, 409]);
-      const winner = results.find((result) => result.status === 200)!;
-      const current = await db.moderationCase.findUniqueOrThrow({
-        where: { id: first.caseId },
-      });
-      expect(current).toMatchObject({
-        status: winner.body.status,
-        reportCount: 2,
-        uniqueReporterCount: 2,
-      });
-      if (left === 'claim')
-        expect(current.assignedModeratorId).toBe(
-          winner.body.assignedModeratorId,
-        );
-      else {
-        expect(current.resolvedById).toBe(winner.body.resolvedById);
-        expect(current.resolvedAt?.toISOString()).toBe(winner.body.resolvedAt);
-      }
-      expect(
-        await db.auditLog.count({
-          where: { targetId: { in: [first.id, second.id] } },
-        }),
-      ).toBe(1);
-    });
-
-    it.each(['resolve', 'dismiss'])(
-      'preserves filtered legacy listings, admin content and overview through %s',
-      async (terminal) => {
-        const { first, second, target } = await fixture();
-        for (const [action, status] of [
-          [null, 'PENDING'],
-          ['claim', 'IN_REVIEW'],
-          [terminal, terminal === 'resolve' ? 'RESOLVED' : 'DISMISSED'],
-        ] as const) {
-          if (action)
-            expect(
-              (await act(first.id, action, admin, { resolutionNote: '   ' }))
-                .status,
-            ).toBe(200);
-          for (const path of [`/games/${slug}/reports`, `/admin/reports`]) {
-            const listing = await api(
-              `${path}?status=${status}&limit=100`,
-              admin,
-            );
-            expect(listing.status).toBe(200);
-            for (const id of [first.id, second.id])
-              expect(listing.body.items).toContainEqual(
-                expect.objectContaining({ id, status }),
-              );
-            const other = await api(
-              `${path}?status=${status === 'PENDING' ? 'RESOLVED' : 'PENDING'}&limit=100`,
-              admin,
-            );
-            expect(
-              other.body.items.some(
-                (row: { id: string }) => row.id === first.id,
-              ),
-            ).toBe(false);
-            expect(
-              listing.body.items.every(
-                (row: object) => !('targetSnapshot' in row),
-              ),
-            ).toBe(true);
-          }
-          const content = await api('/admin/content?limit=100', admin);
-          expect(content.status).toBe(200);
-          expect(
-            content.body.items.some(
-              (row: { id: string }) => row.id === target.id,
-            ),
-          ).toBe(action !== terminal);
-          const overview = await api('/admin/overview', admin);
-          expect(overview.status).toBe(200);
-          expect(
-            overview.body.metrics.find(
-              (row: { id: string }) => row.id === 'reports',
-            )!.value,
-          ).toBe(
-            await db.report.count({
-              where: { case: { status: { in: ['OPEN', 'IN_REVIEW'] } } },
-            }),
-          );
-        }
         expect(
           (
-            await db.moderationCase.findUniqueOrThrow({
-              where: { id: first.caseId },
-            })
-          ).resolutionNote,
-        ).toBeNull();
-      },
-    );
+            await api(
+              `/games/${temporary.slug}/moderation/cases/${caseId}/claim`,
+              admin,
+              {},
+              'PATCH',
+            )
+          ).status,
+        ).toBe(409);
+      } finally {
+        hook.mockRestore();
+        await db.game.deleteMany({ where: { id: temporary.id } });
+      }
+      expect(
+        (await db.moderationCase.findUniqueOrThrow({ where: { id: caseId } }))
+          .status,
+      ).toBe('OPEN');
+      expect(await db.auditLog.count({ where: { targetId: caseId } })).toBe(0);
+    });
   });
 
-  it('new complaints preserve admin/game queues, content/dashboard reads and restored case moderation', async () => {
+  it('new complaints feed native game/platform queues and complaint dashboard metrics', async () => {
     const personal = await post();
     const community = await post(true);
     const a = await submit(personal.id, await user());
     const b = await submit(community.id, await user());
     expect([a.status, b.status]).toEqual([201, 201]);
-    const listing = await api('/admin/reports?limit=100', admin);
+    const listing = await api('/moderation/cases?limit=100', admin);
     expect(listing.status).toBe(200);
     expect(listing.body.items).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: a.body.id, gameId: null, game: null }),
-        expect.objectContaining({ id: b.body.id, gameId }),
+        expect.objectContaining({
+          id: a.body.caseId,
+          gameId: null,
+          game: null,
+        }),
+        expect.objectContaining({ id: b.body.caseId, gameId }),
       ]),
     );
     expect(
       listing.body.items.every((row: object) => !('targetSnapshot' in row)),
     ).toBe(true);
-    const scoped = await api(`/games/${slug}/reports?limit=100`, moderator);
+    const scoped = await api(
+      `/games/${slug}/moderation/cases?limit=100`,
+      moderator,
+    );
     expect(scoped.status).toBe(200);
     expect(
-      scoped.body.items.some((row: { id: string }) => row.id === a.body.id),
+      scoped.body.items.some((row: { id: string }) => row.id === a.body.caseId),
     ).toBe(false);
     expect(scoped.body.items).toContainEqual(
-      expect.objectContaining({ id: b.body.id }),
+      expect.objectContaining({ id: b.body.caseId }),
     );
     const content = await api('/admin/content?limit=100', admin);
     expect(content.status).toBe(200);
@@ -1160,7 +1140,7 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
       expect(
         (
           await api(
-            `/games/${slug}/reports/${b.body.id}/${action}`,
+            `/games/${slug}/moderation/cases/${b.body.caseId}/${action}`,
             moderator,
             {},
             'PATCH',
@@ -1170,7 +1150,7 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
     expect(
       (
         await api(
-          `/games/${slug}/reports/${a.body.id}/claim`,
+          `/games/${slug}/moderation/cases/${a.body.caseId}/claim`,
           admin,
           {},
           'PATCH',
@@ -1195,73 +1175,21 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
     ).toBe(0);
     expect(
       await db.auditLog.count({
-        where: { targetId: { in: [a.body.id, b.body.id] } },
+        where: { targetId: { in: [a.body.caseId, b.body.caseId] } },
       }),
     ).toBe(2);
   });
-  it('platform queue enforces live roles, all/platform/game scopes and report-level projection over HTTP/PostgreSQL', async () => {
-    const platformModerator = await user();
-    await db.user.update({
-      where: { id: platformModerator },
-      data: { role: 'PLATFORM_MODERATOR' },
-    });
-    const personal = await post();
-    const community = await post(true);
-    const a = await submit(personal.id, await user());
-    const b = await submit(community.id, await user());
-    const c = await submit(community.id, await user());
-    expect([a.status, b.status, c.status]).toEqual([201, 201, 201]);
-    const queue = '/moderation/reports';
-    const all = await api(queue, platformModerator);
-    expect(all.status).toBe(200);
-    expect(all.body.items.map((row) => row.id)).toEqual(
-      expect.arrayContaining([a.body.id, b.body.id, c.body.id]),
-    );
-    for (const row of all.body.items) {
-      expect(row).not.toHaveProperty('targetSnapshot');
-      expect(row).not.toHaveProperty('case');
-    }
-    const platform = await api(`${queue}?scope=platform`, platformModerator);
-    expect(platform.status).toBe(200);
-    expect(platform.body.items.map((row) => row.id)).toContain(a.body.id);
-    expect(platform.body.items.every((row) => row.gameId === null)).toBe(true);
-    const game = await api(
-      `${queue}?scope=game&gameSlug=${slug}`,
-      platformModerator,
-    );
-    expect(game.status).toBe(200);
-    expect(game.body.items.map((row) => row.id)).toEqual(
-      expect.arrayContaining([b.body.id, c.body.id]),
-    );
-    expect(game.body.items.every((row) => row.gameId === gameId)).toBe(true);
-    expect((await api(queue, admin)).status).toBe(200);
-    expect((await api(queue, author)).status).toBe(403);
-    expect((await api(queue, moderator)).status).toBe(403);
-    expect((await api(queue, null)).status).toBe(401);
+  it('removes obsolete report-centric moderation routes', async () => {
+    for (const path of [
+      '/moderation/reports',
+      '/admin/reports',
+      `/games/${slug}/reports`,
+    ])
+      expect((await api(path, admin)).status).toBe(404);
     expect(
-      (
-        await api(
-          `${queue}?scope=game&gameSlug=missing-${prefix}`,
-          platformModerator,
-        )
-      ).status,
+      (await api(`/games/${slug}/reports/old-report/claim`, admin, {}, 'PATCH'))
+        .status,
     ).toBe(404);
-    for (const query of [
-      'scope=platform&gameSlug=x',
-      'scope=all&gameSlug=x',
-      'scope=game',
-      'scope=invalid',
-      'limit=101',
-    ]) {
-      expect((await api(`${queue}?${query}`, platformModerator)).status).toBe(
-        400,
-      );
-    }
-    await db.user.update({
-      where: { id: platformModerator },
-      data: { status: 'SUSPENDED' },
-    });
-    expect((await api(queue, platformModerator)).status).toBe(403);
   });
   describe('native moderation case read API', () => {
     let platformModerator: string;
@@ -1296,6 +1224,9 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
       gameB = await db.game.create({
         data: { name: 'Native case B', slug: `${prefix}-native-b` },
         select: { id: true, slug: true },
+      });
+      await db.gameModerator.create({
+        data: { gameId: gameA.id, userId: moderator },
       });
       targetA = (
         await post(false, { gameId: gameA.id, type: 'GUIDE', title: 'Case A' })
@@ -1372,20 +1303,79 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         expect(result.body.meta.total).toBe(1);
         expect(result.body.items.map((row) => row.id)).toEqual([expected]);
       }
-      const legacy = await api(
-        `/moderation/reports?scope=game&gameSlug=${gameA.slug}`,
+      const evidence = await api(
+        `${queue}/${caseA}/reports`,
         platformModerator,
       );
-      expect(legacy.status).toBe(200);
-      expect(legacy.body.items).toHaveLength(3);
+      expect(evidence.status).toBe(200);
+      expect(evidence.body.items).toHaveLength(3);
+      for (const row of evidence.body.items) {
+        expect(row).not.toHaveProperty('status');
+        expect(row).not.toHaveProperty('targetSnapshot');
+      }
+    });
+    it('serves assigned-game case reads and platform case mutations with live capability', async () => {
+      const gameRoot = `/games/${gameA.slug}/moderation/cases`;
+      const list = await api(gameRoot, moderator);
+      expect(list.status).toBe(200);
+      expect(list.body.items.map((row) => row.id)).toEqual([caseA]);
+      expect((await api(`${gameRoot}/${caseA}`, moderator)).status).toBe(200);
+      const evidence = await api(
+        `${gameRoot}/${caseA}/reports?limit=1`,
+        moderator,
+      );
+      expect(evidence.status).toBe(200);
+      expect(evidence.body.items).toHaveLength(1);
+      expect(evidence.body.nextCursor).not.toBeNull();
       expect(
-        legacy.body.items.every(
-          (row) =>
-            row.caseId === caseA &&
-            row.status === 'PENDING' &&
-            !('targetSnapshot' in row),
-        ),
-      ).toBe(true);
+        (await api(`/games/${gameB.slug}/moderation/cases`, moderator)).status,
+      ).toBe(403);
+      for (const action of ['claim', 'resolve', 'dismiss']) {
+        for (const denied of [author, moderator, inactiveModerator])
+          expect(
+            (
+              await api(
+                `${queue}/missing-${prefix}/${action}`,
+                denied,
+                {},
+                'PATCH',
+              )
+            ).status,
+          ).toBe(403);
+      }
+      expect(
+        (await api(`${queue}/${caseB}/claim`, platformModerator, {}, 'PATCH'))
+          .status,
+      ).toBe(200);
+      expect(
+        (
+          await api(
+            `${queue}/${caseB}/dismiss`,
+            platformModerator,
+            { resolutionNote: ' Reviewed ' },
+            'PATCH',
+          )
+        ).status,
+      ).toBe(200);
+      expect(
+        (await api(`${queue}/${caseB}/resolve`, platformModerator, {}, 'PATCH'))
+          .status,
+      ).toBe(409);
+      expect(
+        await db.auditLog.count({
+          where: { targetId: caseB, targetType: 'MODERATION_CASE' },
+        }),
+      ).toBe(2);
+      expect(
+        (
+          await api(
+            `${queue}/missing-${prefix}/claim`,
+            platformModerator,
+            {},
+            'PATCH',
+          )
+        ).status,
+      ).toBe(404);
     });
     it('enforces live roles before case existence lookups on every native route', async () => {
       for (const path of [

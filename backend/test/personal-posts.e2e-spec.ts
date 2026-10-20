@@ -1,3 +1,4 @@
+import { isolatedCaseDatabase } from './support/isolated-case-database';
 jest.mock('@thallesp/nestjs-better-auth', () => {
   const common =
     jest.requireActual<typeof import('@nestjs/common')>('@nestjs/common');
@@ -63,6 +64,7 @@ describe('Personal posts API (development database)', () => {
   jest.setTimeout(90_000);
   let app: INestApplication;
   let db: PrismaService;
+  let isolated: Awaited<ReturnType<typeof isolatedCaseDatabase>>;
   const token = randomUUID();
   const author = `personal-api-author-${token}`;
   const admin = `personal-api-admin-${token}`;
@@ -76,6 +78,7 @@ describe('Personal posts API (development database)', () => {
   const caseIds: string[] = [];
 
   beforeAll(async () => {
+    isolated = await isolatedCaseDatabase();
     const module = await Test.createTestingModule({
       controllers: [
         PostSaveController,
@@ -90,7 +93,7 @@ describe('Personal posts API (development database)', () => {
         AdminContentController,
       ],
       providers: [
-        PrismaService,
+        { provide: PrismaService, useValue: isolated.prisma },
         PostsService,
         PostsRepository,
         PostModerationService,
@@ -186,18 +189,25 @@ describe('Personal posts API (development database)', () => {
   });
 
   afterAll(async () => {
-    if (db) {
-      // Only this suite's unique fixtures are removed; never reset the database.
-      await db.moderationCase.deleteMany({ where: { id: { in: caseIds } } });
-      await db.auditLog.deleteMany({
-        where: { actorId: { in: [author, admin, moderator] } },
-      });
-      await db.user.deleteMany({
-        where: { id: { in: [author, admin, moderator] } },
-      });
-      await db.game.deleteMany({ where: { slug: { startsWith: slug } } });
+    try {
+      if (db) {
+        // Only this suite's unique fixtures are removed; never reset the database.
+        await db.moderationCase.deleteMany({ where: { id: { in: caseIds } } });
+        await db.auditLog.deleteMany({
+          where: { actorId: { in: [author, admin, moderator] } },
+        });
+        await db.user.deleteMany({
+          where: { id: { in: [author, admin, moderator] } },
+        });
+        await db.game.deleteMany({ where: { slug: { startsWith: slug } } });
+      }
+    } finally {
+      try {
+        await app?.close();
+      } finally {
+        await isolated?.cleanup();
+      }
     }
-    await app?.close();
   });
 
   it('POST /posts accepts content-only personal posts', async () => {
@@ -348,7 +358,11 @@ describe('Personal posts API (development database)', () => {
       snapshot: target!.snapshot,
     });
     caseIds.push(report.caseId);
-    expect(report).toMatchObject({ gameId: null, status: 'PENDING' });
+    expect(report.caseId).toBeTruthy();
+    expect(report).not.toHaveProperty('status');
+    expect(
+      (await reports.findModerationCaseById(report.caseId))?.gameId,
+    ).toBeNull();
     expect(report).not.toHaveProperty('targetSnapshot');
   });
 

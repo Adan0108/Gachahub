@@ -33,23 +33,17 @@ import { ReportModerationService } from './report-moderation.service';
 
 describe('ReportModerationService', () => {
   const reportsRepository = {
-    findById: jest.fn(),
-    findMany: jest.fn(),
     findModerationCases: jest.fn(),
     findModerationCaseById: jest.fn(),
     findReportsByCaseId: jest.fn(),
     findCaseTarget: jest.fn(),
-    claim: jest.fn<Promise<unknown>, Parameters<ReportsRepository['claim']>>(),
-    finalize: jest.fn<
-      Promise<unknown>,
-      Parameters<ReportsRepository['finalize']>
-    >(),
+    claimCase: jest.fn(),
+    finalizeCase: jest.fn(),
   };
 
   const gameModeratorsService = {
     resolveGameId: jest.fn(),
     resolveModeratableGameId: jest.fn(),
-    loadModeratableResource: jest.fn(),
   };
 
   const prisma = { user: { findUnique: jest.fn() } };
@@ -58,39 +52,10 @@ describe('ReportModerationService', () => {
 
   let service: ReportModerationService;
 
-  const baseReport = {
-    id: 'report-1',
-    caseId: 'case-1',
-    gameId: 'game-1',
-    reporterId: 'reporter-1',
-    targetType: 'POST',
-    targetId: 'post-1',
-    reasonCode: 'HARASSMENT',
-    status: 'PENDING',
-  };
-
   beforeEach(() => {
     jest.resetAllMocks();
     gameModeratorsService.resolveGameId.mockResolvedValue('game-1');
     gameModeratorsService.resolveModeratableGameId.mockResolvedValue('game-1');
-    // A faithful fake of GameModeratorsService.loadModeratableResource's
-    // contract (load -> null or wrong game => NotFound). The real method's
-    // own behavior, including authorize-before-load ordering, is covered in
-    // game-moderators.service.spec.ts.
-    gameModeratorsService.loadModeratableResource.mockImplementation(
-      async (params: {
-        notFoundMessage: string;
-        load: () => Promise<{ gameId: string } | null>;
-      }) => {
-        const resource = await params.load();
-
-        if (!resource || resource.gameId !== 'game-1') {
-          throw new NotFoundException(params.notFoundMessage);
-        }
-
-        return { gameId: 'game-1', resource };
-      },
-    );
 
     service = new ReportModerationService(
       reportsRepository as unknown as ReportsRepository,
@@ -269,370 +234,196 @@ describe('ReportModerationService', () => {
     });
   });
 
-  describe('listForPlatform', () => {
+  describe('native game authorization and shared mutations', () => {
+    const moderationCase = {
+      id: 'case',
+      gameId: 'game-1',
+      game: { slug: 'slug' },
+      targetType: 'POST',
+      targetId: 'post',
+      status: 'OPEN',
+      reportCount: 3,
+      resolutionNote: null,
+    };
     beforeEach(() => {
       prisma.user.findUnique.mockResolvedValue({
         role: 'PLATFORM_MODERATOR',
         status: 'ACTIVE',
       });
-      reportsRepository.findMany.mockResolvedValue({
-        items: [baseReport],
+      reportsRepository.findModerationCaseById.mockResolvedValue(
+        moderationCase,
+      );
+      reportsRepository.findModerationCases.mockResolvedValue({
+        items: [moderationCase],
         total: 1,
       });
-    });
-    it.each(['ADMIN', 'PLATFORM_MODERATOR'])(
-      'allows live %s role and preserves report pagination',
-      async (role) => {
-        prisma.user.findUnique.mockResolvedValue({ role, status: 'ACTIVE' });
-        const result = await service.listForPlatform('actor', {
-          page: 2,
-          limit: 3,
-          status: 'PENDING',
-          targetType: 'POST',
-        });
-        expect(prisma.user.findUnique).toHaveBeenCalledWith(
-          expect.objectContaining({ where: { id: 'actor' } }),
-        );
-        expect(reportsRepository.findMany).toHaveBeenCalledWith({
-          gameId: undefined,
-          page: 2,
-          limit: 3,
-          status: 'PENDING',
-          targetType: 'POST',
-        });
-        expect(result.items).toEqual([baseReport]);
-        expect(result.meta.total).toBe(1);
-      },
-    );
-    it.each([
-      ['all', undefined],
-      ['platform', null],
-      ['game', 'game-1'],
-    ] as const)('maps %s scope', async (scope, gameId) => {
-      await service.listForPlatform('actor', {
-        scope,
-        ...(scope === 'game' ? { gameSlug: 'slug' } : {}),
+      reportsRepository.findCaseTarget.mockResolvedValue({
+        target: null,
+        targetState: 'missing',
       });
-      expect(reportsRepository.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ gameId }),
-      );
-      if (scope === 'game')
-        expect(gameModeratorsService.resolveGameId).toHaveBeenCalledWith(
-          'slug',
-        );
-      else expect(gameModeratorsService.resolveGameId).not.toHaveBeenCalled();
-    });
-    it.each([
-      { scope: 'game' as const },
-      { scope: 'game' as const, gameSlug: '' },
-      { scope: 'platform' as const, gameSlug: 'slug' },
-      { scope: 'all' as const, gameSlug: 'slug' },
-    ])('rejects contradictory or missing slug: %j', async (query) => {
-      await expect(service.listForPlatform('actor', query)).rejects.toThrow(
-        'gameSlug is required only',
-      );
-      expect(reportsRepository.findMany).not.toHaveBeenCalled();
-    });
-    it('preserves unknown game 404', async () => {
-      gameModeratorsService.resolveGameId.mockRejectedValue(
-        new NotFoundException(),
-      );
-      await expect(
-        service.listForPlatform('actor', {
-          scope: 'game',
-          gameSlug: 'missing',
-        }),
-      ).rejects.toBeInstanceOf(NotFoundException);
-    });
-    it.each([
-      { role: 'USER', status: 'ACTIVE' },
-      { role: 'PLATFORM_MODERATOR', status: 'BANNED' },
-    ])(
-      'denies unauthorized users before any lookup, including assigned game moderators: %j',
-      async (user) => {
-        prisma.user.findUnique.mockResolvedValue(user);
-        await expect(
-          service.listForPlatform('actor', { scope: 'game', gameSlug: 'slug' }),
-        ).rejects.toBeInstanceOf(ForbiddenException);
-        expect(gameModeratorsService.resolveGameId).not.toHaveBeenCalled();
-        expect(reportsRepository.findMany).not.toHaveBeenCalled();
-      },
-    );
-  });
-
-  describe('listForModerator', () => {
-    it('resolves and authorizes the routed game, then lists that game only', async () => {
-      reportsRepository.findMany.mockResolvedValue({
-        items: [baseReport],
-        total: 1,
+      reportsRepository.findReportsByCaseId.mockResolvedValue({
+        items: [],
+        nextCursor: null,
       });
-
-      const result = await service.listForModerator(
-        'wuthering-waves',
-        'mod-1',
-        {},
-      );
-
+      reportsRepository.claimCase.mockResolvedValue({
+        ...moderationCase,
+        status: 'IN_REVIEW',
+      });
+      reportsRepository.finalizeCase.mockResolvedValue({
+        ...moderationCase,
+        status: 'RESOLVED',
+      });
+    });
+    it('scopes game list/detail/evidence to authorized exact game', async () => {
+      await service.listCasesForGame('slug', 'actor', { status: 'OPEN' });
+      expect(reportsRepository.findModerationCases).toHaveBeenCalledWith({
+        gameId: 'game-1',
+        status: 'OPEN',
+        targetType: undefined,
+        page: 1,
+        limit: 20,
+      });
+      await service.getCaseForGame('slug', 'actor', 'case');
+      await service.listCaseReportsForGame('slug', 'actor', 'case', {
+        limit: 2,
+      });
       expect(
         gameModeratorsService.resolveModeratableGameId,
-      ).toHaveBeenCalledWith('wuthering-waves', 'mod-1');
-      expect(reportsRepository.findMany).toHaveBeenCalledWith({
-        gameId: 'game-1',
-        status: undefined,
-        targetType: undefined,
-        page: 1,
-        limit: 20,
-      });
-      expect(result.meta).toEqual({
-        page: 1,
-        limit: 20,
-        total: 1,
-        totalPages: 1,
-      });
+      ).toHaveBeenCalledWith('slug', 'actor');
+      expect(reportsRepository.findReportsByCaseId).toHaveBeenLastCalledWith(
+        'case',
+        2,
+        undefined,
+      );
     });
-
-    it('propagates the moderator permission check failure', async () => {
+    it.each([null, 'other'])(
+      'hides inaccessible gameId %s for all game actions/reads',
+      async (gameId) => {
+        reportsRepository.findModerationCaseById.mockResolvedValue({
+          ...moderationCase,
+          gameId,
+        });
+        for (const read of [
+          () => service.getCaseForGame('slug', 'actor', 'case'),
+          () => service.listCaseReportsForGame('slug', 'actor', 'case', {}),
+          () => service.claimCaseForGame('slug', 'actor', 'case'),
+          () => service.resolveCaseForGame('slug', 'actor', 'case', {}),
+          () => service.dismissCaseForGame('slug', 'actor', 'case', {}),
+        ])
+          await expect(read()).rejects.toBeInstanceOf(NotFoundException);
+        expect(reportsRepository.findCaseTarget).not.toHaveBeenCalled();
+        expect(reportsRepository.claimCase).not.toHaveBeenCalled();
+        expect(reportsRepository.finalizeCase).not.toHaveBeenCalled();
+      },
+    );
+    it('rejects unauthorized game actors before case lookup', async () => {
       gameModeratorsService.resolveModeratableGameId.mockRejectedValue(
-        new ForbiddenException('You cannot moderate this game'),
+        new ForbiddenException(),
       );
-
       await expect(
-        service.listForModerator('game-1', 'user-1', {}),
-      ).rejects.toThrow(ForbiddenException);
-
-      expect(reportsRepository.findMany).not.toHaveBeenCalled();
+        service.claimCaseForGame('slug', 'actor', 'case'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.getCaseForGame('slug', 'actor', 'case'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(reportsRepository.findModerationCaseById).not.toHaveBeenCalled();
     });
-  });
-
-  describe('listAllForAdmin', () => {
-    it('lists across every game when no gameSlug filter is given', async () => {
-      reportsRepository.findMany.mockResolvedValue({ items: [], total: 0 });
-
-      await service.listAllForAdmin({});
-
-      expect(gameModeratorsService.resolveGameId).not.toHaveBeenCalled();
-      expect(reportsRepository.findMany).toHaveBeenCalledWith({
-        gameId: undefined,
-        status: undefined,
-        targetType: undefined,
-        page: 1,
-        limit: 20,
-      });
-    });
-
-    it('resolves gameSlug into a gameId filter when given', async () => {
-      reportsRepository.findMany.mockResolvedValue({ items: [], total: 0 });
-
-      await service.listAllForAdmin({ gameSlug: 'wuthering-waves' });
-
-      expect(gameModeratorsService.resolveGameId).toHaveBeenCalledWith(
-        'wuthering-waves',
+    it.each(['ADMIN', 'PLATFORM_MODERATOR'])(
+      'allows live %s platform mutations including personal cases',
+      async (role) => {
+        prisma.user.findUnique.mockResolvedValue({ role, status: 'ACTIVE' });
+        reportsRepository.findModerationCaseById.mockResolvedValue({
+          ...moderationCase,
+          gameId: null,
+        });
+        await service.claimCaseForPlatform('actor', 'case');
+        await service.resolveCaseForPlatform('actor', 'case', {
+          resolutionNote: '  Reviewed  ',
+        });
+        await service.dismissCaseForPlatform('actor', 'case', {});
+        expect(reportsRepository.claimCase).toHaveBeenCalledWith(
+          'case',
+          'actor',
+          expect.objectContaining({ gameId: undefined }),
+        );
+        expect(reportsRepository.finalizeCase).toHaveBeenCalledWith(
+          {
+            id: 'case',
+            status: 'RESOLVED',
+            resolvedById: 'actor',
+            resolutionNote: 'Reviewed',
+          },
+          expect.anything(),
+        );
+      },
+    );
+    it.each([
+      { role: 'USER', status: 'ACTIVE' },
+      { role: 'ADMIN', status: 'SUSPENDED' },
+      { role: 'PLATFORM_MODERATOR', status: 'BANNED' },
+    ])(
+      'denies platform mutations before existence checks: %j',
+      async (user) => {
+        prisma.user.findUnique.mockResolvedValue(user);
+        for (const action of [
+          () => service.claimCaseForPlatform('actor', 'missing'),
+          () => service.resolveCaseForPlatform('actor', 'missing', {}),
+          () => service.dismissCaseForPlatform('actor', 'missing', {}),
+        ])
+          await expect(action()).rejects.toBeInstanceOf(ForbiddenException);
+        expect(reportsRepository.findModerationCaseById).not.toHaveBeenCalled();
+      },
+    );
+    it('uses one case-target audit callback for both scopes, within the repository transaction', async () => {
+      await service.claimCaseForGame('slug', 'actor', 'case');
+      const [, , context] = reportsRepository.claimCase.mock
+        .calls[0] as unknown as [
+        string,
+        string,
+        import('../reports.repository').CaseTransitionContext,
+      ];
+      expect(context.gameId).toBe('game-1');
+      await context.audit(
+        { ...moderationCase, status: 'IN_REVIEW' } as unknown as Parameters<
+          typeof context.audit
+        >[0],
+        tx,
       );
-      expect(reportsRepository.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ gameId: 'game-1' }),
-      );
-    });
-  });
-
-  describe('claim', () => {
-    it('runs the shared moderation preamble, then claims for the calling moderator', async () => {
-      reportsRepository.findById.mockResolvedValue(baseReport);
-      reportsRepository.claim.mockResolvedValue({
-        ...baseReport,
-        status: 'IN_REVIEW',
-        assignedModeratorId: 'mod-1',
-      });
-
-      const result = await service.claim('game-1', 'report-1', 'mod-1');
-
-      expect(
-        gameModeratorsService.loadModeratableResource,
-      ).toHaveBeenCalledWith(
-        expect.objectContaining({
-          gameSlug: 'game-1',
-          moderatorId: 'mod-1',
-          notFoundMessage: 'Report not found',
-        }),
-      );
-      expect(reportsRepository.claim).toHaveBeenCalledWith(
-        'report-1',
-        'mod-1',
-        expect.objectContaining({
-          gameId: 'game-1',
-        }),
-      );
-      expect(result.status).toBe('IN_REVIEW');
-      await reportsRepository.claim.mock.calls[0][2].audit(result, tx);
       expect(auditLogService.recordOrThrow).toHaveBeenCalledWith(
         {
-          action: 'REPORT_CLAIMED',
-          actorId: 'mod-1',
-          targetType: 'REPORT',
-          targetId: 'report-1',
+          action: 'CASE_CLAIMED',
+          actorId: 'actor',
+          targetType: 'MODERATION_CASE',
+          targetId: 'case',
           gameId: 'game-1',
-          gameSlug: 'game-1',
+          gameSlug: 'slug',
           metadata: {
-            reportId: 'report-1',
-            caseId: 'case-1',
-            reportedTargetType: 'POST',
-            reportedTargetId: 'post-1',
+            caseId: 'case',
+            targetType: 'POST',
+            targetId: 'post',
+            gameId: 'game-1',
+            reportCount: 3,
           },
         },
         tx,
       );
     });
-
-    it('answers 409 for a report that is not claimable - one code whether it was already claimed before this request or mid-request', async () => {
-      reportsRepository.findById.mockResolvedValue({
-        ...baseReport,
-        status: 'IN_REVIEW',
-      });
-      reportsRepository.claim.mockResolvedValue(null);
-
+    it('maps failed conditional writes to 409 and missing IDs to 404', async () => {
+      reportsRepository.claimCase.mockResolvedValue(null);
+      reportsRepository.finalizeCase.mockResolvedValue(null);
       await expect(
-        service.claim('game-1', 'report-1', 'mod-1'),
-      ).rejects.toThrow(ConflictException);
-
-      expect(auditLogService.recordOrThrow).not.toHaveBeenCalled();
-    });
-
-    it('rejects when the report belongs to a different game than the route', async () => {
-      reportsRepository.findById.mockResolvedValue({
-        ...baseReport,
-        gameId: 'other-game-id',
-      });
-
+        service.claimCaseForPlatform('actor', 'case'),
+      ).rejects.toBeInstanceOf(ConflictException);
       await expect(
-        service.claim('game-1', 'report-1', 'mod-1'),
-      ).rejects.toThrow(NotFoundException);
-
-      expect(reportsRepository.claim).not.toHaveBeenCalled();
-    });
-
-    it('rejects a missing report', async () => {
-      reportsRepository.findById.mockResolvedValue(null);
-
+        service.resolveCaseForPlatform('actor', 'case', {}),
+      ).rejects.toBeInstanceOf(ConflictException);
       await expect(
-        service.claim('game-1', 'report-1', 'mod-1'),
-      ).rejects.toThrow(NotFoundException);
-    });
-
-    it('propagates the moderator permission failure without loading the report or writing', async () => {
-      gameModeratorsService.loadModeratableResource.mockRejectedValue(
-        new ForbiddenException('You cannot moderate this game'),
-      );
-
+        service.dismissCaseForGame('slug', 'actor', 'case', {}),
+      ).rejects.toBeInstanceOf(ConflictException);
+      reportsRepository.findModerationCaseById.mockResolvedValue(null);
       await expect(
-        service.claim('game-1', 'report-1', 'user-1'),
-      ).rejects.toThrow(ForbiddenException);
-
-      expect(reportsRepository.findById).not.toHaveBeenCalled();
-      expect(reportsRepository.claim).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('resolve / dismiss', () => {
-    it('resolves an open report with a trimmed note', async () => {
-      reportsRepository.findById.mockResolvedValue(baseReport);
-      reportsRepository.finalize.mockResolvedValue({
-        ...baseReport,
-        status: 'RESOLVED',
-      });
-
-      const result = await service.resolve('game-1', 'report-1', 'mod-1', {
-        resolutionNote: '  Hid the post  ',
-      });
-
-      expect(reportsRepository.finalize).toHaveBeenCalledWith(
-        {
-          id: 'report-1',
-          status: 'RESOLVED',
-          resolvedById: 'mod-1',
-          resolutionNote: 'Hid the post',
-        },
-        expect.objectContaining({
-          gameId: 'game-1',
-        }),
-      );
-      expect(result.status).toBe('RESOLVED');
-      await reportsRepository.finalize.mock.calls[0][1].audit(result, tx);
-      expect(auditLogService.recordOrThrow).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: 'REPORT_RESOLVED',
-          targetId: 'report-1',
-        }),
-        tx,
-      );
-    });
-
-    it('dismisses an open report and drops a whitespace-only note', async () => {
-      reportsRepository.findById.mockResolvedValue(baseReport);
-      reportsRepository.finalize.mockResolvedValue({
-        ...baseReport,
-        status: 'DISMISSED',
-      });
-
-      const result = await service.dismiss('game-1', 'report-1', 'mod-1', {
-        resolutionNote: '   ',
-      });
-
-      expect(reportsRepository.finalize).toHaveBeenCalledWith(
-        {
-          id: 'report-1',
-          status: 'DISMISSED',
-          resolvedById: 'mod-1',
-          resolutionNote: undefined,
-        },
-        expect.objectContaining({
-          gameId: 'game-1',
-        }),
-      );
-      await reportsRepository.finalize.mock.calls[0][1].audit(result, tx);
-      expect(auditLogService.recordOrThrow).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'REPORT_DISMISSED' }),
-        tx,
-      );
-    });
-
-    it('answers 409 for an already-closed report, from either action', async () => {
-      reportsRepository.findById.mockResolvedValue({
-        ...baseReport,
-        status: 'RESOLVED',
-      });
-      reportsRepository.finalize.mockResolvedValue(null);
-
-      await expect(
-        service.resolve('game-1', 'report-1', 'mod-1', {}),
-      ).rejects.toThrow(ConflictException);
-      await expect(
-        service.dismiss('game-1', 'report-1', 'mod-1', {}),
-      ).rejects.toThrow(ConflictException);
-    });
-
-    it('rejects when the report is missing, without writing', async () => {
-      reportsRepository.findById.mockResolvedValue(null);
-
-      await expect(
-        service.resolve('game-1', 'report-1', 'mod-1', {}),
-      ).rejects.toThrow(NotFoundException);
-
-      expect(reportsRepository.finalize).not.toHaveBeenCalled();
-    });
-
-    it('does not require the caller to be the moderator who claimed it', async () => {
-      reportsRepository.findById.mockResolvedValue({
-        ...baseReport,
-        status: 'IN_REVIEW',
-        assignedModeratorId: 'other-mod',
-      });
-      reportsRepository.finalize.mockResolvedValue({
-        ...baseReport,
-        status: 'RESOLVED',
-      });
-
-      await expect(
-        service.resolve('game-1', 'report-1', 'mod-1', {}),
-      ).resolves.toEqual(expect.objectContaining({ status: 'RESOLVED' }));
+        service.claimCaseForPlatform('actor', 'missing'),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });
