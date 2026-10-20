@@ -1,0 +1,123 @@
+/* The Add people sheet shares the Send to sheet's frame (SharePostDialog.css); only the list is its own. */
+.add-people-picked {
+  min-height: 34px;
+  text-align: center;
+}
+
+.add-people-picked small {
+  display: block;
+  padding-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.add-people-picked ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.add-people-picked li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 4px;
+  border-radius: 999px;
+  background: var(--panel2);
+  font-size: 12px;
+}
+
+.add-people-picked li button {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted-strong);
+  cursor: pointer;
+}
+
+.add-people-picked li button:hover {
+  background: var(--line);
+}
+
+.add-people-results {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-height: 160px;
+  overflow-y: auto;
+}
+
+.add-people-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 6px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.add-people-row:hover:not(:disabled) {
+  background: var(--panel2);
+}
+
+.add-people-row .chat-avatar.small {
+  width: 40px;
+  height: 40px;
+}
+
+.add-people-name {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+.add-people-name b {
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.add-people-name small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.add-people-check {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 2px solid var(--muted);
+  border-radius: 50%;
+  color: #fff;
+  font-size: 13px;
+}
+
+.add-people-row.selected .add-people-check {
+  border-color: var(--purple);
+  background: var(--purple);
+}
+
+.add-people-error {
+  color: var(--pink);
+  font-size: 12px;
+}
+
+.add-people-submit {
+  width: 100%;
+  justify-content: center;
+}

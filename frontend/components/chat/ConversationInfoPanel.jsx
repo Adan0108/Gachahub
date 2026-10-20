@@ -9,8 +9,7 @@ import {
   FiLock,
   FiSearch,
   FiShield,
-  FiUser,
-  FiUsers,
+  FiUserPlus,
   FiUserX,
   FiX,
 } from "react-icons/fi";
@@ -19,8 +18,11 @@ import { MuteRow } from "./MuteRow";
 import { ImageTile, VideoTile } from "./AttachmentTiles";
 import { ConfirmChatActionDialog } from "./ConfirmChatActionDialog";
 import { ConversationSearchView } from "./ConversationSearchView";
+import { GroupIdentity } from "./GroupIdentity";
+import { GroupMembersSection } from "./GroupMembersSection";
+import { InfoSectionToggle } from "./InfoSectionToggle";
 import { CONFIRMATIONS } from "../../lib/chat/chatActionConfirmations";
-import { blockedPeerOf } from "../../lib/chat/chatDisplay";
+import { blockedPeerOf, myParticipant } from "../../lib/chat/chatDisplay";
 import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightboxContext";
 import { attachmentKind } from "../../lib/mls/media/attachmentView";
 import { AvatarFace } from "../AvatarFace";
@@ -50,8 +52,10 @@ export function ConversationInfoPanel({
   onUnblock,
   isUnblockPending,
   isGroup,
-  onManageGroup,
-  manageButtonRef,
+  onGroupChanged,
+  onLeftGroup,
+  safety,
+  onVerifyMember,
   conversation,
   userId,
   search,
@@ -62,7 +66,12 @@ export function ConversationInfoPanel({
   const [appliedSeed, setAppliedSeed] = useState(searchSeed);
   const [toast, setToast] = useState(null);
   const [isConfirmingBlock, setIsConfirmingBlock] = useState(false);
+  const [isMembersOpen, setIsMembersOpen] = useState(true);
+  const [isMediaOpen, setIsMediaOpen] = useState(true);
+  const [isAddingPeople, setIsAddingPeople] = useState(false);
   const isBlocked = Boolean(blockedPeerOf(conversation, userId));
+  const myRole = myParticipant(conversation, userId)?.role;
+  const canManageGroup = isGroup && (myRole === "OWNER" || myRole === "ADMIN");
   const toastTimerRef = useRef(null);
 
   useEffect(() => () => window.clearTimeout(toastTimerRef.current), []);
@@ -98,22 +107,43 @@ export function ConversationInfoPanel({
           <div className="chat-info-body">
             <div className="chat-info-banner" />
             <div className="chat-info-profile">
-              <span className="chat-avatar large">
-                <AvatarFace image={displayImage} name={displayName} />
-              </span>
-              <b>{displayName}</b>
+              {isGroup ? (
+                <GroupIdentity canManage={canManageGroup} conversation={conversation} onChanged={onGroupChanged} />
+              ) : (
+                <>
+                  <span className="chat-avatar large">
+                    <AvatarFace image={displayImage} name={displayName} />
+                  </span>
+                  <b>{displayName}</b>
+                </>
+              )}
               <span className="chat-info-encryption-badge">
                 <FiLock aria-hidden="true" /> {encryptionStatus}
               </span>
             </div>
 
             <div className="chat-info-quick-actions">
-              <button onClick={() => notImplemented("Viewing a profile")} type="button">
-                <span className="chat-info-quick-icon">
-                  <FiUser />
-                </span>
-                Profile
-              </button>
+              {canManageGroup ? (
+                <button
+                  onClick={() => {
+                    setIsMembersOpen(true);
+                    setIsAddingPeople(true);
+                  }}
+                  type="button"
+                >
+                  <span className="chat-info-quick-icon">
+                    <FiUserPlus />
+                  </span>
+                  Add people
+                </button>
+              ) : (
+                <button onClick={() => setView("media")} type="button">
+                  <span className="chat-info-quick-icon">
+                    <FiImage />
+                  </span>
+                  Media
+                </button>
+              )}
               <button onClick={() => setView("search")} type="button">
                 <span className="chat-info-quick-icon">
                   <FiSearch />
@@ -123,28 +153,41 @@ export function ConversationInfoPanel({
             </div>
 
             <div className="chat-info-section">
-              <b className="chat-info-section-label">Media and files</b>
-              <button className="chat-info-row" onClick={() => setView("media")} type="button">
-                <FiImage /> Media
-                <small>{visualAttachments.length}</small>
-              </button>
-              <button className="chat-info-row" onClick={() => setView("files")} type="button">
-                <FiFile /> Files
-                <small>{fileAttachments.length}</small>
-              </button>
+              <InfoSectionToggle
+                isOpen={isMediaOpen}
+                label="Media and files"
+                onToggle={() => setIsMediaOpen((open) => !open)}
+              />
+              {isMediaOpen && (
+                <>
+                  <button className="chat-info-row" onClick={() => setView("media")} type="button">
+                    <FiImage /> Media
+                    <small>{visualAttachments.length}</small>
+                  </button>
+                  <button className="chat-info-row" onClick={() => setView("files")} type="button">
+                    <FiFile /> Files
+                    <small>{fileAttachments.length}</small>
+                  </button>
+                </>
+              )}
             </div>
 
+            {isGroup && (
+              <GroupMembersSection
+                conversation={conversation}
+                currentUserId={userId}
+                isAdding={isAddingPeople}
+                isOpen={isMembersOpen}
+                onChanged={onGroupChanged}
+                onLeft={onLeftGroup}
+                onToggleAdding={setIsAddingPeople}
+                onToggleOpen={() => setIsMembersOpen((open) => !open)}
+                onVerify={onVerifyMember}
+                safety={safety}
+              />
+            )}
+
             <div className="chat-info-section">
-              {isGroup && (
-                <button
-                  className="chat-info-row"
-                  onClick={onManageGroup}
-                  ref={manageButtonRef}
-                  type="button"
-                >
-                  <FiUsers /> Manage group
-                </button>
-              )}
               <MuteRow conversation={conversation} />
               {canVerify && (
                 <button className="chat-info-row" onClick={onVerify} type="button">
@@ -153,7 +196,7 @@ export function ConversationInfoPanel({
               )}
               {/* Block only exists for a direct chat: on a group it would cut this user off from
                   the whole group instead of the person they want gone. Leaving is the group
-                  equivalent, already inside Manage group. */}
+                  equivalent, in the members section. */}
               {!isGroup &&
                 (isBlocked ? (
                   <button

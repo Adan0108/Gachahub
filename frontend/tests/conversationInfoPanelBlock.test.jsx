@@ -173,6 +173,44 @@ describe("ConversationInfoPanel blocking", () => {
     expect(screen.queryByRole("button", { name: "Block" })).not.toBeInTheDocument();
   });
 
+  describe("layout", () => {
+    it("has no Profile button, since there is no profile page to open", () => {
+      renderPanel();
+
+      expect(screen.queryByRole("button", { name: "Profile" })).not.toBeInTheDocument();
+    });
+
+    it("folds the media and files rows away and opens them again", () => {
+      renderPanel();
+      const toggle = screen.getByRole("button", { name: "Media and files" });
+
+      expect(screen.getByRole("button", { name: /^Files/ })).toBeInTheDocument();
+      fireEvent.click(toggle);
+      expect(screen.queryByRole("button", { name: /^Files/ })).not.toBeInTheDocument();
+      fireEvent.click(toggle);
+      expect(screen.getByRole("button", { name: /^Files/ })).toBeInTheDocument();
+    });
+
+    it("puts Media where Profile was for someone who cannot add people", () => {
+      renderPanel({ conversation: group });
+
+      expect(screen.getAllByRole("button", { name: /^Media/ }).length).toBeGreaterThan(0);
+      expect(screen.queryByRole("button", { name: "Add people" })).not.toBeInTheDocument();
+    });
+
+    it("puts Add people there for a group owner, and it opens the members and the picker", () => {
+      const owned = { ...group, participants: [{ ...person("me", "Me"), role: "OWNER" }, person("a", "Ann")] };
+      renderPanel({ conversation: owned });
+      fireEvent.click(screen.getByRole("button", { name: /Members/ }));
+      expect(screen.queryByText("Ann")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByText("Add people", { selector: "button" }));
+
+      expect(screen.getByText("Ann")).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "Add people" })).toBeInTheDocument();
+    });
+  });
+
   it("sits on top of the whole page, not inside the panel that opened it", () => {
     renderPanel();
 

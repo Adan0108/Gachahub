@@ -2695,6 +2695,33 @@
   letter-spacing: 0.03em;
 }
 
+.chat-info-section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.chat-info-section-toggle:hover {
+  background: var(--panel2);
+  color: var(--text);
+}
+
+.chat-info-section-toggle[aria-expanded="true"] .chat-info-row-chevron {
+  transform: rotate(180deg);
+}
+
 .chat-info-row {
   display: flex;
   align-items: center;
@@ -4475,9 +4502,168 @@
   cursor: default;
 }
 
-/* The group photo slot takes a dropped file too. */
-.group-photo-drop.dragging {
-  outline: 2px dashed var(--purple, #8b6cff);
-  outline-offset: 4px;
-  border-radius: 12px;
+/* Group photo, name and members in the conversation info panel. */
+.chat-info-photo {
+  position: relative;
+  border-radius: 50%;
 }
+
+.chat-info-photo.dragging {
+  outline: 2px dashed var(--purple);
+  outline-offset: 4px;
+}
+
+.chat-info-photo-button {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.chat-info-photo-button:hover:not(:disabled) {
+  background: var(--purple);
+}
+
+.chat-info-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-info-name button,
+.chat-info-rename button,
+.chat-info-member-more {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted-strong);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.chat-info-name button:hover,
+.chat-info-rename button:hover:not(:disabled),
+.chat-info-member-more:hover {
+  background: var(--panel2);
+  color: var(--text);
+}
+
+.chat-info-rename {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.chat-info-rename input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel2);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.chat-info-rename input:focus {
+  border-color: var(--purple);
+  outline: none;
+}
+
+.chat-info-rename button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chat-info-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--purple);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chat-info-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.chat-info-error {
+  color: var(--pink);
+  font-size: 11px;
+}
+
+.chat-info-hint {
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chat-info-members-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chat-info-member-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-info-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.chat-info-member:hover {
+  background: var(--panel2);
+}
+
+.chat-info-member-name {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-info-member-name b {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-info-member-name small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chat-menu button.danger {
+  color: var(--pink);
+}
+
+

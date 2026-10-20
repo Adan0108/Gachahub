@@ -27,7 +27,6 @@ import {
 import { PresenceDot } from "../../components/PresenceDot";
 import { QueryNotice } from "../../components/QueryNotice";
 import { ConversationInfoPanel } from "../../components/chat/ConversationInfoPanel";
-import { GroupSettingsModal } from "../../components/chat/GroupSettingsModal";
 import { BlockedPeopleList } from "../../components/chat/BlockedPeopleList";
 import { SafetyNumberModal } from "../../components/chat/SafetyNumberModal";
 import { SafetyChangedBanner } from "../../components/chat/SafetyStatus";
@@ -694,8 +693,6 @@ function ChatPageContent() {
     },
   });
 
-  const [isGroupSettingsOpen, setIsGroupSettingsOpen] = useState(false);
-  const groupSettingsButtonRef = useRef(null);
   const [isDevicesOpen, setIsDevicesOpen] = useState(false);
   const devicesButtonRef = useRef(null);
   const [isBackupOpen, setIsBackupOpen] = useState(false);
@@ -1569,12 +1566,13 @@ function ChatPageContent() {
           isGroup={activeConversation?.type === "GROUP"}
           isOpen={isConversationInfoOpen && Boolean(activeConversation)}
           key={activeId || "no-conversation"}
-          manageButtonRef={groupSettingsButtonRef}
           onBlock={() => conversationActions.block.mutate(activeId)}
           onUnblock={() => blockedPeer && conversationActions.unblock.mutate(blockedPeer.userId)}
           isUnblockPending={conversationActions.unblock.isPending}
           onClose={() => setIsConversationInfoOpen(false)}
-          onManageGroup={() => setIsGroupSettingsOpen(true)}
+          onGroupChanged={refreshChat}
+          onLeftGroup={() => setSelectedId("")}
+          onVerifyMember={setVerifyPeerId}
           onOpenAttachment={setLightboxKey}
           onVerify={() => setVerifyPeerId(verifyPeerCandidate)}
           search={{
@@ -1591,6 +1589,7 @@ function ChatPageContent() {
             },
             onJump: jumpToMessage,
           }}
+          safety={safety.byUser}
           searchSeed={searchSeed?.conversationId === activeId ? searchSeed : null}
           userId={user?.id}
           verifyLabel={verifyLabel}
@@ -1617,21 +1616,6 @@ function ChatPageContent() {
         triggerRef={backupButtonRef}
       />
 
-      <GroupSettingsModal
-        conversation={activeConversation}
-        currentUserId={user?.id}
-        isOpen={isGroupSettingsOpen}
-        key={isGroupSettingsOpen ? activeId : "group-settings-closed"}
-        onClose={() => setIsGroupSettingsOpen(false)}
-        onLeft={() => setSelectedId("")}
-        onVerify={(userId) => {
-          setIsGroupSettingsOpen(false);
-          setVerifyPeerId(userId);
-        }}
-        refreshChat={refreshChat}
-        safety={safety.byUser}
-        triggerRef={groupSettingsButtonRef}
-      />
       <SafetyNumberModal
         hasError={safety.hasError}
         isOpen={Boolean(verifyPeerId)}

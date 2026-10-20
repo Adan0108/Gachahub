@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemberAvatar } from "../components/chat/GroupSettingsModal";
+import { MemberAvatar } from "../components/chat/MemberAvatar";
 
 const presence = vi.hoisted(() => ({ of: vi.fn() }));
 vi.mock("../hooks/presence/usePresenceOf", () => ({ usePresenceOf: presence.of }));
