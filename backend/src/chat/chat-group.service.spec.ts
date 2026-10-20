@@ -111,9 +111,15 @@ describe('ChatGroupService', () => {
     publishMany: jest.fn(),
   };
 
+  // The locked actor lookup: the actor still manages the group unless a test revokes them via actorRow
+  let actorRow: { state: string; role: string } | null;
+  const fakeTx = {
+    $queryRaw: jest.fn(),
+    chatParticipant: { findUnique: jest.fn(() => Promise.resolve(actorRow)) },
+  };
   const prisma = {
     $transaction: jest.fn((callback: (tx: unknown) => Promise<unknown>) =>
-      callback('fake-tx'),
+      callback(fakeTx),
     ),
   };
 
@@ -122,8 +128,9 @@ describe('ChatGroupService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    actorRow = { state: 'ACTIVE', role: 'OWNER' };
     prisma.$transaction.mockImplementation(
-      (callback: (tx: unknown) => Promise<unknown>) => callback('fake-tx'),
+      (callback: (tx: unknown) => Promise<unknown>) => callback(fakeTx),
     );
     chatAccessService = new ChatAccessService(
       repository as any,
@@ -200,17 +207,14 @@ describe('ChatGroupService', () => {
         'user-2',
         'user-3',
       ]);
-      expect(repository.createGroupConversation).toHaveBeenCalledWith(
-        'fake-tx',
-        {
-          creatorId: 'user-1',
-          title: 'Team Chat',
-          members: [
-            { userId: 'user-2', state: 'PENDING' },
-            { userId: 'user-3', state: 'PENDING' },
-          ],
-        },
-      );
+      expect(repository.createGroupConversation).toHaveBeenCalledWith(fakeTx, {
+        creatorId: 'user-1',
+        title: 'Team Chat',
+        members: [
+          { userId: 'user-2', state: 'PENDING' },
+          { userId: 'user-3', state: 'PENDING' },
+        ],
+      });
     });
 
     it('lets mutual followers join directly and asks everyone else to accept an invite', async () => {
@@ -235,7 +239,7 @@ describe('ChatGroupService', () => {
       });
 
       expect(repository.createGroupConversation).toHaveBeenCalledWith(
-        'fake-tx',
+        fakeTx,
         expect.objectContaining({
           members: [
             { userId: 'user-2', state: 'ACTIVE' },
@@ -295,7 +299,7 @@ describe('ChatGroupService', () => {
       });
 
       expect(repository.createGroupConversation).toHaveBeenCalledWith(
-        'fake-tx',
+        fakeTx,
         expect.objectContaining({
           members: [{ userId: 'user-2', state: 'PENDING' }],
         }),
@@ -339,7 +343,7 @@ describe('ChatGroupService', () => {
             },
           },
         ],
-        'fake-tx',
+        fakeTx,
       );
     });
   });
@@ -389,6 +393,23 @@ describe('ChatGroupService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
+    // #94: demoted between the admin check and the write
+    it('refuses a rename when the admin was demoted before the write', async () => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          { userId: 'user-1', role: 'ADMIN', state: 'ACTIVE' },
+        ]),
+      );
+      actorRow = { state: 'ACTIVE', role: 'MEMBER' };
+
+      await expect(
+        service.updateGroupChat('user-1', 'conversation-1', {
+          title: 'New Title',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(repository.updateGroupConversation).not.toHaveBeenCalled();
+    });
+
     it.each(['OWNER', 'ADMIN'])(
       'allows an active %s participant to update group details',
       async (role) => {
@@ -403,10 +424,10 @@ describe('ChatGroupService', () => {
           title: 'New Title',
         });
 
-        expect(repository.updateGroupConversation).toHaveBeenCalledWith({
-          conversationId: 'conversation-1',
-          title: 'New Title',
-        });
+        expect(repository.updateGroupConversation).toHaveBeenCalledWith(
+          { conversationId: 'conversation-1', title: 'New Title' },
+          fakeTx,
+        );
       },
     );
   });
@@ -559,6 +580,7 @@ describe('ChatGroupService', () => {
       expect(membershipService.removeMembers).toHaveBeenCalledWith(
         'conversation-1',
         ['user-2'],
+        'user-1',
       );
     });
   });
@@ -797,6 +819,23 @@ describe('ChatGroupService', () => {
       expect(repository.updateParticipantRole).not.toHaveBeenCalled();
     });
 
+    // #94: demoted between the owner check and the write
+    it('refuses a role change when the owner lost ownership before the write', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-2',
+        state: 'ACTIVE',
+        role: 'MEMBER',
+      });
+      actorRow = { state: 'ACTIVE', role: 'ADMIN' };
+
+      await expect(
+        service.updateGroupMemberRole('user-1', 'conversation-1', 'user-2', {
+          role: 'ADMIN',
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+      expect(repository.updateParticipantRole).not.toHaveBeenCalled();
+    });
+
     it('updates the role on success', async () => {
       repository.findParticipant.mockResolvedValue({
         userId: 'user-2',
@@ -821,6 +860,7 @@ describe('ChatGroupService', () => {
         'conversation-1',
         'user-2',
         'ADMIN',
+        fakeTx,
       );
     });
   });

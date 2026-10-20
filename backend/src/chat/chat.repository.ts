@@ -9,7 +9,10 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
 import { pendingSinceChange } from './membership/apply-participant-transitions';
-import { lockConversation } from './membership/lock-conversation';
+import {
+  lockAndAssertActorRole,
+  lockConversation,
+} from './membership/lock-conversation';
 import { notMutedParticipantWhere } from './notification-mute';
 import {
   claimUploadsForAttachment,
@@ -275,12 +278,15 @@ export class ChatRepository {
   }
 
   /** Updates group conversation metadata. */
-  updateGroupConversation(params: {
-    conversationId: string;
-    title?: string;
-    photoUrl?: string;
-  }) {
-    return this.prisma.chatConversation.update({
+  updateGroupConversation(
+    params: {
+      conversationId: string;
+      title?: string;
+      photoUrl?: string;
+    },
+    client: PrismaTransaction = this.prisma,
+  ) {
+    return client.chatConversation.update({
       where: {
         id: params.conversationId,
       },
@@ -329,8 +335,9 @@ export class ChatRepository {
     conversationId: string,
     userId: string,
     role: ChatParticipantRole,
+    client: PrismaTransaction = this.prisma,
   ) {
-    return this.prisma.chatParticipant.update({
+    return client.chatParticipant.update({
       where: {
         conversationId_userId: {
           conversationId,
@@ -707,6 +714,17 @@ export class ChatRepository {
     currentEpoch: number,
   ) {
     return this.prisma.$transaction(async (tx) => {
+      await lockAndAssertActorRole(tx, conversationId, userId, ['OWNER']);
+      // Someone may have joined since the caller saw the owner alone; they would be left in a closed group
+      const othersActive = await tx.chatParticipant.count({
+        where: { conversationId, userId: { not: userId }, state: 'ACTIVE' },
+      });
+      if (othersActive > 0) {
+        throw new ConflictException(
+          'Owner cannot leave before transferring ownership',
+        );
+      }
+
       const participant = await tx.chatParticipant.update({
         where: {
           conversationId_userId: { conversationId, userId },

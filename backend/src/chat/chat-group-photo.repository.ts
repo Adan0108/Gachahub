@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import { claimUploadsForAttachment } from '../media/media.repository';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  GROUP_MANAGER_ROLES,
+  lockAndAssertActorRole,
+} from './membership/lock-conversation';
 
 // Thrown inside the transaction on a CAS miss so Prisma rolls the upload claim back too; the service maps it to a 409.
 export class GroupPhotoConflictError extends Error {}
@@ -22,6 +26,12 @@ export class ChatGroupPhotoRepository {
     upload: { id: string; secureUrl: string },
   ) {
     return this.prisma.$transaction(async (tx) => {
+      await lockAndAssertActorRole(
+        tx,
+        conversationId,
+        userId,
+        GROUP_MANAGER_ROLES,
+      );
       await claimUploadsForAttachment(tx, {
         ids: [upload.id],
         userId,
@@ -36,13 +46,19 @@ export class ChatGroupPhotoRepository {
   }
 
   // Also clears a legacy `photoUrl` that has no backing upload.
-  clear(conversationId: string) {
-    return this.prisma.$transaction((tx) =>
-      this.swap(tx, conversationId, {
+  clear(conversationId: string, userId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      await lockAndAssertActorRole(
+        tx,
+        conversationId,
+        userId,
+        GROUP_MANAGER_ROLES,
+      );
+      return this.swap(tx, conversationId, {
         photoUrl: null,
         photoMediaUploadId: null,
-      }),
-    );
+      });
+    });
   }
 
   // CAS on the upload id read first in this tx, so a concurrent replace/clear makes this one lose instead of overwriting.

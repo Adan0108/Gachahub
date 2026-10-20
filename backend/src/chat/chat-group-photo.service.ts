@@ -38,7 +38,7 @@ export class ChatGroupPhotoService {
   async remove(userId: string, conversationId: string) {
     await this.chatAccessService.assertCanManageGroup(userId, conversationId);
 
-    return this.finish(() => this.repository.clear(conversationId));
+    return this.finish(() => this.repository.clear(conversationId, userId));
   }
 
   private async finish(

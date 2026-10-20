@@ -10,6 +10,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
 import { ChatMembershipService } from './membership/chat-membership.service';
+import {
+  GROUP_MANAGER_ROLES,
+  lockAndAssertActorRole,
+} from './membership/lock-conversation';
 import { CreateGroupChatDto } from './dto/create-group-chat.dto';
 import { TransferGroupOwnershipDto } from './dto/transfer-group-ownership.dto';
 import { UpdateGroupChatDto } from './dto/update-group-chat.dto';
@@ -97,9 +101,17 @@ export class ChatGroupService {
   ) {
     await this.chatAccessService.assertCanManageGroup(userId, conversationId);
 
-    return this.chatRepository.updateGroupConversation({
-      conversationId,
-      title: dto.title,
+    return this.prisma.$transaction(async (tx) => {
+      await lockAndAssertActorRole(
+        tx,
+        conversationId,
+        userId,
+        GROUP_MANAGER_ROLES,
+      );
+      return this.chatRepository.updateGroupConversation(
+        { conversationId, title: dto.title },
+        tx,
+      );
     });
   }
 
@@ -164,6 +176,7 @@ export class ChatGroupService {
     return this.chatMembershipService.removeMembers(
       conversationId,
       Array.from(new Set(dto.userIds)),
+      userId,
     );
   }
 
@@ -233,11 +246,15 @@ export class ChatGroupService {
       throw new BadRequestException('Cannot change role of group owner');
     }
 
-    return this.chatRepository.updateParticipantRole(
-      conversationId,
-      targetUserId,
-      dto.role,
-    );
+    return this.prisma.$transaction(async (tx) => {
+      await lockAndAssertActorRole(tx, conversationId, userId, ['OWNER']);
+      return this.chatRepository.updateParticipantRole(
+        conversationId,
+        targetUserId,
+        dto.role,
+        tx,
+      );
+    });
   }
 
   /**
