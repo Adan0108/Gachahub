@@ -1054,6 +1054,86 @@ describe('ChatMessagingService', () => {
       expect(repository.createMessage).not.toHaveBeenCalled();
     });
 
+    // #93: the removal (user-2) and the add (user-4) both finish between the first read and the lock
+    it('takes recipients from the locked roster when membership changed after the first read', async () => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          {
+            userId: 'user-1',
+            role: 'OWNER',
+            state: 'ACTIVE',
+            notificationLevel: 'ALL',
+          },
+          {
+            userId: 'user-2',
+            role: 'MEMBER',
+            state: 'ACTIVE',
+            notificationLevel: 'ALL',
+          },
+          {
+            userId: 'user-3',
+            role: 'MEMBER',
+            state: 'ACTIVE',
+            notificationLevel: 'ALL',
+          },
+        ]),
+      );
+      repository.lockAndFindParticipants.mockResolvedValue([
+        {
+          userId: 'user-1',
+          role: 'OWNER',
+          state: 'ACTIVE',
+          notificationLevel: 'ALL',
+          mutedUntil: null,
+        },
+        {
+          userId: 'user-2',
+          role: 'MEMBER',
+          state: 'DECLINED',
+          notificationLevel: 'ALL',
+          mutedUntil: null,
+        },
+        {
+          userId: 'user-3',
+          role: 'MEMBER',
+          state: 'ACTIVE',
+          notificationLevel: 'ALL',
+          mutedUntil: null,
+        },
+        {
+          userId: 'user-4',
+          role: 'MEMBER',
+          state: 'ACTIVE',
+          notificationLevel: 'ALL',
+          mutedUntil: null,
+        },
+      ]);
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
+        message: {
+          clientMessageId: 'client-1',
+          mentionUserIds: ['user-2', 'user-4'],
+        },
+      } as any);
+
+      expect(repository.createMessage).toHaveBeenCalledWith(
+        'fake-tx',
+        expect.objectContaining({
+          participantUserIds: ['user-1', 'user-3', 'user-4'],
+        }),
+      );
+      const [event] = eventPublisher.publish.mock.calls.at(-1) as [
+        { payload: { recipientUserIds: string[]; mentionedUserIds: string[] } },
+      ];
+      expect(event.payload.recipientUserIds).toEqual(['user-3', 'user-4']);
+      expect(event.payload.mentionedUserIds).toEqual(['user-4']);
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledTimes(1);
+      expect(chatDelivery.publishMessageCreated).toHaveBeenCalledWith(
+        expect.objectContaining({ recipientUserIds: ['user-3', 'user-4'] }),
+      );
+    });
+
     it('does not tell an outsider a removal is pending - access is checked first', async () => {
       repository.findConversationWithParticipants.mockResolvedValue(
         groupConversation([
