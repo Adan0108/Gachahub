@@ -10,26 +10,27 @@ import {
 import { readLinkPreviews } from "../../lib/mls/messaging/linkPreviewEnvelope";
 import { ChatAttachments } from "./ChatAttachments";
 import { DraftLinkPreviewCard, ReceivedLinkPreviewCard } from "./LinkPreviewCard";
+import { CommunityText } from "../community/CommunityText";
 import { LinkifiedText } from "./LinkifiedText";
 import { SharedPostCard } from "./SharedPostCard";
 import "./ChatAttachments.css";
 
-/** The body of one decrypted message bubble; envelope types this build can't show get a plain note. */
-export function EnvelopeContent({ envelope, messageId, media }) {
+/** The body of one decrypted message bubble; envelope types this build can't show get a plain note. `mentions`: handles of the people in the chat, picked out in colour. */
+export function EnvelopeContent({ envelope, messageId, media, mentions }) {
   const view = envelopeView(envelope);
   if (view?.kind === "text") {
     const previews = readLinkPreviews(envelope);
     if (previews.length === 0) {
       return (
         <p>
-          <LinkifiedText text={view.text} />
+          <CommunityText content={view.text} mentions={mentions} />
         </p>
       );
     }
     return (
       <div className="chat-text-with-preview">
         <p>
-          <LinkifiedText text={view.text} />
+          <CommunityText content={view.text} mentions={mentions} />
         </p>
         {previews.map((preview) => (
           <ReceivedLinkPreviewCard key={preview.url} media={media} messageId={messageId} preview={preview} />
@@ -45,7 +46,7 @@ export function EnvelopeContent({ envelope, messageId, media }) {
     return (
       <div className="chat-text-with-preview">
         <p>
-          <LinkifiedText text={view.caption} />
+          <CommunityText content={view.caption} mentions={mentions} />
         </p>
         <SharedPostCard postId={view.postId} />
       </div>

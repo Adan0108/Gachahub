@@ -55,6 +55,9 @@ import { useLinkPreviewDraft } from "../../hooks/chat/useLinkPreviewDraft";
 import { useConversationActions } from "../../hooks/chat/useConversationActions";
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
+import { useMentionPicker } from "../../hooks/useMentionPicker";
+import { MentionMenu } from "../../components/MentionMenu";
+import { matchMembers, mentionedIds } from "../../lib/mentions";
 import { useAcknowledgeUnreadable } from "../../hooks/chat/useAcknowledgeUnreadable";
 import { useConversationDrafts } from "../../hooks/chat/useConversationDrafts";
 import { usePresenceOf } from "../../hooks/presence/usePresenceOf";
@@ -294,7 +297,7 @@ function ChatPageContent() {
     }
   };
   const sendMessage = useMutation({
-    mutationFn: ({ text, clientId, files, replyToId, preview }) =>
+    mutationFn: ({ text, clientId, files, replyToId, preview, mentionUserIds }) =>
       withDeviceRecovery(async () => {
         if (files?.length) {
           return sendAttachmentsWithCache({
@@ -326,6 +329,7 @@ function ChatPageContent() {
           clientId,
           replyToId,
           card,
+          mentionUserIds,
         );
       }),
     onSuccess: (response, variables) => {
@@ -354,10 +358,16 @@ function ChatPageContent() {
       clientId: pending.clientId,
       files: pending.files,
       preview: pending.preview,
+      mentionUserIds: pending.mentionUserIds,
     });
   };
 
   const composerInputRef = useRef(null);
+  const mentionable = activeMembers(activeConversation)
+    .map((participant) => participant.user)
+    .filter((member) => member && member.id !== user?.id);
+  const mention = useMentionPicker(draft, setDraft, composerInputRef);
+  const mentionSuggestions = mention.query === undefined ? [] : matchMembers(mentionable, mention.query);
   // Emotes picked into the draft, by name: the box shows :name:, the message carries the token.
   const pickedEmotesRef = useRef(new Map());
   const insertIntoDraft = (piece) => {
@@ -1459,10 +1469,11 @@ function ChatPageContent() {
                       if (!text && files.length === 0) return;
                       const clientId = crypto.randomUUID();
                       const preview = files.length === 0 ? (linkPreview.preview ?? undefined) : undefined;
+                      const mentionUserIds = mentionedIds(text, mentionable);
                       // Show the bubble and free the input; the send reconciles in the background.
                       setPendingMessages((prev) => [
                         ...prev,
-                        { clientId, text, files, preview, conversationId: activeId },
+                        { clientId, text, files, preview, mentionUserIds, conversationId: activeId },
                       ]);
                       setDraft("");
                       attachmentPicker.clear();
@@ -1470,9 +1481,10 @@ function ChatPageContent() {
                       typingSignal.stop(activeId);
                       const replyToId = replyTarget?.id;
                       setReplyTarget(null);
-                      sendMessage.mutate({ text, clientId, files, replyToId, preview });
+                      sendMessage.mutate({ text, clientId, files, replyToId, preview, mentionUserIds });
                     }}
                   >
+                  <MentionMenu items={mentionSuggestions} picker={mention} />
                   <AttachmentComposerTray
                     error={attachmentPicker.error}
                     files={attachmentPicker.files}
@@ -1505,12 +1517,15 @@ function ChatPageContent() {
                   <input
                     onChange={(event) => {
                       setDraft(event.target.value);
+                      mention.onInput(event);
                       if (!messageEdit.target && event.target.value.trim()) typingSignal.ping(activeId);
                     }}
                     onKeyDown={(event) => {
+                      if (mention.handleKey(event, mentionSuggestions)) return;
                       if (event.key === "Escape" && messageEdit.target) messageEdit.leave();
                     }}
                     onPaste={handleDraftPaste}
+                    onSelect={mention.onSelect}
                     placeholder={messageEdit.target ? "Edit your message..." : "Send an encrypted message..."}
                     ref={composerInputRef}
                     value={draft}

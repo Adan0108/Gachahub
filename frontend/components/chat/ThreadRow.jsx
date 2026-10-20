@@ -159,14 +159,15 @@ function MessageBubble({
     .filter(Boolean)
     .join(" ");
 
+  const mentions = (conversation?.participants ?? []).map((participant) => participant.user?.username).filter(Boolean);
   const pendingClass = pendingEdit ? `pending ${pendingEdit.failed ? "failed" : ""}` : "";
   const body =
     decrypted.status === "ok" ? (
       mediaOnly ? (
-        <EnvelopeContent envelope={decrypted.envelope} media={message.media} messageId={message.id} />
+        <EnvelopeContent envelope={decrypted.envelope} media={message.media} mentions={mentions} messageId={message.id} />
       ) : (
         <article className={`chat-message ${mine ? "mine" : ""} ${pendingClass}`}>
-          <EnvelopeContent envelope={decrypted.envelope} media={message.media} messageId={message.id} />
+          <EnvelopeContent envelope={decrypted.envelope} media={message.media} mentions={mentions} messageId={message.id} />
         </article>
       )
     ) : (

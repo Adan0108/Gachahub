@@ -20,6 +20,7 @@ export function sendEncryptedChatMessage(
   clientMessageId: string,
   replyToId?: string,
   preview?: LinkPreviewRef,
+  mentionUserIds: UserId[] = [],
 ) {
   return sendEncryptedEnvelope(
     syncEngine,
@@ -30,13 +31,14 @@ export function sendEncryptedChatMessage(
     clientMessageId,
     previewBlobIds(preview),
     replyToId,
+    mentionUserIds,
   );
 }
 
 type WireMessage = { ciphertext: string; encryptionMeta: ReturnType<typeof senderMeta> };
 type Submit = (wire: WireMessage) => Promise<{ message: { id: string } }>;
 
-/** Same send path for any envelope; `mediaUploadIds` are the already-uploaded encrypted blobs to attach. */
+/** Same send path for any envelope; `mediaUploadIds` are the already-uploaded encrypted blobs to attach. `mentionUserIds` travel in the clear: the server cannot read the text to find them. */
 export function sendEncryptedEnvelope(
   syncEngine: SyncEngine,
   deviceId: DeviceId,
@@ -46,6 +48,7 @@ export function sendEncryptedEnvelope(
   clientMessageId: string,
   mediaUploadIds: string[] = [],
   replyToId?: string,
+  mentionUserIds: UserId[] = [],
 ) {
   return encryptSubmitAndCache(syncEngine, deviceId, conversationId, recipientUserId, envelope, (wire) =>
     api.sendChatMessage(conversationId, {
@@ -53,6 +56,7 @@ export function sendEncryptedEnvelope(
       contentType: 'TEXT',
       clientMessageId,
       ...(replyToId ? { replyToId } : {}),
+      ...(mentionUserIds.length ? { mentionUserIds } : {}),
       ...(mediaUploadIds.length
         ? { media: mediaUploadIds.map((mediaUploadId, sortOrder) => ({ mediaUploadId, sortOrder })) }
         : {}),

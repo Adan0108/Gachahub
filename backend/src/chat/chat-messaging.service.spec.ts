@@ -1278,6 +1278,50 @@ describe('ChatMessagingService', () => {
       );
     });
 
+    it('passes on mentions of members, muted or not, but not of outsiders or members who blocked the sender', async () => {
+      repository.findParticipant.mockResolvedValue({
+        userId: 'user-1',
+        state: 'ACTIVE',
+      });
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          {
+            userId: 'user-1',
+            role: 'OWNER',
+            state: 'ACTIVE',
+            notificationLevel: 'ALL',
+          },
+          {
+            userId: 'user-2',
+            role: 'MEMBER',
+            state: 'ACTIVE',
+            notificationLevel: 'NOTHING',
+          },
+          {
+            userId: 'user-3',
+            role: 'MEMBER',
+            state: 'ACTIVE',
+            notificationLevel: 'ALL',
+          },
+        ]),
+      );
+      blocksService.getBlockersAmong.mockResolvedValue(new Set(['user-3']));
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
+        message: {
+          clientMessageId: 'client-1',
+          mentionUserIds: ['user-2', 'user-3', 'outsider', 'user-1'],
+        },
+      } as any);
+
+      const [event] = eventPublisher.publish.mock.calls.at(-1) as [
+        { type: string; payload: { mentionedUserIds: string[] } },
+      ];
+      expect(event.type).toBe('chat.message.sent');
+      expect(event.payload.mentionedUserIds).toEqual(['user-2']);
+    });
+
     it('does not notify a group member who has blocked the sender', async () => {
       repository.findParticipant.mockResolvedValue({
         userId: 'user-1',

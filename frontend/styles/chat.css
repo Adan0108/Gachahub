@@ -3113,6 +3113,14 @@
   color: rgba(255, 255, 255, 0.92);
 }
 
+/* Purple disappears on the blue bubble */
+.chat-message.mine .mention {
+  padding: 0 3px;
+  color: #fff;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.22);
+}
+
 .chat-message.mine small {
   color: rgba(255, 255, 255, 0.7);
 }
@@ -3875,6 +3883,8 @@
 }
 
 .chat-composer {
+  /* the @ suggestion list opens above it */
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;

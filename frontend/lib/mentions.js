@@ -44,3 +44,22 @@ export function splitMentions(text, usernames) {
   if (cursor < text.length) parts.push({ text: text.slice(cursor) });
   return parts;
 }
+
+/** People in `members` ({ id, name, username }) whose handle or name starts like `query`, for the @ list. */
+export function matchMembers(members, query, limit = 8) {
+  const needle = query.toLowerCase();
+  return members
+    .filter(
+      (member) =>
+        member.username &&
+        (member.username.toLowerCase().startsWith(needle) || member.name?.toLowerCase().startsWith(needle)),
+    )
+    .slice(0, limit);
+}
+
+/** Ids of the `members` an @handle in the text names, at most `limit` (the server refuses more). */
+export function mentionedIds(text, members, limit = 10) {
+  const idByHandle = new Map(members.map((member) => [member.username?.toLowerCase(), member.id]));
+  const ids = findMentions(text).map((mention) => idByHandle.get(mention.handle.toLowerCase()));
+  return [...new Set(ids.filter(Boolean))].slice(0, limit);
+}

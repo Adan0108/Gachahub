@@ -586,6 +586,7 @@ function encryptedMessagePayload({
   clientMessageId,
   replyToId,
   media,
+  mentionUserIds,
 }) {
   return {
     ciphertext,
@@ -593,6 +594,7 @@ function encryptedMessagePayload({
     ...(contentType ? { contentType } : {}),
     ...(clientMessageId ? { clientMessageId } : {}),
     ...(replyToId ? { replyToId } : {}),
+    ...(mentionUserIds?.length ? { mentionUserIds } : {}),
     ...(media?.length ? { media } : {}),
   };
 }

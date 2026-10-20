@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FiCornerUpLeft, FiImage, FiSend, FiSmile, FiX } from "react-icons/fi";
 import { EmojiPicker } from "../chat/EmojiPicker";
 import { IMAGE_ACCEPT, imageFileProblem } from "../../hooks/useImageUpload";
@@ -10,9 +10,9 @@ import {
   COMMUNITY_MESSAGE_MAX_CHARS,
 } from "../../lib/community/communityChat";
 import { useCommunityMemberSuggestions } from "../../hooks/community/useCommunityMemberSuggestions";
-import { typingMention } from "../../lib/mentions";
+import { useMentionPicker } from "../../hooks/useMentionPicker";
 import { dragVerdict } from "../../lib/community/dragVerdict";
-import { AvatarFace } from "../AvatarFace";
+import { MentionMenu } from "../MentionMenu";
 import { LocalImage } from "./LocalImage";
 
 /** Writes to the room: Enter sends, Shift+Enter adds a line, a reply shows what it answers, and up to four pictures can be picked, pasted or dropped in. */
@@ -22,56 +22,15 @@ export function CommunityComposer({ slug, channel, replyTo, onCancelReply, onSen
   const [files, setFiles] = useState([]);
   const [problem, setProblem] = useState(null);
   const [dragging, setDragging] = useState(null);
-  const [caret, setCaret] = useState(0);
-  const [highlighted, setHighlighted] = useState(0);
-  // Where the @ being typed started, once the person closed its list with Escape
-  const [dismissedAt, setDismissedAt] = useState(null);
-  const pendingCaret = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const trimmed = draft.trim();
   const canSend = Boolean(trimmed) || files.length > 0;
-  const typing = typingMention(draft, caret);
-  const isSuggesting = Boolean(typing) && dismissedAt !== typing.start;
-  const suggestions = useCommunityMemberSuggestions(slug, isSuggesting ? typing.query : undefined);
-  const showSuggestions = isSuggesting && suggestions.items.length > 0;
-
-  // After picking, the caret goes back behind the inserted handle
-  useLayoutEffect(() => {
-    if (pendingCaret.current === null) return;
-    inputRef.current?.setSelectionRange(pendingCaret.current, pendingCaret.current);
-    pendingCaret.current = null;
-  });
-
-  const pickMember = (member) => {
-    const inserted = `@${member.username} `;
-    const position = typing.start + inserted.length;
-    setDraft(`${draft.slice(0, typing.start)}${inserted}${draft.slice(typing.end)}`);
-    setCaret(position);
-    pendingCaret.current = position;
-    setHighlighted(0);
-    inputRef.current?.focus();
-  };
+  const mention = useMentionPicker(draft, setDraft, inputRef);
+  const suggestions = useCommunityMemberSuggestions(slug, mention.query);
 
   const handleKeyDown = (event) => {
-    if (showSuggestions && !event.nativeEvent.isComposing) {
-      const count = suggestions.items.length;
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-        event.preventDefault();
-        setHighlighted((current) => (current + (event.key === "ArrowDown" ? 1 : count - 1)) % count);
-        return;
-      }
-      if (event.key === "Enter" || event.key === "Tab") {
-        event.preventDefault();
-        pickMember(suggestions.items[Math.min(highlighted, count - 1)]);
-        return;
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setDismissedAt(typing.start);
-        return;
-      }
-    }
+    if (mention.handleKey(event, suggestions.items)) return;
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       submit();
@@ -229,12 +188,11 @@ export function CommunityComposer({ slug, channel, replyTo, onCancelReply, onSen
           maxLength={COMMUNITY_MESSAGE_MAX_CHARS}
           onChange={(event) => {
             setDraft(event.target.value);
-            setCaret(event.target.selectionStart ?? event.target.value.length);
-            setHighlighted(0);
+            mention.onInput(event);
           }}
           onKeyDown={handleKeyDown}
           onPaste={pasteFiles}
-          onSelect={(event) => setCaret(event.target.selectionStart ?? 0)}
+          onSelect={mention.onSelect}
           placeholder={`Message #${channel.name}`}
           ref={inputRef}
           rows={1}
@@ -281,29 +239,7 @@ export function CommunityComposer({ slug, channel, replyTo, onCancelReply, onSen
             <FiSend />
           </button>
         </div>
-        {showSuggestions && (
-          <ul aria-label="Suggested members" className="community-mention-menu" role="listbox">
-            {suggestions.items.map((member, index) => (
-              <li
-                aria-selected={index === highlighted}
-                className={index === highlighted ? "active" : ""}
-                key={member.id}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  pickMember(member);
-                }}
-                onMouseEnter={() => setHighlighted(index)}
-                role="option"
-              >
-                <span className="chat-avatar small">
-                  <AvatarFace image={member.image} name={member.name} />
-                </span>
-                <span className="community-mention-name">{member.name}</span>
-                <span className="community-mention-handle">@{member.username}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <MentionMenu items={suggestions.items} picker={mention} />
         {isPickerOpen && (
           <div className="community-emoji-popover">
             <EmojiPicker emojiOnly onPick={insertEmoji} />

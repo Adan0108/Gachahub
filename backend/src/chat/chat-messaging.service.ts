@@ -377,6 +377,17 @@ export class ChatMessagingService {
       .filter((_, index) => !notifiableFlags[index])
       .map((participant) => participant.userId);
 
+    // A mention reaches someone who muted the chat, but never a non-member or someone who blocked the sender
+    const requestedMentions = new Set(dto.message.mentionUserIds ?? []);
+    const mentionedUserIds = recipientParticipants
+      .filter(
+        (participant) =>
+          requestedMentions.has(participant.userId) &&
+          participant.state === 'ACTIVE' &&
+          !blockerIds.has(participant.userId),
+      )
+      .map((participant) => participant.userId);
+
     let message: Awaited<ReturnType<typeof this.chatRepository.createMessage>>;
     try {
       message = await this.prisma.$transaction(async (tx) => {
@@ -425,6 +436,7 @@ export class ChatMessagingService {
               replyToMessageId: dto.message.replyToId ?? null,
               replyToSenderId: replyTarget?.senderId ?? null,
               recipientUserIds: notifiableRecipientIds,
+              mentionedUserIds,
             },
           },
           tx,

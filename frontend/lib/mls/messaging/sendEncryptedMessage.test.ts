@@ -118,6 +118,20 @@ describe('sendEncryptedChatMessage', () => {
     expect(body).not.toHaveProperty('media');
   });
 
+  it('sends the mentioned user ids beside the ciphertext, and leaves the field out when there are none', async () => {
+    const { api } = await import('../../api');
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockResolvedValue(2);
+    engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
+    vi.mocked(api.sendChatMessage).mockResolvedValue({ message: { id: 'msg-5' } });
+
+    await sendEncryptedChatMessage(engine as any, 'device-1', 'conv-1', 'user-bob', 'hi @bob', 'client-1', undefined, undefined, ['user-bob']);
+    await sendEncryptedChatMessage(engine as any, 'device-1', 'conv-1', 'user-bob', 'hi', 'client-2');
+
+    expect(vi.mocked(api.sendChatMessage).mock.calls.at(-2)![1]).toMatchObject({ mentionUserIds: ['user-bob'] });
+    expect(vi.mocked(api.sendChatMessage).mock.calls.at(-1)![1]).not.toHaveProperty('mentionUserIds');
+  });
+
   it('sets up the group first when this device has never established one', async () => {
     const { api } = await import('../../api');
     const engine = fakeSyncEngine();
