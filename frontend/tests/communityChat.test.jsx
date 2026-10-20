@@ -550,6 +550,33 @@ describe("CommunityChat", () => {
       expect(screen.getByRole("button", { name: "Remove dropped.png" })).toBeInTheDocument();
     });
 
+    it("tells you while dragging whether the room takes what you hold", () => {
+      const { container } = renderChat();
+      const room = container.querySelector(".community-chat");
+      const drag = (type) =>
+        fireEvent.dragOver(room, { dataTransfer: { items: [{ kind: "file", type }], dropEffect: "" } });
+
+      drag("image/png");
+      expect(screen.getByRole("status", { name: "" })).toHaveTextContent("Drop to add this image");
+
+      drag("application/pdf");
+      expect(screen.getByText(/not supported/)).toBeInTheDocument();
+      expect(container.querySelector(".community-drop-overlay.refused")).not.toBeNull();
+
+      fireEvent.dragLeave(room, { relatedTarget: null });
+      expect(container.querySelector(".community-drop-overlay")).toBeNull();
+    });
+
+    it("takes a picture dropped anywhere in the room", async () => {
+      const { container } = renderChat();
+
+      fireEvent.drop(container.querySelector(".community-chat"), {
+        dataTransfer: { files: [png("dropped.png")], items: [] },
+      });
+
+      await screen.findByRole("button", { name: "Remove dropped.png" });
+    });
+
     it("shows the pictures of a message and opens them in a viewer you can step through", () => {
       const media = [
         { id: "i1", url: "https://cdn/1.png", width: 10, height: 10 },

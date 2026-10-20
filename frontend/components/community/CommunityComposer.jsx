@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FiCornerUpLeft, FiImage, FiSend, FiSmile, FiX } from "react-icons/fi";
 import { EmojiPicker } from "../chat/EmojiPicker";
 import { IMAGE_ACCEPT, imageFileProblem } from "../../hooks/useImageUpload";
@@ -9,6 +9,7 @@ import {
   COMMUNITY_MAX_IMAGES,
   COMMUNITY_MESSAGE_MAX_CHARS,
 } from "../../lib/community/communityChat";
+import { dragVerdict } from "../../lib/community/dragVerdict";
 import { LocalImage } from "./LocalImage";
 
 /** Writes to the room: Enter sends, Shift+Enter adds a line, a reply shows what it answers, and up to four pictures can be picked, pasted or dropped in. */
@@ -17,6 +18,7 @@ export function CommunityComposer({ channel, replyTo, onCancelReply, onSend, dis
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [files, setFiles] = useState([]);
   const [problem, setProblem] = useState(null);
+  const [dragging, setDragging] = useState(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const trimmed = draft.trim();
@@ -58,11 +60,43 @@ export function CommunityComposer({ channel, replyTo, onCancelReply, onSend, dis
     addFiles(pasted);
   };
 
-  const dropFiles = (event) => {
-    if (!event.dataTransfer?.files?.length) return;
-    event.preventDefault();
-    addFiles(Array.from(event.dataTransfer.files));
-  };
+  // The whole room is the drop target, and says whether what is being dragged would be taken.
+  useEffect(() => {
+    const room = inputRef.current?.closest(".community-chat");
+    if (!room) return undefined;
+
+    const verdictOf = (event) =>
+      dragVerdict(event.dataTransfer?.items, COMMUNITY_MAX_IMAGES - files.length, IMAGE_ACCEPT.split(","));
+    const over = (event) => {
+      const verdict = verdictOf(event);
+      if (!verdict) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = verdict.ok ? "copy" : "none";
+      setDragging(verdict);
+    };
+    const leave = (event) => {
+      if (!room.contains(event.relatedTarget)) setDragging(null);
+    };
+    const drop = (event) => {
+      if (!event.dataTransfer?.files?.length) return;
+      event.preventDefault();
+      setDragging(null);
+      addFiles(Array.from(event.dataTransfer.files));
+    };
+
+    room.addEventListener("dragenter", over);
+    room.addEventListener("dragover", over);
+    room.addEventListener("dragleave", leave);
+    room.addEventListener("drop", drop);
+    return () => {
+      room.removeEventListener("dragenter", over);
+      room.removeEventListener("dragover", over);
+      room.removeEventListener("dragleave", leave);
+      room.removeEventListener("drop", drop);
+    };
+    // addFiles only reads `files`, which is already a dependency
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files, disabledReason]);
 
   const submit = () => {
     if (!canSend) return;
@@ -94,6 +128,15 @@ export function CommunityComposer({ channel, replyTo, onCancelReply, onSend, dis
 
   return (
     <div className="community-composer">
+      {dragging && (
+        <div
+          aria-live="polite"
+          className={`community-drop-overlay ${dragging.ok ? "" : "refused"}`}
+          role="status"
+        >
+          <b>{dragging.message}</b>
+        </div>
+      )}
       {replyTo && (
         <div className="community-composer-reply">
           <FiCornerUpLeft aria-hidden="true" />
@@ -126,11 +169,7 @@ export function CommunityComposer({ channel, replyTo, onCancelReply, onSend, dis
           {problem}
         </small>
       )}
-      <div
-        className="community-composer-row"
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={dropFiles}
-      >
+      <div className="community-composer-row">
         <textarea
           aria-label={`Message #${channel.name}`}
           maxLength={COMMUNITY_MESSAGE_MAX_CHARS}
