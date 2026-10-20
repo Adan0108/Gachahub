@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
+import { addMessageToCache } from '../../lib/chat/messageCache';
 import { applyReceiptsEvent } from '../../lib/chat/receiptEvents';
 import { queryKeys } from '../../lib/queries';
 import { useSharedSocket } from '../../lib/socket/sharedSocket';
@@ -73,28 +74,17 @@ export function useChatSocket() {
         sinceSavedMs: Date.now() - Date.parse(event.createdAt),
       });
       acknowledgeDelivery(event.messageId);
-      queryClient.setQueryData(queryKeys.chatMessages(event.conversationId), (old) => {
-        if (!old || old.items.some((item) => item.id === event.messageId)) {
-          return old;
-        }
-        return {
-          ...old,
-          items: [
-            ...old.items,
-            {
-              id: event.messageId,
-              conversationId: event.conversationId,
-              senderId: event.senderId,
-              ciphertext: event.ciphertext,
-              encryptionMeta: event.encryptionMeta,
-              contentType: event.contentType,
-              createdAt: event.createdAt,
-              clientMessageId: event.clientMessageId,
-              replyToId: event.replyToId,
-              media: event.media,
-            },
-          ],
-        };
+      void addMessageToCache(queryClient, event.conversationId, {
+        id: event.messageId,
+        conversationId: event.conversationId,
+        senderId: event.senderId,
+        ciphertext: event.ciphertext,
+        encryptionMeta: event.encryptionMeta,
+        contentType: event.contentType,
+        createdAt: event.createdAt,
+        clientMessageId: event.clientMessageId,
+        replyToId: event.replyToId,
+        media: event.media,
       });
       // Sidebar preview text/unread badge and the requests list aren't
       // worth hand-merging - both are cheap GETs, just refetch them.

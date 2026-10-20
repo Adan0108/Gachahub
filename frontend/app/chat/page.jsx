@@ -56,6 +56,7 @@ import { useConversationActions } from "../../hooks/chat/useConversationActions"
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
 import { useMentionPicker } from "../../hooks/useMentionPicker";
+import { addMessageToCache } from "../../lib/chat/messageCache";
 import { MentionMenu } from "../../components/MentionMenu";
 import { matchMembers, mentionedIds } from "../../lib/mentions";
 import { useAcknowledgeUnreadable } from "../../hooks/chat/useAcknowledgeUnreadable";
@@ -283,18 +284,7 @@ function ChatPageContent() {
   const withDeviceRecovery = (action) => recoverDevice(action, reprovisionDevice);
   // Merges a message the server just stored into the cache instead of refetching.
   const mergeIntoMessageCache = (conversationId, message) => {
-    const hadCachedMessages = Boolean(queryClient.getQueryData(queryKeys.chatMessages(conversationId)));
-    queryClient.setQueryData(queryKeys.chatMessages(conversationId), (old) => {
-      if (!old || old.items.some((item) => item.id === message.id)) {
-        return old;
-      }
-      return { ...old, items: [...old.items, message] };
-    });
-    if (!hadCachedMessages) {
-      // A brand-new conversation (this group's first-ever message) has no cached page to merge
-      // into, so the write above was a silent no-op - fetch it instead of losing the message.
-      queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(conversationId) });
-    }
+    void addMessageToCache(queryClient, conversationId, message);
   };
   const sendMessage = useMutation({
     mutationFn: ({ text, clientId, files, replyToId, preview, mentionUserIds }) =>
