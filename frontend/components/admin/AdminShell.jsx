@@ -21,7 +21,7 @@ const navigation = [
   { href: "/admin/moderation", label: "Moderation", icon: FiShield },
   { href: "/admin/users", label: "Users", icon: FiUsers },
   { href: "/admin/moderators", label: "Game moderators", icon: FiFlag },
-  { href: "/admin/reports", label: "Reports", icon: FiAlertTriangle },
+  { href: "/moderation/cases", label: "Cases", icon: FiAlertTriangle },
 ];
 
 export function AdminShell({ user, children }) {

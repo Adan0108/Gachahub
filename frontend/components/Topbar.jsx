@@ -10,6 +10,7 @@ import { useDismiss } from "../hooks/useDismiss";
 import { useMyPresence, useOfflineExpiryNotice } from "../hooks/presence/useMyPresence";
 import { useSignOut } from "../hooks/useSignOut";
 import { useToast } from "../hooks/useToast";
+import { ModerationNavigation } from "./moderation/ModerationNavigation";
 import { api } from "../lib/api";
 import { queries } from "../lib/queries";
 import { AvatarFace } from "./AvatarFace";
@@ -135,6 +136,7 @@ export function Topbar({ menuButtonRef, onMenu, theme, onToggleTheme, showGlobal
                   me={myPresence}
                   onChoose={(change) => changePresence.mutate(change)}
                 />
+                <ModerationNavigation user={user} onNavigate={closeAccountMenu} />
                 <Link href="/profile" onClick={() => setAccountOpen(false)} role="menuitem">
                   <FiUser /> View profile
                 </Link>

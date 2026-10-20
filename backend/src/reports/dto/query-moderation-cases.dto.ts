@@ -1,12 +1,37 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional } from 'class-validator';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { Type } from 'class-transformer';
+import {
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import {
   ModerationCaseStatus,
   ReportTargetType,
 } from '../../generated/prisma/client';
 
-export class QueryModerationCasesDto extends PaginationQueryDto {
+export class QueryModerationCasesDto {
+  @ApiPropertyOptional({ default: 20, minimum: 1, maximum: 100 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number = 20;
+
+  @ApiPropertyOptional({
+    description:
+      'Opaque nextCursor encoding the exclusive createdAt/id boundary; omit for the first page.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1024)
+  cursor?: string;
+
   @ApiPropertyOptional({
     enum: ModerationCaseStatus,
     description: 'Native workflow status; omit for all statuses.',

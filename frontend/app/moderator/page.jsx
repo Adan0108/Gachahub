@@ -1,6 +1,8 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
+import { casePath } from "../../lib/moderation";
 import { useState } from "react";
 import { FiFlag } from "react-icons/fi";
 import { AdminActionDialog } from "../../components/admin/AdminActionDialog";
@@ -18,7 +20,8 @@ export default function ModeratorPage() {
   const [flaggingGame, setFlaggingGame] = useState(null);
   const [reason, setReason] = useState("");
 
-  const invalidateGames = () => queryClient.invalidateQueries({ queryKey: queryKeys.moderatedGames });
+  const invalidateGames = () =>
+    queryClient.invalidateQueries({ queryKey: queryKeys.moderatedGames });
 
   const flagMutation = useMutation({
     mutationFn: () => api.flagGameForReview(flaggingGame.slug, reason.trim() || undefined),
@@ -60,12 +63,15 @@ export default function ModeratorPage() {
               <section className="admin-panel moderator-game-card" key={game.id}>
                 <div className="moderator-game-heading">
                   <h2>{game.name}</h2>
-                  {archived ? <span className="admin-status admin-status-archived">ARCHIVED</span> : null}
+                  <Link href={casePath(game.slug)}>Moderation cases</Link>
+                  {archived ? (
+                    <span className="admin-status admin-status-archived">ARCHIVED</span>
+                  ) : null}
                 </div>
                 {archived ? (
                   <p className="moderator-game-archived-note">
-                    This game is archived - branding and flagging are unavailable until an admin restores
-                    it.
+                    This game is archived - branding and flagging are unavailable until an admin
+                    restores it.
                   </p>
                 ) : (
                   <>

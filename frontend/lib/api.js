@@ -25,13 +25,10 @@ export const backendRoutes = {
   gameRestore: (gameSlug) => `/games/${encodePathParam(gameSlug)}/restore`,
   gameFlag: (gameSlug) => `/games/${encodePathParam(gameSlug)}/flag`,
   adminOverview: "/admin/overview",
-  adminReports: "/admin/reports",
-  reportClaim: (gameSlug, reportId) =>
-    `/games/${encodePathParam(gameSlug)}/reports/${encodePathParam(reportId)}/claim`,
-  reportResolve: (gameSlug, reportId) =>
-    `/games/${encodePathParam(gameSlug)}/reports/${encodePathParam(reportId)}/resolve`,
-  reportDismiss: (gameSlug, reportId) =>
-    `/games/${encodePathParam(gameSlug)}/reports/${encodePathParam(reportId)}/dismiss`,
+  platformCases: "/moderation/cases",
+  platformCase: (caseId) => `/moderation/cases/${encodePathParam(caseId)}`,
+  gameCases: (gameSlug) => `/games/${encodePathParam(gameSlug)}/moderation/cases`,
+  gameCase: (gameSlug, caseId) => `/games/${encodePathParam(gameSlug)}/moderation/cases/${encodePathParam(caseId)}`,
   adminUsers: "/admin/users",
   adminUserStatus: (userId) => `/admin/users/${encodePathParam(userId)}/status`,
   adminContent: "/admin/content",
@@ -479,6 +476,10 @@ async function mockResponse(path, options = {}) {
     });
     return { items: params.has("cursor") ? [] : items, meta: { limit: Number(params.get("limit") || 20), hasMore: false, nextCursor: null } };
   }
+  // Moderation requires explicit fixtures; never let the generic game mock impersonate a case.
+  if (pathname.startsWith('/moderation/cases') || /^\/games\/[^/]+\/moderation\/cases/.test(pathname)) {
+    throw new Error('Case moderation requires a running backend. Disable NEXT_PUBLIC_USE_MOCKS.');
+  }
   if (pathname.startsWith('/games/')) {
     const slug = decodePathParam(pathname.split('/')[2]);
     const game = mockGames.find((item) => item.slug === slug || item.id === slug);
@@ -802,14 +803,22 @@ export const api = {
     };
   },
   getAdminOverview: (options = {}) => request(backendRoutes.adminOverview, options),
-  listReports: (query = {}, options = {}) =>
-    request(withQuery(backendRoutes.adminReports, query), options),
-  claimReport: (gameSlug, reportId) =>
-    mutation(backendRoutes.reportClaim(gameSlug, reportId), undefined, { method: "PATCH" }),
-  resolveReport: (gameSlug, reportId, { resolutionNote } = {}) =>
-    mutation(backendRoutes.reportResolve(gameSlug, reportId), { resolutionNote }, { method: "PATCH" }),
-  dismissReport: (gameSlug, reportId, { resolutionNote } = {}) =>
-    mutation(backendRoutes.reportDismiss(gameSlug, reportId), { resolutionNote }, { method: "PATCH" }),
+  listPlatformCases: ({ cursor, limit, status, targetType, scope, gameSlug } = {}, options = {}) =>
+    request(withQuery(backendRoutes.platformCases, { cursor, limit, status, targetType, scope, gameSlug }), options),
+  getPlatformCase: (caseId, options = {}) => request(backendRoutes.platformCase(caseId), options),
+  listPlatformCaseReports: (caseId, { cursor, limit } = {}, options = {}) =>
+    request(withQuery(`${backendRoutes.platformCase(caseId)}/reports`, { cursor, limit }), options),
+  claimPlatformCase: (caseId) => mutation(`${backendRoutes.platformCase(caseId)}/claim`, undefined, { method: "PATCH" }),
+  resolvePlatformCase: (caseId, { resolutionNote } = {}) => mutation(`${backendRoutes.platformCase(caseId)}/resolve`, { resolutionNote }, { method: "PATCH" }),
+  dismissPlatformCase: (caseId, { resolutionNote } = {}) => mutation(`${backendRoutes.platformCase(caseId)}/dismiss`, { resolutionNote }, { method: "PATCH" }),
+  listGameCases: (gameSlug, { cursor, limit, status, targetType } = {}, options = {}) =>
+    request(withQuery(backendRoutes.gameCases(gameSlug), { cursor, limit, status, targetType }), options),
+  getGameCase: (gameSlug, caseId, options = {}) => request(backendRoutes.gameCase(gameSlug, caseId), options),
+  listGameCaseReports: (gameSlug, caseId, { cursor, limit } = {}, options = {}) =>
+    request(withQuery(`${backendRoutes.gameCase(gameSlug, caseId)}/reports`, { cursor, limit }), options),
+  claimGameCase: (gameSlug, caseId) => mutation(`${backendRoutes.gameCase(gameSlug, caseId)}/claim`, undefined, { method: "PATCH" }),
+  resolveGameCase: (gameSlug, caseId, { resolutionNote } = {}) => mutation(`${backendRoutes.gameCase(gameSlug, caseId)}/resolve`, { resolutionNote }, { method: "PATCH" }),
+  dismissGameCase: (gameSlug, caseId, { resolutionNote } = {}) => mutation(`${backendRoutes.gameCase(gameSlug, caseId)}/dismiss`, { resolutionNote }, { method: "PATCH" }),
   listAdminUsers: (query = {}, options = {}) =>
     request(withQuery(backendRoutes.adminUsers, query), options),
   setUserStatus: (userId, { status, reason }) =>

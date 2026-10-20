@@ -1,6 +1,7 @@
+import { decodeEvidenceCursor } from './domain/report-evidence-pagination';
 jest.mock('../prisma/prisma.service', () => ({ PrismaService: class {} }));
 import { ConflictException } from '@nestjs/common';
-import { Prisma } from '../generated/prisma/client';
+import { Prisma, ReportReason } from '../generated/prisma/client';
 import { ReportsRepository } from './reports.repository';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { PostReportSnapshot } from './domain/report-target-snapshot';
@@ -247,7 +248,8 @@ describe('ReportsRepository native case reads', () => {
       count: jest.fn(),
       findUnique: jest.fn(),
     },
-    report: { findMany: jest.fn() },
+    report: { findMany: jest.fn(), groupBy: jest.fn().mockResolvedValue([]) },
+    $queryRaw: jest.fn().mockResolvedValue([]),
     post: { findUnique: jest.fn() },
     comment: { findUnique: jest.fn() },
     $transaction: jest.fn((queries: Promise<unknown>[]) =>
@@ -264,15 +266,173 @@ describe('ReportsRepository native case reads', () => {
       { id: 'case', status: 'OPEN', reportCount: 3 },
     ]);
     prisma.moderationCase.count.mockResolvedValue(1);
+    prisma.report.groupBy.mockResolvedValue([]);
+    prisma.$queryRaw.mockResolvedValue([]);
+  });
+  it.each([20, 50])(
+    'enriches %i cases with one target batch and one reason aggregation',
+    async (size) => {
+      const items = Array.from({ length: size }, (_, i) => ({
+        id: `case-${i}`,
+        targetType: i % 2 ? 'COMMENT' : 'POST',
+        targetId: `target-${i}`,
+        createdAt: new Date(),
+      }));
+      prisma.moderationCase.findMany.mockResolvedValue(items);
+      await repository.findModerationCases({
+        limit: size,
+      });
+      expect(prisma.moderationCase.findMany).toHaveBeenCalledTimes(1);
+      expect(prisma.moderationCase.count).not.toHaveBeenCalled();
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.report.groupBy).toHaveBeenCalledTimes(1);
+      expect(prisma.report.groupBy).toHaveBeenCalledWith({
+        by: ['caseId', 'reasonCode'],
+        where: { caseId: { in: items.map((item) => item.id) } },
+        _count: { _all: true },
+      });
+      expect(prisma.post.findUnique).not.toHaveBeenCalled();
+      expect(prisma.comment.findUnique).not.toHaveBeenCalled();
+      expect(prisma.report.findMany).not.toHaveBeenCalled();
+    },
+  );
+  it('merges typed previews, safe missing/deleted states and ordered evidence-derived reasons', async () => {
+    prisma.moderationCase.findMany.mockResolvedValue([
+      { id: 'a', targetType: 'POST', targetId: 'same', gameId: null },
+      { id: 'b', targetType: 'COMMENT', targetId: 'same' },
+      { id: 'c', targetType: 'POST', targetId: 'deleted' },
+      { id: 'd', targetType: 'POST', targetId: 'missing' },
+    ]);
+    const author = {
+      id: 'author',
+      name: 'Author',
+      username: 'author',
+      image: null,
+    };
+    prisma.$queryRaw.mockResolvedValue([
+      {
+        targetType: 'POST',
+        targetId: 'same',
+        deleted: false,
+        title: 'Post title',
+        excerpt: 'Excerpt',
+        thumbnailUrl: 'https://example.com/image.png',
+        author,
+      },
+      {
+        targetType: 'COMMENT',
+        targetId: 'same',
+        deleted: false,
+        title: null,
+        excerpt: 'Comment excerpt',
+        thumbnailUrl: null,
+        author,
+      },
+      {
+        targetType: 'POST',
+        targetId: 'deleted',
+        deleted: true,
+        title: 'Deleted secret',
+      },
+    ]);
+    prisma.report.groupBy.mockResolvedValue([
+      { caseId: 'a', reasonCode: 'OTHER', _count: { _all: 1 } },
+      { caseId: 'a', reasonCode: 'HATE', _count: { _all: 2 } },
+      { caseId: 'a', reasonCode: 'HARASSMENT', _count: { _all: 2 } },
+    ]);
+    const { items } = await repository.findModerationCases({
+      limit: 20,
+    });
+    expect(items[0]).toMatchObject({
+      gameId: null,
+      targetPreview: { title: 'Post title', author },
+      reasonSummary: [
+        { reasonCode: 'HARASSMENT', count: 2 },
+        { reasonCode: 'HATE', count: 2 },
+        { reasonCode: 'OTHER', count: 1 },
+      ],
+    });
+    expect(items[1].targetPreview?.excerpt).toBe('Comment excerpt');
+    expect(items[2]).toMatchObject({
+      targetState: 'deleted',
+      targetPreview: null,
+    });
+    expect(items[3]).toMatchObject({
+      targetState: 'missing',
+      targetPreview: null,
+      reasonSummary: [],
+    });
+    for (const item of items) {
+      expect(item).not.toHaveProperty('reports');
+      expect(item).not.toHaveProperty('targetSnapshot');
+    }
+  });
+  it('uses an exclusive tuple boundary, one lookahead and no OFFSET/count without a pagination mode', async () => {
+    const createdAt = new Date('2026-10-20T00:00:00.000Z');
+    prisma.moderationCase.findMany.mockResolvedValue(
+      ['z', 'y', 'x'].map((id) => ({
+        id,
+        targetType: 'POST',
+        targetId: id,
+        createdAt,
+      })),
+    );
+    const result = await repository.findModerationCases({
+      limit: 2,
+
+      cursor: { id: 'zz', createdAt },
+      gameId: 'game',
+    });
+    expect(result.items.map((item) => item.id)).toEqual(['z', 'y']);
+    expect(decodeEvidenceCursor(result.nextCursor!)).toEqual({
+      id: 'y',
+      createdAt,
+    });
+    const [args] = prisma.moderationCase.findMany.mock.calls[0] as unknown as [
+      Record<string, unknown>,
+    ];
+    expect(args).toMatchObject({
+      take: 3,
+      where: {
+        gameId: 'game',
+        OR: [{ createdAt: { lt: createdAt } }, { createdAt, id: { lt: 'zz' } }],
+      },
+    });
+    expect(args).not.toHaveProperty('skip');
+    expect(prisma.moderationCase.count).not.toHaveBeenCalled();
+  });
+  it('does no enrichment work for an empty page', async () => {
+    prisma.moderationCase.findMany.mockResolvedValue([]);
+    expect(
+      await repository.findModerationCases({
+        limit: 20,
+      }),
+    ).toMatchObject({ items: [], nextCursor: null });
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(prisma.report.groupBy).not.toHaveBeenCalled();
+  });
+  it('returns at most one aggregate per enum reason regardless of complaint counts', async () => {
+    prisma.report.groupBy.mockResolvedValue(
+      Object.values(ReportReason).map((reasonCode) => ({
+        caseId: 'case',
+        reasonCode,
+        _count: { _all: 10000 },
+      })),
+    );
+    const summaries = await repository.findCaseReasonSummaries(['case']);
+    expect(summaries.get('case')).toHaveLength(10);
+    expect(summaries.get('case')?.every((item) => item.count === 10000)).toBe(
+      true,
+    );
   });
   it.each([undefined, null, 'game'])(
-    'lists/counts cases with exact game scope %s and native filters',
+    'lists cases with exact game scope %s and native filters',
     async (gameId) => {
       const result = await repository.findModerationCases({
         gameId,
         status: 'OPEN',
         targetType: 'POST',
-        page: 2,
+
         limit: 10,
       });
       const where = {
@@ -283,12 +443,13 @@ describe('ReportsRepository native case reads', () => {
       expect(prisma.moderationCase.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where,
-          skip: 10,
-          take: 10,
+          take: 11,
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         }),
       );
-      expect(prisma.moderationCase.count).toHaveBeenCalledWith({ where });
+      expect(prisma.moderationCase.count).not.toHaveBeenCalled();
+      expect(result).not.toHaveProperty('total');
+      expect(result).not.toHaveProperty('meta');
       const [query] = prisma.moderationCase.findMany.mock
         .calls[0] as unknown as [{ select: Record<string, unknown> }];
       expect(query.select).toMatchObject({
@@ -301,7 +462,7 @@ describe('ReportsRepository native case reads', () => {
         expect(query.select).not.toHaveProperty(excluded);
       expect(prisma.report.findMany).not.toHaveBeenCalled();
       expect(result).toMatchObject({
-        total: 1,
+        nextCursor: null,
         items: [{ status: 'OPEN', reportCount: 3 }],
       });
     },

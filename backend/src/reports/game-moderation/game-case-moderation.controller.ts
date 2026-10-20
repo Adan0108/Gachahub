@@ -45,19 +45,21 @@ export class GameCaseModerationController {
   ) {}
 
   @Get()
+  @ApiQuery({
+    name: 'cursor',
+    required: false,
+    type: String,
+    description:
+      'Opaque nextCursor from the previous queue response; omit for the first page.',
+  })
   @ApiOkResponse({
     description:
-      '{items,meta}: native case summaries with game/user summaries, stored counters, risk, assignment/resolution timestamps. meta counts CASES; evidence and target bodies are excluded.',
+      '{items,nextCursor}: native case summaries with game/user summaries, stored counters, risk, assignment/resolution timestamps. nextCursor is null at the end; evidence and target bodies are excluded. Lightweight targetPreview is {title (max 160), excerpt (max 240), thumbnailUrl (one image), author {id,name,username,image}} or null; targetState is available/deleted/missing. reasonSummary is [{reasonCode,count}], grouped from surviving evidence, count DESC then reasonCode ASC (at most 10 enum reasons). No reports[] or full content/media/storage fields. Cursor encodes the exclusive {createdAt,id} boundary. Stable createdAt DESC,id DESC; evidence remains in detail.',
   })
   @ApiOperation({
     summary: 'List case workflows in this exact game.',
     description:
-      'One case per row; native OPEN/IN_REVIEW/RESOLVED/DISMISSED statuses. DB-side createdAt DESC,id DESC pagination. Stored reportCount/uniqueReporterCount may exceed surviving evidence after reporter deletion. No reports collection or snapshot in list.',
-  })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    schema: { type: 'integer', default: 1, minimum: 1, maximum: 500 },
+      'One case per row; native OPEN/IN_REVIEW/RESOLVED/DISMISSED statuses. Cursor-only DB-side createdAt DESC,id DESC pagination; limit defaults to 20 (maximum 100). Stored reportCount/uniqueReporterCount may exceed surviving evidence after reporter deletion. No reports collection or snapshot in list.',
   })
   @ApiQuery({
     name: 'limit',
@@ -79,7 +81,7 @@ export class GameCaseModerationController {
   @Get(':caseId')
   @ApiOkResponse({
     description:
-      'Case fields plus resolutionNote, target, targetState, evidence {items,nextCursor}. Snapshot projection is allowlisted; missing targets remain readable.',
+      'Case fields plus resolutionNote, aggregate reasonSummary, target, targetState, evidence {items,nextCursor}. Snapshot projection is allowlisted; missing targets remain readable.',
   })
   @ApiParam({
     name: 'caseId',

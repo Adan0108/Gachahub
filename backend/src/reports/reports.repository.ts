@@ -82,8 +82,8 @@ export class ReportsRepository {
     gameId?: string | null;
     status?: ModerationCaseStatus;
     targetType?: ReportTargetType;
-    page: number;
     limit: number;
+    cursor?: EvidenceCursor;
   }) {
     const where: Prisma.ModerationCaseWhereInput = {
       ...(params.gameId !== undefined ? { gameId: params.gameId } : {}),
@@ -91,18 +91,132 @@ export class ReportsRepository {
       ...(params.targetType !== undefined
         ? { targetType: params.targetType }
         : {}),
+      ...(params.cursor
+        ? {
+            OR: [
+              { createdAt: { lt: params.cursor.createdAt } },
+              {
+                createdAt: params.cursor.createdAt,
+                id: { lt: params.cursor.id },
+              },
+            ],
+          }
+        : {}),
     };
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.moderationCase.findMany({
-        where,
-        select: caseSummarySelect,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        skip: (params.page - 1) * params.limit,
-        take: params.limit,
-      }),
-      this.prisma.moderationCase.count({ where }),
+    const rows = await this.prisma.moderationCase.findMany({
+      where,
+      select: caseSummarySelect,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: params.limit + 1,
+    });
+    const page = rows.slice(0, params.limit);
+    const last = page.at(-1);
+    return {
+      items: await this.enrichCasePage(page),
+      nextCursor:
+        rows.length > params.limit && last ? encodeEvidenceCursor(last) : null,
+    };
+  }
+
+  /** One aggregation for this bounded set of cases; never fetch complaint bodies. */
+  async findCaseReasonSummaries(caseIds: string[]) {
+    const result = new Map<
+      string,
+      Array<{ reasonCode: ReportReason; count: number }>
+    >();
+    if (!caseIds.length) return result;
+    const groups = await this.prisma.report.groupBy({
+      by: ['caseId', 'reasonCode'],
+      where: { caseId: { in: caseIds } },
+      _count: { _all: true },
+    });
+    for (const group of groups) {
+      const reasons = result.get(group.caseId) ?? [];
+      reasons.push({ reasonCode: group.reasonCode, count: group._count._all });
+      result.set(group.caseId, reasons);
+    }
+    for (const reasons of result.values())
+      reasons.sort(
+        (a, b) => b.count - a.count || a.reasonCode.localeCompare(b.reasonCode),
+      );
+    return result;
+  }
+
+  private async enrichCasePage<
+    T extends { id: string; targetId: string; targetType: ReportTargetType },
+  >(items: T[]) {
+    if (!items.length) return [];
+    const postIds = items
+      .filter((item) => item.targetType === 'POST')
+      .map((item) => item.targetId);
+    const commentIds = items
+      .filter((item) => item.targetType === 'COMMENT')
+      .map((item) => item.targetId);
+    // LEFT bounds text in PostgreSQL, not after transferring entire content bodies.
+    // The lateral media lookup returns at most one image per post using (postId,sortOrder).
+    const [previews, reasons] = await Promise.all([
+      this.prisma.$queryRaw<
+        Array<{
+          targetType: ReportTargetType;
+          targetId: string;
+          deleted: boolean;
+          title: string | null;
+          excerpt: string;
+          thumbnailUrl: string | null;
+          author: {
+            id: string;
+            name: string;
+            username: string | null;
+            image: string | null;
+          };
+        }>
+      >(Prisma.sql`
+        SELECT 'POST'::text AS "targetType", p.id AS "targetId",
+          (p."deletedAt" IS NOT NULL OR p.status = 'DELETED') AS deleted,
+          LEFT(NULLIF(BTRIM(p.title), ''), 160) AS title,
+          LEFT(regexp_replace(p.content, '\\s+', ' ', 'g'), 240) AS excerpt,
+          m.url AS "thumbnailUrl",
+          json_build_object('id', u.id, 'name', LEFT(u.name,160), 'username', u.username, 'image', LEFT(u.image,2048)) AS author
+        FROM posts p JOIN "user" u ON u.id = p."authorId"
+        LEFT JOIN LATERAL (SELECT url FROM post_media
+          WHERE "postId" = p.id AND "mediaType" = 'IMAGE'
+            AND url ~ '^https?://' AND length(url) <= 2048
+          ORDER BY "sortOrder", id LIMIT 1) m ON true
+        WHERE p.id IN (${Prisma.join(postIds.length ? postIds : [''])})
+        UNION ALL
+        SELECT 'COMMENT'::text, c.id,
+          (c."deletedAt" IS NOT NULL OR p."deletedAt" IS NOT NULL OR p.status = 'DELETED'),
+          NULL, LEFT(regexp_replace(c.content, '\\s+', ' ', 'g'), 240), NULL,
+          json_build_object('id', u.id, 'name', LEFT(u.name,160), 'username', u.username, 'image', LEFT(u.image,2048))
+        FROM comments c JOIN posts p ON p.id = c."postId" JOIN "user" u ON u.id = c."authorId"
+        WHERE c.id IN (${Prisma.join(commentIds.length ? commentIds : [''])})
+      `),
+      this.findCaseReasonSummaries(items.map((item) => item.id)),
     ]);
-    return { items, total };
+    const targets = new Map(
+      previews.map((row) => [`${row.targetType}:${row.targetId}`, row]),
+    );
+    return items.map((item) => {
+      const row = targets.get(`${item.targetType}:${item.targetId}`);
+      return {
+        ...item,
+        targetState: !row
+          ? ('missing' as const)
+          : row.deleted
+            ? ('deleted' as const)
+            : ('available' as const),
+        targetPreview:
+          !row || row.deleted
+            ? null
+            : {
+                title: row.title,
+                excerpt: row.excerpt,
+                thumbnailUrl: row.thumbnailUrl,
+                author: row.author,
+              },
+        reasonSummary: reasons.get(item.id) ?? [],
+      };
+    });
   }
 
   findModerationCaseById(id: string) {

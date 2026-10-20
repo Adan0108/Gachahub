@@ -23,11 +23,13 @@ vi.mock("@tanstack/react-query", () => ({
                 id: "comment-1",
                 content: "Original comment",
                 author: { name: "Reviewer" },
-                replyCount: 0,
+                replyCount: 1,
               },
             ],
           }
-        : null,
+        : options.queryKey?.[0] === "comment-replies"
+          ? { items: [{ id: "reply-1", content: "A reply", author: { name: "Replier" } }] }
+          : null,
     isLoading: false,
     isError: false,
   })),
@@ -98,7 +100,10 @@ describe("PostList", () => {
     fireEvent.click(screen.getByRole("button", { name: "native share" }));
     await waitFor(() =>
       expect(mocks.share).toHaveBeenCalledWith(
-        expect.objectContaining({ title: "Share me", url: expect.stringContaining("/post/post-share") }),
+        expect.objectContaining({
+          title: "Share me",
+          url: expect.stringContaining("/post/post-share"),
+        }),
       ),
     );
   });
@@ -143,6 +148,58 @@ describe("PostList", () => {
         targetId: "post-report",
         reasonCode: "COMMERCIAL_SPAM",
         details: "Repeated ads",
+      }),
+    );
+  });
+
+  it("submits a comment complaint using the comment ID and native target type", async () => {
+    mocks.createReport.mockClear();
+    render(
+      <PostList
+        posts={[{ id: "post-comment-report", title: "Comment report", author: "Author" }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Comments on Comment report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Report comment" }));
+    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: "HARASSMENT" } });
+    fireEvent.change(screen.getByLabelText(/details/i), { target: { value: "Comment evidence" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit report" }));
+    await waitFor(() =>
+      expect(mocks.createReport).toHaveBeenCalledWith({
+        targetType: "COMMENT",
+        targetId: "comment-1",
+        reasonCode: "HARASSMENT",
+        details: "Comment evidence",
+      }),
+    );
+  });
+
+  it("asks a guest to sign in before opening comment reporting", () => {
+    mocks.isAuthenticated = false;
+    mocks.push.mockClear();
+    const { container } = render(
+      <PostList posts={[{ id: "guest-report", title: "Guest report", author: "Author" }]} />,
+    );
+    fireEvent.click(container.querySelector(".post-social button:nth-child(2)"));
+    fireEvent.click(screen.getByRole("button", { name: "Report comment" }));
+    expect(mocks.push).toHaveBeenCalledWith("/login");
+    expect(screen.queryByRole("dialog", { name: /Report comment/ })).not.toBeInTheDocument();
+    mocks.isAuthenticated = true;
+  });
+
+  it("reports a reply as COMMENT evidence using the reply ID", async () => {
+    mocks.createReport.mockClear();
+    render(<PostList posts={[{ id: "reply-report", title: "Reply report", author: "Author" }]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Comments on Reply report" }));
+    fireEvent.click(screen.getByRole("button", { name: "View 1 replies" }));
+    fireEvent.click(screen.getByRole("button", { name: "Report reply" }));
+    expect(screen.getByRole("heading", { name: "What’s wrong with this comment?" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Submit report" }));
+    await waitFor(() =>
+      expect(mocks.createReport).toHaveBeenCalledWith({
+        targetType: "COMMENT",
+        targetId: "reply-1",
+        reasonCode: "UNMARKED_SPOILERS",
       }),
     );
   });

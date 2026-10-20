@@ -9,7 +9,6 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { loadActiveUser } from '../../common/guards/active-user.util';
 import { hasPlatformModerationCapability } from '../../common/guards/moderation-capabilities';
 import { normalizeText } from '../../common/utils/normalize-text';
-import { resolvePagination, toPaginated } from '../../common/utils/paginated';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import type { CaseAuditAction } from '../../audit-log/audit-log.types';
 import { GameModeratorsService } from '../../game-moderators/game-moderators.service';
@@ -224,26 +223,35 @@ export class ReportModerationService {
     gameId: string | null | undefined,
     query: QueryModerationCasesDto,
   ) {
-    const { page, limit } = resolvePagination(query);
-    const result = await this.reportsRepository.findModerationCases({
+    const cursor =
+      query.cursor === undefined
+        ? undefined
+        : decodeEvidenceCursor(query.cursor);
+    if (cursor === null) throw new BadRequestException('Invalid case cursor');
+    return this.reportsRepository.findModerationCases({
       gameId,
       status: query.status,
       targetType: query.targetType,
-      page,
-      limit,
+      limit: query.limit ?? 20,
+      cursor,
     });
-    return toPaginated(result.items, { page, limit, total: result.total });
   }
 
   private async caseDetail(moderationCase: CaseDetail) {
-    const [target, evidence] = await Promise.all([
+    const [target, evidence, reasons] = await Promise.all([
       this.reportsRepository.findCaseTarget(
         moderationCase.targetType,
         moderationCase.targetId,
       ),
       this.reportsRepository.findReportsByCaseId(moderationCase.id, 20),
+      this.reportsRepository.findCaseReasonSummaries([moderationCase.id]),
     ]);
-    return { ...moderationCase, ...target, evidence };
+    return {
+      ...moderationCase,
+      ...target,
+      evidence,
+      reasonSummary: reasons.get(moderationCase.id) ?? [],
+    };
   }
 
   private caseReports(caseId: string, query: QueryCaseReportsDto) {

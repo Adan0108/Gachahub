@@ -43,7 +43,7 @@ function videoMimeType(format) {
   return normalizedFormat === "mov" ? "video/quicktime" : `video/${normalizedFormat}`;
 }
 
-function CommentItem({ comment }) {
+function CommentItem({ comment, onReport }) {
   const queryClient = useQueryClient();
   const { isAuthenticated } = useCurrentUser();
   const router = useRouter();
@@ -95,6 +95,14 @@ function CommentItem({ comment }) {
         <button onClick={startReply} type="button">
           <FiCornerUpLeft /> Reply
         </button>
+        <button
+          onClick={() =>
+            onReport("COMMENT", comment.id, `comment by ${comment.author?.name || "user"}`)
+          }
+          type="button"
+        >
+          <FiFlag /> Report comment
+        </button>
         {comment.replyCount > 0 && (
           <button onClick={() => setRepliesOpen((open) => !open)} type="button">
             {repliesOpen ? "Hide replies" : `View ${comment.replyCount} replies`}
@@ -144,6 +152,16 @@ function CommentItem({ comment }) {
               <p>
                 <MentionText content={item.content} usernames={item.mentions} />
               </p>
+              <div className="post-comment-actions">
+                <button
+                  onClick={() =>
+                    onReport("COMMENT", item.id, `reply by ${item.author?.name || "user"}`)
+                  }
+                  type="button"
+                >
+                  <FiFlag /> Report reply
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -197,13 +215,19 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
   const [shareOpen, setShareOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [reportTarget, setReportTarget] = useState(null);
   const [reportReason, setReportReason] = useState("UNMARKED_SPOILERS");
   const [reportDetails, setReportDetails] = useState("");
   const [actionNotice, setActionNotice] = useState("");
   const menuRef = useRef(null);
   const menuTriggerRef = useRef(null);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
-  useDismiss({ isOpen: menuOpen, onDismiss: closeMenu, contentRef: menuRef, triggerRef: menuTriggerRef });
+  useDismiss({
+    isOpen: menuOpen,
+    onDismiss: closeMenu,
+    contentRef: menuRef,
+    triggerRef: menuTriggerRef,
+  });
   const media = Array.isArray(post.media) ? post.media : [];
   const isFeed = variant === "feed";
   const liked = likeOverride?.liked ?? Boolean(post.likedByCurrentUser);
@@ -263,8 +287,8 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
   const reportPost = useMutation({
     mutationFn: () =>
       api.createReport({
-        targetType: "POST",
-        targetId: post.id,
+        targetType: reportTarget?.targetType || "POST",
+        targetId: reportTarget?.targetId || post.id,
         reasonCode: reportReason,
         ...(reportDetails.trim() ? { details: reportDetails.trim() } : {}),
       }),
@@ -274,6 +298,16 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
       setActionNotice("Report submitted. Thank you for helping keep the community safe.");
     },
   });
+
+  const openReport = (targetType = "POST", targetId = post.id, label = post.title) => {
+    if (!requireAuth()) return;
+    reportPost.reset?.();
+    setActionNotice("");
+    setReportReason("UNMARKED_SPOILERS");
+    setReportDetails("");
+    setReportTarget({ targetType, targetId, label });
+    setReportOpen(true);
+  };
 
   const postUrl = () => `${window.location.origin}/post/${encodeURIComponent(post.id)}`;
 
@@ -285,7 +319,11 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
   const sharePost = async () => {
     try {
       if (navigator.share) {
-        await navigator.share({ title: post.title, text: post.content || post.title, url: postUrl() });
+        await navigator.share({
+          title: post.title,
+          text: post.content || post.title,
+          url: postUrl(),
+        });
         return;
       }
       await copyPostLink();
@@ -371,7 +409,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
                 className="danger"
                 onClick={() => {
                   closeMenu();
-                  if (requireAuth()) setReportOpen(true);
+                  openReport();
                 }}
                 role="menuitem"
                 type="button"
@@ -418,6 +456,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
           <FiHeart /> {likeCount}
         </button>
         <button
+          aria-label={`Comments on ${post.title}`}
           aria-expanded={threadOpen}
           onClick={() => setThreadOpen((open) => !open)}
           type="button"
@@ -449,7 +488,11 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
       {actionNotice && (
         <div className="post-action-notice" role="status">
           {actionNotice}
-          <button aria-label="Dismiss post notice" onClick={() => setActionNotice("")} type="button">
+          <button
+            aria-label="Dismiss post notice"
+            onClick={() => setActionNotice("")}
+            type="button"
+          >
             <FiX />
           </button>
         </div>
@@ -461,7 +504,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
             <small className="post-action-error">Could not load comments.</small>
           )}
           {(comments.data?.items || []).map((item) => (
-            <CommentItem comment={item} key={item.id} />
+            <CommentItem comment={item} key={item.id} onReport={openReport} />
           ))}
           {!comments.isLoading && !comments.isError && !comments.data?.items?.length && (
             <small>No comments yet.</small>
@@ -499,7 +542,9 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
         <SharePostDialog
           onClose={() => setShareOpen(false)}
           onCopyLink={copyPostLink}
-          onNativeShare={typeof navigator !== "undefined" && navigator.share ? sharePost : undefined}
+          onNativeShare={
+            typeof navigator !== "undefined" && navigator.share ? sharePost : undefined
+          }
           postId={post.id}
         />
       )}
@@ -532,7 +577,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
         createPortal(
           <div className="post-report-backdrop" onMouseDown={() => setReportOpen(false)}>
             <section
-              aria-label={`Report ${post.title}`}
+              aria-label={`Report ${reportTarget?.label || post.title}`}
               aria-modal="true"
               className="post-report-dialog"
               onMouseDown={(event) => event.stopPropagation()}
@@ -540,16 +585,26 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
             >
               <div className="post-report-head">
                 <div>
-                  <small>REPORT POST</small>
-                  <h2>What’s wrong with this post?</h2>
+                  <small>REPORT {reportTarget?.targetType || "POST"}</small>
+                  <h2>
+                    What’s wrong with this{" "}
+                    {reportTarget?.targetType === "COMMENT" ? "comment" : "post"}?
+                  </h2>
                 </div>
-                <button aria-label="Close report dialog" onClick={() => setReportOpen(false)} type="button">
+                <button
+                  aria-label="Close report dialog"
+                  onClick={() => setReportOpen(false)}
+                  type="button"
+                >
                   <FiX />
                 </button>
               </div>
               <label>
                 Reason
-                <select onChange={(event) => setReportReason(event.target.value)} value={reportReason}>
+                <select
+                  onChange={(event) => setReportReason(event.target.value)}
+                  value={reportReason}
+                >
                   <option value="UNMARKED_SPOILERS">Unmarked spoilers</option>
                   <option value="HARASSMENT">Harassment</option>
                   <option value="COMMERCIAL_SPAM">Commercial spam</option>
@@ -568,10 +623,20 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
                   value={reportDetails}
                 />
               </label>
-              {reportPost.isError && <small className="post-action-error">{reportPost.error.message}</small>}
+              {reportPost.isError && (
+                <small className="post-action-error" role="alert">
+                  {reportPost.error.message}
+                </small>
+              )}
               <div className="post-report-actions">
-                <button onClick={() => setReportOpen(false)} type="button">Cancel</button>
-                <button disabled={reportPost.isPending} onClick={() => reportPost.mutate()} type="button">
+                <button onClick={() => setReportOpen(false)} type="button">
+                  Cancel
+                </button>
+                <button
+                  disabled={reportPost.isPending}
+                  onClick={() => reportPost.mutate()}
+                  type="button"
+                >
                   {reportPost.isPending ? "Submitting..." : "Submit report"}
                 </button>
               </div>

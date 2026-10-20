@@ -42,10 +42,6 @@ export const queryKeys = {
   comments: (postId) => ["comments", postId],
   replies: (commentId) => ["comment-replies", commentId],
   adminOverview: { all: ["admin", "overview"] },
-  adminReports: {
-    all: ["admin", "reports"],
-    list: (status, page, limit = 20) => ["admin", "reports", { status, page, limit }],
-  },
   adminUsers: {
     all: ["admin", "users"],
     list: (status, search, page) => ["admin", "users", { status, search, page }],
@@ -222,13 +218,6 @@ export const queries = {
     queryFn: ({ signal }) => api.getAdminOverview({ signal }),
     retry: 1,
     staleTime: 30_000,
-  }),
-  adminReports: (status = "", page = 1, limit = 20) => ({
-    queryKey: queryKeys.adminReports.list(status, page, limit),
-    queryFn: ({ signal }) => api.listReports({ status, page, limit }, { signal }),
-    placeholderData: keepPreviousData,
-    retry: 1,
-    staleTime: 15_000,
   }),
   adminUsers: (status = "", search = "", page = 1) => ({
     queryKey: queryKeys.adminUsers.list(status, search, page),

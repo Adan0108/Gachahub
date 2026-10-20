@@ -37,7 +37,8 @@ import { ReportModerationService } from '../moderation/report-moderation.service
     'Live, active ADMIN or PLATFORM_MODERATOR required. GameModerator assignment alone is insufficient.',
 })
 @ApiBadRequestResponse({
-  description: 'Invalid query, scope/gameSlug combination, or evidence cursor.',
+  description:
+    'Invalid query, scope/gameSlug combination, or case/evidence cursor.',
 })
 @Controller('moderation/cases')
 export class PlatformCaseModerationController {
@@ -46,15 +47,17 @@ export class PlatformCaseModerationController {
   ) {}
 
   @Get()
+  @ApiQuery({
+    name: 'cursor',
+    required: false,
+    type: String,
+    description:
+      'Opaque nextCursor from the previous queue response; omit for the first page.',
+  })
   @ApiOperation({
     summary: 'List moderation cases. ADMIN / PLATFORM_MODERATOR only.',
     description:
-      'One row per ModerationCase; multiple user Reports are evidence inside that case. Native statuses: OPEN, IN_REVIEW, RESOLVED, DISMISSED. scope defaults to all; platform filters gameId=null (also deleted games); game requires gameSlug. Other scopes reject gameSlug. Omitted status includes all statuses. Ordered createdAt DESC, id DESC; page defaults 1 (max 500), limit defaults 20 (max 100). Counts are stored case aggregates and may exceed surviving evidence after reporter deletion.',
-  })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    schema: { type: 'integer', default: 1, minimum: 1, maximum: 500 },
+      'One row per ModerationCase; multiple user Reports are evidence inside that case. Native statuses: OPEN, IN_REVIEW, RESOLVED, DISMISSED. scope defaults to all; platform filters gameId=null (also deleted games); game requires gameSlug. Other scopes reject gameSlug. Omitted status includes all statuses. Ordered createdAt DESC, id DESC; cursor pagination only; limit defaults 20 (max 100). Counts are stored case aggregates and may exceed surviving evidence after reporter deletion.',
   })
   @ApiQuery({
     name: 'limit',
@@ -63,7 +66,7 @@ export class PlatformCaseModerationController {
   })
   @ApiOkResponse({
     description:
-      'items: case id, targetType, targetId, gameId/game, native status, reportCount, uniqueReporterCount, currentRiskScore/currentRiskLevel, assignedModeratorId/assignedModerator, resolvedById/resolvedBy, resolvedAt, createdAt, updatedAt. User summaries contain id/name/image; game contains id/name/slug. No reports, snapshot, target body or resolutionNote. meta: page, limit, total CASES, totalPages.',
+      'items: case id, targetType, targetId, gameId/game, native status, reportCount, uniqueReporterCount, currentRiskScore/currentRiskLevel, assignedModeratorId/assignedModerator, resolvedById/resolvedBy, resolvedAt, createdAt, updatedAt. User summaries contain id/name/image; game contains id/name/slug. No reports, snapshot, full target body or resolutionNote. Response is {items,nextCursor}; nextCursor is null at the end. Lightweight targetPreview is {title (max 160), excerpt (max 240), thumbnailUrl (one image), author {id,name,username,image}} or null; targetState is available/deleted/missing. reasonSummary is [{reasonCode,count}], grouped from surviving evidence, count DESC then reasonCode ASC (at most 10 enum reasons). No reports[] or full content/media/storage fields. Cursor encodes the exclusive {createdAt,id} boundary. Stable createdAt DESC,id DESC; evidence remains in detail.',
   })
   @ApiNotFoundResponse({ description: 'Unknown gameSlug.' })
   list(@Session() session: UserSession, @Query() query: QueryPlatformCasesDto) {
@@ -82,11 +85,11 @@ export class PlatformCaseModerationController {
     summary:
       'Read a moderation case with current target and first evidence page.',
     description:
-      'ADMIN / PLATFORM_MODERATOR only. Includes resolutionNote and all list fields. targetState is available, deleted or missing; a missing target gives target=null while case/evidence remain readable. Current target is distinct from historical per-Report snapshot evidence. First evidence page is limited to 20, ordered createdAt DESC, id DESC. Stored counters are not recomputed on reads.',
+      'ADMIN / PLATFORM_MODERATOR only. Includes resolutionNote, aggregate reasonSummary and case summary fields (no targetPreview; current target is returned separately). targetState is available, deleted or missing; a missing target gives target=null while case/evidence remain readable. Current target is distinct from historical per-Report snapshot evidence. First evidence page is limited to 20, ordered createdAt DESC, id DESC. Stored counters are not recomputed on reads.',
   })
   @ApiOkResponse({
     description:
-      'Case detail plus target (explicit POST/COMMENT projection), targetState, and evidence { items, nextCursor }. Evidence items: id, reporter {id,name,image}, reasonCode, details, createdAt, snapshot|null. Snapshot version 1 allowlists targetType/targetId, authorId, content, title, status, visibility, postId, parentId and up to 20 media entries (url/mediaType/altText). Unknown/malformed snapshots are null. Raw targetSnapshot JSON and storage identifiers are excluded. Follow nextCursor using GET /moderation/cases/:caseId/reports.',
+      'Case detail plus aggregate reasonSummary and target (explicit POST/COMMENT projection), targetState, and evidence { items, nextCursor }. Evidence items: id, reporter {id,name,image}, reasonCode, details, createdAt, snapshot|null. Snapshot version 1 allowlists targetType/targetId, authorId, content, title, status, visibility, postId, parentId and up to 20 media entries (url/mediaType/altText). Unknown/malformed snapshots are null. Raw targetSnapshot JSON and storage identifiers are excluded. Follow nextCursor using GET /moderation/cases/:caseId/reports.',
   })
   @ApiNotFoundResponse({
     description:

@@ -1203,10 +1203,8 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
     let caseA: string;
     let caseB: string;
     let personalCase: string;
-    let previousTotal: number;
     const fixtureCases: string[] = [];
     beforeAll(async () => {
-      previousTotal = await db.moderationCase.count();
       platformModerator = await user();
       inactiveModerator = await user();
       await db.user.update({
@@ -1262,7 +1260,7 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
     it('returns three case rows for six complaints, with native statuses and exact scope filters', async () => {
       const all = await api(`${queue}?limit=100`, platformModerator);
       expect(all.status).toBe(200);
-      expect(all.body.meta.total).toBe(previousTotal + 3);
+      expect(Object.keys(all.body).sort()).toEqual(['items', 'nextCursor']);
       const ours = all.body.items.filter((row) =>
         fixtureCases.includes(row.id),
       );
@@ -1300,7 +1298,7 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
           platformModerator,
         );
         expect(result.status).toBe(200);
-        expect(result.body.meta.total).toBe(1);
+        expect(result.body.nextCursor).toBeNull();
         expect(result.body.items.map((row) => row.id)).toEqual([expected]);
       }
       const evidence = await api(
@@ -1505,5 +1503,236 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
       expect(deleted.status).toBe(200);
       expect(deleted.body.targetState).toBe('deleted');
     });
+  });
+  it('serves bounded post/comment previews, ordered reason aggregates and safe deleted/missing states', async () => {
+    const source = await post(true, {
+      title: 'T'.repeat(220),
+      content: 'Preview\n\t text '.repeat(120),
+    });
+    for (const [i, mediaType, url] of [
+      [0, 'VIDEO', 'https://example.invalid/video.mp4'],
+      [1, 'IMAGE', 'javascript:invalid'],
+      [2, 'IMAGE', 'https://example.invalid/first.png'],
+      [3, 'IMAGE', 'https://example.invalid/later.png'],
+    ] as const) {
+      const upload = await db.mediaUpload.create({
+        data: {
+          userId: author,
+          purpose: 'POST',
+          resourceType: mediaType,
+          status: 'ATTACHED',
+          publicId: `${prefix}/preview-${i}`,
+          assetId: `${prefix}-preview-${i}`,
+        },
+      });
+      await db.postMedia.create({
+        data: {
+          postId: source.id,
+          mediaUploadId: upload.id,
+          assetId: upload.assetId!,
+          publicId: upload.publicId,
+          url,
+          mediaType,
+          sortOrder: i,
+        },
+      });
+    }
+    const first = await submit(source.id, await user(), 'POST', {
+      reasonCode: 'HARASSMENT',
+    });
+    await submit(source.id, await user(), 'POST', { reasonCode: 'OTHER' });
+    await submit(source.id, await user(), 'POST', { reasonCode: 'HARASSMENT' });
+    const targetComment = await comment(source.id, {
+      content: 'Comment '.repeat(100),
+    });
+    const receipt = await submit(targetComment.id, await user(), 'COMMENT');
+    const queue = await api(
+      `/moderation/cases?scope=game&gameSlug=${slug}&limit=100`,
+      admin,
+    );
+    expect(queue.status).toBe(200);
+    const item = queue.body.items.find(
+      (item) => item.id === first.body.caseId,
+    )!;
+    const preview = item.targetPreview as {
+      title: string;
+      excerpt: string;
+      thumbnailUrl: string;
+      author: { id: string; name: string };
+    };
+    expect(preview.title).toHaveLength(160);
+    expect(preview.excerpt).toHaveLength(240);
+    expect(preview.excerpt).not.toMatch(/[\n\t]/);
+    expect(preview.thumbnailUrl).toBe('https://example.invalid/first.png');
+    expect(preview.author).toMatchObject({
+      id: author,
+      name: 'Stage A fixture',
+    });
+    expect(item.reasonSummary).toEqual([
+      { reasonCode: 'HARASSMENT', count: 2 },
+      { reasonCode: 'OTHER', count: 1 },
+    ]);
+    expect(item).toMatchObject({
+      reportCount: 3,
+      uniqueReporterCount: 3,
+      targetState: 'available',
+    });
+    for (const key of ['reports', 'targetSnapshot', 'media', 'resolutionNote'])
+      expect(item).not.toHaveProperty(key);
+    expect(preview).not.toHaveProperty('content');
+    expect(preview).not.toHaveProperty('assetId');
+    const commentRow = queue.body.items.find(
+      (item) => item.id === receipt.body.caseId,
+    )!;
+    expect(commentRow).toMatchObject({
+      targetPreview: {
+        title: null,
+        thumbnailUrl: null,
+        author: { id: commenter },
+      },
+    });
+    expect(
+      (commentRow.targetPreview as { excerpt: string }).excerpt,
+    ).toHaveLength(240);
+    const detail = await api(`/moderation/cases/${first.body.caseId}`, admin);
+    expect(
+      (detail.body as unknown as { reasonSummary: unknown }).reasonSummary,
+    ).toEqual(item.reasonSummary);
+    await db.post.update({
+      where: { id: source.id },
+      data: { deletedAt: new Date(), status: 'DELETED' },
+    });
+    const deleted = await api(
+      `/moderation/cases?scope=game&gameSlug=${slug}&limit=100`,
+      admin,
+    );
+    expect(
+      deleted.body.items.find((row) => row.id === first.body.caseId),
+    ).toMatchObject({ targetState: 'deleted', targetPreview: null });
+    expect(
+      deleted.body.items.find((row) => row.id === receipt.body.caseId),
+    ).toMatchObject({ targetState: 'deleted', targetPreview: null });
+    await db.post.delete({ where: { id: source.id } });
+    const missing = await api(
+      `/moderation/cases?scope=game&gameSlug=${slug}&limit=100`,
+      admin,
+    );
+    expect(
+      missing.body.items.find((row) => row.id === first.body.caseId),
+    ).toMatchObject({ targetState: 'missing', targetPreview: null });
+  });
+
+  it('traverses tied case timestamps with an exclusive cursor even after its source case is deleted', async () => {
+    const createdAt = new Date('2030-01-01T00:00:00.000Z');
+    const ownIds: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const source = await post(true);
+      const row = await db.moderationCase.create({
+        data: { targetType: 'POST', targetId: source.id, gameId, createdAt },
+      });
+      ownIds.push(row.id);
+    }
+    const url = `/moderation/cases?scope=game&gameSlug=${slug}&limit=2`;
+    const first = await api(url, admin);
+    expect(first.status).toBe(200);
+    const gameUrl = `/games/${slug}/moderation/cases?limit=2`;
+    expect((await api(gameUrl, moderator)).body).toEqual(first.body);
+    expect(Object.keys(first.body).sort()).toEqual(['items', 'nextCursor']);
+    expect(first.body.nextCursor).toEqual(expect.any(String));
+    const last = first.body.items.at(-1)!;
+    await db.moderationCase.delete({ where: { id: last.id } });
+    const second = await api(`${url}&cursor=${first.body.nextCursor}`, admin);
+    expect(second.status).toBe(200);
+    expect(
+      (await api(`${gameUrl}&cursor=${first.body.nextCursor}`, moderator)).body,
+    ).toEqual(second.body);
+    expect(
+      [...first.body.items, ...second.body.items]
+        .filter((row) => ownIds.includes(row.id))
+        .map((row) => row.id)
+        .sort(),
+    ).toEqual(ownIds.sort());
+    expect((await api(`${url}&cursor=invalid`, admin)).status).toBe(400);
+    for (const endpoint of [
+      '/moderation/cases',
+      `/games/${slug}/moderation/cases`,
+      `/moderation/cases/${second.body.items[0].id}/reports`,
+      `/games/${slug}/moderation/cases/${second.body.items[0].id}/reports`,
+    ]) {
+      for (const oldQuery of ['page=1', 'pagination=cursor', 'totalPages=2'])
+        expect((await api(`${endpoint}?${oldQuery}`, admin)).status).toBe(400);
+    }
+  });
+  it('bounds detail evidence at 20 and continues on both routes after a tied boundary report is deleted', async () => {
+    const source = await post(true);
+    const createdAt = new Date('2031-01-01T00:00:00.000Z');
+    const reporters = Array.from(
+      { length: 21 },
+      () => `${prefix}-${randomUUID()}`,
+    );
+    reporters.forEach((id) => userIds.add(id));
+    await db.user.createMany({
+      data: reporters.map((id) => ({
+        id,
+        name: 'Evidence fixture',
+        email: `${id}@example.invalid`,
+      })),
+    });
+    const row = await db.moderationCase.create({
+      data: {
+        targetType: 'POST',
+        targetId: source.id,
+        gameId,
+        reportCount: 21,
+        uniqueReporterCount: 21,
+      },
+    });
+    await db.report.createMany({
+      data: reporters.map((reporterId, index) => ({
+        id: `${prefix}-evidence-${index.toString().padStart(2, '0')}`,
+        reporterId,
+        caseId: row.id,
+        targetType: 'POST',
+        targetId: source.id,
+        reasonCode: 'OTHER',
+        createdAt,
+      })),
+    });
+    const roots = ['/moderation/cases', `/games/${slug}/moderation/cases`];
+    const detail = await api(`${roots[0]}/${row.id}`, admin);
+    expect(detail.status).toBe(200);
+    expect(detail.body.evidence.items).toHaveLength(20);
+    expect(detail.body.evidence.nextCursor).toEqual(expect.any(String));
+    expect(
+      (await api(`${roots[1]}/${row.id}`, moderator)).body.evidence,
+    ).toEqual(detail.body.evidence);
+    const boundary = detail.body.evidence.items.at(-1)!;
+    const cursor = detail.body.evidence.nextCursor!;
+    expect(JSON.parse(Buffer.from(cursor, 'base64url').toString())).toEqual({
+      id: boundary.id,
+      createdAt: createdAt.toISOString(),
+    });
+    await db.report.delete({ where: { id: boundary.id } });
+    for (const root of roots) {
+      const next = await api(
+        `${root}/${row.id}/reports?cursor=${cursor}`,
+        admin,
+      );
+      expect(next.status).toBe(200);
+      expect(Object.keys(next.body).sort()).toEqual(['items', 'nextCursor']);
+      expect(next.body.items.map((item) => item.id)).toEqual([
+        `${prefix}-evidence-00`,
+      ]);
+      expect(next.body.nextCursor).toBeNull();
+      for (const invalid of [
+        'page=1',
+        'pagination=cursor',
+        'limit=101',
+        'cursor=invalid',
+      ])
+        expect(
+          (await api(`${root}/${row.id}/reports?${invalid}`, admin)).status,
+        ).toBe(400);
+    }
   });
 });

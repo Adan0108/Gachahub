@@ -37,6 +37,7 @@ describe('ReportModerationService', () => {
     findModerationCaseById: jest.fn(),
     findReportsByCaseId: jest.fn(),
     findCaseTarget: jest.fn(),
+    findCaseReasonSummaries: jest.fn(),
     claimCase: jest.fn(),
     finalizeCase: jest.fn(),
   };
@@ -54,6 +55,7 @@ describe('ReportModerationService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    reportsRepository.findCaseReasonSummaries.mockResolvedValue(new Map());
     gameModeratorsService.resolveGameId.mockResolvedValue('game-1');
     gameModeratorsService.resolveModeratableGameId.mockResolvedValue('game-1');
 
@@ -83,7 +85,7 @@ describe('ReportModerationService', () => {
       });
       reportsRepository.findModerationCases.mockResolvedValue({
         items: [moderationCase],
-        total: 1,
+        nextCursor: null,
       });
       reportsRepository.findModerationCaseById.mockResolvedValue(
         moderationCase,
@@ -125,6 +127,35 @@ describe('ReportModerationService', () => {
         );
       },
     );
+    it('returns only the cursor envelope and rejects invalid boundaries before repository access', async () => {
+      reportsRepository.findModerationCases.mockResolvedValue({
+        items: [moderationCase],
+        nextCursor: 'next',
+      });
+      const cursor = {
+        id: 'case-boundary',
+        createdAt: new Date('2026-10-20T00:00:00.000Z'),
+      };
+      expect(
+        await service.listCasesForPlatform('actor', {
+          cursor: encodeEvidenceCursor(cursor),
+        }),
+      ).toEqual({ items: [moderationCase], nextCursor: 'next' });
+      expect(reportsRepository.findModerationCases).toHaveBeenCalledWith({
+        gameId: undefined,
+        status: undefined,
+        targetType: undefined,
+        limit: 20,
+        cursor,
+      });
+      await expect(
+        service.listCasesForPlatform('actor', { cursor: 'bad' }),
+      ).rejects.toThrow('Invalid case cursor');
+      await expect(
+        service.listCasesForGame('slug', 'actor', { cursor: 'bad' }),
+      ).rejects.toThrow('Invalid case cursor');
+      expect(reportsRepository.findModerationCases).toHaveBeenCalledTimes(1);
+    });
     it.each([
       { role: 'USER', status: 'ACTIVE' }, // Assignment cannot elevate this platform capability.
       { role: 'ADMIN', status: 'SUSPENDED' },
@@ -163,14 +194,13 @@ describe('ReportModerationService', () => {
           ...(scope === 'game' ? { gameSlug: 'slug' } : {}),
           status: 'OPEN',
           targetType: 'POST',
-          page: 2,
           limit: 10,
         });
         expect(reportsRepository.findModerationCases).toHaveBeenCalledWith({
           gameId,
+          cursor: undefined,
           status: 'OPEN',
           targetType: 'POST',
-          page: 2,
           limit: 10,
         });
         expect(
@@ -255,7 +285,7 @@ describe('ReportModerationService', () => {
       );
       reportsRepository.findModerationCases.mockResolvedValue({
         items: [moderationCase],
-        total: 1,
+        nextCursor: null,
       });
       reportsRepository.findCaseTarget.mockResolvedValue({
         target: null,
@@ -278,9 +308,9 @@ describe('ReportModerationService', () => {
       await service.listCasesForGame('slug', 'actor', { status: 'OPEN' });
       expect(reportsRepository.findModerationCases).toHaveBeenCalledWith({
         gameId: 'game-1',
+        cursor: undefined,
         status: 'OPEN',
         targetType: undefined,
-        page: 1,
         limit: 20,
       });
       await service.getCaseForGame('slug', 'actor', 'case');

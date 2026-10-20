@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { AdminQueryBoundary } from "../../components/admin/AdminQueryBoundary";
 import { AdminShell } from "../../components/admin/AdminShell";
@@ -18,7 +19,7 @@ function formatMetric(value) {
 const METRIC_LABEL = {
   members: "Total members",
   communities: "Active communities",
-  reports: "Open reports",
+  reports: "Open complaints",
   moderators: "Game moderators",
 };
 
@@ -27,6 +28,9 @@ const AUDIT_ACTION_LABEL = {
   POST_RESTORED: "Post restored",
   COMMENT_HIDDEN: "Comment hidden",
   COMMENT_RESTORED: "Comment restored",
+  CASE_CLAIMED: "Case claimed",
+  CASE_RESOLVED: "Case resolved",
+  CASE_DISMISSED: "Case dismissed",
   REPORT_CLAIMED: "Report claimed",
   REPORT_RESOLVED: "Report resolved",
   REPORT_DISMISSED: "Report dismissed",
@@ -48,6 +52,8 @@ function describeTarget(item) {
       return item.targetName
         ? `Comment on post ${item.targetName}`
         : `Comment ${item.targetId}`;
+    case "MODERATION_CASE":
+      return item.targetName || `Case ${item.targetId}`;
     case "REPORT":
       return item.targetName || `Report ${item.targetId}`;
     case "USER":
@@ -122,7 +128,7 @@ export default function AdminPage() {
                     <tr>
                       <th>Community</th>
                       <th>Members</th>
-                      <th>Open reports</th>
+                      <th>Open complaints</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -160,7 +166,7 @@ export default function AdminPage() {
                     <div>
                       <b>{AUDIT_ACTION_LABEL[item.action] || item.action}</b>
                       <p>
-                        {describeTarget(item)} &middot; by {item.actorName}
+                        {item.targetType === "MODERATION_CASE" ? <Link href={`/moderation/cases/${encodeURIComponent(item.targetId)}`}>{describeTarget(item)}</Link> : describeTarget(item)} &middot; by {item.actorName}
                       </p>
                     </div>
                     <time>{relativeTime(item.occurredAt)}</time>
