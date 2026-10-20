@@ -5,7 +5,6 @@ import { FiPlay } from "react-icons/fi";
 import { useAttachmentBlobUrl } from "../../hooks/chat/useAttachmentBlobUrl";
 import { useOpenAttachment } from "../../lib/mls/media/attachmentLightboxContext";
 import { autoLoadsWithoutTap } from "../../lib/mls/media/attachmentView";
-import { DownloadButton } from "./AttachmentFileChip";
 import { ChatVideoPlayer } from "./ChatVideoPlayer";
 import "./ChatAttachments.css";
 
@@ -59,6 +58,7 @@ export function ImageTile({ file, source, thumbSource, uniform }) {
 
 /** Click-to-load: nothing but the poster (if any) is fetched until the user asks to play. */
 export function VideoTile({ file, source, thumbSource, uniform }) {
+  const openAttachment = useOpenAttachment();
   const [playing, setPlaying] = useState(false);
   const poster = useAttachmentBlobUrl(thumbSource, true);
   const video = useAttachmentBlobUrl(source, playing && Boolean(source));
@@ -68,7 +68,13 @@ export function VideoTile({ file, source, thumbSource, uniform }) {
   return (
     <div>
       {video.status === "ready" ? (
-        <ChatVideoPlayer autoPlay label={file.name} poster={poster.status === "ready" ? poster.url : undefined} src={video.url} />
+        <ChatVideoPlayer
+          autoPlay
+          label={file.name}
+          onExpand={() => openAttachment(source.cacheKey)}
+          poster={poster.status === "ready" ? poster.url : undefined}
+          src={video.url}
+        />
       ) : (
         <button
           aria-label={`Play ${file.name}`}
@@ -87,7 +93,6 @@ export function VideoTile({ file, source, thumbSource, uniform }) {
           )}
         </button>
       )}
-      <DownloadButton name={file.name} source={source} />
     </div>
   );
 }

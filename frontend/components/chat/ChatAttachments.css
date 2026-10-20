@@ -178,13 +178,6 @@ article.chat-message.mine .chat-file-card[data-state="error"] .chat-file-card-te
   object-fit: cover;
 }
 
-.chat-attachment-grid .chat-attachment-action {
-  justify-self: start;
-  border: 0;
-  background: rgba(0, 0, 0, 0.35);
-  color: #fff;
-}
-
 .chat-attachment-tile {
   position: relative;
   display: grid;
@@ -394,20 +387,6 @@ article.chat-message.mine .chat-file-card[data-state="error"] .chat-file-card-te
 
 .chat-file-card[data-state="error"] .chat-file-card-text small {
   color: var(--pink);
-}
-
-.chat-attachment-action {
-  padding: 3px 8px;
-  border: 1px solid currentColor;
-  background: transparent;
-  color: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.chat-attachment-action:disabled {
-  opacity: 0.6;
-  cursor: progress;
 }
 
 .chat-attachment-error {

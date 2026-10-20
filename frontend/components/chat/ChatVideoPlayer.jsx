@@ -10,9 +10,10 @@ const SEEK_STEP_SECONDS = 5;
 /**
  * The player for a video in a chat: a big play button before it starts, then a control bar that
  * matches the app (play, seek, time, volume, fullscreen). Space or K plays and pauses, the arrow
- * keys seek, M mutes and F goes fullscreen while it has focus.
+ * keys seek, M mutes and F goes fullscreen while it has focus. With `onExpand`, that button opens
+ * the chat's media viewer instead of the browser's fullscreen; `hideExpand` leaves it out (inside the viewer).
  */
-export function ChatVideoPlayer({ src, poster, label = "Video", autoPlay = false }) {
+export function ChatVideoPlayer({ src, poster, label = "Video", autoPlay = false, onExpand, hideExpand = false }) {
   const videoRef = useRef(null);
   const frameRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -54,7 +55,11 @@ export function ChatVideoPlayer({ src, poster, label = "Video", autoPlay = false
     setIsMuted(video.muted);
   };
   const goFullscreen = () => {
-    if (document.fullscreenElement) document.exitFullscreen?.();
+    if (hideExpand) return;
+    if (onExpand) {
+      videoRef.current?.pause();
+      onExpand();
+    } else if (document.fullscreenElement) document.exitFullscreen?.();
     else frameRef.current?.requestFullscreen?.();
   };
 
@@ -140,9 +145,11 @@ export function ChatVideoPlayer({ src, poster, label = "Video", autoPlay = false
           type="range"
           value={isMuted ? 0 : volume}
         />
-        <button aria-label="Fullscreen" onClick={goFullscreen} type="button">
-          <FiMaximize aria-hidden="true" />
-        </button>
+        {!hideExpand && (
+          <button aria-label={onExpand ? "Open larger" : "Fullscreen"} onClick={goFullscreen} type="button">
+            <FiMaximize aria-hidden="true" />
+          </button>
+        )}
       </div>
     </div>
   );

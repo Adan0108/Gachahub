@@ -77,6 +77,7 @@ import { previewForSend } from "../../lib/mls/messaging/sendLinkPreview";
 import {
   flattenOtherAttachments,
   flattenVisualAttachments,
+  attachmentKind,
   pendingStatusLabel,
 } from "../../lib/mls/media/attachmentView";
 import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightboxContext";
@@ -1280,19 +1281,23 @@ function ChatPageContent() {
                       >
                         <div>
                           <PendingContent files={pending.files} preview={pending.preview} text={pending.text} />
-                          <small>
-                            {pending.failed ? (
-                              <button
-                                className="chat-message-retry"
-                                onClick={() => retryPendingMessage(pending)}
-                                type="button"
-                              >
-                                Failed to send - tap to retry
-                              </button>
-                            ) : (
-                              pendingStatusLabel(pending.stage)
-                            )}
-                          </small>
+                          {/* Pictures and videos show their own spinner, so no status bar under them. */}
+                          {(pending.failed ||
+                            !pending.files?.some((file) => attachmentKind(file.type) !== "file")) && (
+                            <small>
+                              {pending.failed ? (
+                                <button
+                                  className="chat-message-retry"
+                                  onClick={() => retryPendingMessage(pending)}
+                                  type="button"
+                                >
+                                  Failed to send - tap to retry
+                                </button>
+                              ) : (
+                                pendingStatusLabel(pending.stage)
+                              )}
+                            </small>
+                          )}
                         </div>
                       </article>
                     </div>

@@ -108,6 +108,27 @@ describe("ChatVideoPlayer", () => {
     expect(HTMLElement.prototype.requestFullscreen).toHaveBeenCalled();
   });
 
+  it("opens the viewer instead of the browser fullscreen when it is given one", () => {
+    const onExpand = vi.fn();
+    const { video } = setup({ onExpand });
+    fireEvent.click(screen.getByRole("button", { name: "Play clip.mp4" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Open larger" }));
+
+    expect(onExpand).toHaveBeenCalledTimes(1);
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
+    expect(video.paused).toBe(true);
+    expect(HTMLElement.prototype.requestFullscreen).not.toHaveBeenCalled();
+  });
+
+  it("leaves the expand button out inside the viewer, and ignores F there", () => {
+    setup({ hideExpand: true });
+
+    expect(screen.queryByRole("button", { name: /Fullscreen|Open larger/ })).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("group", { name: "clip.mp4" }), { key: "f" });
+    expect(HTMLElement.prototype.requestFullscreen).not.toHaveBeenCalled();
+  });
+
   it("can be driven from the keyboard", () => {
     const { video } = setup();
     const player = screen.getByRole("group", { name: "clip.mp4" });
