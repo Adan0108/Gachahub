@@ -8,8 +8,17 @@ const postHref = (notification) => {
 const chatHref = (notification) =>
   notification.conversationId ? `/chat?c=${encodeURIComponent(notification.conversationId)}` : "/chat";
 
-const mentionHref = (notification) =>
-  notification.entityType === "MESSAGE" ? chatHref(notification) : postHref(notification);
+// A mention in community chat opens that community's chat on the message.
+const communityHref = (notification) =>
+  notification.community
+    ? `/community/${encodeURIComponent(notification.community.slug)}?tab=Chat&message=${encodeURIComponent(notification.entityId)}`
+    : null;
+
+const mentionHref = (notification) => {
+  if (notification.entityType === "MESSAGE") return chatHref(notification);
+  if (notification.entityType === "COMMUNITY_MESSAGE") return communityHref(notification);
+  return postHref(notification);
+};
 
 const isGroup = (notification) => notification.conversation?.type === "GROUP";
 const groupName = (notification) => notification.conversation?.title || "Unnamed group";
@@ -22,7 +31,13 @@ const NOTIFICATION_KINDS = {
   COMMENT_REPLIED: { action: () => "replied to your comment", href: postHref },
   // There is no profile route to send a new follower to yet.
   USER_FOLLOWED: { action: () => "followed you", href: () => null },
-  USER_MENTIONED: { action: () => "mentioned you", href: mentionHref },
+  USER_MENTIONED: {
+    action: (notification) =>
+      notification.entityType === "COMMUNITY_MESSAGE" && notification.community
+        ? `mentioned you in ${notification.community.name}`
+        : "mentioned you",
+    href: mentionHref,
+  },
   MESSAGE_RECEIVED: {
     action: (notification) =>
       isGroup(notification)

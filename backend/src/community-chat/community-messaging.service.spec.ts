@@ -27,6 +27,7 @@ describe('CommunityMessagingService', () => {
   const presenter = { page: jest.fn(), one: jest.fn() };
   const realtime = { changed: jest.fn() };
   const media = { resolveAttachableMedia: jest.fn() };
+  const mentions = { targetsFor: jest.fn(), publish: jest.fn() };
 
   let service: CommunityMessagingService;
 
@@ -37,6 +38,7 @@ describe('CommunityMessagingService', () => {
     repository.findByClientMessageId.mockResolvedValue(null);
     repository.findMessageInChannel.mockResolvedValue({ id: 'm0' });
     media.resolveAttachableMedia.mockResolvedValue([]);
+    mentions.targetsFor.mockResolvedValue([]);
     repository.createMessage.mockImplementation(
       (data: { content: string; channelId: string }) =>
         Promise.resolve({
@@ -58,6 +60,7 @@ describe('CommunityMessagingService', () => {
       presenter as never,
       realtime as never,
       media as never,
+      mentions as never,
     );
   });
 
@@ -158,6 +161,7 @@ describe('CommunityMessagingService', () => {
         },
         0,
         [],
+        undefined,
       );
       expect(presenter.one).toHaveBeenCalledTimes(1);
       expect(message).toMatchObject({ content: 'hi there', channelId: 'c1' });
@@ -176,6 +180,58 @@ describe('CommunityMessagingService', () => {
       await send({ content: ` ${ZWSP} ` }).catch(() => undefined);
 
       expect(realtime.changed).not.toHaveBeenCalled();
+    });
+
+    describe('with @mentions', () => {
+      it('works out who may be pinged from the cleaned text, in this community', async () => {
+        await send({ content: 'hi @bo' });
+
+        expect(mentions.targetsFor).toHaveBeenCalledWith('g1', 'me', 'hi @bo');
+      });
+
+      it('saves a plain message with no after-save work', async () => {
+        await send();
+
+        expect(
+          (repository.createMessage.mock.calls[0] as unknown[])[3],
+        ).toBeUndefined();
+      });
+
+      it('queues the pings inside the save, for the message that was saved', async () => {
+        mentions.targetsFor.mockResolvedValue(['bo']);
+        await send({ content: 'hi @bo' });
+        const after = (
+          repository.createMessage.mock.calls[0] as unknown[]
+        )[3] as (tx: unknown, created: { id: string }) => Promise<void>;
+        const tx = {};
+
+        await after(tx, { id: 'm7' });
+
+        expect(mentions.publish).toHaveBeenCalledWith(tx, {
+          targetIds: ['bo'],
+          actorId: 'me',
+          messageId: 'm7',
+        });
+      });
+
+      it('saves nothing when there are too many mentions', async () => {
+        mentions.targetsFor.mockRejectedValue(
+          new BadRequestException('too many'),
+        );
+
+        await expect(send({ content: 'many' })).rejects.toThrow('too many');
+        expect(repository.createMessage).not.toHaveBeenCalled();
+      });
+
+      it('pings nobody for a retry that already went through', async () => {
+        repository.findByClientMessageId.mockResolvedValue(
+          row({ id: 'again' }),
+        );
+
+        await send({ clientMessageId: 'c1', content: 'hi @bo' });
+
+        expect(mentions.targetsFor).not.toHaveBeenCalled();
+      });
     });
 
     describe('with images', () => {
@@ -224,6 +280,7 @@ describe('CommunityMessagingService', () => {
               format: 'png',
             },
           ],
+          undefined,
         );
       });
 
@@ -252,6 +309,7 @@ describe('CommunityMessagingService', () => {
           expect.objectContaining({ content: '' }),
           0,
           expect.any(Array),
+          undefined,
         );
       });
 
@@ -355,6 +413,7 @@ describe('CommunityMessagingService', () => {
         expect.objectContaining({ replyToId: 'm0' }),
         0,
         [],
+        undefined,
       );
     });
 
@@ -412,6 +471,7 @@ describe('CommunityMessagingService', () => {
           expect.anything(),
           10,
           [],
+          undefined,
         );
         expect(realtime.changed).not.toHaveBeenCalled();
       });
@@ -424,6 +484,7 @@ describe('CommunityMessagingService', () => {
           expect.anything(),
           60,
           [],
+          undefined,
         );
 
         asModerator();
@@ -432,6 +493,7 @@ describe('CommunityMessagingService', () => {
           expect.anything(),
           0,
           [],
+          undefined,
         );
       });
     });

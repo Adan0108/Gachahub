@@ -123,6 +123,44 @@ describe('toCommunityMessage', () => {
     });
   });
 
+  describe('mentions', () => {
+    const named = new Map([['m1', ['bo', 'cara']]]);
+
+    it('lists the handles a message pinged', () => {
+      const message = toCommunityMessage(row(), {
+        ...viewer(),
+        mentionsById: named,
+      });
+
+      expect(message.mentions).toEqual(['bo', 'cara']);
+    });
+
+    it('lists none when nobody was pinged, or the caller did not ask', () => {
+      expect(toCommunityMessage(row(), viewer()).mentions).toEqual([]);
+      expect(
+        toCommunityMessage(row({ id: 'm2' }), {
+          ...viewer(),
+          mentionsById: named,
+        }).mentions,
+      ).toEqual([]);
+    });
+
+    it('lists none once the message was removed or its author is blocked', () => {
+      expect(
+        toCommunityMessage(row({ deletedAt: at }), {
+          ...viewer(),
+          mentionsById: named,
+        }).mentions,
+      ).toEqual([]);
+      expect(
+        toCommunityMessage(row(), {
+          ...viewer({ blockedIds: new Set(['u1']) }),
+          mentionsById: named,
+        }).mentions,
+      ).toEqual([]);
+    });
+  });
+
   describe('images', () => {
     const image = {
       id: 'i1',

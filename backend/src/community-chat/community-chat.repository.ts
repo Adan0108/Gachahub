@@ -31,6 +31,12 @@ const mediaSelect = {
   mediaUploadId: true,
 } satisfies Prisma.GameChannelMessageMediaSelect;
 
+/** Work done inside the transaction that saves a message. */
+export type AfterSave = (
+  tx: Prisma.TransactionClient,
+  message: CommunityMessageRow,
+) => Promise<void>;
+
 export interface CommunityMediaInput {
   mediaUploadId: string;
   publicId: string;
@@ -191,8 +197,9 @@ export class CommunityChatRepository {
     },
     slowmodeSeconds = 0,
     media: CommunityMediaInput[] = [],
+    after?: AfterSave,
   ): Promise<{ created: CommunityMessageRow } | { waitMs: number }> {
-    if (slowmodeSeconds <= 0 && media.length === 0) {
+    if (slowmodeSeconds <= 0 && media.length === 0 && !after) {
       const created = await this.prisma.gameChannelMessage.create({
         data,
         include: messageInclude,
@@ -233,16 +240,81 @@ export class CommunityChatRepository {
         },
         include: messageInclude,
       });
+      await after?.(tx, created);
       return { created };
     });
   }
 
-  updateContent(messageId: string, content: string) {
-    return this.prisma.gameChannelMessage.update({
-      where: { id: messageId },
-      data: { content, editedAt: new Date() },
-      include: messageInclude,
+  /** `after` runs in the same transaction, so a mention is only ever queued for text that was saved. */
+  updateContent(messageId: string, content: string, after?: AfterSave) {
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.gameChannelMessage.update({
+        where: { id: messageId },
+        data: { content, editedAt: new Date() },
+        include: messageInclude,
+      });
+      await after?.(tx, updated);
+      return updated;
     });
+  }
+
+  /** Which of these handles belong to members of the community, as user ids. */
+  async findMemberIdsByUsernames(gameId: string, usernames: string[]) {
+    const rows = await this.prisma.gameMember.findMany({
+      where: { gameId, user: { username: { in: usernames } } },
+      select: { userId: true },
+    });
+    return new Set(rows.map((row) => row.userId));
+  }
+
+  /** Members to suggest while typing @: active, not blocked either way, matching a name or the start of a handle. */
+  searchMembers(params: {
+    gameId: string;
+    viewerId: string;
+    query: string;
+    limit: number;
+  }) {
+    const { gameId, viewerId, query, limit } = params;
+    return this.prisma.user.findMany({
+      where: {
+        id: { not: viewerId },
+        status: 'ACTIVE',
+        username: { not: null },
+        gameMemberships: { some: { gameId } },
+        blockedUsers: { none: { blockedId: viewerId } },
+        blockedBy: { none: { blockerId: viewerId } },
+        ...(query
+          ? {
+              OR: [
+                { username: { startsWith: query, mode: 'insensitive' } },
+                { name: { contains: query, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ username: 'asc' }],
+      take: limit,
+      select: { id: true, name: true, username: true, image: true },
+    });
+  }
+
+  /** The handles pinged by each of these messages, so they can be shown as mentions. */
+  async findMentionUsernames(messageIds: string[]) {
+    const byMessage = new Map<string, string[]>();
+    if (messageIds.length === 0) return byMessage;
+
+    const rows = await this.prisma.mention.findMany({
+      where: { entityType: 'COMMUNITY_MESSAGE', entityId: { in: messageIds } },
+      select: { entityId: true, user: { select: { username: true } } },
+    });
+    for (const row of rows) {
+      if (!row.user.username) continue;
+      byMessage.set(row.entityId, [
+        ...(byMessage.get(row.entityId) ?? []),
+        row.user.username,
+      ]);
+    }
+    return byMessage;
   }
 
   softDelete(messageId: string, deletedById: string, reason?: string) {

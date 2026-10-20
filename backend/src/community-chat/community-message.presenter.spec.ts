@@ -4,13 +4,17 @@ import { CommunityMessagePresenter } from './community-message.presenter';
 const bo = { id: 'bo', name: 'Bo', image: null, role: 'USER' };
 
 describe('CommunityMessagePresenter', () => {
-  const repository = { findModeratorIds: jest.fn() };
+  const repository = {
+    findModeratorIds: jest.fn(),
+    findMentionUsernames: jest.fn(),
+  };
   const blocks = { getBlockedIdsAmong: jest.fn() };
   let presenter: CommunityMessagePresenter;
 
   beforeEach(() => {
     jest.resetAllMocks();
     repository.findModeratorIds.mockResolvedValue(new Set());
+    repository.findMentionUsernames.mockResolvedValue(new Map());
     blocks.getBlockedIdsAmong.mockResolvedValue(new Set());
     presenter = new CommunityMessagePresenter(
       repository as never,

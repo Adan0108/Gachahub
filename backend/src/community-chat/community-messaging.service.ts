@@ -11,6 +11,7 @@ import { CommunityAccessService } from './community-access.service';
 import { CommunityChatRateLimiterService } from './community-chat-rate-limiter.service';
 import { COMMUNITY_MESSAGE_MAX_IMAGES } from './community-chat.constants';
 import { CommunityChatRepository } from './community-chat.repository';
+import { CommunityMentionsService } from './community-mentions.service';
 import { CommunityMessagePresenter } from './community-message.presenter';
 import { CommunityRealtimeService } from './community-realtime.service';
 import type { QueryCommunityMessagesDto } from './dto/query-community-messages.dto';
@@ -27,6 +28,7 @@ export class CommunityMessagingService {
     private readonly presenter: CommunityMessagePresenter,
     private readonly realtime: CommunityRealtimeService,
     private readonly media: MediaService,
+    private readonly mentions: CommunityMentionsService,
   ) {}
 
   /** A page of history, oldest first; `before` loads the page above the one you have. */
@@ -134,6 +136,8 @@ export class CommunityMessagingService {
       (id) => resolved.find((image) => image.id === id)!,
     );
 
+    const targetIds = await this.mentions.targetsFor(game.id, user.id, content);
+
     try {
       // Moderators are exempt from slow mode; for everyone else the wait is checked as the message is saved.
       const saved = await this.repository.createMessage(
@@ -154,6 +158,14 @@ export class CommunityMessagingService {
           bytes: image.bytes,
           format: image.format,
         })),
+        targetIds.length > 0
+          ? (tx, created) =>
+              this.mentions.publish(tx, {
+                targetIds,
+                actorId: user.id,
+                messageId: created.id,
+              })
+          : undefined,
       );
       if ('waitMs' in saved) throwSlowMode(saved.waitMs);
 

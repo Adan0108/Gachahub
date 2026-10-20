@@ -71,6 +71,7 @@ export const queryKeys = {
   chatEmotes: ["chat", "emotes"],
   communityChannels: (slug) => ["community-chat", slug, "channels"],
   communityMessages: (slug, channelId) => ["community-chat", slug, "messages", channelId],
+  communityMembers: (slug, query) => ["community-chat", slug, "members", query],
   // Socket-pushed only - nobody ever fetches this over REST, useChatSocket just writes into it.
   chatTyping: (conversationId) => ["chat", "typing", conversationId],
   // Same idea: the one-shot "your message request was accepted" event, keyed per conversation.

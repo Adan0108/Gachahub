@@ -85,6 +85,7 @@ export const backendRoutes = {
     `/chat/messages/${encodePathParam(messageId)}/reactions`,
   chatEmotes: '/chat/emotes',
   communityChat: (gameSlug) => `/games/${encodePathParam(gameSlug)}/chat`,
+  communityChatMembers: (gameSlug) => `/games/${encodePathParam(gameSlug)}/chat/members`,
   communityChatMessages: (gameSlug, channelId) =>
     `/games/${encodePathParam(gameSlug)}/chat/channels/${encodePathParam(channelId)}/messages`,
   communityChatRead: (gameSlug, channelId) =>
@@ -927,6 +928,9 @@ export const api = {
     request(withQuery(backendRoutes.presence, { userIds: userIds.join(',') })),
   // Community chat: public rooms of a game community, plaintext so moderators can read and remove messages.
   getCommunityChannels: (gameSlug) => request(backendRoutes.communityChat(gameSlug)),
+  /** Members to suggest after an @: whose name or handle starts like `q`. */
+  searchCommunityMembers: (gameSlug, q, /** @type {{ signal?: AbortSignal }} */ options = {}) =>
+    request(withQuery(backendRoutes.communityChatMembers(gameSlug), { q }), { signal: options.signal }),
   getCommunityMessages: (gameSlug, channelId, query = {}) =>
     request(withQuery(backendRoutes.communityChatMessages(gameSlug, channelId), query)),
   getCommunityMessage: (gameSlug, messageId) =>

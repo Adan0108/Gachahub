@@ -42,6 +42,8 @@ export interface CommunityMessage {
   } | null;
   /** Pictures shown with the message, in the order they were picked; none once it is removed. */
   media: CommunityMedia[];
+  /** Handles in the text that name real members; the ones that were pinged. */
+  mentions: string[];
   reactions: Array<RawReaction & { emote: ChatEmote | null }>;
 }
 
@@ -104,6 +106,13 @@ export function patchMessage(
       items: page.items.map((item) => (item.id === messageId ? update(item) : item)),
     })),
   };
+}
+
+/** Whether this message names the viewer, so it can stand out for them. */
+export function mentionsUser(message: CommunityMessage, username: string | null | undefined): boolean {
+  if (!username || message.deleted || message.blocked) return false;
+  const mine = username.toLowerCase();
+  return message.mentions.some((handle) => handle.toLowerCase() === mine);
 }
 
 /** What a quote of a message shows: its text, or Photo when it is pictures alone. */

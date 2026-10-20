@@ -13,6 +13,7 @@ import { CommunityAccessService } from './community-access.service';
 import { CommunityChatRepository } from './community-chat.repository';
 import { toCommunityReactions } from './community-message.mapper';
 import { CommunityMessagePresenter } from './community-message.presenter';
+import { CommunityMentionsService } from './community-mentions.service';
 import { CommunityRealtimeService } from './community-realtime.service';
 import type { DeleteCommunityMessageDto } from './dto/delete-community-message.dto';
 import type { EditCommunityMessageDto } from './dto/edit-community-message.dto';
@@ -27,6 +28,7 @@ export class CommunityActionsService {
     private readonly presenter: CommunityMessagePresenter,
     private readonly realtime: CommunityRealtimeService,
     private readonly media: MediaService,
+    private readonly mentions: CommunityMentionsService,
   ) {}
 
   async edit(
@@ -53,7 +55,24 @@ export class CommunityActionsService {
     const content = validMessageContent(dto.content, message.media.length > 0);
     if (content === message.content) return this.presenter.one(scope, message);
 
-    const updated = await this.repository.updateContent(message.id, content);
+    // Only people newly named by this edit are pinged: the mentions table remembers who already was
+    const targetIds = await this.mentions.targetsFor(
+      scope.game.id,
+      scope.user.id,
+      content,
+    );
+    const updated = await this.repository.updateContent(
+      message.id,
+      content,
+      targetIds.length > 0
+        ? (tx, saved) =>
+            this.mentions.publish(tx, {
+              targetIds,
+              actorId: scope.user.id,
+              messageId: saved.id,
+            })
+        : undefined,
+    );
     this.realtime.changed(message.channelId, message.id);
     return this.presenter.one(scope, updated);
   }

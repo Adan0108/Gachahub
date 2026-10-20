@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CommunityChat } from "../components/community/CommunityChat";
 
-const mocks = vi.hoisted(() => ({ chat: null, user: null, options: [] }));
+const mocks = vi.hoisted(() => ({ chat: null, user: null, options: [], suggestions: [] }));
 
 vi.mock("../hooks/community/useCommunityChat", () => ({
   useCommunityChat: (_slug, options) => {
@@ -12,6 +12,12 @@ vi.mock("../hooks/community/useCommunityChat", () => ({
   },
 }));
 vi.mock("../hooks/useCurrentUser", () => ({ useCurrentUser: () => ({ user: mocks.user }) }));
+vi.mock("../hooks/community/useCommunityMemberSuggestions", () => ({
+  useCommunityMemberSuggestions: (_slug, query) => ({
+    items: typeof query === "string" ? mocks.suggestions.filter((member) => member.username.startsWith(query)) : [],
+    isLoading: false,
+  }),
+}));
 vi.mock("../components/chat/EmojiPicker", () => ({
   EmojiPicker: ({ onPick }) => (
     <button onClick={() => onPick({ kind: "emoji", emoji: "🎉" })} type="button">
@@ -35,6 +41,7 @@ const message = (id, minutesAgo, extra = {}) => ({
   author: author("ann", "Ann"),
   replyTo: null,
   media: [],
+  mentions: [],
   reactions: [],
   ...extra,
 });
@@ -97,6 +104,7 @@ describe("CommunityChat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.options = [];
+    mocks.suggestions = [];
     Element.prototype.scrollIntoView = vi.fn();
     mocks.user = { id: "me", name: "Me", image: null };
     mocks.chat = chatState();
@@ -677,6 +685,120 @@ describe("CommunityChat", () => {
 
       expect(container.querySelectorAll(".community-message.pending .community-media")).toHaveLength(1);
       expect(screen.getByText("Sending...")).toBeInTheDocument();
+    });
+  });
+
+  describe("mentions", () => {
+    const members = [
+      { id: "u1", name: "Bobby", username: "bobby", image: null },
+      { id: "u2", name: "Bonnie", username: "bonnie", image: null },
+    ];
+    const typeAt = (text) => {
+      const box = composer();
+      fireEvent.change(box, { target: { value: text, selectionStart: text.length } });
+      box.setSelectionRange(text.length, text.length);
+      fireEvent.select(box);
+    };
+
+    it("shows the handles that pinged someone as mentions, and leaves other @words plain", () => {
+      mocks.chat = chatState({
+        messages: [message("m1", 2, { content: "hi @bobby and @nobody", mentions: ["bobby"] })],
+      });
+      const { container } = renderChat();
+
+      const spans = container.querySelectorAll(".community-text .mention");
+      expect(spans).toHaveLength(1);
+      expect(spans[0]).toHaveTextContent("@bobby");
+    });
+
+    it("makes a message that names you stand out, and not the others", () => {
+      mocks.user = { id: "me", name: "Me", image: null, username: "Me-Handle" };
+      mocks.chat = chatState({
+        messages: [
+          message("m1", 3, { content: "@me-handle look", mentions: ["me-handle"] }),
+          message("m2", 2, { content: "@bobby look", mentions: ["bobby"] }),
+        ],
+      });
+      const { container } = renderChat();
+
+      expect(container.querySelector("#community-message-m1")).toHaveClass("mentions-me");
+      expect(container.querySelector("#community-message-m2")).not.toHaveClass("mentions-me");
+    });
+
+    it("suggests members as soon as an @ is typed, narrowing as you type", () => {
+      mocks.suggestions = members;
+      renderChat();
+
+      typeAt("hi @");
+      expect(screen.getByRole("listbox", { name: "Suggested members" })).toBeInTheDocument();
+      expect(screen.getAllByRole("option")).toHaveLength(2);
+
+      typeAt("hi @bob");
+      expect(screen.getAllByRole("option")).toHaveLength(1);
+      expect(screen.getByText("@bobby")).toBeInTheDocument();
+    });
+
+    it("suggests nothing for text with no @ or for an email", () => {
+      mocks.suggestions = members;
+      renderChat();
+
+      typeAt("just words");
+      typeAt("mail bob@bo");
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    it("puts the picked member's handle into the text, and does not send on that Enter", () => {
+      mocks.suggestions = members;
+      const chat = chatState();
+      mocks.chat = chat;
+      renderChat();
+      typeAt("hi @bo");
+
+      fireEvent.keyDown(composer(), { key: "ArrowDown" });
+      fireEvent.keyDown(composer(), { key: "Enter" });
+
+      expect(composer()).toHaveValue("hi @bonnie ");
+      expect(chat.send).not.toHaveBeenCalled();
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    it("picks with a click, too, and with Tab", () => {
+      mocks.suggestions = members;
+      renderChat();
+      typeAt("@bo");
+
+      fireEvent.mouseDown(screen.getByRole("option", { name: /Bonnie/ }));
+      expect(composer()).toHaveValue("@bonnie ");
+
+      typeAt("hey @bob");
+      fireEvent.keyDown(composer(), { key: "Tab" });
+      expect(composer()).toHaveValue("hey @bobby ");
+    });
+
+    it("closes the list with Escape, and sends normally on the next Enter", () => {
+      mocks.suggestions = members;
+      const chat = chatState();
+      mocks.chat = chat;
+      renderChat();
+      typeAt("hi @bo");
+
+      fireEvent.keyDown(composer(), { key: "Escape" });
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      fireEvent.keyDown(composer(), { key: "Enter" });
+
+      expect(chat.send).toHaveBeenCalledWith("hi @bo", null, []);
+    });
+
+    it("still sends on Enter when no list is open", () => {
+      const chat = chatState();
+      mocks.chat = chat;
+      renderChat();
+
+      type("plain");
+      enter();
+
+      expect(chat.send).toHaveBeenCalledWith("plain", null, []);
     });
   });
 

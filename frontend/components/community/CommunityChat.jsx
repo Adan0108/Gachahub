@@ -22,6 +22,7 @@ export function CommunityChat({
   canJoin,
   isJoining,
   onJoin,
+  focusMessageId,
 }) {
   const { user } = useCurrentUser();
   // Only members get in, so asking before joining would be a request that is certain to be refused.
@@ -42,7 +43,7 @@ export function CommunityChat({
     removeTarget,
     confirmRemove,
     closeRemove,
-  } = useCommunityThread(chat);
+  } = useCommunityThread(chat, focusMessageId);
 
   if (!user) {
     return (
@@ -159,6 +160,7 @@ export function CommunityChat({
                 onSaveEdit={(messageId, content) => chat.edit.mutateAsync({ messageId, content })}
                 showHeader={row.showHeader}
                 userId={user.id}
+                username={user.username}
               />
             ),
           )}
@@ -177,6 +179,7 @@ export function CommunityChat({
 
       <CommunityComposer
         channel={channel}
+        slug={slug}
         disabledReason={lockedReason}
         onCancelReply={() => setReplyTo(null)}
         onSend={send}

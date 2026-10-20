@@ -11,7 +11,11 @@ export const DOMAIN_EVENT_TYPES = {
 export type DomainEventType =
   (typeof DOMAIN_EVENT_TYPES)[keyof typeof DOMAIN_EVENT_TYPES];
 
-export type MentionTargetType = 'POST' | 'COMMENT' | 'MESSAGE';
+export type MentionTargetType =
+  | 'POST'
+  | 'COMMENT'
+  | 'MESSAGE'
+  | 'COMMUNITY_MESSAGE';
 
 /** JOINING: added but not yet in the MLS group, can't decrypt until a Commit lands (see membership-state-machine.ts). */
 export type ChatParticipantAddedState = 'ACTIVE' | 'JOINING' | 'PENDING';

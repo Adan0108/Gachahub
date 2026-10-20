@@ -48,6 +48,9 @@ type NotificationRepositoryMock = {
   findConversationSummaries: jest.MockedFunction<
     NotificationRepository['findConversationSummaries']
   >;
+  findCommunitiesByMessageIds: jest.MockedFunction<
+    NotificationRepository['findCommunitiesByMessageIds']
+  >;
   upsertMessageStack: jest.MockedFunction<
     NotificationRepository['upsertMessageStack']
   >;
@@ -77,6 +80,7 @@ describe('NotificationService', () => {
     findConversationIdsByMessageIds: jest.fn(),
     settleMessageNotifications: jest.fn(),
     findConversationSummaries: jest.fn(),
+    findCommunitiesByMessageIds: jest.fn(),
     upsertMessageStack: jest.fn(),
     findDeviceStart: jest.fn(),
     findMessageNotificationIdsBefore: jest.fn(),
@@ -139,6 +143,7 @@ describe('NotificationService', () => {
     repositoryMock.settleMessageNotifications.mockResolvedValue(0);
     repositoryMock.findDeviceStart.mockResolvedValue(null);
     repositoryMock.findConversationSummaries.mockResolvedValue([]);
+    repositoryMock.findCommunitiesByMessageIds.mockResolvedValue([]);
     repositoryMock.findMessageNotificationIdsBefore.mockResolvedValue([]);
   });
 
@@ -632,8 +637,20 @@ describe('NotificationService', () => {
 
       expect(result).toEqual({
         items: [
-          { ...n1, postId: null, conversationId: null, conversation: null },
-          { ...n2, postId: null, conversationId: null, conversation: null },
+          {
+            ...n1,
+            postId: null,
+            conversationId: null,
+            conversation: null,
+            community: null,
+          },
+          {
+            ...n2,
+            postId: null,
+            conversationId: null,
+            conversation: null,
+            community: null,
+          },
         ],
         nextCursor: 'notification-2',
         hasMore: true,
@@ -654,6 +671,7 @@ describe('NotificationService', () => {
             postId: null,
             conversationId: null,
             conversation: null,
+            community: null,
           },
         ],
         nextCursor: null,
@@ -851,6 +869,38 @@ describe('NotificationService', () => {
           photoUrl: 'https://cdn.example.com/squad.png',
         },
       });
+    });
+
+    it('tells a community mention which community it came from', async () => {
+      repositoryMock.findByRecipient.mockResolvedValue([
+        {
+          ...notificationWithActor,
+          id: 'n-mention',
+          type: NotificationType.USER_MENTIONED,
+          entityType: NotificationEntityType.COMMUNITY_MESSAGE,
+          entityId: 'cm-1',
+        },
+        {
+          ...notificationWithActor,
+          id: 'n-like',
+          type: NotificationType.POST_LIKED,
+          entityType: NotificationEntityType.POST,
+          entityId: 'post-1',
+        },
+      ]);
+      repositoryMock.findCommunitiesByMessageIds.mockResolvedValue([
+        { id: 'cm-1', slug: 'wuwa', name: 'Wuthering Waves' },
+      ]);
+
+      const result = await service.getNotifications(recipientId, {});
+
+      expect(repositoryMock.findCommunitiesByMessageIds).toHaveBeenCalledWith([
+        'cm-1',
+      ]);
+      expect(result.items[0]).toMatchObject({
+        community: { slug: 'wuwa', name: 'Wuthering Waves' },
+      });
+      expect(result.items[1]).toMatchObject({ community: null });
     });
 
     it('only looks up messages for rows that do not carry their conversation', async () => {

@@ -3,15 +3,16 @@
 import { useState } from "react";
 import { FiCornerUpLeft } from "react-icons/fi";
 import { AvatarFace } from "../AvatarFace";
-import { LinkifiedText } from "../chat/LinkifiedText";
 import { MessageActions } from "../chat/MessageActions";
 import { ReactionChips } from "../chat/ReactionChips";
 import {
   COMMUNITY_MESSAGE_MAX_CHARS,
   canEditCommunityMessage,
+  mentionsUser,
   quoteText,
 } from "../../lib/community/communityChat";
 import { CommunityImages } from "./CommunityImages";
+import { CommunityText } from "./CommunityText";
 
 const BADGE_LABEL = { ADMIN: "Admin", MODERATOR: "Mod" };
 
@@ -81,6 +82,7 @@ export function CommunityMessageRow({
   message,
   showHeader,
   userId,
+  username,
   canModerate,
   now,
   editState,
@@ -119,7 +121,7 @@ export function CommunityMessageRow({
 
   return (
     <div
-      className={`community-message ${showHeader ? "with-header" : ""} ${message.deleted ? "removed" : ""}`}
+      className={`community-message ${showHeader ? "with-header" : ""} ${message.deleted ? "removed" : ""} ${mentionsUser(message, username) ? "mentions-me" : ""}`}
       id={`community-message-${message.id}`}
     >
       <div className="community-gutter">
@@ -183,7 +185,7 @@ export function CommunityMessageRow({
         ) : (
           (message.content || message.editedAt) && (
             <p className="community-text">
-              <LinkifiedText text={message.content} />
+              <CommunityText content={message.content} mentions={message.mentions} />
               {message.editedAt && <small className="community-edited"> (edited)</small>}
             </p>
           )

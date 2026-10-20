@@ -286,6 +286,25 @@ export class NotificationRepository {
     });
   }
 
+  /** The community each of these chat messages was written in, so a mention can open it. */
+  async findCommunitiesByMessageIds(
+    messageIds: string[],
+  ): Promise<Array<{ id: string; slug: string; name: string }>> {
+    if (messageIds.length === 0) {
+      return [];
+    }
+
+    const rows = await this.prisma.gameChannelMessage.findMany({
+      where: { id: { in: messageIds } },
+      select: {
+        id: true,
+        channel: { select: { game: { select: { slug: true, name: true } } } },
+      },
+    });
+
+    return rows.map((row) => ({ id: row.id, ...row.channel.game }));
+  }
+
   /** The conversation each of these messages is in, so a chat notification can open it. */
   async findConversationIdsByMessageIds(
     messageIds: string[],

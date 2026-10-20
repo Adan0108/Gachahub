@@ -64,6 +64,34 @@ describe("describeNotification", () => {
     });
   });
 
+  describe("mentions in community chat", () => {
+    const mention = (extra = {}) => ({
+      ...base,
+      type: "USER_MENTIONED",
+      entityType: "COMMUNITY_MESSAGE",
+      entityId: "cm 1",
+      community: { slug: "wuthering-waves", name: "Wuthering Waves" },
+      ...extra,
+    });
+
+    it("says where you were mentioned", () => {
+      expect(describeNotification(mention()).action).toBe("mentioned you in Wuthering Waves");
+    });
+
+    it("opens that community's chat on the message", () => {
+      expect(describeNotification(mention()).href).toBe(
+        "/community/wuthering-waves?tab=Chat&message=cm%201",
+      );
+    });
+
+    it("has nowhere to go, and says only that you were mentioned, when the community is gone", () => {
+      const lost = describeNotification(mention({ community: null }));
+
+      expect(lost.href).toBeNull();
+      expect(lost.action).toBe("mentioned you");
+    });
+  });
+
   describe("chat notifications", () => {
     it.each([
       ["MESSAGE_RECEIVED", "MESSAGE"],

@@ -19,6 +19,8 @@ import {
   commentEntityIds,
   messageEntityIds,
   withConversationIds,
+  communityMessageEntityIds,
+  withCommunities,
   withConversations,
   withPostIds,
 } from './notification.mapper';
@@ -293,11 +295,14 @@ export class NotificationService {
     const nextCursor =
       hasMore && items.length > 0 ? items[items.length - 1].id : null;
 
-    const [comments, messages] = await Promise.all([
+    const [comments, messages, communities] = await Promise.all([
       this.commentsRepository.findPostIdsByCommentIds(commentEntityIds(items)),
       // Rows made before a row carried its own conversation find it through the message
       this.notificationRepository.findConversationIdsByMessageIds(
         messageEntityIds(items.filter((item) => !item.conversationId)),
+      ),
+      this.notificationRepository.findCommunitiesByMessageIds(
+        communityMessageEntityIds(items),
       ),
     ]);
 
@@ -318,9 +323,12 @@ export class NotificationService {
       ]);
 
     return {
-      items: withConversations(
-        located,
-        new Map(summaries.map((summary) => [summary.id, summary])),
+      items: withCommunities(
+        withConversations(
+          located,
+          new Map(summaries.map((summary) => [summary.id, summary])),
+        ),
+        new Map(communities.map(({ id, slug, name }) => [id, { slug, name }])),
       ),
       nextCursor,
       hasMore,

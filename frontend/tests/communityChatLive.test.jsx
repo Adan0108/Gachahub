@@ -43,6 +43,8 @@ const message = (id, extra = {}) => ({
   editedAt: null,
   author: { id: "ann", name: "Ann", image: null, badge: null },
   replyTo: null,
+  media: [],
+  mentions: [],
   reactions: [],
   ...extra,
 });

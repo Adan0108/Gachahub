@@ -9,8 +9,12 @@ const MENTION_CANDIDATE = /(?<![\w-])@([A-Za-z0-9_-]+)/g;
  * Distinct, case-insensitive `@handle`s in the text, capped. Like Discord/GitHub, the whole run of
  * handle characters is one candidate: `@bob-smith` mentions `bob-smith` (never `bob`), and an
  * invalid run such as `@bob--x` mentions nobody. Only trailing separators are dropped (`@bob_`).
+ * Stops at `limit` handles; ask for one more than allowed to know whether there were too many.
  */
-export function extractMentionHandles(text: string): string[] {
+export function extractMentionHandles(
+  text: string,
+  limit: number = MAX_MENTIONS_PER_TEXT,
+): string[] {
   const seen = new Map<string, string>();
 
   for (const match of text.matchAll(MENTION_CANDIDATE)) {
@@ -19,7 +23,7 @@ export function extractMentionHandles(text: string): string[] {
     if (USERNAME_PATTERN.test(handle) && !seen.has(handle.toLowerCase())) {
       seen.set(handle.toLowerCase(), handle);
 
-      if (seen.size === MAX_MENTIONS_PER_TEXT) {
+      if (seen.size === limit) {
         break;
       }
     }

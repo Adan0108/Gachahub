@@ -26,12 +26,17 @@ import { SocketRegistry } from '../src/websocket/socket-registry.service';
 import { CommunityActionsService } from '../src/community-chat/community-actions.service';
 import { CommunityChannelsService } from '../src/community-chat/community-channels.service';
 import { CommunityMessagePresenter } from '../src/community-chat/community-message.presenter';
+import { CommunityMentionsService } from '../src/community-chat/community-mentions.service';
 import { CommunityMessagingService } from '../src/community-chat/community-messaging.service';
 import { GameModeratorsRepository } from '../src/game-moderators/game-moderators.repository';
 import { CloudinaryService } from '../src/cloudinary/cloudinary.service';
 import { MediaRepository } from '../src/media/media.repository';
 import { MediaService } from '../src/media/media.service';
 import { RedisService } from '../src/redis/redis.service';
+import { EventPublisherPort } from '../src/domain-events/event-publisher.port';
+import { MentionsService } from '../src/mentions/mentions.service';
+import { OutboxEventPublisher } from '../src/outbox/outbox-event.publisher';
+import { OutboxRepository } from '../src/outbox/outbox.repository';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 // Real HTTP controller, validation, services and PostgreSQL persistence, including the
@@ -95,6 +100,11 @@ describe('Community chat API (real database)', () => {
         BlocksRepository,
         MediaService,
         MediaRepository,
+        CommunityMentionsService,
+        MentionsService,
+        OutboxRepository,
+        OutboxEventPublisher,
+        { provide: EventPublisherPort, useExisting: OutboxEventPublisher },
         { provide: CloudinaryService, useValue: { deleteAsset: destroyAsset } },
         { provide: RedisService, useValue: {} },
         {
@@ -741,6 +751,215 @@ describe('Community chat API (real database)', () => {
       await send(bo, 'a').expect(429);
       await send(mod, 'b').expect(201);
       await send(mod, 'c').expect(201);
+    });
+  });
+
+  describe('@mentions', () => {
+    const tag = token.replace(/-/g, '').slice(0, 8);
+    const handle = (name: string) => `${name}-${tag}`;
+    const sent: string[] = [];
+    const pinged = async (messageId: string) =>
+      (
+        await db.mention.findMany({
+          where: { entityType: 'COMMUNITY_MESSAGE', entityId: messageId },
+        })
+      )
+        .map((row) => row.userId)
+        .sort();
+    const events = (messageId: string) =>
+      db.outboxEvent.findMany({
+        where: { type: 'user.mentioned', aggregateId: messageId },
+      });
+    const say = async (user: string, content: string) => {
+      const response = await send(user, content).expect(201);
+      sent.push(response.body.id);
+      return response.body as { id: string; mentions: string[] };
+    };
+    const edit = (user: string, messageId: string, content: string) =>
+      request(app.getHttpServer())
+        .patch(`${BASE}/messages/${messageId}`)
+        .set(as(user))
+        .send({ content })
+        .expect(200);
+
+    beforeAll(async () => {
+      const names = ['ann', 'bo', 'out', 'sus', 'mod'];
+      await Promise.all(
+        [ann, bo, outsider, suspended, mod].map((userId, index) =>
+          db.user.update({
+            where: { id: userId },
+            data: { username: handle(names[index]) },
+          }),
+        ),
+      );
+    });
+
+    afterAll(async () => {
+      await db.outboxEvent.deleteMany({ where: { aggregateId: { in: sent } } });
+      await db.mention.deleteMany({ where: { entityId: { in: sent } } });
+    });
+
+    it('pings a member named in a message, once, and shows the handle as a mention', async () => {
+      const message = await say(ann, `hi @${handle('bo')}!`);
+
+      expect(await pinged(message.id)).toEqual([bo]);
+      const queued = await events(message.id);
+      expect(queued).toHaveLength(1);
+      expect(queued[0].payload).toMatchObject({
+        targetUserId: bo,
+        actorId: ann,
+        entityType: 'COMMUNITY_MESSAGE',
+        entityId: message.id,
+      });
+      expect(message.mentions).toEqual([handle('bo')]);
+      const page = await messages(bo, '?limit=100');
+      expect(
+        page.items.find((item: { id: string }) => item.id === message.id)
+          .mentions,
+      ).toEqual([handle('bo')]);
+    });
+
+    it('pings nobody for someone who is not a member, a suspended account, or yourself', async () => {
+      const message = await say(
+        ann,
+        `@${handle('out')} @${handle('sus')} @${handle('ann')} @${handle('mod')}`,
+      );
+
+      expect(await pinged(message.id)).toEqual([]);
+      expect(await events(message.id)).toHaveLength(0);
+      expect(message.mentions).toEqual([]);
+    });
+
+    it('pings nobody who is blocked either way', async () => {
+      await db.chatUserBlock.create({
+        data: { blockerId: bo, blockedId: ann },
+      });
+      try {
+        const message = await say(ann, `@${handle('bo')} are you there`);
+        expect(await pinged(message.id)).toEqual([]);
+
+        await db.chatUserBlock.deleteMany({ where: { blockerId: bo } });
+        await db.chatUserBlock.create({
+          data: { blockerId: ann, blockedId: bo },
+        });
+        const again = await say(ann, `@${handle('bo')} again`);
+        expect(await pinged(again.id)).toEqual([]);
+      } finally {
+        await db.chatUserBlock.deleteMany({
+          where: { OR: [{ blockerId: bo }, { blockerId: ann }] },
+        });
+      }
+    });
+
+    it('does not ping the same person again when the message is edited', async () => {
+      const message = await say(ann, `@${handle('bo')} first`);
+
+      await edit(ann, message.id, `@${handle('bo')} fixed typo`);
+      await edit(ann, message.id, `fixed typo, no mention`);
+      await edit(ann, message.id, `@${handle('bo')} back again`);
+
+      expect(await events(message.id)).toHaveLength(1);
+    });
+
+    it('pings someone added by an edit, and only them', async () => {
+      await db.gameMember.upsert({
+        where: { gameId_userId: { gameId, userId: mod } },
+        create: { gameId, userId: mod },
+        update: {},
+      });
+      try {
+        const message = await say(ann, `@${handle('bo')} first`);
+
+        await edit(ann, message.id, `@${handle('bo')} and @${handle('mod')}`);
+
+        expect(await pinged(message.id)).toEqual([bo, mod].sort());
+        expect(await events(message.id)).toHaveLength(2);
+      } finally {
+        await db.gameMember.deleteMany({ where: { gameId, userId: mod } });
+      }
+    });
+
+    it('refuses a message that mentions more than ten people, and saves nothing', async () => {
+      const before = await db.gameChannelMessage.count({
+        where: { channelId },
+      });
+      const crowd = Array.from(
+        { length: 11 },
+        (_, i) => `@crowd${i}-${tag}`,
+      ).join(' ');
+
+      await send(ann, crowd).expect(400);
+
+      expect(await db.gameChannelMessage.count({ where: { channelId } })).toBe(
+        before,
+      );
+    });
+
+    it('accepts exactly ten', async () => {
+      const ten = Array.from(
+        { length: 10 },
+        (_, i) => `@crowd${i}-${tag}`,
+      ).join(' ');
+
+      await say(ann, ten);
+    });
+
+    it('does not ping a retry of a send that already went through', async () => {
+      const clientMessageId = `mention-retry-${randomUUID()}`;
+      const first = await send(ann, `@${handle('bo')} retry`, {
+        clientMessageId,
+      }).expect(201);
+      sent.push(first.body.id);
+
+      await send(ann, `@${handle('bo')} retry`, { clientMessageId }).expect(
+        201,
+      );
+
+      expect(await events(first.body.id)).toHaveLength(1);
+    });
+
+    describe('suggestions while typing @', () => {
+      const suggest = (user: string, q: string) =>
+        get(user, `${BASE}/members?q=${encodeURIComponent(q)}`);
+      const idsOf = (body: { items: Array<{ id: string }> }) =>
+        body.items.map((item) => item.id);
+
+      it('lists members that match the start of a handle or a name', async () => {
+        const response = await suggest(ann, handle('bo').slice(0, 4)).expect(
+          200,
+        );
+
+        expect(idsOf(response.body)).toEqual([bo]);
+        expect(response.body.items[0]).toMatchObject({
+          username: handle('bo'),
+        });
+      });
+
+      it('leaves out you, non-members and suspended accounts', async () => {
+        const response = await suggest(ann, '').expect(200);
+        const ids = idsOf(response.body);
+
+        expect(ids).toContain(bo);
+        expect(ids).not.toContain(ann);
+        expect(ids).not.toContain(outsider);
+        expect(ids).not.toContain(suspended);
+      });
+
+      it('leaves out people blocked either way', async () => {
+        await db.chatUserBlock.create({
+          data: { blockerId: bo, blockedId: ann },
+        });
+        try {
+          const response = await suggest(ann, '').expect(200);
+          expect(idsOf(response.body)).not.toContain(bo);
+        } finally {
+          await db.chatUserBlock.deleteMany({ where: { blockerId: bo } });
+        }
+      });
+
+      it('refuses someone who cannot use this chat', async () => {
+        await suggest(outsider, 'a').expect(403);
+      });
     });
   });
 

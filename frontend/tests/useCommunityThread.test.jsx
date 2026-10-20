@@ -25,6 +25,7 @@ const message = (id, minute) => ({
   author: { id: "ann", name: "Ann", image: null, badge: null },
   replyTo: null,
   media: [],
+  mentions: [],
   reactions: [],
 });
 
@@ -42,9 +43,9 @@ function makeChat(extra = {}) {
   };
 }
 
-function setup(chat) {
-  return renderHook(({ chat: current }) => useCommunityThread(current), {
-    initialProps: { chat },
+function setup(chat, focusMessageId) {
+  return renderHook(({ chat: current, focus }) => useCommunityThread(current, focus), {
+    initialProps: { chat, focus: focusMessageId },
   });
 }
 
@@ -197,6 +198,79 @@ describe("useCommunityThread", () => {
       act(() => result.current.send("hi"));
 
       expect(chat.send).toHaveBeenCalledWith("hi", null, []);
+    });
+  });
+
+  describe("opened from a link to one message", () => {
+    const target = () => {
+      const element = document.createElement("div");
+      element.id = "community-message-m1";
+      element.scrollIntoView = vi.fn();
+      document.body.append(element);
+      return element;
+    };
+
+    it("scrolls to the message when it is already loaded", () => {
+      const element = target();
+
+      setup(makeChat(), "m1");
+
+      expect(element.scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(element.classList.contains("flash")).toBe(true);
+    });
+
+    it("does nothing without a link", () => {
+      const element = target();
+
+      setup(makeChat());
+
+      expect(element.scrollIntoView).not.toHaveBeenCalled();
+    });
+
+    it("waits for the room to load before looking", () => {
+      const element = target();
+
+      setup(makeChat({ isLoading: true }), "m1");
+
+      expect(element.scrollIntoView).not.toHaveBeenCalled();
+    });
+
+    it("loads older messages while the message is not there yet, then scrolls once it shows up", () => {
+      const chat = makeChat({ hasOlder: true, isLoadingOlder: false });
+      const { rerender } = setup(chat, "m1");
+      expect(chat.loadOlder).toHaveBeenCalledTimes(1);
+
+      const element = target();
+      rerender({ chat: { ...chat, messages: [message("m0", 0), ...chat.messages] }, focus: "m1" });
+
+      expect(element.scrollIntoView).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not ask for another page while one is loading", () => {
+      const chat = makeChat({ hasOlder: true, isLoadingOlder: true });
+
+      setup(chat, "m1");
+
+      expect(chat.loadOlder).not.toHaveBeenCalled();
+    });
+
+    it("gives up when the history runs out", () => {
+      const chat = makeChat({ hasOlder: false });
+
+      setup(chat, "gone");
+
+      expect(chat.loadOlder).not.toHaveBeenCalled();
+    });
+
+    it("gives up after a few pages instead of loading the whole room", () => {
+      const chat = makeChat({ hasOlder: true, isLoadingOlder: false });
+      const { rerender } = setup(chat, "gone");
+
+      for (let page = 1; page <= 10; page += 1) {
+        rerender({ chat: { ...chat, messages: [...chat.messages, message(`x${page}`, 10 + page)] }, focus: "gone" });
+      }
+
+      expect(chat.loadOlder.mock.calls.length).toBeLessThanOrEqual(6);
     });
   });
 

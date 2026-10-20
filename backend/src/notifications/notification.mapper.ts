@@ -76,3 +76,28 @@ export function withConversations<T extends { conversationId: string | null }>(
     };
   });
 }
+
+/** The community chat messages among these notifications - the ones that need their community looked up. */
+export function communityMessageEntityIds(
+  items: MappableNotification[],
+): string[] {
+  return items
+    .filter(
+      (item) => item.entityType === NotificationEntityType.COMMUNITY_MESSAGE,
+    )
+    .map((item) => item.entityId);
+}
+
+/** Community chat notifications carry the community to open; every other kind carries null. */
+export function withCommunities<T extends MappableNotification>(
+  items: T[],
+  communityByMessageId: Map<string, { slug: string; name: string }>,
+) {
+  return items.map((item) => ({
+    ...item,
+    community:
+      item.entityType === NotificationEntityType.COMMUNITY_MESSAGE
+        ? (communityByMessageId.get(item.entityId) ?? null)
+        : null,
+  }));
+}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  mentionsUser,
   quoteText,
   buildRows,
   canEditCommunityMessage,
@@ -26,6 +27,7 @@ const message = (id: string, extra: Partial<CommunityMessage> = {}): CommunityMe
   author: { id: "ann", name: "Ann", image: null, badge: null },
   replyTo: null,
   media: [],
+  mentions: [],
   reactions: [],
   ...extra,
 });
@@ -251,5 +253,24 @@ describe("quoteText", () => {
 
   it("quotes nothing for a message with neither", () => {
     expect(quoteText({ content: null, hasMedia: false })).toBe("");
+  });
+});
+
+describe("mentionsUser", () => {
+  const named = (extra: Partial<CommunityMessage> = {}) => message("m1", { mentions: ["Bobby-1"], ...extra });
+
+  it("is true when the message pinged this handle, whatever the capitals", () => {
+    expect(mentionsUser(named(), "bobby-1")).toBe(true);
+  });
+
+  it("is false for anyone else, for no handle, and for a message with no mentions", () => {
+    expect(mentionsUser(named(), "carol")).toBe(false);
+    expect(mentionsUser(named(), undefined)).toBe(false);
+    expect(mentionsUser(message("m2"), "bobby-1")).toBe(false);
+  });
+
+  it("is false once the message was removed or its author is blocked", () => {
+    expect(mentionsUser(named({ deleted: true }), "bobby-1")).toBe(false);
+    expect(mentionsUser(named({ blocked: true }), "bobby-1")).toBe(false);
   });
 });

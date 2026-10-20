@@ -33,6 +33,8 @@ export interface CommunityMessage {
   } | null;
   /** Images shown with the message; none once it is removed or its author is blocked. */
   media: CommunityMedia[];
+  /** Handles in the text that name real members, so they can be shown as mentions. */
+  mentions: string[];
   reactions: CommunityReaction[];
 }
 
@@ -113,12 +115,14 @@ export interface ViewerContext {
   moderatorIds: ReadonlySet<string>;
   /** Authors the viewer has blocked. */
   blockedIds: ReadonlySet<string>;
+  /** Handles each message pinged, by message id. */
+  mentionsById?: ReadonlyMap<string, string[]>;
 }
 
 /** What one viewer sees of a message; a removed or blocked one keeps its place but loses its text. */
 export function toCommunityMessage(
   row: CommunityMessageRow,
-  { moderatorIds, blockedIds }: ViewerContext,
+  { moderatorIds, blockedIds, mentionsById }: ViewerContext,
 ): CommunityMessage {
   const deleted = row.deletedAt !== null;
 
@@ -134,6 +138,7 @@ export function toCommunityMessage(
       author: null,
       replyTo: null,
       media: [],
+      mentions: [],
       reactions: [],
     };
   }
@@ -156,6 +161,7 @@ export function toCommunityMessage(
       : null,
     replyTo: row.replyTo ? presentReply(row.replyTo, blockedIds) : null,
     media: deleted ? [] : row.media.map(toMedia),
+    mentions: deleted ? [] : (mentionsById?.get(row.id) ?? []),
     reactions: row.reactions.map(toReaction),
   };
 }

@@ -17,6 +17,7 @@ describe('CommunityActionsService', () => {
   const presenter = { one: jest.fn() };
   const realtime = { changed: jest.fn() };
   const media = { releaseReplacedUpload: jest.fn() };
+  const mentions = { targetsFor: jest.fn(), publish: jest.fn() };
 
   let service: CommunityActionsService;
 
@@ -25,6 +26,7 @@ describe('CommunityActionsService', () => {
     access.scope.mockResolvedValue(scope());
     access.messageIn.mockResolvedValue(row());
     repository.findReactions.mockResolvedValue([]);
+    mentions.targetsFor.mockResolvedValue([]);
     // The presenter is covered by its own spec; here it just echoes what it was given.
     presenter.one.mockImplementation((_scope: unknown, message: unknown) =>
       Promise.resolve(message),
@@ -35,6 +37,7 @@ describe('CommunityActionsService', () => {
       presenter as never,
       realtime as never,
       media as never,
+      mentions as never,
     );
   });
 
@@ -49,9 +52,48 @@ describe('CommunityActionsService', () => {
 
       const message = await edit();
 
-      expect(repository.updateContent).toHaveBeenCalledWith('m1', 'fixed');
+      expect(repository.updateContent).toHaveBeenCalledWith(
+        'm1',
+        'fixed',
+        undefined,
+      );
       expect(message).toMatchObject({ content: 'fixed' });
       expect(message?.editedAt).not.toBeNull();
+    });
+
+    it('pings only through the save, and only people named in the new text', async () => {
+      mentions.targetsFor.mockResolvedValue(['bo']);
+      repository.updateContent.mockResolvedValue(row({ content: 'fixed @bo' }));
+
+      await edit('fixed @bo');
+
+      expect(mentions.targetsFor).toHaveBeenCalledWith('g1', 'me', 'fixed @bo');
+      const after = (
+        repository.updateContent.mock.calls[0] as unknown[]
+      )[2] as (tx: unknown, saved: { id: string }) => Promise<void>;
+      const tx = {};
+      await after(tx, { id: 'm1' });
+      expect(mentions.publish).toHaveBeenCalledWith(tx, {
+        targetIds: ['bo'],
+        actorId: 'me',
+        messageId: 'm1',
+      });
+    });
+
+    it('queues no pings for an edit that names nobody', async () => {
+      repository.updateContent.mockResolvedValue(row({ content: 'fixed' }));
+
+      await edit();
+
+      expect(
+        (repository.updateContent.mock.calls[0] as unknown[])[2],
+      ).toBeUndefined();
+    });
+
+    it('does not look for mentions when the text did not change', async () => {
+      await edit('hello');
+
+      expect(mentions.targetsFor).not.toHaveBeenCalled();
     });
 
     it('lets a message with pictures end up with no text, but not one without', async () => {
@@ -61,7 +103,11 @@ describe('CommunityActionsService', () => {
       repository.updateContent.mockResolvedValue(row({ content: '' }));
 
       await edit('   ');
-      expect(repository.updateContent).toHaveBeenCalledWith('m1', '');
+      expect(repository.updateContent).toHaveBeenCalledWith(
+        'm1',
+        '',
+        undefined,
+      );
 
       access.messageIn.mockResolvedValue(row());
       await expect(edit('   ')).rejects.toThrow(BadRequestException);
