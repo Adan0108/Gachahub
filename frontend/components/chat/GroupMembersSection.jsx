@@ -10,6 +10,7 @@ import {
   FiStar,
   FiUserMinus,
   FiUserPlus,
+  FiUsers,
 } from "react-icons/fi";
 import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
 import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
@@ -200,7 +201,12 @@ export function GroupMembersSection({
 
   return (
     <div className="chat-info-section chat-info-members">
-      <InfoSectionToggle isOpen={isOpen} label={`Members (${members.length})`} onToggle={onToggleOpen} />
+      <InfoSectionToggle
+        icon={<FiUsers aria-hidden="true" />}
+        isOpen={isOpen}
+        label={`Members (${members.length})`}
+        onToggle={onToggleOpen}
+      />
 
       {isOpen && canManage && (
         <button

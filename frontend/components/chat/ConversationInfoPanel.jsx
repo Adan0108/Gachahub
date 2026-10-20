@@ -154,6 +154,7 @@ export function ConversationInfoPanel({
 
             <div className="chat-info-section">
               <InfoSectionToggle
+                icon={<FiImage aria-hidden="true" />}
                 isOpen={isMediaOpen}
                 label="Media and files"
                 onToggle={() => setIsMediaOpen((open) => !open)}

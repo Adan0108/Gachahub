@@ -2695,33 +2695,6 @@
   letter-spacing: 0.03em;
 }
 
-.chat-info-section-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 8px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-align: left;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.chat-info-section-toggle:hover {
-  background: var(--panel2);
-  color: var(--text);
-}
-
-.chat-info-section-toggle[aria-expanded="true"] .chat-info-row-chevron {
-  transform: rotate(180deg);
-}
-
 .chat-info-row {
   display: flex;
   align-items: center;
