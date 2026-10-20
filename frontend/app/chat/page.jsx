@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FiArchive,
   FiCheck,
   FiCheckCircle,
+  FiChevronLeft,
   FiEdit2,
   FiInfo,
   FiLock,
@@ -19,13 +20,14 @@ import {
   FiSearch,
   FiSend,
   FiShield,
+  FiUserX,
   FiUsers,
   FiX,
 } from "react-icons/fi";
 import { PresenceDot } from "../../components/PresenceDot";
 import { QueryNotice } from "../../components/QueryNotice";
 import { ConversationInfoPanel } from "../../components/chat/ConversationInfoPanel";
-import { GroupSettingsModal } from "../../components/chat/GroupSettingsModal";
+import { BlockedPeopleList } from "../../components/chat/BlockedPeopleList";
 import { SafetyNumberModal } from "../../components/chat/SafetyNumberModal";
 import { SafetyChangedBanner } from "../../components/chat/SafetyStatus";
 import { UserPicker } from "../../components/chat/UserPicker";
@@ -54,6 +56,7 @@ import { useConversationActions } from "../../hooks/chat/useConversationActions"
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
 import { useAcknowledgeUnreadable } from "../../hooks/chat/useAcknowledgeUnreadable";
+import { useConversationDrafts } from "../../hooks/chat/useConversationDrafts";
 import { usePresenceOf } from "../../hooks/presence/usePresenceOf";
 import { useMarkChatRead } from "../../hooks/chat/useMarkChatRead";
 import { useReadWhenSeen } from "../../hooks/chat/useReadWhenSeen";
@@ -62,6 +65,9 @@ import { useStickToBottom } from "../../hooks/chat/useStickToBottom";
 import { useTypingNames } from "../../hooks/chat/useTypingNames";
 import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
 import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
+import { useToast } from "../../hooks/useToast";
+import { ComposerEmojiButton } from "../../components/chat/ComposerEmojiButton";
+import { encodeEmotes } from "../../lib/emoji/emoteText";
 import { useThreadData } from "../../hooks/chat/useThreadData";
 import { sendEncryptedChatMessage, sendEncryptedEdit } from "../../lib/mls/messaging/sendEncryptedMessage";
 
@@ -70,6 +76,7 @@ import { previewForSend } from "../../lib/mls/messaging/sendLinkPreview";
 import {
   flattenOtherAttachments,
   flattenVisualAttachments,
+  attachmentKind,
   pendingStatusLabel,
 } from "../../lib/mls/media/attachmentView";
 import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightboxContext";
@@ -80,6 +87,7 @@ import { conversationMatches } from "../../lib/chat/conversationSearch";
 import { MIN_SEARCH_CHARS, parseSearchQuery } from "../../lib/chat/searchFolding";
 import {
   activeMembers,
+  blockedPeerOf,
   conversationDisplayName,
   conversationImage,
   conversationPeer,
@@ -130,12 +138,25 @@ function ChatSkeleton() {
   );
 }
 
+const VIEW_TITLES = { requests: "Requests", archived: "Archived", blocked: "Blocked" };
+
 export default function ChatPage() {
+  return (
+    <Suspense fallback={null}>
+      <ChatPageContent />
+    </Suspense>
+  );
+}
+
+function ChatPageContent() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
   const [view, setView] = useState("inbox");
   const [selectedId, setSelectedId] = useState("");
+  // /chat?c=<conversation id> (a clicked notification) opens that conversation; the id is then taken off the address.
+  const requestedId = useSearchParams().get("c") ?? "";
+  const [handledRequestId, setHandledRequestId] = useState("");
   const [search, setSearch] = useState("");
   // The text message search was last run for (on Enter); null until it has been used.
   const [messageQuery, setMessageQuery] = useState(null);
@@ -145,8 +166,37 @@ export default function ChatPage() {
     ...queries.chatArchivedConversations(),
     enabled: isAuthenticated && view === "archived",
   });
-  const listByView = { inbox: conversations, requests, archived };
+  // The conversation can be an inbox chat or a request, so it is opened once both lists are in.
+  const [pendingOpenId, setPendingOpenId] = useState("");
+  if (requestedId !== handledRequestId) {
+    setHandledRequestId(requestedId);
+    if (requestedId) setPendingOpenId(requestedId);
+  }
+  const listsReady = (conversations.data || conversations.isError) && (requests.data || requests.isError);
+  if (pendingOpenId && listsReady) {
+    setPendingOpenId("");
+    setSelectedId(pendingOpenId);
+    setView(requests.data?.some((conversation) => conversation.id === pendingOpenId) ? "requests" : "inbox");
+  }
+  useEffect(() => {
+    if (requestedId) router.replace("/chat");
+  }, [requestedId, router]);
+  const blockedUsers = useQuery({
+    ...queries.chatBlockedUsers(),
+    enabled: isAuthenticated && view === "blocked",
+  });
+  // The blocked view lists people, not conversations; the inbox stays the list behind it.
+  const listByView = { inbox: conversations, requests, archived, blocked: conversations };
   const listQuery = listByView[view];
+  const directChatByUserId = new Map(
+    (conversations.data ?? [])
+      .filter((conversation) => conversation.type === "DIRECT")
+      .flatMap((conversation) =>
+        conversation.participants
+          .filter((participant) => participant.userId !== user?.id)
+          .map((participant) => [participant.userId, conversation.id]),
+      ),
+  );
   const rawList = listQuery.data || [];
   const searchTerms = parseSearchQuery(search);
   const isFiltering = searchTerms.length > 0;
@@ -210,9 +260,9 @@ export default function ChatPage() {
     followIfNearBottom,
     showJumpToBottom,
   } = useStickToBottom(messagesContainerRef);
-  const [draft, setDraft] = useState("");
   // { id, senderName, preview } of the message being replied to, or null.
   const [replyTarget, setReplyTarget] = useState(null);
+  const { draft, setDraft, setDraftFor } = useConversationDrafts(activeId);
   // Sent messages awaiting the network, keyed by a client-side id.
   const [pendingMessages, setPendingMessages] = useState([]);
   const attachmentPicker = useAttachmentPicker();
@@ -308,6 +358,26 @@ export default function ChatPage() {
   };
 
   const composerInputRef = useRef(null);
+  // Emotes picked into the draft, by name: the box shows :name:, the message carries the token.
+  const pickedEmotesRef = useRef(new Map());
+  const insertIntoDraft = (piece) => {
+    const input = composerInputRef.current;
+    const start = input?.selectionStart ?? draft.length;
+    const end = input?.selectionEnd ?? draft.length;
+    setDraft(`${draft.slice(0, start)}${piece}${draft.slice(end)}`);
+    requestAnimationFrame(() => {
+      input?.focus();
+      input?.setSelectionRange(start + piece.length, start + piece.length);
+    });
+  };
+  const pickEmoji = (choice) => {
+    if (choice.kind === "emote") {
+      pickedEmotesRef.current.set(choice.emote.shortcode, choice.emote);
+      insertIntoDraft(`:${choice.emote.shortcode}: `);
+    } else {
+      insertIntoDraft(choice.emoji);
+    }
+  };
   const messageEdit = useMessageEdit({
     draft,
     setDraft,
@@ -499,7 +569,11 @@ export default function ChatPage() {
     typingSignal.stop(replyLightboxOwnerId);
     setReplyLightboxOwnerId(activeId);
     setReplyTarget(null);
-    if (messageEdit.target) messageEdit.leave();
+    // The text being edited sat in the old conversation's box; give that box its own draft back.
+    if (messageEdit.target) {
+      setDraftFor(replyLightboxOwnerId, messageEdit.target.previousDraft ?? "");
+      messageEdit.leave({ restoreDraft: false });
+    }
     setRemoveTarget(null);
     setLightboxKey(null);
     setHiddenMessageIds(getHiddenMessageIds(activeId));
@@ -593,7 +667,12 @@ export default function ChatPage() {
   const closeIfOpen = (conversationId) => {
     if (conversationId === activeId) setSelectedId("");
   };
-  const conversationActions = useConversationActions({ onGone: closeIfOpen });
+  const { notice: actionNotice, showNotice: showActionNotice } = useToast();
+  const conversationActions = useConversationActions({
+    userId: user?.id,
+    onGone: closeIfOpen,
+    notify: showActionNotice,
+  });
 
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [groupTitle, setGroupTitle] = useState("");
@@ -614,8 +693,6 @@ export default function ChatPage() {
     },
   });
 
-  const [isGroupSettingsOpen, setIsGroupSettingsOpen] = useState(false);
-  const groupSettingsButtonRef = useRef(null);
   const [isDevicesOpen, setIsDevicesOpen] = useState(false);
   const devicesButtonRef = useRef(null);
   const [isBackupOpen, setIsBackupOpen] = useState(false);
@@ -662,7 +739,9 @@ export default function ChatPage() {
     displayMessages.length > 0 &&
     displayMessages.every((message) => message.contentType === "SYSTEM") &&
     pendingMessages.length === 0;
-  const actionError = acceptRequest.error || declineRequest.error || conversationActions.block.error;
+  const actionError =
+    acceptRequest.error ||
+    declineRequest.error;
   // Only claim end-to-end encryption when this device can actually use the group.
   const encryptionStatus = groupProblem
     ? "Encryption problem on this device"
@@ -696,8 +775,10 @@ export default function ChatPage() {
     canSendMessages &&
     activeConversation?.type === "GROUP" &&
     otherActiveMemberIds(activeConversation, user?.id).length === 0;
+  // You blocked this person: the chat stays, read-only, until you unblock them.
+  const blockedPeer = blockedPeerOf(activeConversation, user?.id);
   const composerReady =
-    canSendMessages && !isGroupAwaitingAcceptance && isDeviceReady && Boolean(syncEngine);
+    canSendMessages && !isGroupAwaitingAcceptance && !blockedPeer && isDeviceReady && Boolean(syncEngine);
 
   const handleThreadDragEnter = (event) => {
     if (!composerReady || !event.dataTransfer?.types?.includes("Files")) return;
@@ -734,7 +815,10 @@ export default function ChatPage() {
 
   return (
     <div className="page chat-page">
-      <div className={`chat-layout ${isConversationInfoOpen && activeConversation ? "info-open" : ""}`}>
+      {actionNotice && floatingPortal(<div className="chat-row-toast" role="status">{actionNotice}</div>)}
+      <div
+        className={`chat-layout ${isConversationInfoOpen && activeConversation ? "info-open" : ""} ${activeConversation ? "has-chat" : ""}`}
+      >
         <aside className="panel chat-sidebar">
           <div className="chat-sidebar-head">
             <span>Conversations</span>
@@ -803,6 +887,16 @@ export default function ChatPage() {
                       >
                         <FiArchive /> Archived
                       </button>
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          setView((current) => (current === "blocked" ? "inbox" : "blocked"));
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <FiUserX /> Blocked
+                      </button>
                     </div>,
                   )}
               </div>
@@ -857,7 +951,7 @@ export default function ChatPage() {
           </div>
           {view !== "inbox" && (
             <div className="chat-view-banner">
-              <span>{view === "requests" ? "Requests" : "Archived"}</span>
+              <span>{VIEW_TITLES[view]}</span>
               <button onClick={() => setView("inbox")} type="button">
                 <FiX /> All chats
               </button>
@@ -964,13 +1058,29 @@ export default function ChatPage() {
           {search.trim().length >= MIN_SEARCH_CHARS && search.trim() !== messageQuery && (
             <small className="chat-sidebar-search-hint">Press Enter to search messages</small>
           )}
-          {listQuery.isLoading && (
+          {view === "blocked" ? (
+            <BlockedPeopleList
+              chatIdByUserId={directChatByUserId}
+              isError={blockedUsers.isError}
+              isLoading={blockedUsers.isLoading}
+              onOpenChat={(conversationId) => {
+                setSelectedId(conversationId);
+                setView("inbox");
+              }}
+              onRetry={() => blockedUsers.refetch()}
+              onUnblock={(userId) => conversationActions.unblock.mutate(userId)}
+              people={blockedUsers.data?.items ?? []}
+              unblockingId={conversationActions.unblock.isPending ? conversationActions.unblock.variables : null}
+            />
+          ) : null}
+          {view !== "blocked" && listQuery.isLoading && (
             <div aria-busy="true" aria-label="Loading conversations" className="chat-skeleton-list">
               {[0, 1, 2, 3, 4].map((index) => (
                 <ChatSkeletonRow key={index} />
               ))}
             </div>
           )}
+          {view !== "blocked" && (
           <QueryNotice
             isError={listQuery.isError}
             isEmpty={!listQuery.isLoading && !currentList.length}
@@ -984,6 +1094,8 @@ export default function ChatPage() {
                     : "No conversations yet."
             }
           />
+          )}
+          {view !== "blocked" && (
           <div className="chat-conversation-list">
             {currentList.map((conversation) => (
               <ConversationListItem
@@ -998,6 +1110,7 @@ export default function ChatPage() {
               />
             ))}
           </div>
+          )}
           {messageQuery !== null && (
             <SidebarMessageSearch
               conversations={listQuery.data}
@@ -1025,6 +1138,14 @@ export default function ChatPage() {
             <>
               <header className="chat-thread-head">
                 <div>
+                  <button
+                    aria-label="Back to conversations"
+                    className="chat-back-button"
+                    onClick={() => setSelectedId("")}
+                    type="button"
+                  >
+                    <FiChevronLeft />
+                  </button>
                   <span className="avatar-with-presence">
                     <span className="chat-avatar">
                       <AvatarFace image={activeConversationImage} name={activeConversationName} />
@@ -1157,19 +1278,23 @@ export default function ChatPage() {
                       >
                         <div>
                           <PendingContent files={pending.files} preview={pending.preview} text={pending.text} />
-                          <small>
-                            {pending.failed ? (
-                              <button
-                                className="chat-message-retry"
-                                onClick={() => retryPendingMessage(pending)}
-                                type="button"
-                              >
-                                Failed to send - tap to retry
-                              </button>
-                            ) : (
-                              pendingStatusLabel(pending.stage)
-                            )}
-                          </small>
+                          {/* Pictures and videos show their own spinner, so no status bar under them. */}
+                          {(pending.failed ||
+                            !pending.files?.some((file) => attachmentKind(file.type) !== "file")) && (
+                            <small>
+                              {pending.failed ? (
+                                <button
+                                  className="chat-message-retry"
+                                  onClick={() => retryPendingMessage(pending)}
+                                  type="button"
+                                >
+                                  Failed to send - tap to retry
+                                </button>
+                              ) : (
+                                pendingStatusLabel(pending.stage)
+                              )}
+                            </small>
+                          )}
                         </div>
                       </article>
                     </div>
@@ -1266,6 +1391,21 @@ export default function ChatPage() {
                     </small>
                   </div>
                 </div>
+              ) : blockedPeer ? (
+                <div className="chat-composer-disabled">
+                  <FiUserX />
+                  <div>
+                    <b>You blocked {blockedPeer.user?.name || "this person"}</b>
+                    <small>Unblock them to send messages again. They are not told.</small>
+                  </div>
+                  <button
+                    disabled={conversationActions.unblock.isPending}
+                    onClick={() => conversationActions.unblock.mutate(blockedPeer.userId)}
+                    type="button"
+                  >
+                    Unblock
+                  </button>
+                </div>
               ) : isGroupAwaitingAcceptance ? (
                 <div className="chat-composer-disabled">
                   <FiLock />
@@ -1314,7 +1454,7 @@ export default function ChatPage() {
                     onSubmit={(event) => {
                       event.preventDefault();
                       if (messageEdit.target) return messageEdit.submit();
-                      const text = draft.trim();
+                      const text = encodeEmotes(draft.trim(), pickedEmotesRef.current);
                       const files = attachmentPicker.files;
                       if (!text && files.length === 0) return;
                       const clientId = crypto.randomUUID();
@@ -1375,6 +1515,7 @@ export default function ChatPage() {
                     ref={composerInputRef}
                     value={draft}
                   />
+                  <ComposerEmojiButton disabled={Boolean(messageEdit.target)} onPick={pickEmoji} />
                   <button
                     aria-label={messageEdit.target ? "Save edit" : "Send"}
                     disabled={
@@ -1425,10 +1566,13 @@ export default function ChatPage() {
           isGroup={activeConversation?.type === "GROUP"}
           isOpen={isConversationInfoOpen && Boolean(activeConversation)}
           key={activeId || "no-conversation"}
-          manageButtonRef={groupSettingsButtonRef}
           onBlock={() => conversationActions.block.mutate(activeId)}
+          onUnblock={() => blockedPeer && conversationActions.unblock.mutate(blockedPeer.userId)}
+          isUnblockPending={conversationActions.unblock.isPending}
           onClose={() => setIsConversationInfoOpen(false)}
-          onManageGroup={() => setIsGroupSettingsOpen(true)}
+          onGroupChanged={refreshChat}
+          onLeftGroup={() => setSelectedId("")}
+          onVerifyMember={setVerifyPeerId}
           onOpenAttachment={setLightboxKey}
           onVerify={() => setVerifyPeerId(verifyPeerCandidate)}
           search={{
@@ -1445,6 +1589,7 @@ export default function ChatPage() {
             },
             onJump: jumpToMessage,
           }}
+          safety={safety.byUser}
           searchSeed={searchSeed?.conversationId === activeId ? searchSeed : null}
           userId={user?.id}
           verifyLabel={verifyLabel}
@@ -1471,21 +1616,6 @@ export default function ChatPage() {
         triggerRef={backupButtonRef}
       />
 
-      <GroupSettingsModal
-        conversation={activeConversation}
-        currentUserId={user?.id}
-        isOpen={isGroupSettingsOpen}
-        key={isGroupSettingsOpen ? activeId : "group-settings-closed"}
-        onClose={() => setIsGroupSettingsOpen(false)}
-        onLeft={() => setSelectedId("")}
-        onVerify={(userId) => {
-          setIsGroupSettingsOpen(false);
-          setVerifyPeerId(userId);
-        }}
-        refreshChat={refreshChat}
-        safety={safety.byUser}
-        triggerRef={groupSettingsButtonRef}
-      />
       <SafetyNumberModal
         hasError={safety.hasError}
         isOpen={Boolean(verifyPeerId)}

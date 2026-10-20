@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
     reactToCommunityMessage: vi.fn(),
     unreactToCommunityMessage: vi.fn(),
     markCommunityRead: vi.fn(),
+    uploadSingleImage: vi.fn(),
   },
 }));
 
@@ -37,6 +38,8 @@ const message = (id, minute, extra = {}) => ({
   editedAt: null,
   author: { id: "ann", name: "Ann", image: null, badge: null },
   replyTo: null,
+  media: [],
+  mentions: [],
   reactions: [],
   ...extra,
 });
@@ -163,6 +166,87 @@ describe("useCommunityChat", () => {
       expect(first).toMatchObject({ content: "hello", replyToId: "m1" });
       expect(second.clientMessageId).toBe(first.clientMessageId);
       await waitFor(() => expect(hook.result.current.pending).toEqual([]));
+    });
+
+    describe("with pictures", () => {
+      const file = (name) => new File(["x"], name, { type: "image/png" });
+
+      it("uploads them as community pictures, then sends their ids in the order picked", async () => {
+        mocks.api.uploadSingleImage.mockImplementation(async (picked) => ({
+          mediaUploadId: `up-${picked.name}`,
+        }));
+        mocks.api.sendCommunityMessage.mockResolvedValue(message("m3", 3));
+        const hook = await loaded(setup());
+
+        await act(() => hook.result.current.send("", null, [file("a.png"), file("b.png")]));
+
+        expect(mocks.api.uploadSingleImage).toHaveBeenCalledWith(expect.any(File), "COMMUNITY");
+        expect(mocks.api.sendCommunityMessage.mock.calls[0][2]).toMatchObject({
+          content: "",
+          mediaUploadIds: ["up-a.png", "up-b.png"],
+        });
+        await waitFor(() => expect(hook.result.current.pending).toEqual([]));
+      });
+
+      it("sends a message without pictures exactly as before", async () => {
+        mocks.api.sendCommunityMessage.mockResolvedValue(message("m3", 3));
+        const hook = await loaded(setup());
+
+        await act(() => hook.result.current.send("hello", null));
+
+        expect(mocks.api.uploadSingleImage).not.toHaveBeenCalled();
+        expect(mocks.api.sendCommunityMessage.mock.calls[0][2]).not.toHaveProperty("mediaUploadIds");
+      });
+
+      it("fails the message when a picture does not upload, and sends nothing", async () => {
+        mocks.api.uploadSingleImage.mockRejectedValue(new Error("Image must be 10 MB or smaller"));
+        const hook = await loaded(setup());
+
+        await act(() => hook.result.current.send("look", null, [file("a.png")]));
+
+        await waitFor(() => expect(hook.result.current.pending[0].status).toBe("failed"));
+        expect(hook.result.current.pending[0].error).toBe("Image must be 10 MB or smaller");
+        expect(mocks.api.sendCommunityMessage).not.toHaveBeenCalled();
+      });
+
+      it("uploads only the pictures that failed when retried, and keeps the same client id", async () => {
+        mocks.api.uploadSingleImage.mockImplementation(async (picked) => {
+          if (picked.name === "b.png" && mocks.api.uploadSingleImage.mock.calls.length <= 2) {
+            throw new Error("Upload failed");
+          }
+          return { mediaUploadId: `up-${picked.name}` };
+        });
+        mocks.api.sendCommunityMessage.mockResolvedValue(message("m3", 3));
+        const hook = await loaded(setup());
+
+        await act(() => hook.result.current.send("two", null, [file("a.png"), file("b.png")]));
+        await waitFor(() => expect(hook.result.current.pending[0].status).toBe("failed"));
+        await act(() => hook.result.current.retry(hook.result.current.pending[0].clientId));
+
+        const uploaded = mocks.api.uploadSingleImage.mock.calls.map(([picked]) => picked.name);
+        expect(uploaded).toEqual(["a.png", "b.png", "b.png"]);
+        expect(mocks.api.sendCommunityMessage.mock.calls[0][2].mediaUploadIds).toEqual([
+          "up-a.png",
+          "up-b.png",
+        ]);
+        await waitFor(() => expect(hook.result.current.pending).toEqual([]));
+      });
+
+      it("does not upload again when only the send failed", async () => {
+        mocks.api.uploadSingleImage.mockResolvedValue({ mediaUploadId: "up1" });
+        mocks.api.sendCommunityMessage.mockRejectedValueOnce(new Error("Network down"));
+        mocks.api.sendCommunityMessage.mockResolvedValue(message("m3", 3));
+        const hook = await loaded(setup());
+
+        await act(() => hook.result.current.send("", null, [file("a.png")]));
+        await waitFor(() => expect(hook.result.current.pending[0].status).toBe("failed"));
+        await act(() => hook.result.current.retry(hook.result.current.pending[0].clientId));
+
+        expect(mocks.api.uploadSingleImage).toHaveBeenCalledTimes(1);
+        const [first, second] = mocks.api.sendCommunityMessage.mock.calls.map(([, , body]) => body);
+        expect(second.mediaUploadIds).toEqual(first.mediaUploadIds);
+        expect(second.clientMessageId).toBe(first.clientMessageId);
+      });
     });
 
     it("drops a failed message when discarded", async () => {

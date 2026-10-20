@@ -4,13 +4,17 @@ import { CommunityMessagePresenter } from './community-message.presenter';
 const bo = { id: 'bo', name: 'Bo', image: null, role: 'USER' };
 
 describe('CommunityMessagePresenter', () => {
-  const repository = { findModeratorIds: jest.fn() };
+  const repository = {
+    findModeratorIds: jest.fn(),
+    findMentionUsernames: jest.fn(),
+  };
   const blocks = { getBlockedIdsAmong: jest.fn() };
   let presenter: CommunityMessagePresenter;
 
   beforeEach(() => {
     jest.resetAllMocks();
     repository.findModeratorIds.mockResolvedValue(new Set());
+    repository.findMentionUsernames.mockResolvedValue(new Map());
     blocks.getBlockedIdsAmong.mockResolvedValue(new Set());
     presenter = new CommunityMessagePresenter(
       repository as never,
@@ -58,6 +62,7 @@ describe('CommunityMessagePresenter', () => {
             content: 'hi',
             deletedAt: null,
             author: { id: 'cy', name: 'Cy' },
+            media: [],
           },
         }),
       ]);
@@ -130,6 +135,7 @@ describe('CommunityMessagePresenter', () => {
           content: 'hi',
           deletedAt: null,
           author: { id: 'bo', name: 'Bo' },
+          media: [],
         },
       });
 
@@ -149,6 +155,7 @@ describe('CommunityMessagePresenter', () => {
           content: 'mine',
           deletedAt: null,
           author: { id: 'me', name: 'Me' },
+          media: [],
         },
       });
 

@@ -17,6 +17,12 @@ export function findMentions(text) {
   return mentions;
 }
 
+/** The `@word` being typed right before the caret (the word may still be empty or partial), or null. */
+export function typingMention(text, caret) {
+  const match = /(?<![\w-])@([A-Za-z0-9_-]{0,20})$/.exec(text.slice(0, caret));
+  return match ? { start: match.index, end: caret, query: match[1] } : null;
+}
+
 /** The mention the caret sits right after, if any. */
 export function activeMention(text, caret) {
   return findMentions(text).find((mention) => mention.end === caret) ?? null;

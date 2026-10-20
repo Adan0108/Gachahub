@@ -63,7 +63,6 @@ export class ChatGroupService {
         {
           creatorId: userId,
           title: dto.title,
-          photoUrl: dto.photoUrl,
           members,
         },
       );
@@ -101,7 +100,6 @@ export class ChatGroupService {
     return this.chatRepository.updateGroupConversation({
       conversationId,
       title: dto.title,
-      photoUrl: dto.photoUrl,
     });
   }
 

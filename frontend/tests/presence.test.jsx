@@ -88,6 +88,98 @@ describe("createPresenceStore", () => {
     expect(fetchPresence).toHaveBeenCalledTimes(2);
   });
 
+  it("asks again about someone whose first lookup failed, while their row stays as it is", async () => {
+    const fetchPresence = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("down"))
+      .mockResolvedValue({ a: "ONLINE" });
+    const store = createPresenceStore({ fetchPresence });
+
+    store.request("a");
+    await vi.advanceTimersByTimeAsync(60);
+    expect(store.get("a")).toBeUndefined();
+
+    // The periodic refresh, and a reconnect, without the row asking again.
+    store.refreshAll();
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(fetchPresence).toHaveBeenCalledTimes(2);
+    expect(fetchPresence).toHaveBeenLastCalledWith(["a"]);
+    expect(store.get("a")).toBe("ONLINE");
+  });
+
+  it("keeps asking on every refresh until the lookup works", async () => {
+    const fetchPresence = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("down"))
+      .mockRejectedValueOnce(new Error("still down"))
+      .mockResolvedValue({ a: "OFFLINE" });
+    const store = createPresenceStore({ fetchPresence });
+
+    store.request("a");
+    await vi.advanceTimersByTimeAsync(60);
+    store.refreshAll();
+    await vi.advanceTimersByTimeAsync(60);
+    store.refreshAll();
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(store.get("a")).toBe("OFFLINE");
+  });
+
+  it("drops the answer of a lookup that was running when the store was cleared", async () => {
+    let answer;
+    const fetchPresence = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const store = createPresenceStore({ fetchPresence });
+    const listener = vi.fn();
+    store.subscribe(listener);
+
+    store.request("a");
+    await vi.advanceTimersByTimeAsync(60);
+    store.clear();
+    answer({ a: "ONLINE" });
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(store.get("a")).toBeUndefined();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("stops asking for the rest of a big batch once cleared", async () => {
+    let answer;
+    const fetchPresence = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const store = createPresenceStore({ fetchPresence });
+
+    for (let index = 0; index < 150; index += 1) store.request(`u${index}`);
+    await vi.advanceTimersByTimeAsync(60);
+    store.clear();
+    answer({});
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(fetchPresence).toHaveBeenCalledTimes(1);
+  });
+
+  it("works normally for whoever signs in after a clear", async () => {
+    const fetchPresence = vi.fn().mockResolvedValue({ b: "ONLINE" });
+    const store = createPresenceStore({ fetchPresence });
+    store.request("a");
+    store.clear();
+
+    store.request("b");
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(fetchPresence).toHaveBeenCalledWith(["b"]);
+    expect(store.get("b")).toBe("ONLINE");
+  });
+
   it("asks about everyone known again after a reconnect, and forgets all on clear", async () => {
     const fetchPresence = vi.fn().mockResolvedValue({});
     const store = createPresenceStore({ fetchPresence });

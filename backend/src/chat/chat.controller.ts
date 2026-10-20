@@ -17,6 +17,7 @@ import {
 import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { ChatMessagingService } from './chat-messaging.service';
+import { ChatGroupPhotoService } from './chat-group-photo.service';
 import { ChatGroupService } from './chat-group.service';
 import { ChatInboxService } from './chat-inbox.service';
 import { ChatEmotesService } from './chat-emotes.service';
@@ -35,6 +36,7 @@ import { SendMessageDto } from './dto/send-message.dto';
 import { SetNotificationLevelDto } from './dto/set-notification-level.dto';
 import { TransferGroupOwnershipDto } from './dto/transfer-group-ownership.dto';
 import { UpdateGroupChatDto } from './dto/update-group-chat.dto';
+import { UpdateGroupPhotoDto } from './dto/update-group-photo.dto';
 import { UpdateGroupMembersDto } from './dto/update-group-members.dto';
 import { UpdateGroupMemberRoleDto } from './dto/update-group-member-role.dto';
 
@@ -53,6 +55,7 @@ export class ChatController {
   constructor(
     private readonly chatMessagingService: ChatMessagingService,
     private readonly chatGroupService: ChatGroupService,
+    private readonly chatGroupPhotoService: ChatGroupPhotoService,
     private readonly chatInboxService: ChatInboxService,
     private readonly chatMessageActionsService: ChatMessageActionsService,
     private readonly chatEmotesService: ChatEmotesService,
@@ -204,6 +207,32 @@ export class ChatController {
       conversationId,
       dto,
     );
+  }
+
+  /** Sets the group photo from a confirmed GROUP_PHOTO upload; the old photo is released. */
+  @Patch('groups/:conversationId/photo')
+  @ApiOperation({ summary: 'Set the group photo from an upload' })
+  @ApiParam({ name: 'conversationId', example: 'cm123conversation456' })
+  updateGroupPhoto(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: UpdateGroupPhotoDto,
+  ) {
+    return this.chatGroupPhotoService.update(
+      session.user.id,
+      conversationId,
+      dto,
+    );
+  }
+
+  @Delete('groups/:conversationId/photo')
+  @ApiOperation({ summary: 'Remove the group photo' })
+  @ApiParam({ name: 'conversationId', example: 'cm123conversation456' })
+  removeGroupPhoto(
+    @Session() session: UserSession,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.chatGroupPhotoService.remove(session.user.id, conversationId);
   }
 
   /**
@@ -425,6 +454,15 @@ export class ChatController {
       session.user.id,
       conversationId,
     );
+  }
+
+  /** The people the current user has blocked, for the Blocked list. */
+  @Get('users/blocked')
+  @ApiOperation({ summary: 'List the people you have blocked' })
+  async listBlockedUsers(@Session() session: UserSession) {
+    return {
+      items: await this.chatInboxService.listBlockedUsers(session.user.id),
+    };
   }
 
   /**

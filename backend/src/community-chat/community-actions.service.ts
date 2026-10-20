@@ -8,10 +8,12 @@ import {
   MESSAGE_EDIT_WINDOW_MS,
   isEditWindowOpen,
 } from '../chat/message-edit-policy';
+import { MediaService } from '../media/media.service';
 import { CommunityAccessService } from './community-access.service';
 import { CommunityChatRepository } from './community-chat.repository';
 import { toCommunityReactions } from './community-message.mapper';
 import { CommunityMessagePresenter } from './community-message.presenter';
+import { CommunityMentionsService } from './community-mentions.service';
 import { CommunityRealtimeService } from './community-realtime.service';
 import type { DeleteCommunityMessageDto } from './dto/delete-community-message.dto';
 import type { EditCommunityMessageDto } from './dto/edit-community-message.dto';
@@ -25,6 +27,8 @@ export class CommunityActionsService {
     private readonly access: CommunityAccessService,
     private readonly presenter: CommunityMessagePresenter,
     private readonly realtime: CommunityRealtimeService,
+    private readonly media: MediaService,
+    private readonly mentions: CommunityMentionsService,
   ) {}
 
   async edit(
@@ -48,11 +52,28 @@ export class CommunityActionsService {
       );
     }
 
-    const content = validMessageContent(dto.content);
+    const content = validMessageContent(dto.content, message.media.length > 0);
     if (content === message.content) return this.presenter.one(scope, message);
 
-    const updated = await this.repository.updateContent(message.id, content);
-    this.realtime.changed(message.channelId);
+    // Only people newly named by this edit are pinged: the mentions table remembers who already was
+    const targetIds = await this.mentions.targetsFor(
+      scope.game.id,
+      scope.user.id,
+      content,
+    );
+    const updated = await this.repository.updateContent(
+      message.id,
+      content,
+      targetIds.length > 0
+        ? (tx, saved) =>
+            this.mentions.publish(tx, {
+              targetIds,
+              actorId: scope.user.id,
+              messageId: saved.id,
+            })
+        : undefined,
+    );
+    this.realtime.changed(message.channelId, message.id);
     return this.presenter.one(scope, updated);
   }
 
@@ -78,7 +99,13 @@ export class CommunityActionsService {
       scope.user.id,
       reason,
     );
-    this.realtime.changed(message.channelId);
+    this.realtime.changed(message.channelId, message.id);
+    // Pictures are not kept as evidence: the files are destroyed, a failure is retried hourly
+    await Promise.all(
+      message.media.map((item) =>
+        this.media.releaseReplacedUpload(item.mediaUploadId),
+      ),
+    );
     return this.presenter.one(scope, removed);
   }
 
@@ -107,7 +134,7 @@ export class CommunityActionsService {
       emoji: dto.emoji,
       emoteId: dto.emoteId,
     });
-    this.realtime.changed(message.channelId);
+    this.realtime.changed(message.channelId, message.id);
     return this.reactionsOf(message.id);
   }
 
@@ -116,7 +143,7 @@ export class CommunityActionsService {
     const message = await this.access.messageIn(game.id, messageId);
 
     await this.repository.deleteReaction(message.id, user.id);
-    this.realtime.changed(message.channelId);
+    this.realtime.changed(message.channelId, message.id);
     return this.reactionsOf(message.id);
   }
 

@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CommunityChat } from "../components/community/CommunityChat";
 
-const mocks = vi.hoisted(() => ({ chat: null, user: null, options: [] }));
+const mocks = vi.hoisted(() => ({ chat: null, user: null, options: [], suggestions: [] }));
 
 vi.mock("../hooks/community/useCommunityChat", () => ({
   useCommunityChat: (_slug, options) => {
@@ -12,6 +12,12 @@ vi.mock("../hooks/community/useCommunityChat", () => ({
   },
 }));
 vi.mock("../hooks/useCurrentUser", () => ({ useCurrentUser: () => ({ user: mocks.user }) }));
+vi.mock("../hooks/community/useCommunityMemberSuggestions", () => ({
+  useCommunityMemberSuggestions: (_slug, query) => ({
+    items: typeof query === "string" ? mocks.suggestions.filter((member) => member.username.startsWith(query)) : [],
+    isLoading: false,
+  }),
+}));
 vi.mock("../components/chat/EmojiPicker", () => ({
   EmojiPicker: ({ onPick }) => (
     <button onClick={() => onPick({ kind: "emoji", emoji: "🎉" })} type="button">
@@ -34,6 +40,8 @@ const message = (id, minutesAgo, extra = {}) => ({
   editedAt: null,
   author: author("ann", "Ann"),
   replyTo: null,
+  media: [],
+  mentions: [],
   reactions: [],
   ...extra,
 });
@@ -96,6 +104,7 @@ describe("CommunityChat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.options = [];
+    mocks.suggestions = [];
     Element.prototype.scrollIntoView = vi.fn();
     mocks.user = { id: "me", name: "Me", image: null };
     mocks.chat = chatState();
@@ -334,7 +343,7 @@ describe("CommunityChat", () => {
       type("hello there");
       enter();
 
-      expect(chat.send).toHaveBeenCalledWith("hello there", null);
+      expect(chat.send).toHaveBeenCalledWith("hello there", null, []);
       expect(composer()).toHaveValue("");
     });
 
@@ -392,7 +401,11 @@ describe("CommunityChat", () => {
       type("agreed");
       enter();
 
-      expect(chat.send).toHaveBeenCalledWith("agreed", expect.objectContaining({ id: "m1" }));
+      expect(chat.send).toHaveBeenCalledWith(
+        "agreed",
+        expect.objectContaining({ id: "m1" }),
+        [],
+      );
       await waitFor(() => expect(screen.queryByText(/Replying to/)).not.toBeInTheDocument());
     });
 
@@ -457,6 +470,335 @@ describe("CommunityChat", () => {
       renderChat();
 
       expect(screen.getByText(/one message every 30s/)).toBeInTheDocument();
+    });
+  });
+
+  describe("images", () => {
+    const png = (name = "a.png", extra = {}) =>
+      new File(["x"], name, { type: "image/png", ...extra });
+    const choose = (...files) =>
+      fireEvent.change(screen.getByLabelText("Choose images", { selector: "input" }), {
+        target: { files },
+      });
+
+    beforeEach(() => {
+      URL.createObjectURL = vi.fn(() => "blob:preview");
+      URL.revokeObjectURL = vi.fn();
+    });
+
+    it("sends pictures with no text, and clears them", async () => {
+      const chat = chatState();
+      mocks.chat = chat;
+      renderChat();
+      const file = png();
+
+      choose(file);
+      await screen.findByRole("list", { name: "Images to send" });
+      fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+      expect(chat.send).toHaveBeenCalledWith("", null, [file]);
+      expect(screen.queryByRole("list", { name: "Images to send" })).not.toBeInTheDocument();
+    });
+
+    it("keeps send off until there is text or a picture", async () => {
+      renderChat();
+      expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+
+      choose(png());
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled(),
+      );
+    });
+
+    it("takes a picture back out before sending", async () => {
+      const chat = chatState();
+      mocks.chat = chat;
+      renderChat();
+      choose(png("a.png"), png("b.png"));
+      await screen.findByRole("list", { name: "Images to send" });
+
+      fireEvent.click(screen.getByRole("button", { name: "Remove a.png" }));
+      type("hi");
+      enter();
+
+      expect(chat.send).toHaveBeenCalledWith("hi", null, [expect.objectContaining({ name: "b.png" })]);
+    });
+
+    it("stops at four pictures and says so", async () => {
+      renderChat();
+
+      choose(png("1.png"), png("2.png"), png("3.png"), png("4.png"), png("5.png"));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("up to 4 images");
+      expect(within(screen.getByRole("list", { name: "Images to send" })).getAllByRole("listitem")).toHaveLength(4);
+      expect(screen.getByRole("button", { name: "Add images" })).toBeDisabled();
+    });
+
+    it("refuses a file that is not a picture, and one that is too big", async () => {
+      renderChat();
+
+      choose(new File(["x"], "notes.pdf", { type: "application/pdf" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("notes.pdf: Use a JPG, PNG, WebP or GIF image");
+      expect(screen.queryByRole("list", { name: "Images to send" })).not.toBeInTheDocument();
+
+      const big = png("big.png");
+      Object.defineProperty(big, "size", { value: 11 * 1024 * 1024 });
+      choose(big);
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("10 MB or smaller"));
+    });
+
+    it("takes pictures that are pasted or dropped on the box", async () => {
+      renderChat();
+
+      fireEvent.paste(composer(), { clipboardData: { files: [png("pasted.png")] } });
+      fireEvent.drop(composer(), { dataTransfer: { files: [png("dropped.png")] } });
+
+      await screen.findByRole("button", { name: "Remove pasted.png" });
+      expect(screen.getByRole("button", { name: "Remove dropped.png" })).toBeInTheDocument();
+    });
+
+    it("tells you while dragging whether the room takes what you hold", () => {
+      const { container } = renderChat();
+      const room = container.querySelector(".community-chat");
+      const drag = (type) =>
+        fireEvent.dragOver(room, { dataTransfer: { items: [{ kind: "file", type }], dropEffect: "" } });
+
+      drag("image/png");
+      expect(screen.getByRole("status", { name: "" })).toHaveTextContent("Drop to add this image");
+
+      drag("application/pdf");
+      expect(screen.getByText(/not supported/)).toBeInTheDocument();
+      expect(container.querySelector(".community-drop-overlay.refused")).not.toBeNull();
+
+      fireEvent.dragLeave(room, { relatedTarget: null });
+      expect(container.querySelector(".community-drop-overlay")).toBeNull();
+    });
+
+    it("takes a picture dropped anywhere in the room", async () => {
+      const { container } = renderChat();
+
+      fireEvent.drop(container.querySelector(".community-chat"), {
+        dataTransfer: { files: [png("dropped.png")], items: [] },
+      });
+
+      await screen.findByRole("button", { name: "Remove dropped.png" });
+    });
+
+    it("shows the pictures of a message and opens them in a viewer you can step through", () => {
+      const media = [
+        { id: "i1", url: "https://cdn/1.png", width: 10, height: 10 },
+        { id: "i2", url: "https://cdn/2.png", width: 10, height: 10 },
+      ];
+      mocks.chat = chatState({ messages: [message("m1", 2, { content: "", media })] });
+      renderChat();
+
+      fireEvent.click(screen.getByRole("button", { name: "Open image 1 of 2" }));
+      const viewer = screen.getByRole("dialog", { name: "Image viewer" });
+      expect(within(viewer).getByRole("img")).toHaveAttribute("src", "https://cdn/1.png");
+
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(within(viewer).getByRole("img")).toHaveAttribute("src", "https://cdn/2.png");
+
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByRole("dialog", { name: "Image viewer" })).not.toBeInTheDocument();
+    });
+
+    it("shows no empty text line for a picture-only message, and no pictures once removed", () => {
+      const media = [{ id: "i1", url: "https://cdn/1.png", width: 10, height: 10 }];
+      mocks.chat = chatState({
+        messages: [
+          message("m1", 3, { content: "", media }),
+          message("m2", 2, { content: null, deleted: true, media: [] }),
+        ],
+      });
+      const { container } = renderChat();
+
+      expect(container.querySelectorAll(".community-text")).toHaveLength(0);
+      expect(screen.getAllByRole("button", { name: /Open image/ })).toHaveLength(1);
+    });
+
+    it("quotes a picture-only message as Photo", () => {
+      mocks.chat = chatState({
+        messages: [
+          message("m1", 3, {
+            replyToId: "m0",
+            replyTo: {
+              id: "m0",
+              content: "",
+              hasMedia: true,
+              deleted: false,
+              blocked: false,
+              authorName: "Bo",
+            },
+          }),
+        ],
+      });
+      renderChat();
+
+      expect(screen.getByText("Photo")).toBeInTheDocument();
+    });
+
+    it("lets a caption be cleared from a message that has pictures, but not from one without", async () => {
+      const media = [{ id: "i1", url: "https://cdn/1.png", width: 10, height: 10 }];
+      const chat = chatState({
+        messages: [
+          message("m1", 3, { content: "caption", media, author: author("me", "Me") }),
+          message("m2", 2, { content: "plain", author: author("me", "Me") }),
+        ],
+      });
+      mocks.chat = chat;
+      const { container } = renderChat();
+      const startEdit = (id) => {
+        const row = container.querySelector(`#community-message-${id}`);
+        fireEvent.click(within(row).getByRole("button", { name: "More" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: /Edit/ }));
+        return screen.getByRole("textbox", { name: "Edit message" });
+      };
+
+      fireEvent.change(startEdit("m1"), { target: { value: "" } });
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() =>
+        expect(chat.edit.mutateAsync).toHaveBeenCalledWith({ messageId: "m1", content: "" }),
+      );
+
+      fireEvent.change(startEdit("m2"), { target: { value: "" } });
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+
+    it("shows pictures that are still going out", () => {
+      mocks.chat = chatState({
+        pending: [
+          {
+            clientId: "k1",
+            content: "",
+            files: [png("out.png")],
+            replyTo: null,
+            status: "sending",
+            error: null,
+            createdAt: at(0),
+          },
+        ],
+      });
+      const { container } = renderChat();
+
+      expect(container.querySelectorAll(".community-message.pending .community-media")).toHaveLength(1);
+      expect(screen.getByText("Sending...")).toBeInTheDocument();
+    });
+  });
+
+  describe("mentions", () => {
+    const members = [
+      { id: "u1", name: "Bobby", username: "bobby", image: null },
+      { id: "u2", name: "Bonnie", username: "bonnie", image: null },
+    ];
+    const typeAt = (text) => {
+      const box = composer();
+      fireEvent.change(box, { target: { value: text, selectionStart: text.length } });
+      box.setSelectionRange(text.length, text.length);
+      fireEvent.select(box);
+    };
+
+    it("shows the handles that pinged someone as mentions, and leaves other @words plain", () => {
+      mocks.chat = chatState({
+        messages: [message("m1", 2, { content: "hi @bobby and @nobody", mentions: ["bobby"] })],
+      });
+      const { container } = renderChat();
+
+      const spans = container.querySelectorAll(".community-text .mention");
+      expect(spans).toHaveLength(1);
+      expect(spans[0]).toHaveTextContent("@bobby");
+    });
+
+    it("makes a message that names you stand out, and not the others", () => {
+      mocks.user = { id: "me", name: "Me", image: null, username: "Me-Handle" };
+      mocks.chat = chatState({
+        messages: [
+          message("m1", 3, { content: "@me-handle look", mentions: ["me-handle"] }),
+          message("m2", 2, { content: "@bobby look", mentions: ["bobby"] }),
+        ],
+      });
+      const { container } = renderChat();
+
+      expect(container.querySelector("#community-message-m1")).toHaveClass("mentions-me");
+      expect(container.querySelector("#community-message-m2")).not.toHaveClass("mentions-me");
+    });
+
+    it("suggests members as soon as an @ is typed, narrowing as you type", () => {
+      mocks.suggestions = members;
+      renderChat();
+
+      typeAt("hi @");
+      expect(screen.getByRole("listbox", { name: "Suggested members" })).toBeInTheDocument();
+      expect(screen.getAllByRole("option")).toHaveLength(2);
+
+      typeAt("hi @bob");
+      expect(screen.getAllByRole("option")).toHaveLength(1);
+      expect(screen.getByText("@bobby")).toBeInTheDocument();
+    });
+
+    it("suggests nothing for text with no @ or for an email", () => {
+      mocks.suggestions = members;
+      renderChat();
+
+      typeAt("just words");
+      typeAt("mail bob@bo");
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    it("puts the picked member's handle into the text, and does not send on that Enter", () => {
+      mocks.suggestions = members;
+      const chat = chatState();
+      mocks.chat = chat;
+      renderChat();
+      typeAt("hi @bo");
+
+      fireEvent.keyDown(composer(), { key: "ArrowDown" });
+      fireEvent.keyDown(composer(), { key: "Enter" });
+
+      expect(composer()).toHaveValue("hi @bonnie ");
+      expect(chat.send).not.toHaveBeenCalled();
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    it("picks with a click, too, and with Tab", () => {
+      mocks.suggestions = members;
+      renderChat();
+      typeAt("@bo");
+
+      fireEvent.mouseDown(screen.getByRole("option", { name: /Bonnie/ }));
+      expect(composer()).toHaveValue("@bonnie ");
+
+      typeAt("hey @bob");
+      fireEvent.keyDown(composer(), { key: "Tab" });
+      expect(composer()).toHaveValue("hey @bobby ");
+    });
+
+    it("closes the list with Escape, and sends normally on the next Enter", () => {
+      mocks.suggestions = members;
+      const chat = chatState();
+      mocks.chat = chat;
+      renderChat();
+      typeAt("hi @bo");
+
+      fireEvent.keyDown(composer(), { key: "Escape" });
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      fireEvent.keyDown(composer(), { key: "Enter" });
+
+      expect(chat.send).toHaveBeenCalledWith("hi @bo", null, []);
+    });
+
+    it("still sends on Enter when no list is open", () => {
+      const chat = chatState();
+      mocks.chat = chat;
+      renderChat();
+
+      type("plain");
+      enter();
+
+      expect(chat.send).toHaveBeenCalledWith("plain", null, []);
     });
   });
 

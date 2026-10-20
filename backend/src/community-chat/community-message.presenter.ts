@@ -26,12 +26,13 @@ export class CommunityMessagePresenter {
         ),
       ),
     ];
-    const [moderatorIds, blockedIds] = await Promise.all([
+    const [moderatorIds, blockedIds, mentionsById] = await Promise.all([
       this.repository.findModeratorIds(gameId, authorIds),
       this.blocks.getBlockedIdsAmong(viewerId, authorIds),
+      this.repository.findMentionUsernames(rows.map((row) => row.id)),
     ]);
     return rows.map((row) =>
-      toCommunityMessage(row, { moderatorIds, blockedIds }),
+      toCommunityMessage(row, { moderatorIds, blockedIds, mentionsById }),
     );
   }
 
@@ -48,13 +49,15 @@ export class CommunityMessagePresenter {
     }
 
     const quoted = row.replyTo?.author?.id;
-    const blockedIds =
+    const [blockedIds, mentionsById] = await Promise.all([
       quoted && quoted !== viewerId
-        ? await this.blocks.getBlockedIdsAmong(viewerId, [quoted])
-        : new Set<string>();
+        ? this.blocks.getBlockedIdsAmong(viewerId, [quoted])
+        : new Set<string>(),
+      this.repository.findMentionUsernames([row.id]),
+    ]);
     const moderatorIds = new Set<string>(
       scope.canModerate && row.author ? [row.author.id] : [],
     );
-    return toCommunityMessage(row, { moderatorIds, blockedIds });
+    return toCommunityMessage(row, { moderatorIds, blockedIds, mentionsById });
   }
 }

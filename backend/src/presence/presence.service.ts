@@ -9,8 +9,8 @@ import {
   type MyPresenceStatus,
   type PublicPresence,
 } from './presence.constants';
-import { PresenceRepository } from './presence.repository';
-import { PresenceStore, isInvisible } from './presence.store';
+import { PresenceAudienceService } from './presence-audience.service';
+import { PresenceRedisStore, isInvisible } from './presence-redis.store';
 
 export interface MyPresence {
   status: MyPresenceStatus;
@@ -22,8 +22,8 @@ export interface MyPresence {
 @Injectable()
 export class PresenceService {
   constructor(
-    private readonly store: PresenceStore,
-    private readonly repository: PresenceRepository,
+    private readonly store: PresenceRedisStore,
+    private readonly audience: PresenceAudienceService,
     private readonly registry: SocketRegistry,
   ) {}
 
@@ -48,7 +48,7 @@ export class PresenceService {
     userIds: string[],
   ): Promise<Record<string, PublicPresence>> {
     const now = Date.now();
-    const visible = await this.repository.findVisibleAmong(viewerId, userIds);
+    const visible = await this.audience.findVisibleAmong(viewerId, userIds);
     const ids = userIds.filter((id) => visible.has(id));
     const [online, invisible] = await Promise.all([
       this.store.onlineAmong(ids, now),
@@ -141,7 +141,7 @@ export class PresenceService {
     const [online, invisible, audience] = await Promise.all([
       this.store.onlineAmong([userId], now),
       this.store.invisibleAmong([userId], now),
-      this.repository.findAudienceIds(userId),
+      this.audience.findAudienceIds(userId),
     ]);
     if (audience.length === 0) return;
 

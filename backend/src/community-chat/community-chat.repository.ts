@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
+import { claimUploadsForAttachment } from '../media/media.repository';
 import { PrismaService } from '../prisma/prisma.service';
 import { COMMUNITY_DEFAULT_CHANNEL } from './community-chat.constants';
 
@@ -22,6 +23,30 @@ const reactionSelect = {
   emote: { select: emoteSelect },
 } satisfies Prisma.GameChannelReactionSelect;
 
+const mediaSelect = {
+  id: true,
+  url: true,
+  width: true,
+  height: true,
+  mediaUploadId: true,
+} satisfies Prisma.GameChannelMessageMediaSelect;
+
+/** Work done inside the transaction that saves a message. */
+export type AfterSave = (
+  tx: Prisma.TransactionClient,
+  message: CommunityMessageRow,
+) => Promise<void>;
+
+export interface CommunityMediaInput {
+  mediaUploadId: string;
+  publicId: string;
+  url: string;
+  width: number | null;
+  height: number | null;
+  bytes: number | null;
+  format: string | null;
+}
+
 const messageInclude = {
   author: { select: { id: true, name: true, image: true, role: true } },
   replyTo: {
@@ -30,8 +55,10 @@ const messageInclude = {
       content: true,
       deletedAt: true,
       author: { select: { id: true, name: true } },
+      media: { select: { id: true }, take: 1 },
     },
   },
+  media: { orderBy: { sortOrder: 'asc' }, select: mediaSelect },
   reactions: { orderBy: { createdAt: 'asc' }, select: reactionSelect },
 } satisfies Prisma.GameChannelMessageInclude;
 
@@ -155,34 +182,139 @@ export class CommunityChatRepository {
     });
   }
 
-  async lastMessageAtBy(channelId: string, authorId: string) {
-    const last = await this.prisma.gameChannelMessage.findFirst({
-      where: { channelId, authorId },
-      orderBy: { createdAt: 'desc' },
-      select: { createdAt: true },
+  /**
+   * Saves a message. With slow mode on, the wait check and the insert happen under one lock per
+   * person and room, so two requests at once cannot both pass; the loser gets how long to wait.
+   * Images are claimed in the same transaction, so a message never points at an upload someone else took.
+   */
+  async createMessage(
+    data: {
+      channelId: string;
+      authorId: string;
+      content: string;
+      replyToId?: string;
+      clientMessageId?: string;
+    },
+    slowmodeSeconds = 0,
+    media: CommunityMediaInput[] = [],
+    after?: AfterSave,
+  ): Promise<{ created: CommunityMessageRow } | { waitMs: number }> {
+    if (slowmodeSeconds <= 0 && media.length === 0 && !after) {
+      const created = await this.prisma.gameChannelMessage.create({
+        data,
+        include: messageInclude,
+      });
+      return { created };
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      if (slowmodeSeconds > 0) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${data.channelId}:${data.authorId}`}, 0))`;
+
+        const last = await tx.gameChannelMessage.findFirst({
+          where: { channelId: data.channelId, authorId: data.authorId },
+          orderBy: { createdAt: 'desc' },
+          select: { createdAt: true },
+        });
+        if (last) {
+          const waitMs =
+            slowmodeSeconds * 1000 - (Date.now() - last.createdAt.getTime());
+          if (waitMs > 0) return { waitMs };
+        }
+      }
+
+      if (media.length > 0) {
+        await claimUploadsForAttachment(tx, {
+          ids: media.map((item) => item.mediaUploadId),
+          userId: data.authorId,
+          purpose: 'COMMUNITY',
+        });
+      }
+
+      const created = await tx.gameChannelMessage.create({
+        data: {
+          ...data,
+          media: {
+            create: media.map((item, sortOrder) => ({ ...item, sortOrder })),
+          },
+        },
+        include: messageInclude,
+      });
+      await after?.(tx, created);
+      return { created };
     });
-    return last?.createdAt ?? null;
   }
 
-  createMessage(data: {
-    channelId: string;
-    authorId: string;
-    content: string;
-    replyToId?: string;
-    clientMessageId?: string;
+  /** `after` runs in the same transaction, so a mention is only ever queued for text that was saved. */
+  updateContent(messageId: string, content: string, after?: AfterSave) {
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.gameChannelMessage.update({
+        where: { id: messageId },
+        data: { content, editedAt: new Date() },
+        include: messageInclude,
+      });
+      await after?.(tx, updated);
+      return updated;
+    });
+  }
+
+  /** Which of these handles belong to members of the community, as user ids. */
+  async findMemberIdsByUsernames(gameId: string, usernames: string[]) {
+    const rows = await this.prisma.gameMember.findMany({
+      where: { gameId, user: { username: { in: usernames } } },
+      select: { userId: true },
+    });
+    return new Set(rows.map((row) => row.userId));
+  }
+
+  /** Members to suggest while typing @: active, not blocked either way, matching a name or the start of a handle. */
+  searchMembers(params: {
+    gameId: string;
+    viewerId: string;
+    query: string;
+    limit: number;
   }) {
-    return this.prisma.gameChannelMessage.create({
-      data,
-      include: messageInclude,
+    const { gameId, viewerId, query, limit } = params;
+    return this.prisma.user.findMany({
+      where: {
+        id: { not: viewerId },
+        status: 'ACTIVE',
+        username: { not: null },
+        gameMemberships: { some: { gameId } },
+        blockedUsers: { none: { blockedId: viewerId } },
+        blockedBy: { none: { blockerId: viewerId } },
+        ...(query
+          ? {
+              OR: [
+                { username: { startsWith: query, mode: 'insensitive' } },
+                { name: { contains: query, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ username: 'asc' }],
+      take: limit,
+      select: { id: true, name: true, username: true, image: true },
     });
   }
 
-  updateContent(messageId: string, content: string) {
-    return this.prisma.gameChannelMessage.update({
-      where: { id: messageId },
-      data: { content, editedAt: new Date() },
-      include: messageInclude,
+  /** The handles pinged by each of these messages, so they can be shown as mentions. */
+  async findMentionUsernames(messageIds: string[]) {
+    const byMessage = new Map<string, string[]>();
+    if (messageIds.length === 0) return byMessage;
+
+    const rows = await this.prisma.mention.findMany({
+      where: { entityType: 'COMMUNITY_MESSAGE', entityId: { in: messageIds } },
+      select: { entityId: true, user: { select: { username: true } } },
     });
+    for (const row of rows) {
+      if (!row.user.username) continue;
+      byMessage.set(row.entityId, [
+        ...(byMessage.get(row.entityId) ?? []),
+        row.user.username,
+      ]);
+    }
+    return byMessage;
   }
 
   softDelete(messageId: string, deletedById: string, reason?: string) {
@@ -240,13 +372,6 @@ export class CommunityChatRepository {
     });
   }
 
-  findReadState(userId: string, channelId: string) {
-    return this.prisma.gameChannelReadState.findUnique({
-      where: { userId_channelId: { userId, channelId } },
-      select: { lastReadAt: true },
-    });
-  }
-
   /** Where this person has read up to in each of these rooms, in one query. */
   findReadStates(userId: string, channelIds: string[]) {
     return this.prisma.gameChannelReadState.findMany({
@@ -255,19 +380,22 @@ export class CommunityChatRepository {
     });
   }
 
-  markRead(params: {
+  /** Moves the read position forward only; an older position arriving late, from another tab, changes nothing. */
+  async markRead(params: {
     userId: string;
     channelId: string;
     at: Date;
     messageId?: string;
   }) {
     const { userId, channelId, at, messageId } = params;
-    const data = { lastReadAt: at, lastReadMessageId: messageId ?? null };
-    return this.prisma.gameChannelReadState.upsert({
-      where: { userId_channelId: { userId, channelId } },
-      update: data,
-      create: { userId, channelId, ...data },
-    });
+    await this.prisma.$executeRaw`
+      INSERT INTO "game_channel_read_states" ("userId", "channelId", "lastReadAt", "lastReadMessageId", "updatedAt")
+      VALUES (${userId}, ${channelId}, ${at}, ${messageId ?? null}, NOW())
+      ON CONFLICT ("userId", "channelId") DO UPDATE
+      SET "lastReadAt" = EXCLUDED."lastReadAt",
+          "lastReadMessageId" = EXCLUDED."lastReadMessageId",
+          "updatedAt" = NOW()
+      WHERE "game_channel_read_states"."lastReadAt" < EXCLUDED."lastReadAt"`;
   }
 
   /** Messages from other people after `since`, up to `limit` and one more; enough for a "99+" badge without counting a whole backlog. */

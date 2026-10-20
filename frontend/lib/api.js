@@ -85,6 +85,7 @@ export const backendRoutes = {
     `/chat/messages/${encodePathParam(messageId)}/reactions`,
   chatEmotes: '/chat/emotes',
   communityChat: (gameSlug) => `/games/${encodePathParam(gameSlug)}/chat`,
+  communityChatMembers: (gameSlug) => `/games/${encodePathParam(gameSlug)}/chat/members`,
   communityChatMessages: (gameSlug, channelId) =>
     `/games/${encodePathParam(gameSlug)}/chat/channels/${encodePathParam(channelId)}/messages`,
   communityChatRead: (gameSlug, channelId) =>
@@ -96,6 +97,8 @@ export const backendRoutes = {
   chatAcceptRequest: (conversationId) => `/chat/requests/${encodePathParam(conversationId)}/accept`,
   chatDeclineRequest: (conversationId) =>
     `/chat/requests/${encodePathParam(conversationId)}/decline`,
+  chatBlockedUsers: '/chat/users/blocked',
+  chatUserBlock: (userId) => `/chat/users/${encodePathParam(userId)}/block`,
   chatBlockConversation: (conversationId) =>
     `/chat/conversations/${encodePathParam(conversationId)}/block`,
   chatConversation: (conversationId) => `/chat/conversations/${encodePathParam(conversationId)}`,
@@ -105,6 +108,7 @@ export const backendRoutes = {
     `/chat/conversations/${encodePathParam(conversationId)}/notification-level`,
   chatGroups: '/chat/groups',
   chatGroup: (conversationId) => `/chat/groups/${encodePathParam(conversationId)}`,
+  chatGroupPhoto: (conversationId) => `/chat/groups/${encodePathParam(conversationId)}/photo`,
   chatGroupMembers: (conversationId) =>
     `/chat/groups/${encodePathParam(conversationId)}/members`,
   chatGroupTransferOwnership: (conversationId) =>
@@ -862,6 +866,9 @@ export const api = {
   acceptChatRequest: (conversationId) => mutation(backendRoutes.chatAcceptRequest(conversationId)),
   declineChatRequest: (conversationId) =>
     mutation(backendRoutes.chatDeclineRequest(conversationId)),
+  getBlockedChatUsers: (options = {}) => request(backendRoutes.chatBlockedUsers, options),
+  unblockChatUser: (userId) =>
+    mutation(backendRoutes.chatUserBlock(userId), undefined, { method: 'DELETE' }),
   blockChatConversation: (conversationId) =>
     mutation(backendRoutes.chatBlockConversation(conversationId)),
   archiveChatConversation: (conversationId) =>
@@ -878,10 +885,14 @@ export const api = {
       { notificationLevel, mutedUntil },
       { method: 'PATCH' },
     ),
-  createGroupChat: ({ title, photoUrl, memberUserIds }) =>
-    mutation(backendRoutes.chatGroups, { title, photoUrl, memberUserIds }),
-  updateGroupChat: (conversationId, { title, photoUrl }) =>
-    mutation(backendRoutes.chatGroup(conversationId), { title, photoUrl }, { method: 'PATCH' }),
+  createGroupChat: ({ title, memberUserIds }) =>
+    mutation(backendRoutes.chatGroups, { title, memberUserIds }),
+  updateGroupChat: (conversationId, { title }) =>
+    mutation(backendRoutes.chatGroup(conversationId), { title }, { method: 'PATCH' }),
+  setGroupPhoto: (conversationId, photoMediaUploadId) =>
+    mutation(backendRoutes.chatGroupPhoto(conversationId), { photoMediaUploadId }, { method: 'PATCH' }),
+  removeGroupPhoto: (conversationId) =>
+    mutation(backendRoutes.chatGroupPhoto(conversationId), undefined, { method: 'DELETE' }),
   addGroupMembers: (conversationId, userIds) =>
     mutation(backendRoutes.chatGroupMembers(conversationId), { userIds }),
   removeGroupMembers: (conversationId, userIds) =>
@@ -917,8 +928,13 @@ export const api = {
     request(withQuery(backendRoutes.presence, { userIds: userIds.join(',') })),
   // Community chat: public rooms of a game community, plaintext so moderators can read and remove messages.
   getCommunityChannels: (gameSlug) => request(backendRoutes.communityChat(gameSlug)),
+  /** Members to suggest after an @: whose name or handle starts like `q`. */
+  searchCommunityMembers: (gameSlug, q, /** @type {{ signal?: AbortSignal }} */ options = {}) =>
+    request(withQuery(backendRoutes.communityChatMembers(gameSlug), { q }), { signal: options.signal }),
   getCommunityMessages: (gameSlug, channelId, query = {}) =>
     request(withQuery(backendRoutes.communityChatMessages(gameSlug, channelId), query)),
+  getCommunityMessage: (gameSlug, messageId) =>
+    request(backendRoutes.communityChatMessage(gameSlug, messageId)),
   sendCommunityMessage: (gameSlug, channelId, message) =>
     mutation(backendRoutes.communityChatMessages(gameSlug, channelId), message),
   editCommunityMessage: (gameSlug, messageId, content) =>

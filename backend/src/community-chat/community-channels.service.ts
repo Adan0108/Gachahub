@@ -80,10 +80,7 @@ export class CommunityChannelsService {
       at = seen.createdAt;
     }
 
-    // Reading only moves forward: marking an older message never brings back unread ones.
-    const current = await this.repository.findReadState(user.id, channel.id);
-    if (current && current.lastReadAt > at) return { ok: true };
-
+    // The database keeps the position moving forward only, so an older mark arriving late changes nothing.
     await this.repository.markRead({
       userId: user.id,
       channelId: channel.id,

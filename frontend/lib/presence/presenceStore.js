@@ -14,9 +14,13 @@ export function createPresenceStore({
 } = {}) {
   const statuses = new Map();
   const listeners = new Set();
+  // Asked and not failed, so each person is looked up once; wanted also keeps the failures for refreshes.
   const asked = new Set();
+  const wanted = new Set();
   let waiting = new Set();
   let timer;
+  // Bumped by clear(), so a lookup that was already running cannot fill the store afterwards.
+  let generation = 0;
 
   const notify = () => listeners.forEach((listener) => listener());
 
@@ -32,17 +36,19 @@ export function createPresenceStore({
 
   const flush = async () => {
     timer = undefined;
+    const run = generation;
     const ids = [...waiting];
     waiting = new Set();
 
     for (let start = 0; start < ids.length; start += MAX_PER_REQUEST) {
+      if (run !== generation) return;
       const chunk = ids.slice(start, start + MAX_PER_REQUEST);
       try {
-        // eslint-disable-next-line no-await-in-loop -- a few chunks at most, in order
-        setMany(await fetchPresence(chunk));
+        const result = await fetchPresence(chunk);
+        if (run === generation) setMany(result);
       } catch {
-        // Asked again the next time a row needs it.
-        chunk.forEach((id) => asked.delete(id));
+        // Still wanted, so the next refresh or the next row asking looks it up again.
+        if (run === generation) chunk.forEach((id) => asked.delete(id));
       }
     }
   };
@@ -61,22 +67,27 @@ export function createPresenceStore({
     },
     /** Asks the server about this person once, together with whoever else asks in the same moment. */
     request(userId) {
-      if (!userId || asked.has(userId)) return;
+      if (!userId) return;
+      wanted.add(userId);
+      if (asked.has(userId)) return;
       asked.add(userId);
       waiting.add(userId);
       schedule();
     },
-    /** After a reconnect updates may have been missed: ask about everyone known again. */
+    /** Updates may have been missed, or a lookup failed: ask again about everyone known or wanted. */
     refreshAll() {
+      wanted.forEach((userId) => waiting.add(userId));
       statuses.forEach((_, userId) => waiting.add(userId));
       if (waiting.size > 0) schedule();
     },
     /** Forgets everyone, e.g. when signing out. */
     clear() {
+      generation += 1;
       clearTimeout(timer);
       timer = undefined;
       waiting = new Set();
       asked.clear();
+      wanted.clear();
       if (statuses.size > 0) {
         statuses.clear();
         notify();

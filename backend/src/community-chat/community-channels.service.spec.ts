@@ -9,7 +9,6 @@ describe('CommunityChannelsService', () => {
     lastMessageAtByChannel: jest.fn(),
     countUnread: jest.fn(),
     findCursor: jest.fn(),
-    findReadState: jest.fn(),
     markRead: jest.fn(),
   };
   const access = { scope: jest.fn(), channelIn: jest.fn() };
@@ -24,7 +23,6 @@ describe('CommunityChannelsService', () => {
     repository.findReadStates.mockResolvedValue([]);
     repository.lastMessageAtByChannel.mockResolvedValue([]);
     repository.countUnread.mockResolvedValue(0);
-    repository.findReadState.mockResolvedValue(null);
     service = new CommunityChannelsService(
       repository as never,
       access as never,
@@ -167,18 +165,20 @@ describe('CommunityChannelsService', () => {
       });
     });
 
-    it('never moves backwards', async () => {
+    it('leaves keeping the position forward-only to the database, so an older mark arriving late is just passed on', async () => {
       repository.findCursor.mockResolvedValue({
         id: 'm1',
         createdAt: new Date('2026-10-10T00:00:00Z'),
       });
-      repository.findReadState.mockResolvedValue({
-        lastReadAt: new Date('2026-10-15T00:00:00Z'),
-      });
 
       await markRead('m1');
 
-      expect(repository.markRead).not.toHaveBeenCalled();
+      expect(repository.markRead).toHaveBeenCalledWith({
+        userId: 'me',
+        channelId: 'c1',
+        at: new Date('2026-10-10T00:00:00Z'),
+        messageId: 'm1',
+      });
     });
 
     it('refuses a message that is not in this room', async () => {

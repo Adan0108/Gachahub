@@ -14,11 +14,13 @@ import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { ReactToMessageDto } from '../chat/dto/react-to-message.dto';
 import { CommunityActionsService } from './community-actions.service';
 import { CommunityChannelsService } from './community-channels.service';
+import { CommunityMentionsService } from './community-mentions.service';
 import { CommunityMessagingService } from './community-messaging.service';
 import { DeleteCommunityMessageDto } from './dto/delete-community-message.dto';
 import { EditCommunityMessageDto } from './dto/edit-community-message.dto';
 import { MarkCommunityReadDto } from './dto/mark-community-read.dto';
 import { QueryCommunityMessagesDto } from './dto/query-community-messages.dto';
+import { SearchCommunityMembersDto } from './dto/search-community-members.dto';
 import { SendCommunityMessageDto } from './dto/send-community-message.dto';
 
 /** Chat rooms of one game community; only its members, moderators and admins get in. */
@@ -30,6 +32,7 @@ export class CommunityChatController {
     private readonly channels: CommunityChannelsService,
     private readonly messaging: CommunityMessagingService,
     private readonly actions: CommunityActionsService,
+    private readonly mentions: CommunityMentionsService,
   ) {}
 
   @Get()
@@ -41,6 +44,18 @@ export class CommunityChatController {
     @Session() session: UserSession,
   ) {
     return this.channels.listChannels(slug, session.user.id);
+  }
+
+  @Get('members')
+  @ApiOperation({
+    summary: 'Members to suggest while typing an @mention',
+  })
+  searchMembers(
+    @Param('gameSlug') slug: string,
+    @Query() query: SearchCommunityMembersDto,
+    @Session() session: UserSession,
+  ) {
+    return this.mentions.searchMembers(slug, query.q, session.user.id);
   }
 
   @Get('channels/:channelId/messages')
@@ -76,6 +91,16 @@ export class CommunityChatController {
     @Session() session: UserSession,
   ) {
     return this.channels.markRead(slug, channelId, dto, session.user.id);
+  }
+
+  @Get('messages/:messageId')
+  @ApiOperation({ summary: 'One message, as you see it' })
+  getMessage(
+    @Param('gameSlug') slug: string,
+    @Param('messageId') messageId: string,
+    @Session() session: UserSession,
+  ) {
+    return this.messaging.getMessage(slug, messageId, session.user.id);
   }
 
   @Patch('messages/:messageId')

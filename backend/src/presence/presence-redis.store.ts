@@ -16,7 +16,7 @@ export interface InvisiblePreference {
 
 /** Redis state behind presence: who is connected, and who chose to be invisible. */
 @Injectable()
-export class PresenceStore {
+export class PresenceRedisStore {
   constructor(private readonly redis: RedisService) {}
 
   /** Marks this socket alive now; says whether it just appeared and how many sockets the person has. */
@@ -40,14 +40,10 @@ export class PresenceStore {
   }
 
   async connectedAmong(userIds: string[], nowMs: number): Promise<Set<string>> {
-    const counts = await Promise.all(
-      userIds.map((userId) =>
-        this.redis.sortedSetLiveCount(
-          socketsKey(userId),
-          nowMs,
-          SOCKET_STALE_AFTER_MS,
-        ),
-      ),
+    const counts = await this.redis.sortedSetLiveCounts(
+      userIds.map(socketsKey),
+      nowMs,
+      SOCKET_STALE_AFTER_MS,
     );
 
     return new Set(userIds.filter((_, index) => counts[index] > 0));
@@ -64,9 +60,7 @@ export class PresenceStore {
   }
 
   async lingeringAmong(userIds: string[], nowMs: number): Promise<Set<string>> {
-    const scores = await Promise.all(
-      userIds.map((userId) => this.redis.sortedSetScore(LINGER_KEY, userId)),
-    );
+    const scores = await this.redis.sortedSetScores(LINGER_KEY, userIds);
 
     return new Set(userIds.filter((_, index) => (scores[index] ?? 0) > nowMs));
   }
@@ -95,8 +89,8 @@ export class PresenceStore {
   }
 
   async invisibleAmong(userIds: string[], nowMs: number): Promise<Set<string>> {
-    const preferences = await Promise.all(
-      userIds.map((userId) => this.getInvisible(userId)),
+    const preferences = await this.redis.getManyJson<InvisiblePreference>(
+      userIds.map(preferenceKey),
     );
 
     return new Set(
@@ -126,10 +120,17 @@ export class PresenceStore {
     const expired: string[] = [];
 
     for (const userId of due) {
-      const preference = await this.getInvisible(userId);
-      // Someone who chose again after being queued has a newer end time: leave that one alone.
-      if (preference?.until != null && preference.until <= nowMs) {
-        await this.redis.delete(preferenceKey(userId));
+      const key = preferenceKey(userId);
+      const raw = await this.redis.get(key);
+      if (!raw) continue;
+
+      const preference = JSON.parse(raw) as InvisiblePreference;
+      // Only delete exactly what was read: someone who chose again meanwhile keeps the new choice.
+      if (
+        preference.until !== null &&
+        preference.until <= nowMs &&
+        (await this.redis.deleteIfEquals(key, raw))
+      ) {
         expired.push(userId);
       }
     }

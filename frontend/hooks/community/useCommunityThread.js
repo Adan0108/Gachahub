@@ -8,12 +8,14 @@ import { useNowTick } from "../useNowTick";
 const MARK_READ_DELAY_MS = 800;
 const NOW_TICK_MS = 30_000;
 const FLASH_MS = 1600;
+// Older pages loaded while looking for a message someone linked to
+const MAX_FOCUS_PAGES = 6;
 
 /**
  * How the message list behaves on screen: where it scrolls, when messages count as read, and the
  * reply and remove-confirmation state around it. The data itself comes from useCommunityChat.
  */
-export function useCommunityThread(chat) {
+export function useCommunityThread(chat, focusMessageId) {
   const now = useNowTick(NOW_TICK_MS);
   const listElement = useRef(null);
   // A callback ref keeps the element itself out of what this hook hands back.
@@ -71,8 +73,27 @@ export function useCommunityThread(chat) {
     setTimeout(() => element.classList.remove("flash"), FLASH_MS);
   };
 
-  const send = (content) => {
-    chat.send(content, replyTo);
+  // Opened from a link to one message (a mention): scroll to it, loading older history while it is not there yet.
+  const focusedRef = useRef(null);
+  const focusPagesRef = useRef(0);
+  const olderPending = chat.isLoadingOlder;
+  const hasOlder = chat.hasOlder;
+  const loadOlderForFocus = chat.loadOlder;
+  useEffect(() => {
+    if (!focusMessageId || !ready || focusedRef.current === focusMessageId) return;
+    if (document.getElementById(`community-message-${focusMessageId}`)) {
+      focusedRef.current = focusMessageId;
+      jumpTo(focusMessageId);
+    } else if (hasOlder && !olderPending && focusPagesRef.current < MAX_FOCUS_PAGES) {
+      focusPagesRef.current += 1;
+      loadOlderForFocus();
+    } else if (!hasOlder || focusPagesRef.current >= MAX_FOCUS_PAGES) {
+      focusedRef.current = focusMessageId;
+    }
+  }, [focusMessageId, ready, messages.length, hasOlder, olderPending, loadOlderForFocus]);
+
+  const send = (content, files = []) => {
+    chat.send(content, replyTo, files);
     setReplyTo(null);
   };
 

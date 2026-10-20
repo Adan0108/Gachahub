@@ -16,6 +16,8 @@ describe('CommunityActionsService', () => {
   const access = { scope: jest.fn(), messageIn: jest.fn() };
   const presenter = { one: jest.fn() };
   const realtime = { changed: jest.fn() };
+  const media = { releaseReplacedUpload: jest.fn() };
+  const mentions = { targetsFor: jest.fn(), publish: jest.fn() };
 
   let service: CommunityActionsService;
 
@@ -24,6 +26,7 @@ describe('CommunityActionsService', () => {
     access.scope.mockResolvedValue(scope());
     access.messageIn.mockResolvedValue(row());
     repository.findReactions.mockResolvedValue([]);
+    mentions.targetsFor.mockResolvedValue([]);
     // The presenter is covered by its own spec; here it just echoes what it was given.
     presenter.one.mockImplementation((_scope: unknown, message: unknown) =>
       Promise.resolve(message),
@@ -33,6 +36,8 @@ describe('CommunityActionsService', () => {
       access as never,
       presenter as never,
       realtime as never,
+      media as never,
+      mentions as never,
     );
   });
 
@@ -47,15 +52,71 @@ describe('CommunityActionsService', () => {
 
       const message = await edit();
 
-      expect(repository.updateContent).toHaveBeenCalledWith('m1', 'fixed');
+      expect(repository.updateContent).toHaveBeenCalledWith(
+        'm1',
+        'fixed',
+        undefined,
+      );
       expect(message).toMatchObject({ content: 'fixed' });
       expect(message?.editedAt).not.toBeNull();
+    });
+
+    it('pings only through the save, and only people named in the new text', async () => {
+      mentions.targetsFor.mockResolvedValue(['bo']);
+      repository.updateContent.mockResolvedValue(row({ content: 'fixed @bo' }));
+
+      await edit('fixed @bo');
+
+      expect(mentions.targetsFor).toHaveBeenCalledWith('g1', 'me', 'fixed @bo');
+      const after = (
+        repository.updateContent.mock.calls[0] as unknown[]
+      )[2] as (tx: unknown, saved: { id: string }) => Promise<void>;
+      const tx = {};
+      await after(tx, { id: 'm1' });
+      expect(mentions.publish).toHaveBeenCalledWith(tx, {
+        targetIds: ['bo'],
+        actorId: 'me',
+        messageId: 'm1',
+      });
+    });
+
+    it('queues no pings for an edit that names nobody', async () => {
+      repository.updateContent.mockResolvedValue(row({ content: 'fixed' }));
+
+      await edit();
+
+      expect(
+        (repository.updateContent.mock.calls[0] as unknown[])[2],
+      ).toBeUndefined();
+    });
+
+    it('does not look for mentions when the text did not change', async () => {
+      await edit('hello');
+
+      expect(mentions.targetsFor).not.toHaveBeenCalled();
+    });
+
+    it('lets a message with pictures end up with no text, but not one without', async () => {
+      access.messageIn.mockResolvedValue(
+        row({ media: [{ id: 'i1', mediaUploadId: 'up1' }] }),
+      );
+      repository.updateContent.mockResolvedValue(row({ content: '' }));
+
+      await edit('   ');
+      expect(repository.updateContent).toHaveBeenCalledWith(
+        'm1',
+        '',
+        undefined,
+      );
+
+      access.messageIn.mockResolvedValue(row());
+      await expect(edit('   ')).rejects.toThrow(BadRequestException);
     });
 
     it('tells the room when the text changed, not when it did not', async () => {
       repository.updateContent.mockResolvedValue(row({ content: 'fixed' }));
       await edit();
-      expect(realtime.changed).toHaveBeenCalledWith('c1');
+      expect(realtime.changed).toHaveBeenCalledWith('c1', 'm1');
 
       realtime.changed.mockClear();
       access.messageIn.mockResolvedValue(row({ content: 'same' }));
@@ -112,7 +173,7 @@ describe('CommunityActionsService', () => {
     it('tells the room a message went, and not again the second time', async () => {
       repository.softDelete.mockResolvedValue(row({ deletedAt: new Date() }));
       await remove();
-      expect(realtime.changed).toHaveBeenCalledWith('c1');
+      expect(realtime.changed).toHaveBeenCalledWith('c1', 'm1');
 
       realtime.changed.mockClear();
       access.messageIn.mockResolvedValue(row({ deletedAt: new Date() }));
@@ -137,6 +198,25 @@ describe('CommunityActionsService', () => {
       await remove('  spam  ');
 
       expect(repository.softDelete).toHaveBeenCalledWith('m1', 'me', 'spam');
+    });
+
+    it('destroys the pictures of a removed message', async () => {
+      const withImages = row({
+        media: [
+          { id: 'i1', mediaUploadId: 'up1' },
+          { id: 'i2', mediaUploadId: 'up2' },
+        ],
+      });
+      access.messageIn.mockResolvedValue(withImages);
+      repository.softDelete.mockResolvedValue({
+        ...withImages,
+        deletedAt: new Date(),
+      });
+
+      await remove();
+
+      expect(media.releaseReplacedUpload).toHaveBeenCalledWith('up1');
+      expect(media.releaseReplacedUpload).toHaveBeenCalledWith('up2');
     });
 
     it('does nothing the second time', async () => {
@@ -192,7 +272,7 @@ describe('CommunityActionsService', () => {
       await service.unreact('wuwa', 'm1', 'me');
 
       expect(realtime.changed).toHaveBeenCalledTimes(2);
-      expect(realtime.changed).toHaveBeenCalledWith('c1');
+      expect(realtime.changed).toHaveBeenCalledWith('c1', 'm1');
     });
 
     it('refuses to react to a removed message', async () => {

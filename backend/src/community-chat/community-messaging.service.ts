@@ -6,9 +6,12 @@ import {
 } from '@nestjs/common';
 import { isUniqueViolationOn } from '../chat/prisma-unique-violation';
 import { RateLimitedException } from '../common/exceptions/rate-limited.exception';
+import { MediaService } from '../media/media.service';
 import { CommunityAccessService } from './community-access.service';
 import { CommunityChatRateLimiterService } from './community-chat-rate-limiter.service';
+import { COMMUNITY_MESSAGE_MAX_IMAGES } from './community-chat.constants';
 import { CommunityChatRepository } from './community-chat.repository';
+import { CommunityMentionsService } from './community-mentions.service';
 import { CommunityMessagePresenter } from './community-message.presenter';
 import { CommunityRealtimeService } from './community-realtime.service';
 import type { QueryCommunityMessagesDto } from './dto/query-community-messages.dto';
@@ -24,6 +27,8 @@ export class CommunityMessagingService {
     private readonly rateLimiter: CommunityChatRateLimiterService,
     private readonly presenter: CommunityMessagePresenter,
     private readonly realtime: CommunityRealtimeService,
+    private readonly media: MediaService,
+    private readonly mentions: CommunityMentionsService,
   ) {}
 
   /** A page of history, oldest first; `before` loads the page above the one you have. */
@@ -57,6 +62,17 @@ export class CommunityMessagingService {
     };
   }
 
+  /** One message as this person sees it, so a client can refresh just the one that changed. */
+  async getMessage(
+    slug: string,
+    messageId: string,
+    userId: string | undefined,
+  ) {
+    const scope = await this.access.scope(slug, userId);
+    const message = await this.access.messageIn(scope.game.id, messageId);
+    return this.presenter.one(scope, message);
+  }
+
   async send(
     slug: string,
     channelId: string,
@@ -66,7 +82,8 @@ export class CommunityMessagingService {
     const scope = await this.access.scope(slug, userId);
     const { user, game, canModerate } = scope;
     const channel = await this.access.channelIn(game.id, channelId);
-    const content = validMessageContent(dto.content);
+    const mediaIds = dto.mediaUploadIds ?? [];
+    const content = validMessageContent(dto.content ?? '', mediaIds.length > 0);
 
     // A retry of a send that already went through returns that message, not a second one.
     if (dto.clientMessageId) {
@@ -94,7 +111,6 @@ export class CommunityMessagingService {
         throw new ForbiddenException('This channel is locked');
       }
       this.rateLimiter.assertNotRateLimited(user.id, channel.id);
-      await this.assertSlowmodeElapsed(channel, user.id);
     }
 
     if (dto.replyToId) {
@@ -107,16 +123,54 @@ export class CommunityMessagingService {
       }
     }
 
+    const resolved = await this.media.resolveAttachableMedia({
+      ids: mediaIds,
+      userId: user.id,
+      purpose: 'COMMUNITY',
+      maxImages: COMMUNITY_MESSAGE_MAX_IMAGES,
+      maxVideos: 0,
+      entityLabel: 'community message',
+    });
+    // Shown in the order the sender picked them, not the order the database returned them
+    const images = mediaIds.map(
+      (id) => resolved.find((image) => image.id === id)!,
+    );
+
+    const targetIds = await this.mentions.targetsFor(game.id, user.id, content);
+
     try {
-      const created = await this.repository.createMessage({
-        channelId: channel.id,
-        authorId: user.id,
-        content,
-        replyToId: dto.replyToId,
-        clientMessageId: dto.clientMessageId,
-      });
-      this.realtime.changed(channel.id);
-      return await this.presenter.one(scope, created);
+      // Moderators are exempt from slow mode; for everyone else the wait is checked as the message is saved.
+      const saved = await this.repository.createMessage(
+        {
+          channelId: channel.id,
+          authorId: user.id,
+          content,
+          replyToId: dto.replyToId,
+          clientMessageId: dto.clientMessageId,
+        },
+        canModerate ? 0 : channel.slowmodeSeconds,
+        images.map((image) => ({
+          mediaUploadId: image.id,
+          publicId: image.publicId,
+          url: image.secureUrl!,
+          width: image.width,
+          height: image.height,
+          bytes: image.bytes,
+          format: image.format,
+        })),
+        targetIds.length > 0
+          ? (tx, created) =>
+              this.mentions.publish(tx, {
+                targetIds,
+                actorId: user.id,
+                messageId: created.id,
+              })
+          : undefined,
+      );
+      if ('waitMs' in saved) throwSlowMode(saved.waitMs);
+
+      this.realtime.changed(channel.id, saved.created.id);
+      return await this.presenter.one(scope, saved.created);
     } catch (error) {
       // Two sends with one client id at once: the loser gets the winner's message.
       if (
@@ -132,24 +186,12 @@ export class CommunityMessagingService {
       throw error;
     }
   }
+}
 
-  private async assertSlowmodeElapsed(
-    channel: { id: string; slowmodeSeconds: number },
-    userId: string,
-  ) {
-    if (channel.slowmodeSeconds <= 0) return;
-
-    const last = await this.repository.lastMessageAtBy(channel.id, userId);
-    if (!last) return;
-
-    const waitMs =
-      channel.slowmodeSeconds * 1000 - (Date.now() - last.getTime());
-    if (waitMs > 0) {
-      const seconds = Math.ceil(waitMs / 1000);
-      throw new RateLimitedException(
-        `Slow mode is on, wait ${seconds}s before sending again`,
-        seconds,
-      );
-    }
-  }
+function throwSlowMode(waitMs: number): never {
+  const seconds = Math.ceil(waitMs / 1000);
+  throw new RateLimitedException(
+    `Slow mode is on, wait ${seconds}s before sending again`,
+    seconds,
+  );
 }

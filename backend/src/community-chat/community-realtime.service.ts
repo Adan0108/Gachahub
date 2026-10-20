@@ -8,9 +8,10 @@ export const communityRoom = (channelId: string) => `community:${channelId}`;
 export class CommunityRealtimeService {
   constructor(private readonly registry: SocketRegistry) {}
 
-  changed(channelId: string): void {
+  /** `messageId` is the message that was sent, edited, removed or reacted to, so listeners fetch just that one. */
+  changed(channelId: string, messageId?: string): void {
     this.registry.server
       ?.to(communityRoom(channelId))
-      .emit('community:activity', { channelId });
+      .emit('community:activity', { channelId, messageId });
   }
 }

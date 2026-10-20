@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 
@@ -14,7 +15,15 @@ import {
 
 import { CommentsRepository } from '../comments/comments.repository';
 import { GetNotificationsQueryDto } from './dto/get-notifications-query.dto';
-import { commentEntityIds, withPostIds } from './notification.mapper';
+import {
+  commentEntityIds,
+  messageEntityIds,
+  withConversationIds,
+  communityMessageEntityIds,
+  withCommunities,
+  withConversations,
+  withPostIds,
+} from './notification.mapper';
 import { NotificationRepository } from './notification.repository';
 import { CreateNotificationInput } from './notification.types';
 
@@ -22,6 +31,7 @@ import { CreateNotificationInput } from './notification.types';
 export class NotificationService {
   private static readonly DEFAULT_PAGE_SIZE = 20;
   private static readonly DEDUPE_WINDOW_MS = 60_000;
+  private readonly logger = new Logger(NotificationService.name);
 
   constructor(
     private readonly notificationRepository: NotificationRepository,
@@ -48,7 +58,8 @@ export class NotificationService {
     input: CreateNotificationInput,
     transaction?: Prisma.TransactionClient,
   ) {
-    const { recipientId, actorId, type, entityType, entityId } = input;
+    const { recipientId, actorId, type, entityType, entityId, conversationId } =
+      input;
 
     // 1. Basic runtime validation.
     if (!recipientId) {
@@ -132,6 +143,7 @@ export class NotificationService {
         type,
         entityType,
         entityId,
+        conversationId,
       },
       transaction,
     );
@@ -155,6 +167,8 @@ export class NotificationService {
       type: NotificationType;
       entityType: NotificationEntityType;
       entityId: string;
+      conversationId: string | null;
+      count: number;
       readAt: Date | null;
       createdAt: Date;
       updatedAt: Date;
@@ -191,6 +205,8 @@ export class NotificationService {
       type: input.type,
       entityType: input.entityType,
       entityId: input.entityId,
+      conversationId: null,
+      count: 1,
       readAt: null,
       createdAt: now,
       updatedAt: now,
@@ -202,6 +218,47 @@ export class NotificationService {
   }
 
   /**
+   * "Sent you a message" for people in a conversation, stacked: each person has one unread row for
+   * the conversation that counts its messages, instead of one row per message. People who cannot
+   * be notified (gone or banned) are left out; the sender never notifies themselves.
+   */
+  async stackMessageNotifications(
+    input: {
+      recipientIds: readonly string[];
+      actorId: string;
+      messageId: string;
+      conversationId: string;
+    },
+    transaction: Prisma.TransactionClient,
+  ) {
+    const candidateIds = input.recipientIds.filter(
+      (recipientId) => recipientId !== input.actorId,
+    );
+    if (candidateIds.length === 0) {
+      return [];
+    }
+
+    const notifiableIds =
+      await this.notificationRepository.findNotifiableRecipientIds(
+        candidateIds,
+        transaction,
+      );
+    if (notifiableIds.length === 0) {
+      return [];
+    }
+
+    return this.notificationRepository.upsertMessageStack(
+      {
+        recipientIds: notifiableIds,
+        actorId: input.actorId,
+        messageId: input.messageId,
+        conversationId: input.conversationId,
+      },
+      transaction,
+    );
+  }
+
+  /**
    * Returns a cursor-paginated list of notifications for a recipient.
    *
    * Fetches one additional row to determine whether another page exists.
@@ -209,10 +266,17 @@ export class NotificationService {
   async getNotifications(
     recipientId: string,
     params: GetNotificationsQueryDto,
+    sessionId?: string,
   ) {
     if (!recipientId) {
       throw new BadRequestException('recipientId is required');
     }
+
+    await this.settleReadMessageNotifications(recipientId);
+    const excludeIds = await this.idsThisDeviceCannotRead(
+      recipientId,
+      sessionId,
+    );
 
     const limit = params.limit ?? NotificationService.DEFAULT_PAGE_SIZE;
     const cursor = params.cursor;
@@ -221,6 +285,7 @@ export class NotificationService {
       recipientId,
       limit: limit + 1,
       cursor,
+      excludeIds,
     });
 
     const hasMore = notifications.length > limit;
@@ -230,14 +295,40 @@ export class NotificationService {
     const nextCursor =
       hasMore && items.length > 0 ? items[items.length - 1].id : null;
 
-    const comments = await this.commentsRepository.findPostIdsByCommentIds(
-      commentEntityIds(items),
-    );
+    const [comments, messages, communities] = await Promise.all([
+      this.commentsRepository.findPostIdsByCommentIds(commentEntityIds(items)),
+      // Rows made before a row carried its own conversation find it through the message
+      this.notificationRepository.findConversationIdsByMessageIds(
+        messageEntityIds(items.filter((item) => !item.conversationId)),
+      ),
+      this.notificationRepository.findCommunitiesByMessageIds(
+        communityMessageEntityIds(items),
+      ),
+    ]);
 
-    return {
-      items: withPostIds(
+    const located = withConversationIds(
+      withPostIds(
         items,
         new Map(comments.map((comment) => [comment.id, comment.postId])),
+      ),
+      new Map(messages.map((message) => [message.id, message.conversationId])),
+    );
+    const summaries =
+      await this.notificationRepository.findConversationSummaries([
+        ...new Set(
+          located.flatMap((item) =>
+            item.conversationId ? [item.conversationId] : [],
+          ),
+        ),
+      ]);
+
+    return {
+      items: withCommunities(
+        withConversations(
+          located,
+          new Map(summaries.map((summary) => [summary.id, summary])),
+        ),
+        new Map(communities.map(({ id, slug, name }) => [id, { slug, name }])),
       ),
       nextCursor,
       hasMore,
@@ -245,14 +336,65 @@ export class NotificationService {
   }
 
   /**
+   * Chat message notifications for messages sent before this login's device existed. That device
+   * can never decrypt them, so a new device or a reset one does not light the bell for history it
+   * cannot open; the person's other devices still show them.
+   */
+  private async idsThisDeviceCannotRead(
+    recipientId: string,
+    sessionId: string | undefined,
+  ): Promise<string[]> {
+    if (!sessionId) return [];
+
+    try {
+      const deviceStart = await this.notificationRepository.findDeviceStart(
+        sessionId,
+        recipientId,
+      );
+      if (!deviceStart) return [];
+
+      return await this.notificationRepository.findMessageNotificationIdsBefore(
+        recipientId,
+        deviceStart,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Could not tell which notifications ${recipientId}'s device cannot read`,
+        error,
+      );
+      return [];
+    }
+  }
+
+  /** Best effort: a failure here must not stop the bell from answering. */
+  private async settleReadMessageNotifications(recipientId: string) {
+    try {
+      await this.notificationRepository.settleMessageNotifications(recipientId);
+    } catch (error) {
+      this.logger.warn(
+        `Could not settle message notifications for ${recipientId}`,
+        error,
+      );
+    }
+  }
+
+  /**
    * Returns the number of unread notifications for a recipient.
    */
-  async getUnreadCount(recipientId: string) {
+  async getUnreadCount(recipientId: string, sessionId?: string) {
     if (!recipientId) {
       throw new BadRequestException('recipientId is required');
     }
 
-    const count = await this.notificationRepository.countUnread(recipientId);
+    await this.settleReadMessageNotifications(recipientId);
+    const excludeIds = await this.idsThisDeviceCannotRead(
+      recipientId,
+      sessionId,
+    );
+    const count = await this.notificationRepository.countUnread(
+      recipientId,
+      excludeIds,
+    );
 
     return {
       count,

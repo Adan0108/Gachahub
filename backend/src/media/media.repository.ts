@@ -153,6 +153,9 @@ export class MediaRepository {
       this.prisma.chatMessageMedia.deleteMany({
         where: { mediaUploadId: id },
       }),
+      this.prisma.gameChannelMessageMedia.deleteMany({
+        where: { mediaUploadId: id },
+      }),
     ]);
   }
 
@@ -195,11 +198,14 @@ export class MediaRepository {
       const batch = await this.prisma.mediaUpload.findMany({
         where: {
           status: 'ATTACHED',
-          purpose: { in: ['AVATAR', 'GAME_ICON', 'GAME_BANNER'] },
+          purpose: {
+            in: ['AVATAR', 'GAME_ICON', 'GAME_BANNER', 'GROUP_PHOTO'],
+          },
           updatedAt: { lt: retryCutoff },
           avatarFor: null,
           gameIconFor: null,
           gameBannerFor: null,
+          chatGroupPhotoFor: null,
         },
         orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
         take,

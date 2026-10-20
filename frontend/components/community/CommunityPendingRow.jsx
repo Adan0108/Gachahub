@@ -1,6 +1,8 @@
 "use client";
 
 import { AvatarFace } from "../AvatarFace";
+import { quoteText } from "../../lib/community/communityChat";
+import { LocalImage } from "./LocalImage";
 
 /** A message still going out, or one that failed and can be retried. */
 export function CommunityPendingRow({ entry, user, onRetry, onDiscard }) {
@@ -18,10 +20,19 @@ export function CommunityPendingRow({ entry, user, onRetry, onDiscard }) {
         {entry.replyTo && (
           <p className="community-reply static">
             <b>{entry.replyTo.author?.name ?? "Deleted user"}</b>
-            <span>{entry.replyTo.content}</span>
+            <span>{quoteText(entry.replyTo)}</span>
           </p>
         )}
-        <p className="community-text">{entry.content}</p>
+        {entry.content && <p className="community-text">{entry.content}</p>}
+        {entry.files?.length > 0 && (
+          <div className={`community-media count-${entry.files.length}`}>
+            {entry.files.map((file, index) => (
+              <span key={`${file.name}-${index}`}>
+                <LocalImage file={file} />
+              </span>
+            ))}
+          </div>
+        )}
         {entry.status === "sending" ? (
           <small className="community-pending-note">Sending...</small>
         ) : (

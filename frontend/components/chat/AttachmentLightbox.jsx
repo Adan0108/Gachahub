@@ -3,12 +3,17 @@
 import { useEffect, useState } from "react";
 import { FiChevronLeft, FiChevronRight, FiDownload, FiX } from "react-icons/fi";
 import { useAttachmentBlobUrl } from "../../hooks/chat/useAttachmentBlobUrl";
+import { attachmentKind } from "../../lib/mls/media/attachmentView";
 import { saveAttachment } from "../../lib/mls/media/saveAttachment";
+import { AttachmentLightboxStrip } from "./AttachmentLightboxStrip";
+import { ChatVideoPlayer } from "./ChatVideoPlayer";
 
-/** Full-screen viewer for one attachment in `items`, with prev/next through the rest of the thread's media. */
+/** Viewer for one picture or video of `items`, with prev/next and a strip of the rest of the thread's media underneath. */
 export function AttachmentLightbox({ items, index, onClose, onNavigate }) {
   const item = items[index];
+  const isVideo = item ? attachmentKind(item.file.mime) === "video" : false;
   const full = useAttachmentBlobUrl(item?.source ?? null, Boolean(item));
+  const poster = useAttachmentBlobUrl(item?.thumbSource ?? null, isVideo);
   const [downloadState, setDownloadState] = useState("idle");
 
   useEffect(() => {
@@ -74,7 +79,16 @@ export function AttachmentLightbox({ items, index, onClose, onNavigate }) {
         </button>
       )}
       <div className="attachment-lightbox-body" onClick={stop}>
-        {full.status === "ready" ? (
+        {full.status === "ready" && isVideo ? (
+          <ChatVideoPlayer
+            autoPlay
+            hideExpand
+            key={item.cacheKey}
+            label={item.file.name}
+            poster={poster.status === "ready" ? poster.url : undefined}
+            src={full.url}
+          />
+        ) : full.status === "ready" ? (
           <img alt={item.file.name} src={full.url} />
         ) : (
           <span className="chat-attachment-status">
@@ -93,6 +107,9 @@ export function AttachmentLightbox({ items, index, onClose, onNavigate }) {
           {downloadState === "error" && <span className="chat-attachment-error">File unavailable</span>}
         </div>
       </div>
+      {items.length > 1 && (
+        <AttachmentLightboxStrip index={index} items={items} onSelect={(at) => onNavigate(at - index)} />
+      )}
     </div>
   );
 }

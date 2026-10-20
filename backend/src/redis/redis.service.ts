@@ -68,6 +68,14 @@ export class RedisService {
     return JSON.parse(value) as T;
   }
 
+  /** Several JSON values in one command, null where a key is empty. */
+  async getManyJson<T>(keys: string[]): Promise<(T | null)[]> {
+    if (keys.length === 0) return [];
+
+    const values = await this.client.mGet(keys.map((key) => this.key(key)));
+    return values.map((value) => (value ? (JSON.parse(value) as T) : null));
+  }
+
   getClient(): RedisClientType {
     return this.client;
   }
@@ -140,24 +148,64 @@ export class RedisService {
     return this.client.zCount(this.key(key), nowMs - staleAfterMs, '+inf');
   }
 
+  /** The same count for several sorted sets, in one round trip. */
+  async sortedSetLiveCounts(
+    keys: string[],
+    nowMs: number,
+    staleAfterMs: number,
+  ): Promise<number[]> {
+    if (keys.length === 0) return [];
+
+    const pipeline = this.client.multi();
+    for (const key of keys) {
+      pipeline.zCount(this.key(key), nowMs - staleAfterMs, '+inf');
+    }
+    const counts = await pipeline.execAsPipeline();
+
+    return counts.map(Number);
+  }
+
   async sortedSetAdd(key: string, member: string, score: number) {
     await this.client.zAdd(this.key(key), { score, value: member });
+  }
+
+  /** Deletes the key only if it still holds exactly this value, so a newer write is never lost. */
+  async deleteIfEquals(key: string, expected: string): Promise<boolean> {
+    const deleted = await this.client.eval(
+      `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end`,
+      { keys: [this.key(key)], arguments: [expected] },
+    );
+
+    return Number(deleted) === 1;
   }
 
   async sortedSetScore(key: string, member: string): Promise<number | null> {
     return this.client.zScore(this.key(key), member);
   }
 
+  /** Scores of several members of one sorted set in one command; null for a member that is not there. */
+  async sortedSetScores(
+    key: string,
+    members: string[],
+  ): Promise<(number | null)[]> {
+    if (members.length === 0) return [];
+
+    return this.client.zmScore(this.key(key), members);
+  }
+
   async sortedSetRemove(key: string, member: string) {
     await this.client.zRem(this.key(key), member);
   }
 
-  /** Removes and returns the members whose score is at or below maxScore. */
+  /** Takes the members whose score is at or below maxScore, in one step, so a member rescheduled meanwhile is never removed and two callers never get the same one. */
   async sortedSetPopDue(key: string, maxScore: number): Promise<string[]> {
-    const redisKey = this.key(key);
-    const due = await this.client.zRangeByScore(redisKey, '-inf', maxScore);
-    if (due.length > 0) await this.client.zRem(redisKey, due);
+    const due = await this.client.eval(
+      `local due = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
+      for _, member in ipairs(due) do redis.call('ZREM', KEYS[1], member) end
+      return due`,
+      { keys: [this.key(key)], arguments: [String(maxScore)] },
+    );
 
-    return due;
+    return due as string[];
   }
 }

@@ -255,6 +255,7 @@ function CommunityContent() {
               isJoining={membership.isPending}
               onJoin={membership.toggle}
               slug={slug}
+              focusMessageId={searchParams.get("message") || undefined}
             />
           )}
 

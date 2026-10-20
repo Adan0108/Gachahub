@@ -344,13 +344,15 @@ enum ChatEmoteScope {
 }
 
 model ChatConversation {
-  id            String                 @id @default(cuid())
-  type          ChatConversationType   @default(DIRECT)
-  status        ChatConversationStatus @default(ACTIVE)
-  title         String?
-  photoUrl      String?
-  createdBy     String?
-  lastMessageId String?
+  id                 String                 @id @default(cuid())
+  type               ChatConversationType   @default(DIRECT)
+  status             ChatConversationStatus @default(ACTIVE)
+  title              String?
+  photoUrl           String?
+  /// MediaUpload behind `photoUrl`, so replacing or removing the photo can release the old asset.
+  photoMediaUploadId String?                @unique
+  createdBy          String?
+  lastMessageId      String?
 
   /// MLS group epoch; advanced only by an atomic compare-and-set so one Commit wins each epoch.
   mlsEpoch Int @default(0)
@@ -362,15 +364,16 @@ model ChatConversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  creator         User?             @relation("ChatConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
-  participants    ChatParticipant[]
-  directPair      ChatDirectPair?
-  messages        ChatMessage[]
-  mlsHandshakes   MlsHandshake[]
-  mlsWelcomes     MlsWelcome[]
-  mlsMembers      MlsGroupMember[]
-  mlsCommitFaults MlsCommitFault[]
-  mlsGroupInfo    MlsGroupInfo?
+  creator          User?             @relation("ChatConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  photoMediaUpload MediaUpload?      @relation("ChatGroupPhotoUpload", fields: [photoMediaUploadId], references: [id], onDelete: SetNull)
+  participants     ChatParticipant[]
+  directPair       ChatDirectPair?
+  messages         ChatMessage[]
+  mlsHandshakes    MlsHandshake[]
+  mlsWelcomes      MlsWelcome[]
+  mlsMembers       MlsGroupMember[]
+  mlsCommitFaults  MlsCommitFault[]
+  mlsGroupInfo     MlsGroupInfo?
 
   @@index([type])
   @@index([status])
@@ -528,12 +531,13 @@ model GameChannelMessage {
 
   createdAt DateTime @default(now())
 
-  channel   GameChannel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  author    User?                 @relation("GameChannelMessageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
-  deletedBy User?                 @relation("GameChannelMessageDeleter", fields: [deletedById], references: [id], onDelete: SetNull)
-  replyTo   GameChannelMessage?   @relation("GameChannelMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies   GameChannelMessage[]  @relation("GameChannelMessageReplies")
+  channel   GameChannel               @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author    User?                     @relation("GameChannelMessageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  deletedBy User?                     @relation("GameChannelMessageDeleter", fields: [deletedById], references: [id], onDelete: SetNull)
+  replyTo   GameChannelMessage?       @relation("GameChannelMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   GameChannelMessage[]      @relation("GameChannelMessageReplies")
   reactions GameChannelReaction[]
+  media     GameChannelMessageMedia[]
 
   @@unique([authorId, clientMessageId])
   @@index([channelId, createdAt, id])
@@ -599,6 +603,31 @@ model GameChannelReadState {
   @@id([userId, channelId])
   @@index([channelId])
   @@map("game_channel_read_states")
+}
+
+/// An image attached to a community chat message.
+model GameChannelMessageMedia {
+  id            String @id @default(cuid())
+  messageId     String
+  mediaUploadId String @unique
+
+  publicId String
+  url      String
+
+  sortOrder Int @default(0)
+
+  width  Int?
+  height Int?
+  bytes  Int?
+  format String?
+
+  createdAt DateTime @default(now())
+
+  message     GameChannelMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  mediaUpload MediaUpload        @relation(fields: [mediaUploadId], references: [id], onDelete: Restrict)
+
+  @@index([messageId, sortOrder])
+  @@map("game_channel_message_media")
 }
 
 model ChatMessageMedia {
@@ -881,6 +910,8 @@ enum MediaPurpose {
   BANNER
   GAME_ICON
   GAME_BANNER
+  GROUP_PHOTO
+  COMMUNITY
 }
 
 enum MediaResourceType {
@@ -940,12 +971,14 @@ model MediaUpload {
   attachedAt DateTime?
   deletedAt  DateTime?
 
-  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  postMedia        PostMedia?
-  chatMessageMedia ChatMessageMedia?
-  gameIconFor      Game?             @relation("GameIconUpload")
-  gameBannerFor    Game?             @relation("GameBannerUpload")
-  avatarFor        User?             @relation("UserAvatarUpload")
+  user                  User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postMedia             PostMedia?
+  chatMessageMedia      ChatMessageMedia?
+  gameIconFor           Game?                    @relation("GameIconUpload")
+  gameBannerFor         Game?                    @relation("GameBannerUpload")
+  avatarFor             User?                    @relation("UserAvatarUpload")
+  chatGroupPhotoFor     ChatConversation?        @relation("ChatGroupPhotoUpload")
+  communityMessageMedia GameChannelMessageMedia?
 
   @@index([userId, status, createdAt])
   @@index([status, createdAt])
@@ -1175,6 +1208,7 @@ enum NotificationEntityType {
   POST
   COMMENT
   MESSAGE
+  COMMUNITY_MESSAGE
   CONVERSATION
   USER
 }
@@ -1190,6 +1224,11 @@ model Notification {
   entityType NotificationEntityType
   entityId   String
 
+  /// The chat conversation a chat notification belongs to.
+  conversationId String?
+  /// How many messages a stacked chat notification stands for (one row per person and conversation while unread).
+  count          Int     @default(1)
+
   readAt DateTime?
 
   createdAt DateTime @default(now())
@@ -1202,6 +1241,7 @@ model Notification {
   @@index([recipientId, createdAt])
   @@index([recipientId, readAt])
   @@index([actorId])
+  @@index([recipientId, conversationId])
   @@map("notifications")
 }
 

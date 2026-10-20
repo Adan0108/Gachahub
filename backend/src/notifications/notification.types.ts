@@ -11,4 +11,6 @@ export type CreateNotificationInput = {
 
   entityType: NotificationEntityType;
   entityId: string;
+  /** The chat conversation, for chat notifications. */
+  conversationId?: string | null;
 };
