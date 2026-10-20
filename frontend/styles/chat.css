@@ -3181,6 +3181,17 @@
   position: relative;
 }
 
+/* The avatar hangs off the bottom-left of the bubble; the row keeps its room free. */
+.chat-message-row:not(.mine) {
+  padding-left: 43px;
+}
+
+.chat-message-bubble-anchor > .chat-avatar.small {
+  position: absolute;
+  right: calc(100% + 8px);
+  bottom: 0;
+}
+
 .message-actions {
   position: absolute;
   top: 50%;
@@ -3482,8 +3493,79 @@
 
 .attachment-lightbox-body img {
   max-width: min(92vw, 1100px);
-  max-height: 78vh;
+  max-height: calc(100vh - 230px);
   object-fit: contain;
+}
+
+.attachment-lightbox-body .chat-video {
+  width: min(92vw, 1000px);
+  border-radius: 10px;
+}
+
+.attachment-lightbox-body .chat-video-screen {
+  max-height: calc(100vh - 230px);
+}
+
+/* Everything in the thread under the open one: click to jump. */
+.attachment-lightbox-strip {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  display: flex;
+  gap: 6px;
+  max-width: min(92vw, 900px);
+  margin: 0;
+  padding: 6px;
+  overflow-x: auto;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.45);
+  list-style: none;
+  transform: translateX(-50%);
+}
+
+.attachment-lightbox-strip li {
+  flex: 0 0 auto;
+}
+
+.attachment-lightbox-strip button {
+  position: relative;
+  display: block;
+  width: 54px;
+  height: 54px;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: var(--panel2);
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.attachment-lightbox-strip button:hover {
+  opacity: 1;
+}
+
+.attachment-lightbox-strip button.active {
+  border-color: #fff;
+  opacity: 1;
+}
+
+.attachment-lightbox-strip img,
+.attachment-lightbox-thumb-blank {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attachment-lightbox-thumb-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  color: #fff;
+  font-size: 16px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+  transform: translate(-50%, -50%);
 }
 
 .attachment-lightbox-toolbar {

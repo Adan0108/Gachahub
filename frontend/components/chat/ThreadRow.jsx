@@ -186,11 +186,6 @@ function MessageBubble({
   return (
     <div className={hoverZoneClass}>
       <div className={rowClass} id={`chat-message-${message.id}`}>
-        {!mine && (
-          <span className={`chat-avatar small ${groupedWithNext ? "placeholder" : ""}`}>
-            {!groupedWithNext && <AvatarFace image={sender?.image} name={sender?.name} />}
-          </span>
-        )}
         <div className="chat-message-time-wrap">
           {showSenderName && (
             <small className="chat-message-sender">{sender?.name || "GachaHub member"}</small>
@@ -228,6 +223,12 @@ function MessageBubble({
               onJumpToMessage={onJumpToMessage}
             />
             <div className="chat-message-bubble-anchor">
+              {/* Sits at the bottom of the bubble, whatever is above or below it (name, reply, reactions, status). */}
+              {!mine && (
+                <span className={`chat-avatar small ${groupedWithNext ? "placeholder" : ""}`}>
+                  {!groupedWithNext && <AvatarFace image={sender?.image} name={sender?.name} />}
+                </span>
+              )}
             <MessageActions
               canCopy={Boolean(copyText)}
               canEdit={canEdit && !pendingEdit}
