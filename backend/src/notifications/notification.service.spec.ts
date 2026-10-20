@@ -829,7 +829,12 @@ describe('NotificationService', () => {
         },
       ]);
       repositoryMock.findConversationSummaries.mockResolvedValue([
-        { id: 'conversation-group', type: 'GROUP', title: 'Squad' },
+        {
+          id: 'conversation-group',
+          type: 'GROUP',
+          title: 'Squad',
+          photoUrl: 'https://cdn.example.com/squad.png',
+        },
       ]);
 
       const result = await service.getNotifications(recipientId, {});
@@ -840,7 +845,11 @@ describe('NotificationService', () => {
       expect(result.items[0]).toMatchObject({
         count: 4,
         conversationId: 'conversation-group',
-        conversation: { type: 'GROUP', title: 'Squad' },
+        conversation: {
+          type: 'GROUP',
+          title: 'Squad',
+          photoUrl: 'https://cdn.example.com/squad.png',
+        },
       });
     });
 

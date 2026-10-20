@@ -100,7 +100,7 @@ describe('notification mapper', () => {
       expect(result[0].conversationId).toBe('c-own');
     });
 
-    it('says what kind of conversation a chat notification is from, and its name', () => {
+    it('says what kind of conversation a chat notification is from, and its name and photo', () => {
       const result = withConversations(
         [
           { id: 'n1', conversationId: 'c-group' },
@@ -109,14 +109,26 @@ describe('notification mapper', () => {
           { id: 'n4', conversationId: 'c-gone' },
         ],
         new Map([
-          ['c-group', { id: 'c-group', type: 'GROUP', title: 'Squad' }],
-          ['c-dm', { id: 'c-dm', type: 'DIRECT', title: null }],
+          [
+            'c-group',
+            {
+              id: 'c-group',
+              type: 'GROUP',
+              title: 'Squad',
+              photoUrl: 'https://cdn.example.com/squad.png',
+            },
+          ],
+          ['c-dm', { id: 'c-dm', type: 'DIRECT', title: null, photoUrl: null }],
         ]),
       );
 
       expect(result.map((item) => item.conversation)).toEqual([
-        { type: 'GROUP', title: 'Squad' },
-        { type: 'DIRECT', title: null },
+        {
+          type: 'GROUP',
+          title: 'Squad',
+          photoUrl: 'https://cdn.example.com/squad.png',
+        },
+        { type: 'DIRECT', title: null, photoUrl: null },
         null,
         null,
       ]);

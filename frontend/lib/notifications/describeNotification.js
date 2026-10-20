@@ -12,10 +12,10 @@ const mentionHref = (notification) =>
   notification.entityType === "MESSAGE" ? chatHref(notification) : postHref(notification);
 
 const isGroup = (notification) => notification.conversation?.type === "GROUP";
-const groupName = (notification) => notification.conversation?.title || "a group";
+const groupName = (notification) => notification.conversation?.title || "Unnamed group";
 const messages = (count) => (count > 1 ? `${count} messages` : "a message");
 
-/** Per type: the sentence (it can name the group and count stacked messages), and where it leads (`href` returning null = nowhere to go, on purpose). */
+/** Per type: the sentence (it counts stacked messages; in a group the row's title is the group, so the sentence leaves it out), and where it leads (`href` returning null = nowhere to go, on purpose). */
 const NOTIFICATION_KINDS = {
   POST_LIKED: { action: () => "liked your post", href: postHref },
   POST_COMMENTED: { action: () => "commented on your post", href: postHref },
@@ -26,40 +26,37 @@ const NOTIFICATION_KINDS = {
   MESSAGE_RECEIVED: {
     action: (notification) =>
       isGroup(notification)
-        ? `sent ${messages(notification.count)} in ${groupName(notification)}`
+        ? `sent ${messages(notification.count)}`
         : `sent you ${messages(notification.count)}`,
     href: chatHref,
   },
-  MESSAGE_REPLIED: {
-    action: (notification) =>
-      isGroup(notification)
-        ? `replied to your message in ${groupName(notification)}`
-        : "replied to your message",
-    href: chatHref,
-  },
+  MESSAGE_REPLIED: { action: () => "replied to your message", href: chatHref },
   GROUP_ADDED: {
-    action: (notification) => `added you to ${groupName(notification)}`,
+    action: (notification) => (isGroup(notification) ? "added you" : "added you to a group"),
     href: chatHref,
   },
   GROUP_INVITE_PENDING: {
-    action: (notification) => `invited you to ${groupName(notification)}`,
+    action: (notification) => (isGroup(notification) ? "invited you" : "invited you to a group"),
     href: chatHref,
   },
 };
 
-/** "Group" or "Direct" for a chat notification, so a row says what kind of chat it is from at a glance; nothing for other kinds. */
-function chatScope(notification) {
-  if (!notification.conversation) return undefined;
-  return isGroup(notification) ? "Group" : "Direct";
-}
-
+/** A group's row is headed by the group and shows its photo, with the sender named in the sentence; every other row is headed by who did it. */
 export function describeNotification(notification) {
   const kind = NOTIFICATION_KINDS[notification.type];
+  const actor = notification.actor?.name || "Someone";
+  const verb = kind?.action(notification) ?? "sent you a notification";
+  const href = kind?.href(notification) ?? null;
 
-  return {
-    actor: notification.actor?.name || "Someone",
-    action: kind?.action(notification) ?? "sent you a notification",
-    href: kind?.href(notification) ?? null,
-    scope: chatScope(notification),
-  };
+  if (isGroup(notification)) {
+    return {
+      actor,
+      title: groupName(notification),
+      image: notification.conversation.photoUrl ?? null,
+      action: `${actor} ${verb}`,
+      href,
+    };
+  }
+
+  return { actor, title: actor, image: notification.actor?.image ?? null, action: verb, href };
 }

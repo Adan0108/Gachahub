@@ -7,6 +7,8 @@ describe("describeNotification", () => {
   it("names the actor and links a liked post to it", () => {
     expect(describeNotification({ ...base, type: "POST_LIKED", entityType: "POST" })).toEqual({
       actor: "Rover",
+      title: "Rover",
+      image: null,
       action: "liked your post",
       href: "/post/e1",
     });
@@ -55,6 +57,8 @@ describe("describeNotification", () => {
     );
     expect(describeNotification({ ...base, type: "SOMETHING_NEW", entityType: "POST" })).toEqual({
       actor: "Rover",
+      title: "Rover",
+      image: null,
       action: "sent you a notification",
       href: null,
     });
@@ -89,43 +93,52 @@ describe("describeNotification", () => {
   describe("stacked chat notifications", () => {
     const stack = (extra) => ({ ...base, type: "MESSAGE_RECEIVED", entityType: "MESSAGE", ...extra });
     const dm = { type: "DIRECT", title: null };
-    const squad = { type: "GROUP", title: "Squad" };
+    const squad = { type: "GROUP", title: "Squad", photoUrl: "https://cdn/squad.png" };
 
     it("counts the messages of a direct chat", () => {
       expect(describeNotification(stack({ count: 1, conversation: dm })).action).toBe("sent you a message");
       expect(describeNotification(stack({ count: 5, conversation: dm })).action).toBe("sent you 5 messages");
     });
 
-    it("names the group and counts the messages", () => {
-      expect(describeNotification(stack({ count: 1, conversation: squad })).action).toBe("sent a message in Squad");
-      expect(describeNotification(stack({ count: 12, conversation: squad })).action).toBe("sent 12 messages in Squad");
+    it("names the sender and counts the messages in a group", () => {
+      expect(describeNotification(stack({ count: 1, conversation: squad })).action).toBe("Rover sent a message");
+      expect(describeNotification(stack({ count: 12, conversation: squad })).action).toBe("Rover sent 12 messages");
     });
 
     it("falls back to the old wording for a row with no count or conversation", () => {
       expect(describeNotification(stack({})).action).toBe("sent you a message");
     });
 
-    it("says which kind of chat a row is from, and nothing for other kinds", () => {
-      expect(describeNotification(stack({ count: 1, conversation: squad })).scope).toBe("Group");
-      expect(describeNotification(stack({ count: 1, conversation: dm })).scope).toBe("Direct");
-      expect(describeNotification(stack({})).scope).toBeUndefined();
-      expect(describeNotification({ ...base, type: "POST_LIKED", entityType: "POST" }).scope).toBeUndefined();
+    it("heads a group row with the group and its photo, and a direct row with the sender", () => {
+      const group = describeNotification(stack({ count: 1, conversation: squad }));
+      expect(group).toMatchObject({ title: "Squad", image: "https://cdn/squad.png" });
+
+      const direct = describeNotification(stack({ count: 1, conversation: dm, actor: { name: "Rover", image: "https://cdn/r.png" } }));
+      expect(direct).toMatchObject({ title: "Rover", image: "https://cdn/r.png" });
     });
 
-    it("names the group in replies, additions and invites", () => {
+    it("has no photo for a group without one", () => {
+      expect(describeNotification(stack({ conversation: { type: "GROUP", title: "Squad", photoUrl: null } })).image).toBeNull();
+    });
+
+    it("puts the group in the title for replies, additions and invites", () => {
       const row = (type, entityType) => ({ ...base, type, entityType, conversation: squad });
 
-      expect(describeNotification(row("MESSAGE_REPLIED", "MESSAGE")).action).toBe("replied to your message in Squad");
-      expect(describeNotification(row("GROUP_ADDED", "CONVERSATION")).action).toBe("added you to Squad");
-      expect(describeNotification(row("GROUP_INVITE_PENDING", "CONVERSATION")).action).toBe("invited you to Squad");
+      expect(describeNotification(row("MESSAGE_REPLIED", "MESSAGE"))).toMatchObject({
+        title: "Squad",
+        action: "Rover replied to your message",
+      });
+      expect(describeNotification(row("GROUP_ADDED", "CONVERSATION")).action).toBe("Rover added you");
+      expect(describeNotification(row("GROUP_INVITE_PENDING", "CONVERSATION")).action).toBe("Rover invited you");
     });
 
-    it("says a group when it has no name", () => {
-      const untitled = { type: "GROUP", title: null };
+    it("calls a group with no name Unnamed group", () => {
+      const untitled = { type: "GROUP", title: null, photoUrl: null };
 
-      expect(describeNotification({ ...base, type: "GROUP_ADDED", entityType: "CONVERSATION", conversation: untitled }).action).toBe(
-        "added you to a group",
-      );
+      expect(describeNotification({ ...base, type: "GROUP_ADDED", entityType: "CONVERSATION", conversation: untitled })).toMatchObject({
+        title: "Unnamed group",
+        action: "Rover added you",
+      });
     });
   });
 });

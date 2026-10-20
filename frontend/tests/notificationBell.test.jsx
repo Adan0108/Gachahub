@@ -104,7 +104,7 @@ describe("NotificationBell", () => {
     expect(screen.getByText("sent you a message")).toBeInTheDocument();
   });
 
-  it("shows a stacked chat row with its count, and says whether it is a group or a direct chat", async () => {
+  it("shows a stacked chat row with its count, a group under its own name and photo", async () => {
     const stacked = (id, extra) => ({
       ...message,
       id,
@@ -114,7 +114,7 @@ describe("NotificationBell", () => {
     });
     mocks.getNotifications.mockResolvedValue({
       items: [
-        stacked("g1", { count: 7, conversation: { type: "GROUP", title: "Squad" }, actor: { id: "a2", name: "Mado", image: null } }),
+        stacked("g1", { count: 7, conversation: { type: "GROUP", title: "Squad", photoUrl: null }, actor: { id: "a2", name: "Mado", image: null } }),
         stacked("d1", { count: 1, conversation: { type: "DIRECT", title: null }, actor: { id: "a4", name: "Sora", image: null } }),
       ],
       nextCursor: null,
@@ -123,10 +123,10 @@ describe("NotificationBell", () => {
     renderBell();
     await openDrawer();
 
-    expect(await screen.findByText("sent 7 messages in Squad")).toBeInTheDocument();
+    expect(await screen.findByText("Mado sent 7 messages")).toBeInTheDocument();
+    expect(screen.getByText("Squad")).toBeInTheDocument();
+    expect(screen.getByText("Sora")).toBeInTheDocument();
     expect(screen.getByText("sent you a message")).toBeInTheDocument();
-    expect(screen.getByText("Group")).toBeInTheDocument();
-    expect(screen.getByText("Direct")).toBeInTheDocument();
   });
 
   it("does not fetch the list until the drawer is opened", async () => {

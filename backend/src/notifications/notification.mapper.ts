@@ -51,10 +51,13 @@ export function withConversationIds<T extends MappableNotification>(
   }));
 }
 
-/** Chat notifications also say what kind of conversation they are from and, for a group, its name; every other kind carries null. */
+/** Chat notifications also say what kind of conversation they are from and, for a group, its name and photo; every other kind carries null. */
 export function withConversations<T extends { conversationId: string | null }>(
   items: T[],
-  summaryById: Map<string, { id: string; type: string; title: string | null }>,
+  summaryById: Map<
+    string,
+    { id: string; type: string; title: string | null; photoUrl: string | null }
+  >,
 ) {
   return items.map((item) => {
     const summary = item.conversationId
@@ -64,7 +67,11 @@ export function withConversations<T extends { conversationId: string | null }>(
     return {
       ...item,
       conversation: summary
-        ? { type: summary.type, title: summary.title }
+        ? {
+            type: summary.type,
+            title: summary.title,
+            photoUrl: summary.photoUrl,
+          }
         : null,
     };
   });

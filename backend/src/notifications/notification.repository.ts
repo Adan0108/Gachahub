@@ -268,16 +268,21 @@ export class NotificationRepository {
   }
 
   /** The kind and name of these conversations, so a chat notification can say where it is from. */
-  findConversationSummaries(
-    conversationIds: string[],
-  ): Promise<Array<{ id: string; type: string; title: string | null }>> {
+  findConversationSummaries(conversationIds: string[]): Promise<
+    Array<{
+      id: string;
+      type: string;
+      title: string | null;
+      photoUrl: string | null;
+    }>
+  > {
     if (conversationIds.length === 0) {
       return Promise.resolve([]);
     }
 
     return this.prisma.chatConversation.findMany({
       where: { id: { in: conversationIds } },
-      select: { id: true, type: true, title: true },
+      select: { id: true, type: true, title: true, photoUrl: true },
     });
   }
 
