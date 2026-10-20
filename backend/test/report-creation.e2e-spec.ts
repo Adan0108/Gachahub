@@ -1,3 +1,4 @@
+import { PlatformCaseModerationController } from '../src/reports/platform-moderation/platform-case-moderation.controller';
 import { PlatformReportModerationController } from '../src/reports/platform-moderation/platform-report-moderation.controller';
 type TestRequest = Request & {
   user?: { id: string };
@@ -14,6 +15,16 @@ type ApiBody = {
   message: string | string[];
   items: Array<{ id: string; [key: string]: unknown }>;
   metrics: Array<{ id: string; value: number }>;
+  meta: { total: number };
+  reportCount: number;
+  uniqueReporterCount: number;
+  target: { content?: string; targetType: string } | null;
+  targetState: string;
+  evidence: {
+    items: Array<{ id: string; snapshot: { content: string } | null }>;
+    nextCursor: string | null;
+  };
+  nextCursor: string | null;
 };
 
 jest.mock('@thallesp/nestjs-better-auth', () => {
@@ -192,6 +203,7 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
       controllers: [
         ReportsController,
         PlatformReportModerationController,
+        PlatformCaseModerationController,
         AdminReportsController,
         ReportModerationController,
         AdminContentController,
@@ -1250,5 +1262,258 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
       data: { status: 'SUSPENDED' },
     });
     expect((await api(queue, platformModerator)).status).toBe(403);
+  });
+  describe('native moderation case read API', () => {
+    let platformModerator: string;
+    let inactiveModerator: string;
+    let gameA: { id: string; slug: string };
+    let gameB: { id: string; slug: string };
+    let targetA: string;
+    let targetB: string;
+    let personalTarget: string;
+    let personalReporter: string;
+    let caseA: string;
+    let caseB: string;
+    let personalCase: string;
+    let previousTotal: number;
+    const fixtureCases: string[] = [];
+    beforeAll(async () => {
+      previousTotal = await db.moderationCase.count();
+      platformModerator = await user();
+      inactiveModerator = await user();
+      await db.user.update({
+        where: { id: platformModerator },
+        data: { role: 'PLATFORM_MODERATOR' },
+      });
+      await db.user.update({
+        where: { id: inactiveModerator },
+        data: { role: 'PLATFORM_MODERATOR', status: 'SUSPENDED' },
+      });
+      gameA = await db.game.create({
+        data: { name: 'Native case A', slug: `${prefix}-native-a` },
+        select: { id: true, slug: true },
+      });
+      gameB = await db.game.create({
+        data: { name: 'Native case B', slug: `${prefix}-native-b` },
+        select: { id: true, slug: true },
+      });
+      targetA = (
+        await post(false, { gameId: gameA.id, type: 'GUIDE', title: 'Case A' })
+      ).id;
+      targetB = (
+        await post(false, { gameId: gameB.id, type: 'GUIDE', title: 'Case B' })
+      ).id;
+      personalTarget = (await post()).id;
+      for (const [targetId, count] of [
+        [targetA, 3],
+        [targetB, 1],
+        [personalTarget, 2],
+      ] as const) {
+        let caseId = '';
+        for (let index = 0; index < count; index++) {
+          const reporter = await user();
+          if (targetId === personalTarget && index === 0)
+            personalReporter = reporter;
+          const response = await submit(targetId, reporter);
+          expect(response.status).toBe(201);
+          caseId = response.body.caseId;
+        }
+        fixtureCases.push(caseId);
+      }
+      [caseA, caseB, personalCase] = fixtureCases;
+    });
+    afterAll(async () => {
+      await db.game.deleteMany({
+        where: { slug: { in: [`${prefix}-native-a`, `${prefix}-native-b`] } },
+      });
+    });
+    const queue = '/moderation/cases';
+    it('returns three case rows for six complaints, with native statuses and exact scope filters', async () => {
+      const all = await api(`${queue}?limit=100`, platformModerator);
+      expect(all.status).toBe(200);
+      expect(all.body.meta.total).toBe(previousTotal + 3);
+      const ours = all.body.items.filter((row) =>
+        fixtureCases.includes(row.id),
+      );
+      expect(ours).toHaveLength(3);
+      expect(ours.find((row) => row.id === caseA)).toMatchObject({
+        status: 'OPEN',
+        reportCount: 3,
+        uniqueReporterCount: 3,
+      });
+      for (const row of ours)
+        for (const field of [
+          'reports',
+          'targetSnapshot',
+          'snapshot',
+          'target',
+          'resolutionNote',
+          'evidence',
+        ])
+          expect(row).not.toHaveProperty(field);
+      const personal = await api(
+        `${queue}?scope=platform&limit=100`,
+        platformModerator,
+      );
+      expect(personal.status).toBe(200);
+      expect(personal.body.items.map((row) => row.id)).toContain(personalCase);
+      expect(personal.body.items.every((row) => row.gameId === null)).toBe(
+        true,
+      );
+      for (const [game, expected] of [
+        [gameA, caseA],
+        [gameB, caseB],
+      ] as const) {
+        const result = await api(
+          `${queue}?scope=game&gameSlug=${game.slug}&status=OPEN&targetType=POST`,
+          platformModerator,
+        );
+        expect(result.status).toBe(200);
+        expect(result.body.meta.total).toBe(1);
+        expect(result.body.items.map((row) => row.id)).toEqual([expected]);
+      }
+      const legacy = await api(
+        `/moderation/reports?scope=game&gameSlug=${gameA.slug}`,
+        platformModerator,
+      );
+      expect(legacy.status).toBe(200);
+      expect(legacy.body.items).toHaveLength(3);
+      expect(
+        legacy.body.items.every(
+          (row) =>
+            row.caseId === caseA &&
+            row.status === 'PENDING' &&
+            !('targetSnapshot' in row),
+        ),
+      ).toBe(true);
+    });
+    it('enforces live roles before case existence lookups on every native route', async () => {
+      for (const path of [
+        queue,
+        `${queue}/${caseA}`,
+        `${queue}/${caseA}/reports`,
+      ]) {
+        expect((await api(path, admin)).status).toBe(200);
+        expect((await api(path, platformModerator)).status).toBe(200);
+        for (const denied of [author, moderator, inactiveModerator])
+          expect((await api(path, denied)).status).toBe(403);
+        expect((await api(path, null)).status).toBe(401);
+      }
+      expect(
+        (await api(`${queue}/missing-${prefix}`, platformModerator)).status,
+      ).toBe(404);
+      expect(
+        (await api(`${queue}/missing-${prefix}/reports`, platformModerator))
+          .status,
+      ).toBe(404);
+      expect((await api(`${queue}/missing-${prefix}`, moderator)).status).toBe(
+        403,
+      );
+      expect(
+        (
+          await api(
+            `${queue}?scope=game&gameSlug=missing-${prefix}`,
+            platformModerator,
+          )
+        ).status,
+      ).toBe(404);
+      for (const query of [
+        'scope=platform&gameSlug=x',
+        'scope=all&gameSlug=x',
+        'scope=game',
+        'status=PENDING',
+        'scope=invalid',
+        'limit=101',
+      ])
+        expect((await api(`${queue}?${query}`, platformModerator)).status).toBe(
+          400,
+        );
+      expect(
+        (await api(`${queue}/${caseA}/reports?cursor=bad!`, platformModerator))
+          .status,
+      ).toBe(400);
+    }, 180_000);
+    it('separates current target from allowlisted evidence and paginates equal timestamps without duplicates', async () => {
+      await db.post.update({
+        where: { id: targetA },
+        data: { content: 'Changed current target' },
+      });
+      await db.report.updateMany({
+        where: { caseId: caseA },
+        data: { createdAt: new Date('2026-01-01T00:00:00.000Z') },
+      });
+      const detail = await api(`${queue}/${caseA}`, platformModerator);
+      expect(detail.status).toBe(200);
+      expect(detail.body.target).toMatchObject({
+        content: 'Changed current target',
+        targetType: 'POST',
+      });
+      expect(detail.body.evidence.items).toHaveLength(3);
+      expect(
+        detail.body.evidence.items.every(
+          (row) => row.snapshot?.content === 'Original evidence',
+        ),
+      ).toBe(true);
+      for (const row of detail.body.evidence.items) {
+        expect(row).not.toHaveProperty('targetSnapshot');
+        expect(row.snapshot).not.toHaveProperty('mediaUploadId');
+      }
+      const expectedIds = detail.body.evidence.items.map((row) => row.id);
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      do {
+        const page = await api(
+          `${queue}/${caseA}/reports?limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+          platformModerator,
+        );
+        expect(page.status).toBe(200);
+        expect(page.body.items).toHaveLength(1);
+        ids.push(page.body.items[0].id);
+        cursor = page.body.nextCursor;
+        expect(ids.length).toBeLessThanOrEqual(3);
+      } while (cursor);
+      expect(ids).toEqual(expectedIds);
+      expect(new Set(ids).size).toBe(3);
+    });
+    it('keeps stored aggregates after reporter deletion and survives missing target content', async () => {
+      await db.user.delete({ where: { id: personalReporter } });
+      const detail = await api(`${queue}/${personalCase}`, platformModerator);
+      expect(detail.status).toBe(200);
+      expect(detail.body.reportCount).toBe(2);
+      expect(detail.body.uniqueReporterCount).toBe(2);
+      expect(detail.body.evidence.items).toHaveLength(1);
+      await db.post.delete({ where: { id: personalTarget } });
+      const missing = await api(`${queue}/${personalCase}`, platformModerator);
+      expect(missing.status).toBe(200);
+      expect(missing.body.target).toBeNull();
+      expect(missing.body.targetState).toBe('missing');
+      expect(missing.body.evidence.items[0].snapshot?.content).toBe(
+        'Original evidence',
+      );
+    });
+    it('reads comment cases and reports soft-deleted targets explicitly', async () => {
+      const target = await comment(targetB);
+      const response = await submit(target.id, await user(), 'COMMENT');
+      expect(response.status).toBe(201);
+      const detail = await api(
+        `${queue}/${response.body.caseId}`,
+        platformModerator,
+      );
+      expect(detail.status).toBe(200);
+      expect(detail.body.target).toMatchObject({
+        targetType: 'COMMENT',
+        content: 'Comment evidence',
+      });
+      await db.comment.update({
+        where: { id: target.id },
+        data: { deletedAt: new Date() },
+      });
+      const deleted = await api(
+        `${queue}/${response.body.caseId}`,
+        platformModerator,
+      );
+      expect(deleted.status).toBe(200);
+      expect(deleted.body.targetState).toBe('deleted');
+    });
   });
 });

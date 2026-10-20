@@ -1,3 +1,4 @@
+import { PlatformCaseModerationController } from './platform-moderation/platform-case-moderation.controller';
 import { CommonModule } from '../common/common.module';
 import { PlatformReportModerationController } from './platform-moderation/platform-report-moderation.controller';
 import { AuditLogModule } from '../audit-log/audit-log.module';
@@ -22,6 +23,7 @@ import { ReportsService } from './reports.service';
   controllers: [
     ReportsController,
     PlatformReportModerationController,
+    PlatformCaseModerationController,
     ReportModerationController,
     AdminReportsController,
   ],

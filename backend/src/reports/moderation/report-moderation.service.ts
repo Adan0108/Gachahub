@@ -1,3 +1,6 @@
+import { QueryPlatformCasesDto } from '../dto/platform-moderation/query-platform-cases.dto';
+import { QueryCaseReportsDto } from '../dto/platform-moderation/query-case-reports.dto';
+import { decodeEvidenceCursor } from '../domain/report-evidence-pagination';
 import { PrismaService } from '../../prisma/prisma.service';
 import { loadActiveUser } from '../../common/guards/active-user.util';
 import { hasPlatformModerationCapability } from '../../common/guards/moderation-capabilities';
@@ -7,6 +10,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { normalizeText } from '../../common/utils/normalize-text';
 import { AuditLogService } from '../../audit-log/audit-log.service';
@@ -36,12 +40,78 @@ export class ReportModerationService {
 
   /** Read-only report rows; recheck live capability for direct service callers. */
   async listForPlatform(userId: string, query: QueryPlatformReportsDto) {
+    await this.authorizePlatform(userId);
+    const gameId = await this.resolvePlatformGameId(query);
+    return this.listByGameId(gameId, query);
+  }
+
+  async listCasesForPlatform(userId: string, query: QueryPlatformCasesDto) {
+    await this.authorizePlatform(userId);
+    const gameId = await this.resolvePlatformGameId(query);
+    const { page, limit } = resolvePagination(query);
+    const result = await this.reportsRepository.findModerationCases({
+      gameId,
+      status: query.status,
+      targetType: query.targetType,
+      page,
+      limit,
+    });
+    return toPaginated(result.items, { page, limit, total: result.total });
+  }
+
+  async getCaseForPlatform(userId: string, caseId: string) {
+    await this.authorizePlatform(userId);
+    const moderationCase = await this.loadCase(caseId);
+    const [target, evidence] = await Promise.all([
+      this.reportsRepository.findCaseTarget(
+        moderationCase.targetType,
+        moderationCase.targetId,
+      ),
+      this.reportsRepository.findReportsByCaseId(caseId, 20),
+    ]);
+    return { ...moderationCase, ...target, evidence };
+  }
+
+  async listCaseReportsForPlatform(
+    userId: string,
+    caseId: string,
+    query: QueryCaseReportsDto,
+  ) {
+    await this.authorizePlatform(userId);
+    const cursor =
+      query.cursor === undefined
+        ? undefined
+        : decodeEvidenceCursor(query.cursor);
+    if (cursor === null)
+      throw new BadRequestException('Invalid evidence cursor');
+    await this.loadCase(caseId);
+    return this.reportsRepository.findReportsByCaseId(
+      caseId,
+      query.limit ?? 20,
+      cursor,
+    );
+  }
+
+  private async loadCase(caseId: string) {
+    const moderationCase =
+      await this.reportsRepository.findModerationCaseById(caseId);
+    if (!moderationCase)
+      throw new NotFoundException('Moderation case not found');
+    return moderationCase;
+  }
+
+  private async authorizePlatform(userId: string) {
     const user = await loadActiveUser(this.prisma, userId);
     if (!hasPlatformModerationCapability(user.role)) {
       throw new ForbiddenException('PlatformModerator permission required');
     }
+  }
 
-    // Cross-field rules also apply outside the HTTP ValidationPipe.
+  private async resolvePlatformGameId(query: {
+    scope?: 'all' | 'platform' | 'game';
+    gameSlug?: string;
+  }) {
+    // Shared cross-field semantics for native cases and compatibility reports.
     const scope = query.scope ?? 'all';
     if (
       !['all', 'platform', 'game'].includes(scope) ||
@@ -51,14 +121,11 @@ export class ReportModerationService {
     ) {
       throw new BadRequestException('gameSlug is required only for scope=game');
     }
-
-    const gameId =
-      scope === 'game'
-        ? await this.gameModeratorsService.resolveGameId(query.gameSlug!)
-        : scope === 'platform'
-          ? null
-          : undefined;
-    return this.listByGameId(gameId, query);
+    return scope === 'game'
+      ? this.gameModeratorsService.resolveGameId(query.gameSlug!)
+      : scope === 'platform'
+        ? null
+        : undefined;
   }
 
   /**

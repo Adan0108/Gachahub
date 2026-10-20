@@ -1,3 +1,8 @@
+import {
+  encodeEvidenceCursor,
+  type EvidenceCursor,
+} from './domain/report-evidence-pagination';
+import { projectReportSnapshot } from './domain/report-evidence.projection';
 import { ConflictException, Injectable } from '@nestjs/common';
 import {
   Prisma,
@@ -26,6 +31,27 @@ const reportInclude = {
     },
   },
 } satisfies Prisma.ReportInclude;
+
+// Explicit API projections: adding schema fields cannot expose them through these reads.
+const caseSummarySelect = {
+  id: true,
+  targetType: true,
+  targetId: true,
+  gameId: true,
+  game: { select: { id: true, name: true, slug: true } },
+  status: true,
+  reportCount: true,
+  uniqueReporterCount: true,
+  currentRiskScore: true,
+  currentRiskLevel: true,
+  assignedModeratorId: true,
+  assignedModerator: { select: { id: true, name: true, image: true } },
+  resolvedById: true,
+  resolvedBy: { select: { id: true, name: true, image: true } },
+  resolvedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.ModerationCaseSelect;
 
 export interface ReportableTargetInfo {
   gameId: string | null;
@@ -80,6 +106,151 @@ export interface CaseTransitionContext {
 @Injectable()
 export class ReportsRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  async findModerationCases(params: {
+    gameId?: string | null;
+    status?: ModerationCaseStatus;
+    targetType?: ReportTargetType;
+    page: number;
+    limit: number;
+  }) {
+    const where: Prisma.ModerationCaseWhereInput = {
+      ...(params.gameId !== undefined ? { gameId: params.gameId } : {}),
+      ...(params.status !== undefined ? { status: params.status } : {}),
+      ...(params.targetType !== undefined
+        ? { targetType: params.targetType }
+        : {}),
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.moderationCase.findMany({
+        where,
+        select: caseSummarySelect,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (params.page - 1) * params.limit,
+        take: params.limit,
+      }),
+      this.prisma.moderationCase.count({ where }),
+    ]);
+    return { items, total };
+  }
+
+  findModerationCaseById(id: string) {
+    return this.prisma.moderationCase.findUnique({
+      where: { id },
+      select: { ...caseSummarySelect, resolutionNote: true },
+    });
+  }
+
+  async findReportsByCaseId(
+    caseId: string,
+    limit: number,
+    cursor?: EvidenceCursor,
+  ) {
+    const rows = await this.prisma.report.findMany({
+      where: {
+        caseId,
+        ...(cursor
+          ? {
+              OR: [
+                { createdAt: { lt: cursor.createdAt } },
+                { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+              ],
+            }
+          : {}),
+      },
+      select: {
+        id: true,
+        reporter: { select: { id: true, name: true, image: true } },
+        reasonCode: true,
+        details: true,
+        createdAt: true,
+        targetType: true,
+        targetId: true,
+        targetSnapshot: true,
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+    });
+    const page = rows.slice(0, limit);
+    const last = page.at(-1);
+    return {
+      items: page.map((row) => ({
+        id: row.id,
+        reporter: row.reporter,
+        reasonCode: row.reasonCode,
+        details: row.details,
+        createdAt: row.createdAt,
+        snapshot: projectReportSnapshot(
+          row.targetSnapshot,
+          row.targetType,
+          row.targetId,
+        ),
+      })),
+      nextCursor:
+        rows.length > limit && last ? encodeEvidenceCursor(last) : null,
+    };
+  }
+
+  async findCaseTarget(targetType: ReportTargetType, targetId: string) {
+    if (targetType === 'POST') {
+      const post = await this.prisma.post.findUnique({
+        where: { id: targetId },
+        select: {
+          id: true,
+          title: true,
+          content: true,
+          type: true,
+          status: true,
+          visibility: true,
+          deletedAt: true,
+          gameId: true,
+          createdAt: true,
+          updatedAt: true,
+          author: { select: { id: true, name: true, image: true } },
+          media: {
+            take: 20,
+            orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+            select: { url: true, mediaType: true, altText: true },
+          },
+        },
+      });
+      return {
+        target: post ? { targetType: 'POST' as const, ...post } : null,
+        targetState: !post
+          ? ('missing' as const)
+          : post.deletedAt || post.status === 'DELETED'
+            ? ('deleted' as const)
+            : ('available' as const),
+      };
+    }
+    const comment = await this.prisma.comment.findUnique({
+      where: { id: targetId },
+      select: {
+        id: true,
+        content: true,
+        postId: true,
+        parentId: true,
+        status: true,
+        deletedAt: true,
+        createdAt: true,
+        updatedAt: true,
+        author: { select: { id: true, name: true, image: true } },
+        post: {
+          select: { id: true, gameId: true, status: true, deletedAt: true },
+        },
+      },
+    });
+    return {
+      target: comment ? { targetType: 'COMMENT' as const, ...comment } : null,
+      targetState: !comment
+        ? ('missing' as const)
+        : comment.deletedAt ||
+            comment.post.deletedAt ||
+            comment.post.status === 'DELETED'
+          ? ('deleted' as const)
+          : ('available' as const),
+    };
+  }
 
   /**
    * Resolves a report target down to the post-level fields ReportsService

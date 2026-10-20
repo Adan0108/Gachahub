@@ -1,3 +1,4 @@
+import { encodeEvidenceCursor } from '../domain/report-evidence-pagination';
 import {
   ConflictException,
   ForbiddenException,
@@ -34,6 +35,10 @@ describe('ReportModerationService', () => {
   const reportsRepository = {
     findById: jest.fn(),
     findMany: jest.fn(),
+    findModerationCases: jest.fn(),
+    findModerationCaseById: jest.fn(),
+    findReportsByCaseId: jest.fn(),
+    findCaseTarget: jest.fn(),
     claim: jest.fn<Promise<unknown>, Parameters<ReportsRepository['claim']>>(),
     finalize: jest.fn<
       Promise<unknown>,
@@ -93,6 +98,175 @@ describe('ReportModerationService', () => {
       auditLogService as unknown as AuditLogService,
       prisma as unknown as PrismaService,
     );
+  });
+
+  describe('native case reads', () => {
+    const moderationCase = {
+      id: 'case',
+      targetType: 'POST',
+      targetId: 'post',
+      gameId: null,
+      status: 'OPEN',
+      reportCount: 9,
+      uniqueReporterCount: 8,
+      resolutionNote: 'note',
+    };
+    beforeEach(() => {
+      prisma.user.findUnique.mockResolvedValue({
+        role: 'PLATFORM_MODERATOR',
+        status: 'ACTIVE',
+      });
+      reportsRepository.findModerationCases.mockResolvedValue({
+        items: [moderationCase],
+        total: 1,
+      });
+      reportsRepository.findModerationCaseById.mockResolvedValue(
+        moderationCase,
+      );
+      reportsRepository.findCaseTarget.mockResolvedValue({
+        target: null,
+        targetState: 'missing',
+      });
+      reportsRepository.findReportsByCaseId.mockResolvedValue({
+        items: [],
+        nextCursor: null,
+      });
+    });
+    it.each(['ADMIN', 'PLATFORM_MODERATOR'])(
+      'allows live %s for every read and preserves native status/stored counters',
+      async (role) => {
+        prisma.user.findUnique.mockResolvedValue({ role, status: 'ACTIVE' });
+        expect(
+          (await service.listCasesForPlatform('actor', {})).items[0].status,
+        ).toBe('OPEN');
+        expect(await service.getCaseForPlatform('actor', 'case')).toMatchObject(
+          {
+            reportCount: 9,
+            uniqueReporterCount: 8,
+            target: null,
+            targetState: 'missing',
+            evidence: { items: [] },
+          },
+        );
+        expect(
+          await service.listCaseReportsForPlatform('actor', 'case', {}),
+        ).toEqual({ items: [], nextCursor: null });
+        expect(reportsRepository.findReportsByCaseId).toHaveBeenCalledWith(
+          'case',
+          20,
+        );
+        expect(prisma.user.findUnique).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: 'actor' } }),
+        );
+      },
+    );
+    it.each([
+      { role: 'USER', status: 'ACTIVE' }, // Assignment cannot elevate this platform capability.
+      { role: 'ADMIN', status: 'SUSPENDED' },
+      { role: 'PLATFORM_MODERATOR', status: 'SUSPENDED' },
+    ])('denies every read before any sensitive lookup: %j', async (user) => {
+      prisma.user.findUnique.mockResolvedValue(user);
+      for (const read of [
+        () =>
+          service.listCasesForPlatform('actor', {
+            scope: 'game',
+            gameSlug: 'slug',
+          }),
+        () => service.getCaseForPlatform('actor', 'case'),
+        () => service.listCaseReportsForPlatform('actor', 'case', {}),
+      ]) {
+        await expect(read()).rejects.toBeInstanceOf(ForbiddenException);
+      }
+      expect(gameModeratorsService.resolveGameId).not.toHaveBeenCalled();
+      for (const method of [
+        reportsRepository.findModerationCases,
+        reportsRepository.findModerationCaseById,
+        reportsRepository.findCaseTarget,
+        reportsRepository.findReportsByCaseId,
+      ])
+        expect(method).not.toHaveBeenCalled();
+    });
+    it.each([
+      ['all', undefined],
+      ['platform', null],
+      ['game', 'game-1'],
+    ] as const)(
+      'maps native %s filters without legacy conversion',
+      async (scope, gameId) => {
+        await service.listCasesForPlatform('actor', {
+          scope,
+          ...(scope === 'game' ? { gameSlug: 'slug' } : {}),
+          status: 'OPEN',
+          targetType: 'POST',
+          page: 2,
+          limit: 10,
+        });
+        expect(reportsRepository.findModerationCases).toHaveBeenCalledWith({
+          gameId,
+          status: 'OPEN',
+          targetType: 'POST',
+          page: 2,
+          limit: 10,
+        });
+        expect(
+          gameModeratorsService.resolveModeratableGameId,
+        ).not.toHaveBeenCalled();
+      },
+    );
+    it.each([
+      { scope: 'game' as const },
+      { scope: 'game' as const, gameSlug: '  ' },
+      { scope: 'platform' as const, gameSlug: 'x' },
+      { scope: 'all' as const, gameSlug: 'x' },
+    ])('rejects invalid scope combinations %j', async (query) => {
+      await expect(
+        service.listCasesForPlatform('actor', query),
+      ).rejects.toThrow('gameSlug is required only');
+      expect(reportsRepository.findModerationCases).not.toHaveBeenCalled();
+    });
+    it('preserves unknown game 404', async () => {
+      gameModeratorsService.resolveGameId.mockRejectedValue(
+        new NotFoundException(),
+      );
+      await expect(
+        service.listCasesForPlatform('actor', {
+          scope: 'game',
+          gameSlug: 'missing',
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+    it('returns 404 for missing cases without looking up targets or evidence', async () => {
+      reportsRepository.findModerationCaseById.mockResolvedValue(null);
+      await expect(
+        service.getCaseForPlatform('actor', 'missing'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        service.listCaseReportsForPlatform('actor', 'missing', {}),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(reportsRepository.findCaseTarget).not.toHaveBeenCalled();
+      expect(reportsRepository.findReportsByCaseId).not.toHaveBeenCalled();
+    });
+    it('passes parsed exclusive evidence boundaries and bounded limit', async () => {
+      const cursor = {
+        id: 'report',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      };
+      await service.listCaseReportsForPlatform('actor', 'case', {
+        cursor: encodeEvidenceCursor(cursor),
+        limit: 5,
+      });
+      expect(reportsRepository.findReportsByCaseId).toHaveBeenCalledWith(
+        'case',
+        5,
+        cursor,
+      );
+    });
+    it('rejects malformed cursor without evidence access', async () => {
+      await expect(
+        service.listCaseReportsForPlatform('actor', 'case', { cursor: 'bad!' }),
+      ).rejects.toThrow('Invalid evidence cursor');
+      expect(reportsRepository.findReportsByCaseId).not.toHaveBeenCalled();
+    });
   });
 
   describe('listForPlatform', () => {

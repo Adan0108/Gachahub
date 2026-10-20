@@ -280,3 +280,203 @@ describe('ReportsRepository queue filters', () => {
     },
   );
 });
+
+describe('ReportsRepository native case reads', () => {
+  const prisma = {
+    moderationCase: {
+      findMany: jest.fn(),
+      count: jest.fn(),
+      findUnique: jest.fn(),
+    },
+    report: { findMany: jest.fn() },
+    post: { findUnique: jest.fn() },
+    comment: { findUnique: jest.fn() },
+    $transaction: jest.fn((queries: Promise<unknown>[]) =>
+      Promise.all(queries),
+    ),
+  };
+  const repository = new ReportsRepository(prisma as unknown as PrismaService);
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.$transaction.mockImplementation((queries: Promise<unknown>[]) =>
+      Promise.all(queries),
+    );
+    prisma.moderationCase.findMany.mockResolvedValue([
+      { id: 'case', status: 'OPEN', reportCount: 3 },
+    ]);
+    prisma.moderationCase.count.mockResolvedValue(1);
+  });
+  it.each([undefined, null, 'game'])(
+    'lists/counts cases with exact game scope %s and native filters',
+    async (gameId) => {
+      const result = await repository.findModerationCases({
+        gameId,
+        status: 'OPEN',
+        targetType: 'POST',
+        page: 2,
+        limit: 10,
+      });
+      const where = {
+        ...(gameId !== undefined ? { gameId } : {}),
+        status: 'OPEN',
+        targetType: 'POST',
+      };
+      expect(prisma.moderationCase.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where,
+          skip: 10,
+          take: 10,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        }),
+      );
+      expect(prisma.moderationCase.count).toHaveBeenCalledWith({ where });
+      const [query] = prisma.moderationCase.findMany.mock
+        .calls[0] as unknown as [{ select: Record<string, unknown> }];
+      expect(query.select).toMatchObject({
+        reportCount: true,
+        uniqueReporterCount: true,
+        assignedModerator: { select: { id: true, name: true, image: true } },
+        game: { select: { id: true, name: true, slug: true } },
+      });
+      for (const excluded of ['reports', 'targetSnapshot', 'resolutionNote'])
+        expect(query.select).not.toHaveProperty(excluded);
+      expect(prisma.report.findMany).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        total: 1,
+        items: [{ status: 'OPEN', reportCount: 3 }],
+      });
+    },
+  );
+  it('loads exact case detail including nullable game and resolution metadata through an allowlist', async () => {
+    const detail = {
+      id: 'case',
+      game: null,
+      assignedModerator: { id: 'mod' },
+      resolvedBy: { id: 'admin' },
+      resolutionNote: 'done',
+    };
+    prisma.moderationCase.findUnique.mockResolvedValue(detail);
+    expect(await repository.findModerationCaseById('case')).toEqual(detail);
+    expect(prisma.moderationCase.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'case' },
+        select: expect.objectContaining({
+          resolutionNote: true,
+          resolvedById: true,
+          resolvedBy: { select: { id: true, name: true, image: true } },
+        }) as unknown,
+      }),
+    );
+    prisma.moderationCase.findUnique.mockResolvedValue(null);
+    expect(await repository.findModerationCaseById('missing')).toBeNull();
+  });
+  it('bounds evidence with one lookahead and never returns raw snapshot fields', async () => {
+    const createdAt = new Date('2026-01-01T00:00:00.000Z');
+    const row = {
+      id: 'z',
+      createdAt,
+      reporter: { id: 'user', name: 'Name', image: null },
+      reasonCode: 'OTHER',
+      details: null,
+      targetType: 'POST',
+      targetId: 'post',
+      targetSnapshot: {
+        version: 1,
+        targetType: 'POST',
+        postId: 'post',
+        content: 'evidence',
+        secret: 'private',
+      },
+    };
+    prisma.report.findMany.mockResolvedValue([
+      row,
+      { ...row, id: 'y' },
+      { ...row, id: 'x' },
+    ]);
+    const result = await repository.findReportsByCaseId('case', 2);
+    expect(prisma.report.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { caseId: 'case' },
+        take: 3,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      }),
+    );
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]).toMatchObject({
+      snapshot: { content: 'evidence' },
+    });
+    expect(result.items[0]).not.toHaveProperty('targetSnapshot');
+    expect(result.items[0].snapshot).not.toHaveProperty('secret');
+    expect(result.nextCursor).not.toBeNull();
+    prisma.report.findMany.mockResolvedValue([]);
+    expect(
+      await repository.findReportsByCaseId('case', 2, { id: 'y', createdAt }),
+    ).toEqual({ items: [], nextCursor: null });
+    expect(prisma.report.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: {
+          caseId: 'case',
+          OR: [
+            { createdAt: { lt: createdAt } },
+            { createdAt, id: { lt: 'y' } },
+          ],
+        },
+      }),
+    );
+  });
+  it('returns no continuation when the evidence page ends exactly at its limit', async () => {
+    prisma.report.findMany.mockResolvedValue([
+      {
+        id: 'report',
+        createdAt: new Date(),
+        targetType: 'POST',
+        targetId: 'post',
+        targetSnapshot: null,
+      },
+    ]);
+    const result = await repository.findReportsByCaseId('case', 1);
+    expect(result.nextCursor).toBeNull();
+    expect(result.items[0].snapshot).toBeNull();
+  });
+  it.each(['POST', 'COMMENT'] as const)(
+    'preserves cases with missing %s target content',
+    async (type) => {
+      prisma.post.findUnique.mockResolvedValue(null);
+      prisma.comment.findUnique.mockResolvedValue(null);
+      expect(await repository.findCaseTarget(type, 'missing')).toEqual({
+        target: null,
+        targetState: 'missing',
+      });
+    },
+  );
+  it('represents soft-deleted posts and comments with deleted parents explicitly', async () => {
+    prisma.post.findUnique.mockResolvedValue({
+      id: 'post',
+      deletedAt: new Date(),
+      status: 'DELETED',
+    });
+    expect(await repository.findCaseTarget('POST', 'post')).toMatchObject({
+      targetState: 'deleted',
+      target: { id: 'post' },
+    });
+    prisma.comment.findUnique.mockResolvedValue({
+      id: 'comment',
+      deletedAt: null,
+      post: { deletedAt: new Date(), status: 'DELETED' },
+    });
+    expect(await repository.findCaseTarget('COMMENT', 'comment')).toMatchObject(
+      { targetState: 'deleted', target: { id: 'comment' } },
+    );
+    expect(prisma.post.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          media: {
+            take: 20,
+            orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+            select: { url: true, mediaType: true, altText: true },
+          },
+        }) as unknown,
+      }),
+    );
+  });
+});
