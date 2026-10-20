@@ -10,10 +10,15 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 // Mirrors the policy MediaService enforces at confirm time (see backend .env.example for the
 // Cloudinary preset limits) - this is only for instant feedback.
+const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "gif"];
+
 export function imageFileProblem(file) {
-  // An empty type means the browser couldn't infer one, not that the file is wrong; the
-  // backend decides by the real format after upload.
-  if (file.type && !IMAGE_ACCEPT.split(",").includes(file.type)) {
+  // With no type from the browser (Windows gives none for many files) the extension decides; no extension either is left to the backend.
+  const extension = /\.([A-Za-z0-9]+)$/.exec(file.name ?? "")?.[1]?.toLowerCase();
+  const isImage = file.type
+    ? IMAGE_ACCEPT.split(",").includes(file.type)
+    : !extension || IMAGE_EXTENSIONS.includes(extension);
+  if (!isImage) {
     return "Use a JPG, PNG, WebP or GIF image";
   }
   if (file.size > MAX_IMAGE_BYTES) {

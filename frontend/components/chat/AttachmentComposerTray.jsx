@@ -1,43 +1,48 @@
 "use client";
 
-import { FiFile, FiX } from "react-icons/fi";
+import { FiFile, FiPlay, FiX } from "react-icons/fi";
 import { useLocalFileUrl } from "../../hooks/useLocalFileUrl";
 import { attachmentKind, formatBytes } from "../../lib/mls/media/attachmentView";
 import "./ChatAttachments.css";
 
-/** The chip's own thumbnail - the real image/first video frame for those, a plain icon otherwise. */
-function AttachmentPreview({ file }) {
+/** The tile's picture - the real image or first video frame for those, a plain icon otherwise. */
+function TilePreview({ file }) {
   const kind = attachmentKind(file.type);
   const url = useLocalFileUrl(file, kind !== "file");
-  if (kind === "image" && url) return <img alt="" className="chat-attachment-chip-thumb" src={url} />;
+  if (kind === "image" && url) return <img alt="" src={url} />;
   if (kind === "video" && url) {
-    return <video className="chat-attachment-chip-thumb" muted src={url} />;
+    return (
+      <>
+        <video muted src={url} />
+        <FiPlay aria-hidden="true" className="chat-draft-tile-play" />
+      </>
+    );
   }
-  return <FiFile aria-hidden="true" />;
+  return (
+    <>
+      <FiFile aria-hidden="true" className="chat-draft-tile-icon" />
+      <span className="chat-draft-tile-name">{file.name}</span>
+    </>
+  );
 }
 
-/** Files chosen but not yet sent; each can still be dropped. */
+/** Files chosen but not yet sent, as small tiles with a corner button to take each back out. */
 export function AttachmentComposerTray({ files, onRemove, error }) {
   if (files.length === 0 && !error) return null;
   return (
     <div className="chat-attachment-tray">
-      {files.map((file, index) => (
-        <div className="chat-attachment-chip" key={`${file.name}-${index}`}>
-          <AttachmentPreview file={file} />
-          <span className="chat-attachment-name" title={file.name}>
-            {file.name}
-          </span>
-          <small>{formatBytes(file.size)}</small>
-          <button
-            aria-label={`Remove ${file.name}`}
-            className="chat-attachment-remove"
-            onClick={() => onRemove(index)}
-            type="button"
-          >
-            <FiX />
-          </button>
-        </div>
-      ))}
+      {files.length > 0 && (
+        <ul aria-label="Files to send" className="chat-draft-tiles">
+          {files.map((file, index) => (
+            <li key={`${file.name}-${index}`} title={`${file.name} (${formatBytes(file.size)})`}>
+              <TilePreview file={file} />
+              <button aria-label={`Remove ${file.name}`} onClick={() => onRemove(index)} type="button">
+                <FiX />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {error && <span className="chat-attachment-error">{error}</span>}
     </div>
   );

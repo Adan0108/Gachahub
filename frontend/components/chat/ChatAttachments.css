@@ -15,7 +15,7 @@
 /*
  * The image/video grid goes flush to the bubble's own edges (overflow: hidden clips it to the
  * bubble's rounded corners) - only the caption and file chips below it keep their own inset, via
- * .chat-attachments > p / > .chat-attachment-chip further down, not padding on the bubble itself.
+ * .chat-attachments > p further down, not padding on the bubble itself.
  *
  * The `article.chat-message` form (not just `.chat-message`) is deliberate: .chat-message.mine's
  * border-color rule (globals.css) has the same 0-1-2-0 specificity as a plain `.chat-message:has`
@@ -50,14 +50,6 @@ article.chat-message:has(.chat-attachments) {
 .chat-attachments > p {
   margin: 0;
   padding: 2px 10px 8px;
-}
-
-.chat-attachments > .chat-attachment-chip {
-  margin: 0 10px;
-}
-
-.chat-attachments > .chat-attachment-chip:last-child {
-  margin-bottom: 8px;
 }
 
 /* In a bubble the bubble itself is the card: edge to edge, no frame, rounding or fill of its own. */
@@ -271,44 +263,6 @@ article.chat-message.mine .chat-file-card[data-state="error"] .chat-file-card-te
   text-align: center;
 }
 
-.chat-attachment-chip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 7px 9px;
-  border: 1px solid var(--line);
-  border-radius: var(--chat-radius);
-  background: rgba(0, 0, 0, 0.2);
-  color: var(--muted-strong);
-  font-size: 12px;
-}
-
-.chat-attachment-chip > svg {
-  flex: 0 0 auto;
-}
-
-.chat-attachment-chip-thumb {
-  flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  object-fit: cover;
-  background: #000;
-}
-
-.chat-attachment-chip .chat-attachment-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-attachment-chip small {
-  flex: 0 0 auto;
-}
-
 /* A received file: one button-card, so the whole thing is the click target. */
 .chat-file-card {
   display: flex;
@@ -411,17 +365,76 @@ article.chat-message.mine .chat-file-card[data-state="error"] .chat-file-card-te
   gap: 6px;
 }
 
-.chat-attachment-tray .chat-attachment-chip {
-  max-width: 240px;
+/* The remove button hangs off the corner of its tile, so the list leaves room for it. */
+.chat-draft-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 8px 0 0;
+  list-style: none;
 }
 
-.chat-composer .chat-attachment-remove {
-  width: auto;
-  height: auto;
-  padding: 2px;
-  background: transparent;
-  color: inherit;
+.chat-draft-tiles li {
+  position: relative;
+  display: grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel2);
+}
+
+.chat-draft-tiles img,
+.chat-draft-tiles video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 9px;
+  object-fit: cover;
+}
+
+/* Doubled up on the tray so the composer's own 36px button rule cannot resize or pad it. */
+.chat-attachment-tray .chat-draft-tiles button {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  line-height: 0;
+  background: #2b2e3d;
+  color: #fff;
+  font-size: 13px;
   cursor: pointer;
+}
+
+.chat-draft-tile-play {
+  position: absolute;
+  color: #fff;
+  font-size: 20px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+}
+
+/* A file with no picture: its icon, and its name squeezed under it. */
+.chat-draft-tile-icon {
+  color: var(--muted-strong);
+  font-size: 24px;
+}
+
+.chat-draft-tile-name {
+  max-width: 100%;
+  padding: 0 6px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-composer .chat-attach-button {

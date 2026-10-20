@@ -553,7 +553,7 @@
   flex-wrap: wrap;
   gap: 8px;
   margin: 0;
-  padding: 0;
+  padding: 8px 8px 0 0;
   list-style: none;
 }
 
@@ -561,7 +561,6 @@
   position: relative;
   width: 72px;
   height: 72px;
-  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--panel2);
@@ -575,17 +574,24 @@
   object-fit: cover;
 }
 
+.community-composer-files img,
+.community-composer-files .community-local-blank {
+  border-radius: 9px;
+}
+
 .community-composer-files button {
   position: absolute;
-  top: 3px;
-  right: 3px;
+  top: -8px;
+  right: -8px;
   display: grid;
   width: 22px;
   height: 22px;
+  padding: 0;
   place-items: center;
-  border: 0;
+  line-height: 0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.65);
+  background: #2b2e3d;
   color: #fff;
   font-size: 13px;
   cursor: pointer;
