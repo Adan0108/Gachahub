@@ -9,7 +9,10 @@ vi.mock("../hooks/admin/useRequireAdmin", () => ({
 }));
 beforeEach(() => {
   vi.spyOn(api, "listPlatformCases");
-  vi.spyOn(api, "getAdminOverview").mockResolvedValue({ metrics: [{ id: "reports", value: 42 }] });
+  vi.spyOn(api, "getAdminOverview").mockResolvedValue({
+    metrics: [{ id: "reports", value: 42 }],
+    moderation: { openCases: 12, unassignedCases: 5 },
+  });
   vi.spyOn(api, "listAdminContent").mockResolvedValue({ items: [], meta: { total: 0 } });
 });
 it("links to cursor case queues without requesting totals and retains complaint metrics", async () => {
@@ -19,15 +22,16 @@ it("links to cursor case queues without requesting totals and retains complaint 
     </QueryClientProvider>,
   );
   expect(await screen.findByText("42")).toBeInTheDocument();
-  expect(screen.getByText("Review cases")).toBeInTheDocument();
+  expect(screen.getByText("Open cases")).toBeInTheDocument();
   expect(api.listPlatformCases).not.toHaveBeenCalled();
   expect(screen.getByText("Open complaints")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Open case queue" })).toHaveAttribute(
     "href",
     "/moderation/cases",
   );
-  expect(api.listAdminContent).toHaveBeenCalledWith(
-    expect.objectContaining({ excludeHidden: true }),
-    expect.anything(),
-  );
+  expect(api.listAdminContent).not.toHaveBeenCalled();
+  expect(screen.queryByText("Flagged content")).not.toBeInTheDocument();
+  expect(screen.getByText("Unassigned cases")).toBeVisible();
+  expect(screen.getByText("12")).toBeVisible();
+  expect(screen.getByText("5")).toBeVisible();
 });

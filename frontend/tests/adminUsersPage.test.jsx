@@ -49,6 +49,17 @@ const baseUser = {
 };
 
 describe("AdminUsersPage status-based actions", () => {
+  it("links active ordinary users to the existing moderation access workflow", async () => {
+    mocks.listAdminUsers.mockResolvedValue({
+      items: [{ ...baseUser, status: "ACTIVE", username: "rover" }],
+      meta: { page: 1, limit: 20, total: 1, totalPages: 1 },
+    });
+    renderPage();
+    expect(await screen.findByRole("link", { name: "Manage moderation access" })).toHaveAttribute(
+      "href",
+      "/admin/moderators?search=%40rover",
+    );
+  });
   beforeEach(() => {
     mocks.listAdminUsers.mockReset();
   });

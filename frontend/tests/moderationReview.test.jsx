@@ -1,10 +1,11 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, expect, it, vi } from "vitest";
 import { PostItem } from "../components/PostList";
 import { CaseDetail } from "../components/moderation/CaseDetail";
 import { ModeratorPicker } from "../components/moderation/ModeratorPicker";
 import { api } from "../lib/api";
+import userEvent from "@testing-library/user-event";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -79,6 +80,32 @@ beforeEach(() => {
   vi.spyOn(api, "searchPlatformCaseAssignees").mockResolvedValue({ items: [candidate] });
   vi.spyOn(api, "assignPlatformCase").mockResolvedValue(record);
 });
+it.each(["POST", "COMMENT"])(
+  "requires an explicit %s report reason and resets it on keyboard close/reopen",
+  async (type) => {
+    const keyboard = userEvent.setup();
+    mount(<PostItem post={post} detail variant="feed" />);
+    const open = async () => {
+      if (type === "POST") {
+        fireEvent.click(screen.getByRole("button", { name: /More options/ }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Report" }));
+      } else fireEvent.click(await screen.findByRole("button", { name: "Report comment" }));
+    };
+    await open();
+    expect(screen.getByLabelText("Reason")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Submit report" })).toBeDisabled();
+    await keyboard.keyboard("{Enter}");
+    expect(api.createReport).not.toHaveBeenCalled();
+    await keyboard.selectOptions(screen.getByLabelText("Reason"), "HARASSMENT");
+    expect(screen.getByRole("button", { name: "Submit report" })).toBeEnabled();
+    await keyboard.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await open();
+    expect(screen.getByLabelText("Reason")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Submit report" })).toBeDisabled();
+  },
+);
+
 it.each(["POST", "COMMENT"])("shows a visible success toast after a %s report", async (type) => {
   mount(<PostItem post={post} detail variant="feed" />);
   if (type === "POST") {
@@ -87,6 +114,7 @@ it.each(["POST", "COMMENT"])("shows a visible success toast after a %s report", 
     expect(menu.parentElement).toBe(document.body);
     fireEvent.click(screen.getByRole("menuitem", { name: "Report" }));
   } else fireEvent.click(await screen.findByRole("button", { name: "Report comment" }));
+  fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "HARASSMENT" } });
   fireEvent.click(screen.getByRole("button", { name: "Submit report" }));
   expect(await screen.findByText(/Report submitted/)).toBeVisible();
   expect(api.createReport).toHaveBeenCalledWith(
@@ -100,6 +128,7 @@ it.each([409, 500])(
     mount(<PostItem post={post} variant="feed" />);
     fireEvent.click(screen.getByRole("button", { name: /More options/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Report" }));
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "HARASSMENT" } });
     fireEvent.click(screen.getByRole("button", { name: "Submit report" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       status === 409 ? "already reported" : "could not be submitted",
@@ -114,7 +143,7 @@ it("keeps a tiny personal post's report menu outside the card clipping area", ()
   expect(screen.getByRole("menu").parentElement).toBe(document.body);
   expect(screen.getByRole("menuitem", { name: "Report" })).toBeVisible();
 });
-it("shows eligible identity search results, a role badge and submits the selected moderator", async () => {
+it("shows eligible identities and makes selecting the existing moderator a no-op", async () => {
   mount(<CaseDetail caseId="case" />);
   expect(await screen.findByText(/Reported by Deleted user/)).toBeVisible();
   expect(screen.getByRole("navigation", { name: "Moderation navigation" })).toBeInTheDocument();
@@ -128,10 +157,7 @@ it("shows eligible identity search results, a role badge and submits the selecte
   expect(select.querySelector("img")).toHaveAttribute("src", candidate.image);
   expect(select).toHaveTextContent("Platform moderator");
   fireEvent.click(select);
-  await waitFor(() =>
-    expect(api.assignPlatformCase).toHaveBeenCalledWith("case", { assigneeId: "mod" }),
-  );
-  expect(await screen.findByText("Case assignment updated.")).toBeVisible();
+  expect(api.assignPlatformCase).not.toHaveBeenCalled();
 });
 it("clears stale picker results as the query changes", async () => {
   const search = vi.fn().mockResolvedValue({ items: [candidate] });

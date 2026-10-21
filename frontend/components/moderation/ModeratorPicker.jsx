@@ -15,8 +15,9 @@ export function ModeratorPicker({
   disabled = false,
   granting = false,
   label = "Find moderator",
+  initialQuery = "",
 }) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const normalized = query.trim();
   const settled = useDebouncedValue(normalized, 300);
   const ready = Boolean(settled && settled === normalized);
@@ -44,7 +45,7 @@ export function ModeratorPicker({
         />
       </label>
       <p className="case-muted">
-        Use 4 or more characters for suggestions. Shorter queries match exact handles only.
+        Use @username for an exact handle match, or 4 or more characters of a display name.
       </p>
       {normalized && (!ready || result.isFetching) && <p role="status">Searching moderators...</p>}
       {ready && result.isError && (

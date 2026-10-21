@@ -131,6 +131,7 @@ export class GameModeratorsRepository {
             name: true,
             email: true,
             image: true,
+            username: true,
             status: true,
           },
         },

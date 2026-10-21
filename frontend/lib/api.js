@@ -331,10 +331,10 @@ async function request(path, options = {}) {
     } catch {
       message = await response.text().catch(() => '');
     }
-    const error = new Error(message || `API request failed: ${response.status}`);
+    const error = new Error(response.status >= 500 ? 'Something went wrong. Please try again.' : message || `API request failed: ${response.status}`);
     error.status = response.status;
     // Machine-readable reason from the backend (e.g. MEMBERSHIP_CHANGE_PENDING), when it sent one.
-    error.code = code;
+    error.code = response.status >= 500 ? undefined : code;
     if (response.status === 429) {
       const retryAfterSeconds = Number.parseInt(response.headers.get('Retry-After') ?? '', 10);
       error.retryAfterSeconds = retryAfterSeconds > 0 ? retryAfterSeconds : undefined;

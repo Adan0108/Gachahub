@@ -217,7 +217,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportTarget, setReportTarget] = useState(null);
-  const [reportReason, setReportReason] = useState("UNMARKED_SPOILERS");
+  const [reportReason, setReportReason] = useState("");
   const [reportDetails, setReportDetails] = useState("");
   const [actionNotice, setActionNotice] = useState("");
   const { notice, showNotice } = useToast(3500);
@@ -229,6 +229,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
     onDismiss: closeMenu,
     contentRef: menuRef,
     triggerRef: menuTriggerRef,
+    restoreFocus: !reportOpen,
   });
   useLayoutEffect(() => {
     if (!menuOpen || !menuRef.current || !menuTriggerRef.current) return;
@@ -318,7 +319,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
     if (!requireAuth()) return;
     reportPost.reset?.();
     setActionNotice("");
-    setReportReason("UNMARKED_SPOILERS");
+    setReportReason("");
     setReportDetails("");
     setReportTarget({ targetType, targetId, label });
     setReportOpen(true);
@@ -402,37 +403,39 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
           >
             <FiMoreHorizontal />
           </button>
-          {menuOpen && createPortal(
-            <div className="post-options-menu" ref={menuRef} role="menu">
-              <button
-                onClick={() => {
-                  closeMenu();
-                  copyPostLink().catch(() => setActionNotice("Could not copy the post link."));
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <FiLink /> Copy link
-              </button>
-              <button onClick={() => showUnavailable("Save posts")} role="menuitem" type="button">
-                <FiSave /> Save
-              </button>
-              <button onClick={() => showUnavailable("Hide posts")} role="menuitem" type="button">
-                <FiEyeOff /> Hide
-              </button>
-              <button
-                className="danger"
-                onClick={() => {
-                  closeMenu();
-                  openReport();
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <FiFlag /> Report
-              </button>
-            </div>, document.body
-          )}
+          {menuOpen &&
+            createPortal(
+              <div className="post-options-menu" ref={menuRef} role="menu">
+                <button
+                  onClick={() => {
+                    closeMenu();
+                    copyPostLink().catch(() => setActionNotice("Could not copy the post link."));
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <FiLink /> Copy link
+                </button>
+                <button onClick={() => showUnavailable("Save posts")} role="menuitem" type="button">
+                  <FiSave /> Save
+                </button>
+                <button onClick={() => showUnavailable("Hide posts")} role="menuitem" type="button">
+                  <FiEyeOff /> Hide
+                </button>
+                <button
+                  className="danger"
+                  onClick={() => {
+                    closeMenu();
+                    openReport();
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <FiFlag /> Report
+                </button>
+              </div>,
+              document.body,
+            )}
         </div>
       </div>
       {(detail || isFeed) && (post.content || media.length > 0) && (
@@ -500,7 +503,13 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
       {(toggleLike.isError || toggleFollow.isError) && (
         <small className="post-action-error">Could not update this post. Try again.</small>
       )}
-      {notice && createPortal(<div className="toast" role="status">{notice}</div>, document.body)}
+      {notice &&
+        createPortal(
+          <div className="toast" role="status">
+            {notice}
+          </div>,
+          document.body,
+        )}
       {actionNotice && (
         <div className="post-action-notice" role="status">
           {actionNotice}
@@ -514,7 +523,11 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
         </div>
       )}
       {threadOpen && (
-        <section className="post-thread" aria-label={`Comments on ${post.title}`}>
+        <section
+          id={detail ? "comments" : undefined}
+          className="post-thread"
+          aria-label={`Comments on ${post.title}`}
+        >
           {comments.isLoading && <small>Loading comments...</small>}
           {comments.isError && (
             <small className="post-action-error">Could not load comments.</small>
@@ -598,6 +611,12 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
               className="post-report-dialog"
               onMouseDown={(event) => event.stopPropagation()}
               role="dialog"
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && !reportPost.isPending) {
+                  event.stopPropagation();
+                  setReportOpen(false);
+                }
+              }}
             >
               <div className="post-report-head">
                 <div>
@@ -618,9 +637,13 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
               <label>
                 Reason
                 <select
+                  autoFocus
                   onChange={(event) => setReportReason(event.target.value)}
                   value={reportReason}
                 >
+                  <option value="" disabled>
+                    Choose a reason
+                  </option>
                   <option value="UNMARKED_SPOILERS">Unmarked spoilers</option>
                   <option value="HARASSMENT">Harassment</option>
                   <option value="COMMERCIAL_SPAM">Commercial spam</option>
@@ -651,8 +674,10 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
                   Cancel
                 </button>
                 <button
-                  disabled={reportPost.isPending}
-                  onClick={() => reportPost.mutate()}
+                  disabled={reportPost.isPending || !reportReason}
+                  onClick={() => {
+                    if (reportReason) reportPost.mutate();
+                  }}
                   type="button"
                 >
                   {reportPost.isPending ? "Submitting..." : "Submit report"}

@@ -4,6 +4,7 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { DiscordLoggerService } from '../discord/discord-logger.service';
@@ -21,6 +22,7 @@ type ErrorResponse = {
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(HttpExceptionFilter.name);
   constructor(private readonly discordLogger: DiscordLoggerService) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
@@ -60,8 +62,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const body: ErrorResponse = {
       success: false,
       statusCode: status,
-      message,
-      ...(code ? { code } : {}),
+      message:
+        status >= 500 && process.env.NODE_ENV !== 'development'
+          ? 'Something went wrong. Please try again.'
+          : message,
+      ...(code && status < 500 ? { code } : {}),
       path: request.url,
       timestamp: new Date().toISOString(),
     };
@@ -72,8 +77,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
           ? exception.constructor.name
           : 'UnknownError';
 
-      const errorMessage =
-        body.message.toString().trim() || 'Internal server error';
+      const errorMessage = message.toString().trim() || 'Internal server error';
+      this.logger.error(
+        errorMessage,
+        exception instanceof Error ? exception.stack : undefined,
+      );
 
       // Query strings can carry reset tokens/signed-URL secrets — strip them before
       // this leaves the server, the client-facing body.path above is unaffected.

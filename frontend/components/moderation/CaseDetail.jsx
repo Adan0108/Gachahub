@@ -54,6 +54,7 @@ export function CaseDetail({ caseId, gameSlug = "", queue = "" }) {
             item={query.data}
             gameSlug={gameSlug}
             actorId={access.user?.id}
+            actorRole={access.user?.role}
           />
         )}
       </AdminQueryBoundary>
@@ -61,13 +62,14 @@ export function CaseDetail({ caseId, gameSlug = "", queue = "" }) {
   );
 }
 
-function CaseRecord({ item, gameSlug, actorId }) {
+function CaseRecord({ item, gameSlug, actorId, actorRole }) {
   const client = useQueryClient();
   const [decision, setDecision] = useState(null);
   const [note, setNote] = useState("");
   const [notice, setNotice] = useState("");
   const [denied, setDenied] = useState(false);
   const [assigning, setAssigning] = useState(false);
+  const [replacement, setReplacement] = useState(null);
   const mutation = useMutation({
     mutationFn: ({ action, resolutionNote, assigneeId }) => {
       if (action === "assign")
@@ -87,13 +89,16 @@ function CaseRecord({ item, gameSlug, actorId }) {
     onSuccess: async (_, variables) => {
       setDecision(null);
       setAssigning(false);
+      setReplacement(null);
       setNote("");
       setNotice(
         variables.action === "claim"
           ? "Assigned to you."
           : variables.action === "assign"
             ? "Case assignment updated."
-            : `Case ${variables.action === "resolve" ? "resolved" : "dismissed"}.`,
+            : variables.action === "resolve"
+              ? "Action taken recorded."
+              : "No violation recorded.",
       );
       await refreshModeration(client, actorId);
     },
@@ -131,9 +136,8 @@ function CaseRecord({ item, gameSlug, actorId }) {
                   : "Content unavailable")}
           </h1>
           <p>
-            {caseStatusLabel(item.status)} · {item.game?.name || "Outside a community"} ·{" "}
-            {item.reportCount} {item.reportCount === 1 ? "report" : "reports"} from{" "}
-            {item.uniqueReporterCount} {item.uniqueReporterCount === 1 ? "person" : "people"}
+            {caseStatusLabel(item.status)} · {item.game?.name || "Outside a community"} · Reported
+            by {item.uniqueReporterCount} {item.uniqueReporterCount === 1 ? "person" : "people"}
           </p>
         </div>
       </div>
@@ -161,7 +165,9 @@ function CaseRecord({ item, gameSlug, actorId }) {
                   className={`case-target-state case-target-state-${item.targetState || "missing"}`}
                 >
                   {item.targetState === "available"
-                    ? "Content available"
+                    ? item.target?.status === "HIDDEN"
+                      ? "Content hidden"
+                      : "Content available"
                     : item.targetState === "deleted"
                       ? "Content deleted"
                       : "Content unavailable"}
@@ -171,6 +177,7 @@ function CaseRecord({ item, gameSlug, actorId }) {
                 ) : (
                   <p>You can still review what users reported below.</p>
                 )}
+                <CaseContentActions item={item} actorId={actorId} actorRole={actorRole} />
               </section>
               <section className="admin-panel case-content" aria-labelledby="case-reasons-title">
                 <h2 id="case-reasons-title">Why users reported this</h2>
@@ -198,12 +205,12 @@ function CaseRecord({ item, gameSlug, actorId }) {
                 </span>
               </div>
               <dl className="case-facts">
-                <dt>Reports received</dt>
-                <dd>{item.reportCount}</dd>
-                <dt>Reported by</dt>
-                <dd>
-                  {item.uniqueReporterCount} {item.uniqueReporterCount === 1 ? "person" : "people"}
-                </dd>
+                {item.reportCount !== item.uniqueReporterCount && (
+                  <>
+                    <dt>Evidence records</dt>
+                    <dd>{item.reportCount}</dd>
+                  </>
+                )}
                 <dt>Assigned to</dt>
                 <dd>
                   {item.assignedModerator?.name || "Unassigned"}
@@ -270,16 +277,21 @@ function CaseRecord({ item, gameSlug, actorId }) {
                           ? api.searchGameCaseAssignees(gameSlug, item.id, q, options)
                           : api.searchPlatformCaseAssignees(item.id, q, options)
                       }
-                      onSelect={(user) =>
-                        mutation.mutate({ action: "assign", assigneeId: user.id })
-                      }
+                      onSelect={(user) => {
+                        if (user.id === item.assignedModerator?.id) {
+                          setAssigning(false);
+                          return;
+                        }
+                        if (item.assignedModerator) setReplacement(user);
+                        else mutation.mutate({ action: "assign", assigneeId: user.id });
+                      }}
                       disabled={mutation.isPending}
                     />
                   )}
                   {["resolve", "dismiss"].map((action) => (
                     <button
                       key={action}
-                      className={`case-button ${action === "dismiss" ? "case-button-danger" : "case-button-secondary"}`}
+                      className={`case-button case-button-${action === "resolve" ? "primary" : "secondary"}`}
                       disabled={mutation.isPending}
                       onClick={() => {
                         mutation.reset();
@@ -288,12 +300,12 @@ function CaseRecord({ item, gameSlug, actorId }) {
                       }}
                       type="button"
                     >
-                      {action === "resolve" ? "Resolve" : "Dismiss"}
+                      {action === "resolve" ? "Action taken" : "No violation"}
                     </button>
                   ))}
                   <p>
-                    These decisions close the review. Content stays visible unless removed
-                    separately.
+                    These decisions close the review. Hiding or restoring content is a separate
+                    action.
                   </p>
                 </section>
               )}
@@ -310,9 +322,13 @@ function CaseRecord({ item, gameSlug, actorId }) {
       {decision && active && (
         <AdminActionDialog
           className="case-action-modal"
-          title={`${decision === "resolve" ? "Resolve" : "Dismiss"} case`}
-          description="Save your decision and close this review. Content will remain visible unless removed separately."
-          confirmLabel={decision === "resolve" ? "Resolve case" : "Dismiss case"}
+          title={decision === "resolve" ? "Action taken" : "No violation"}
+          description={
+            decision === "resolve"
+              ? "The report was valid and a moderation decision was made."
+              : "No policy violation was found."
+          }
+          confirmLabel={decision === "resolve" ? "Record action taken" : "Record no violation"}
           pendingLabel="Saving…"
           pending={mutation.isPending}
           error={mutation.error ? moderationError(mutation.error) : undefined}
@@ -320,6 +336,14 @@ function CaseRecord({ item, gameSlug, actorId }) {
           onClose={() => setDecision(null)}
           onConfirm={() => mutation.mutate({ action: decision, resolutionNote: note.trim() })}
         >
+          <p
+            className={`case-visibility-notice ${contentVisibility(item) === "Visible" && decision === "resolve" ? "case-visibility-warning" : ""}`}
+          >
+            Content status: {contentVisibility(item)}
+            {contentVisibility(item) === "Visible" &&
+              decision === "resolve" &&
+              " — content remains visible. Hide it separately if required."}
+          </p>
           <label>
             Decision note (optional)
             <textarea
@@ -332,7 +356,129 @@ function CaseRecord({ item, gameSlug, actorId }) {
           </label>
         </AdminActionDialog>
       )}
+      {replacement && active && (
+        <AdminActionDialog
+          title="Reassign this case?"
+          description={`This case is currently assigned to ${item.assignedModerator.name}. Assign it to ${replacement.name} instead?`}
+          confirmLabel="Reassign case"
+          pendingLabel="Assigning..."
+          pending={mutation.isPending}
+          tone="primary"
+          error={mutation.error ? moderationError(mutation.error) : undefined}
+          onClose={() => setReplacement(null)}
+          onConfirm={() => mutation.mutate({ action: "assign", assigneeId: replacement.id })}
+        />
+      )}
     </>
+  );
+}
+
+function contentVisibility(item) {
+  if (item.targetState !== "available" || !item.target)
+    return item.targetState === "deleted" ? "Deleted" : "Unavailable";
+  if (item.targetType === "COMMENT" && item.target.post?.status === "HIDDEN")
+    return "Hidden (parent post)";
+  return item.target.status === "HIDDEN"
+    ? "Hidden"
+    : item.target.status === "PUBLISHED"
+      ? "Visible"
+      : "Unavailable";
+}
+
+function CaseContentActions({ item, actorId, actorRole }) {
+  const client = useQueryClient();
+  const [action, setAction] = useState(null);
+  const [notice, setNotice] = useState("");
+  const live = item.targetState === "available" && item.target;
+  const hidden = live && item.target.status === "HIDDEN";
+  const parent = item.targetType === "COMMENT" ? item.target?.post : item.target;
+  const contextAccessible =
+    live &&
+    item.target.status === "PUBLISHED" &&
+    parent?.status === "PUBLISHED" &&
+    !parent?.deletedAt &&
+    (parent?.visibility === "PUBLIC" ||
+      parent?.authorId === actorId ||
+      parent?.author?.id === actorId);
+  const canChange =
+    live &&
+    ["PUBLISHED", "HIDDEN"].includes(item.target.status) &&
+    (item.game?.slug || (actorRole === "ADMIN" && !item.gameId));
+  const descriptor = { id: item.targetId, type: item.targetType, gameSlug: item.game?.slug };
+  const mutation = useMutation({
+    mutationFn: () =>
+      action === "hide" ? api.hideContent(descriptor) : api.restoreContent(descriptor),
+    onSuccess: async () => {
+      setNotice(
+        action === "hide"
+          ? "Content hidden. Case evidence is preserved."
+          : "Content restored. Case evidence is preserved.",
+      );
+      setAction(null);
+      await refreshModeration(client, actorId);
+      await client.invalidateQueries({ queryKey: ["admin", "content"] });
+    },
+    onError: async (error) => {
+      if ([401, 403, 404, 409].includes(error.status)) {
+        setAction(null);
+        setNotice(moderationError(error));
+        await refreshModeration(client, actorId);
+      }
+    },
+  });
+  return (
+    <div className="case-content-controls">
+      <p className="case-visibility-notice">Content status: {contentVisibility(item)}</p>
+      {contextAccessible ? (
+        <Link
+          className="case-button case-button-secondary"
+          href={`/post/${encodeURIComponent(item.targetType === "COMMENT" ? item.target.postId : item.targetId)}${item.targetType === "COMMENT" ? "#comments" : ""}`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Open in context
+        </Link>
+      ) : (
+        <p className="case-muted">
+          Live context is hidden, deleted, or restricted. Review the evidence here.
+        </p>
+      )}
+      {canChange ? (
+        <button
+          className={`case-button ${hidden ? "case-button-secondary" : "case-button-danger"}`}
+          type="button"
+          disabled={mutation.isPending}
+          onClick={() => {
+            mutation.reset();
+            setAction(hidden ? "restore" : "hide");
+          }}
+        >
+          {hidden ? "Restore" : "Hide"} {item.targetType === "COMMENT" ? "comment" : "post"}
+        </button>
+      ) : live && !item.gameId && actorRole !== "ADMIN" ? (
+        <p className="case-muted">
+          An Admin must change visibility of content outside a community.
+        </p>
+      ) : null}
+      {notice && <p role="status">{notice}</p>}
+      {action && (
+        <AdminActionDialog
+          title={`${action === "hide" ? "Hide" : "Restore"} ${item.targetType === "COMMENT" ? "comment" : "post"}?`}
+          description={
+            action === "hide"
+              ? "Remove this content from public view. It can be restored later; case evidence and history remain."
+              : "Restore this content to its existing audience. Case evidence and history remain."
+          }
+          confirmLabel={action === "hide" ? "Hide content" : "Restore content"}
+          pendingLabel="Updating visibility..."
+          tone={action === "hide" ? "danger" : "primary"}
+          pending={mutation.isPending}
+          error={mutation.error ? moderationError(mutation.error) : undefined}
+          onClose={() => setAction(null)}
+          onConfirm={() => mutation.mutate()}
+        />
+      )}
+    </div>
   );
 }
 

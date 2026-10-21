@@ -71,7 +71,21 @@ function ScopedCaseQueue({ access, gameSlug, initialQuery }) {
           <h1>{caseViews.find((item) => item.value === filters.view)?.label || "Cases"}</h1>
           <p>Review reported content and the complaints behind it.</p>
         </div>
+        <button
+          className="case-button case-button-secondary"
+          type="button"
+          disabled={query.isFetching || !valid}
+          onClick={() => {
+            setCursors([undefined]);
+            if (!cursor) void query.refetch();
+          }}
+        >
+          Refresh cases
+        </button>
       </div>
+      <p className="case-muted">
+        New reports can move cases to the first page. Refresh cases to see the latest activity.
+      </p>
       <section className="admin-toolbar case-filters" aria-label="Case filters">
         <label>
           Status{" "}
@@ -80,7 +94,9 @@ function ScopedCaseQueue({ access, gameSlug, initialQuery }) {
             value={filters.status}
             onChange={(event) => update("status", event.target.value)}
           >
-            <option value="">All statuses</option>
+            <option value="">
+              {filters.view === "history" ? "Completed cases" : "Active cases"}
+            </option>
             {["OPEN", "IN_REVIEW", "RESOLVED", "DISMISSED"].map((status) => (
               <option key={status} value={status}>
                 {caseStatusLabel(status)}
@@ -157,11 +173,8 @@ function ScopedCaseQueue({ access, gameSlug, initialQuery }) {
                       <ReasonSummary reasons={item.reasonSummary} compact />
                     </td>
                     <td data-label="Reports">
-                      {item.reportCount} {item.reportCount === 1 ? "report" : "reports"}
-                      <small>
-                        {item.uniqueReporterCount}{" "}
-                        {item.uniqueReporterCount === 1 ? "person" : "people"}
-                      </small>
+                      Reported by {item.uniqueReporterCount}{" "}
+                      {item.uniqueReporterCount === 1 ? "person" : "people"}
                     </td>
                     <td data-label="Status">
                       <span
@@ -189,6 +202,7 @@ function ScopedCaseQueue({ access, gameSlug, initialQuery }) {
                     </td>
                     <td data-label="Action">
                       <Link
+                        className="case-button case-button-secondary"
                         href={`${casePath(gameSlug, item.id)}${queueContext ? `?queue=${encodeURIComponent(queueContext)}` : ""}`}
                       >
                         View case

@@ -6,7 +6,7 @@ describe('moderation identity search', () => {
   const findMany = jest.fn();
   const db = { user: { findMany } } as unknown as Prisma.TransactionClient;
   beforeEach(() => findMany.mockReset());
-  it.each(['@r', '@rad'])(
+  it.each(['@r', '@rad', '@radi', '@radiu'])(
     'only performs an exact handle lookup for %s',
     async (q) => {
       findMany.mockResolvedValue([]);
@@ -22,20 +22,19 @@ describe('moderation identity search', () => {
       );
     },
   );
-  it('ranks exact handles, then prefixes, then names, bounded at ten without private fields', async () => {
+  it('ranks exact bare usernames then bounded display names without username prefixes or private fields', async () => {
     findMany
       .mockResolvedValueOnce([{ id: 'exact' }])
-      .mockResolvedValueOnce([{ id: 'prefix' }])
       .mockResolvedValueOnce([{ id: 'name' }]);
     expect(
       await searchModeratorCandidates(
         db,
         caseModeratorWhere('game'),
-        ' @Radium ',
+        ' Radium ',
       ),
-    ).toEqual([{ id: 'exact' }, { id: 'prefix' }, { id: 'name' }]);
+    ).toEqual([{ id: 'exact' }, { id: 'name' }]);
     const calls = findMany.mock.calls as Array<[Prisma.UserFindManyArgs]>;
-    expect(calls.map(([query]) => query.take)).toEqual([1, 9, 8]);
+    expect(calls.map(([query]) => query.take)).toEqual([1, 9]);
     for (const [query] of calls)
       expect(query.select).toEqual({
         id: true,
@@ -44,6 +43,18 @@ describe('moderation identity search', () => {
         image: true,
         role: true,
       });
+  });
+  it('matches @Radium exactly without any display-name fallback', async () => {
+    findMany.mockResolvedValue([{ id: 'radium' }]);
+    expect(
+      await searchModeratorCandidates(db, caseModeratorWhere(null), '@Radium'),
+    ).toEqual([{ id: 'radium' }]);
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { AND: [caseModeratorWhere(null), { username: 'radium' }] },
+      }),
+    );
   });
   it('never runs name fallback once ten results have been collected', async () => {
     findMany

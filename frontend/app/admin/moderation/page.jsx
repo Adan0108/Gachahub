@@ -8,14 +8,10 @@ import { queries } from "../../../lib/queries";
 
 export default function AdminModerationPage() {
   const session = useRequireAdmin();
-  const content = useQuery({
-    ...queries.adminContent("", 1, { excludeHidden: true, limit: 100 }),
-    enabled: session.isAdmin,
-  });
   const overview = useQuery({ ...queries.adminOverview(), enabled: session.isAdmin });
   if (session.isLoading || !session.isAdmin)
     return <AdminState kind="loading" title="Checking admin access" />;
-  const all = [content, overview];
+  const all = [overview];
   const failed = all.find((query) => query.isError);
   return (
     <AdminShell user={session.user}>
@@ -39,11 +35,13 @@ export default function AdminModerationPage() {
           <section className="admin-moderation-summary">
             <article>
               <div>
-                <small>Moderation cases</small>
-                <strong>Review cases</strong>
-                <p>Review reported content and record decisions in the case queue.</p>
+                <small>Open cases</small>
+                <strong>{overview.data?.moderation?.openCases ?? 0}</strong>
+                <p>Needs review or being reviewed.</p>
               </div>
-              <Link href="/moderation/cases">Open case queue</Link>
+              <Link className="admin-button admin-button-primary" href="/moderation/cases">
+                Open case queue
+              </Link>
             </article>
             <article>
               <div>
@@ -55,14 +53,19 @@ export default function AdminModerationPage() {
             </article>
             <article>
               <div>
-                <small>Flagged content</small>
-                <strong>{content.data?.meta?.total ?? content.data?.items?.length ?? 0}</strong>
+                <small>Unassigned cases</small>
+                <strong>{overview.data?.moderation?.unassignedCases ?? 0}</strong>
               </div>
-              <Link href="/admin/content">Review content</Link>
+              <Link
+                className="admin-button admin-button-secondary"
+                href="/moderation/cases?view=unassigned"
+              >
+                Find unassigned work
+              </Link>
             </article>
           </section>
           <p>
-            Resolving or dismissing a case records a decision. Content visibility is managed
+            Action taken or No violation records a decision. Content visibility is managed
             separately.
           </p>
         </>

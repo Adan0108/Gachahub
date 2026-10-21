@@ -9,13 +9,13 @@ const candidateSelect = {
   role: true,
 } as const;
 
-/** At most three bounded indexed/prefix reads. Short queries resolve only exact
- * handles; no similarity/substring search and no email/account metadata. */
+/** @handles are exact only; bare text also allows bounded display-name prefixes. */
 export async function searchModeratorCandidates(
   db: Prisma.TransactionClient,
   eligibility: Prisma.UserWhereInput,
   value: string,
 ) {
+  const handleOnly = value.trim().startsWith('@');
   const query = value.trim().replace(/^@/, '').toLowerCase();
   if (!query || query.length > 100) return [];
   const exact = await db.user.findMany({
@@ -23,27 +23,18 @@ export async function searchModeratorCandidates(
     select: candidateSelect,
     take: 1,
   });
-  if (query.length < 4) return exact;
+  if (handleOnly || query.length < 4) return exact;
   const prefix = {
     startsWith: escapeLikePattern(query),
     mode: 'insensitive' as const,
   };
-  const handles = await db.user.findMany({
-    where: {
-      AND: [eligibility, { username: prefix }, { NOT: { username: query } }],
-    },
-    orderBy: [{ username: 'asc' }, { id: 'asc' }],
-    select: candidateSelect,
-    take: 10 - exact.length,
-  });
-  const results = [...exact, ...handles];
-  if (results.length === 10) return results;
+  const results = exact;
   const names = await db.user.findMany({
     where: {
       AND: [
         eligibility,
         { name: prefix },
-        { OR: [{ username: null }, { NOT: { username: prefix } }] },
+        { id: { notIn: exact.map((user) => user.id) } },
       ],
     },
     orderBy: [{ name: 'asc' }, { id: 'asc' }],

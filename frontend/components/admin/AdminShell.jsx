@@ -31,6 +31,8 @@ const navigation = [
 export function AdminShell({ user, children, moderation = false, gameSlug = "", view = "all" }) {
   const pathname = usePathname() || "";
   const platformModerator = user?.role === "PLATFORM_MODERATOR";
+  const reviewSurface =
+    moderation || ["/admin/moderation", "/admin/moderators", "/admin/users"].includes(pathname);
   const items =
     moderation || platformModerator
       ? caseViews.map((item) => ({
@@ -44,7 +46,9 @@ export function AdminShell({ user, children, moderation = false, gameSlug = "", 
       : navigation;
 
   return (
-    <div className={`admin-shell${moderation ? " moderation-console" : ""}`}>
+    <div
+      className={`admin-shell${moderation ? " moderation-console" : ""}${reviewSurface ? " moderation-review-surface" : ""}`}
+    >
       <aside className="admin-sidebar">
         <div className="admin-brand">
           <BrandMark size={36} />

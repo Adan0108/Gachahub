@@ -7,8 +7,8 @@ export const caseStatusLabel = (status) =>
   ({
     OPEN: "Needs review",
     IN_REVIEW: "Being reviewed",
-    RESOLVED: "Resolved",
-    DISMISSED: "Dismissed",
+    RESOLVED: "Action taken",
+    DISMISSED: "No violation",
   })[status] || status;
 export const casePath = (gameSlug = "", caseId = "") =>
   `${gameSlug ? `/moderator/${encodeURIComponent(gameSlug)}/cases` : "/moderation/cases"}${caseId ? `/${encodeURIComponent(caseId)}` : ""}`;
@@ -98,16 +98,23 @@ export function watchModerationSession(client) {
   });
 }
 export const moderationError = (error) =>
-  ({
-    400: "The request could not be accepted. Check the filters or note.",
-    401: "Your session has ended. Please sign in again.",
-    403: "You no longer have access to this moderation workspace.",
-    404: "This case or game is unavailable in this workspace.",
-    409: "This case changed while you were reviewing it. The latest state has been requested.",
-  })[error?.status] ||
-  error?.message ||
-  "Could not load moderation data.";
+  !error?.status || error.status >= 500
+    ? "Something went wrong. Please try again."
+    : {
+        400: "The request could not be accepted. Check the filters or note.",
+        401: "Your session has ended. Please sign in again.",
+        403: "You no longer have access to this moderation workspace.",
+        404: "This case or game is unavailable in this workspace.",
+        409: "This case changed while you were reviewing it. The latest state has been requested.",
+      }[error?.status] ||
+      error?.message ||
+      "Could not load moderation data.";
 
 export const moderatorRoleLabel = (user, game) =>
-  user?.role === "ADMIN" ? "Admin" : user?.role === "PLATFORM_MODERATOR"
-    ? "Platform moderator" : game?.name ? `${game.name} moderator` : "Moderator";
+  user?.role === "ADMIN"
+    ? "Admin"
+    : user?.role === "PLATFORM_MODERATOR"
+      ? "Platform moderator"
+      : game?.name
+        ? `${game.name} moderator`
+        : "Moderator";

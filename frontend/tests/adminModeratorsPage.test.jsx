@@ -6,6 +6,7 @@ import AdminModeratorsPage from "../app/admin/moderators/page";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/admin/moderators",
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("../hooks/admin/useRequireAdmin", () => ({
@@ -17,6 +18,7 @@ vi.mock("../hooks/admin/useRequireAdmin", () => ({
 }));
 
 const mocks = vi.hoisted(() => ({
+  listAdminUsers: vi.fn(),
   getGames: vi.fn(),
   getGameModerators: vi.fn(),
   assignGameModerator: vi.fn(),
@@ -29,6 +31,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../lib/api", () => ({
   api: {
+    listAdminUsers: mocks.listAdminUsers,
     getGames: mocks.getGames,
     getGameModerators: mocks.getGameModerators,
     assignGameModerator: mocks.assignGameModerator,
@@ -67,6 +70,9 @@ const assignment = {
 
 describe("AdminModeratorsPage", () => {
   beforeEach(() => {
+    mocks.listAdminUsers
+      .mockReset()
+      .mockResolvedValue({ items: [], meta: { page: 1, totalPages: 1, total: 0 } });
     mocks.getGames.mockReset().mockResolvedValue({
       items: games,
       meta: { page: 1, limit: 100, total: 2, totalPages: 1 },
@@ -103,7 +109,7 @@ describe("AdminModeratorsPage", () => {
       const revoke = role === "PLATFORM_MODERATOR";
       fireEvent.click(
         screen.getByRole("button", {
-          name: revoke ? "Revoke Platform moderator" : "Grant Platform moderator",
+          name: revoke ? "Remove platform moderator access" : "Grant platform moderator access",
         }),
       );
       expect(mocks.grantPlatformModerator).not.toHaveBeenCalled();
@@ -133,6 +139,33 @@ describe("AdminModeratorsPage", () => {
     },
   );
 
+  it("loads a bounded persistent platform moderator list with identity, role and remove confirmation", async () => {
+    mocks.getGameModerators.mockResolvedValue([]);
+    mocks.listAdminUsers.mockResolvedValue({
+      items: [
+        {
+          id: "listed",
+          name: "Listed Moderator",
+          username: "listed",
+          role: "PLATFORM_MODERATOR",
+          status: "ACTIVE",
+        },
+      ],
+      meta: { totalPages: 2, page: 1, total: 21 },
+    });
+    renderPage();
+    expect(await screen.findByText("@listed")).toBeVisible();
+    expect(mocks.listAdminUsers).toHaveBeenCalledWith(
+      { role: "PLATFORM_MODERATOR", page: 1, limit: 20 },
+      expect.anything(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Remove access" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Remove platform moderator access?");
+    expect(mocks.revokePlatformModerator).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Remove platform access" }));
+    await waitFor(() => expect(mocks.revokePlatformModerator).toHaveBeenCalledWith("listed"));
+  });
+
   it("keeps a failed privilege confirmation open and allows cancellation without a change", async () => {
     mocks.getGameModerators.mockResolvedValue([]);
     mocks.grantPlatformModerator.mockRejectedValue(new Error("User access changed; search again"));
@@ -143,12 +176,14 @@ describe("AdminModeratorsPage", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Select Review Rover (@review-rover)" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Grant Platform moderator" }));
+    fireEvent.click(screen.getByRole("button", { name: "Grant platform moderator access" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(mocks.grantPlatformModerator).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Grant Platform moderator" }));
+    fireEvent.click(screen.getByRole("button", { name: "Grant platform moderator access" }));
     fireEvent.click(screen.getByRole("button", { name: "Grant platform access" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("User access changed; search again");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Something went wrong. Please try again.",
+    );
     expect(screen.getByRole("alertdialog")).toBeVisible();
   });
 

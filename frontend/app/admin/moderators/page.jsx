@@ -1,9 +1,11 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { FiAlertTriangle, FiPlus, FiTrash2, FiUserCheck, FiX } from "react-icons/fi";
 import { ModeratorPicker } from "../../../components/moderation/ModeratorPicker";
+import { AvatarFace } from "../../../components/AvatarFace";
 import { PlatformModeratorManagement } from "../../../components/admin/PlatformModeratorManagement";
 import { AdminQueryBoundary } from "../../../components/admin/AdminQueryBoundary";
 import { AdminShell } from "../../../components/admin/AdminShell";
@@ -13,6 +15,12 @@ import { useRequireAdmin } from "../../../hooks/admin/useRequireAdmin";
 import { useToast } from "../../../hooks/useToast";
 import { api } from "../../../lib/api";
 import { queries, queryKeys } from "../../../lib/queries";
+
+function PlatformModeratorsWithSearch({ actorId }) {
+  const params = useSearchParams();
+  const search = params?.get("search")?.slice(0, 100) || "";
+  return <PlatformModeratorManagement key={search} actorId={actorId} initialSearch={search} />;
+}
 
 function AssignmentForm({ game, actorId, onClose, onSaved }) {
   const [target, setTarget] = useState(null);
@@ -192,7 +200,9 @@ export default function AdminModeratorsPage() {
           <p>Manage platform access and separate game assignments.</p>
         </div>
       </div>
-      <PlatformModeratorManagement actorId={session.user.id} />
+      <Suspense fallback={<AdminState kind="loading" title="Loading platform moderators" />}>
+        <PlatformModeratorsWithSearch actorId={session.user.id} />
+      </Suspense>
       <div className="admin-page-heading">
         <div>
           <span className="admin-eyebrow">Permissions</span>
@@ -280,8 +290,21 @@ export default function AdminModeratorsPage() {
                       <tr key={assignment.id || assignment.user.id}>
                         <td>
                           <div className="admin-user-cell">
-                            <span>{assignment.user.name?.charAt(0)?.toUpperCase() || "M"}</span>
-                            <b>{assignment.user.name || "Unnamed user"}</b>
+                            <span className="case-person-avatar">
+                              <AvatarFace
+                                name={assignment.user.name}
+                                image={assignment.user.image}
+                              />
+                            </span>
+                            <div>
+                              <b>{assignment.user.name || "Unnamed user"}</b>
+                              {assignment.user.username && (
+                                <small>@{assignment.user.username}</small>
+                              )}
+                              <small>
+                                Game moderator for {selectedGame?.name || "this community"}
+                              </small>
+                            </div>
                           </div>
                         </td>
                         <td>{assignment.user.email}</td>

@@ -3,6 +3,9 @@ import { PlatformCaseModerationController } from '../src/reports/platform-modera
 import { PlatformModeratorsController } from '../src/game-moderators/platform-moderators.controller';
 import { PlatformModeratorsService } from '../src/game-moderators/platform-moderators.service';
 import { GameModeratorsController } from '../src/game-moderators/game-moderators.controller';
+import { AdminUsersController } from '../src/users/admin-users.controller';
+import { UserModerationService } from '../src/users/user-moderation.service';
+import { SessionTerminator } from '../src/auth/session-terminator.service';
 type TestRequest = Request & {
   user?: { id: string };
   session?: { user: { id: string } };
@@ -207,6 +210,7 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
       controllers: [
         PlatformModeratorsController,
         GameModeratorsController,
+        AdminUsersController,
         ReportsController,
         PlatformCaseModerationController,
         GameCaseModerationController,
@@ -234,6 +238,11 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         OverviewService,
         GamesRepository,
         UsersRepository,
+        UserModerationService,
+        {
+          provide: SessionTerminator,
+          useValue: { terminateAllSessions: () => Promise.resolve() },
+        },
         {
           provide: EventPublisherPort,
           useValue: {
@@ -307,6 +316,155 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         await isolated?.cleanup();
       }
     }
+  });
+
+  describe('MVP transactional authorization and bounded lists', () => {
+    it.each(['claim', 'assign', 'resolve', 'dismiss'] as const)(
+      'rejects platform %s if the actor loses their role after service authorization',
+      async (action) => {
+        const actor = await user();
+        await db.user.update({
+          where: { id: actor },
+          data: { role: 'PLATFORM_MODERATOR' },
+        });
+        const result = await submit((await post()).id, await user());
+        const before = await db.moderationCase.findUniqueOrThrow({
+          where: { id: result.body.caseId },
+        });
+        let revoked = false;
+        const hook = intercept(
+          (tx) =>
+            new Proxy(tx, {
+              get(target, key): unknown {
+                if (key !== '$queryRaw') return Reflect.get(target, key);
+                return async (
+                  query: TemplateStringsArray,
+                  ...values: unknown[]
+                ) => {
+                  if (!revoked) {
+                    revoked = true;
+                    await db.user.update({
+                      where: { id: actor },
+                      data: { role: 'USER' },
+                    });
+                  }
+                  return tx.$queryRaw(query, ...values);
+                };
+              },
+            }),
+        );
+        try {
+          expect(
+            (
+              await api(
+                `/moderation/cases/${result.body.caseId}/${action === 'assign' ? 'assignee' : action}`,
+                actor,
+                action === 'assign' ? { assigneeId: admin } : {},
+                'PATCH',
+              )
+            ).status,
+          ).toBe(403);
+        } finally {
+          hook.mockRestore();
+        }
+        expect(revoked).toBe(true);
+        expect(
+          await db.moderationCase.findUniqueOrThrow({
+            where: { id: before.id },
+          }),
+        ).toEqual(before);
+        expect(
+          await db.auditLog.count({ where: { targetId: before.id } }),
+        ).toBe(0);
+      },
+    );
+    it.each(['claim', 'assign', 'resolve', 'dismiss'] as const)(
+      'rejects game %s if the exact assignment is removed after service authorization',
+      async (action) => {
+        const actor = await user();
+        await db.gameModerator.create({ data: { userId: actor, gameId } });
+        const result = await submit((await post(true)).id, await user());
+        const before = await db.moderationCase.findUniqueOrThrow({
+          where: { id: result.body.caseId },
+        });
+        let revoked = false;
+        const hook = intercept(
+          (tx) =>
+            new Proxy(tx, {
+              get(target, key): unknown {
+                if (key !== '$queryRaw') return Reflect.get(target, key);
+                return async (
+                  query: TemplateStringsArray,
+                  ...values: unknown[]
+                ) => {
+                  if (!revoked) {
+                    revoked = true;
+                    await db.gameModerator.deleteMany({
+                      where: { userId: actor, gameId },
+                    });
+                  }
+                  return tx.$queryRaw(query, ...values);
+                };
+              },
+            }),
+        );
+        try {
+          expect(
+            (
+              await api(
+                `/games/${slug}/moderation/cases/${result.body.caseId}/${action === 'assign' ? 'assignee' : action}`,
+                actor,
+                action === 'assign' ? { assigneeId: admin } : {},
+                'PATCH',
+              )
+            ).status,
+          ).toBe(403);
+        } finally {
+          hook.mockRestore();
+        }
+        expect(revoked).toBe(true);
+        expect(
+          await db.moderationCase.findUniqueOrThrow({
+            where: { id: before.id },
+          }),
+        ).toEqual(before);
+        expect(
+          await db.auditLog.count({ where: { targetId: before.id } }),
+        ).toBe(0);
+      },
+    );
+    it('reuses the Admin Users role-filtered bounded list and prevents non-admin access', async () => {
+      const targets = [await user(), await user(), await user()];
+      await db.user.updateMany({
+        where: { id: { in: targets } },
+        data: { role: 'PLATFORM_MODERATOR' },
+      });
+      const one = await api(
+        '/admin/users?role=PLATFORM_MODERATOR&limit=2&page=1',
+        admin,
+      );
+      expect(one.status).toBe(200);
+      expect(one.body.items).toHaveLength(2);
+      expect(
+        one.body.items.every((item) => item.role === 'PLATFORM_MODERATOR'),
+      ).toBe(true);
+      expect(one.body.items[0]).toHaveProperty('username');
+      expect(one.body.items[0]).toHaveProperty('image');
+      const two = await api(
+        '/admin/users?role=PLATFORM_MODERATOR&limit=2&page=2',
+        admin,
+      );
+      expect(
+        new Set([...one.body.items, ...two.body.items].map((item) => item.id))
+          .size,
+      ).toBe(3);
+      expect(
+        (await api('/admin/users?role=PLATFORM_MODERATOR', targets[0])).status,
+      ).toBe(403);
+      expect(
+        (await api('/admin/users?role=PLATFORM_MODERATOR', author)).status,
+      ).toBe(403);
+    });
   });
 
   describe('navigation and platform moderator privileges', () => {
@@ -527,7 +685,7 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         where: { id: target },
         data: { username: 'followup-rover', name: 'Followup Rover' },
       });
-      for (const q of ['@followup-rover', 'followup-rov', 'Followup Rover']) {
+      for (const q of ['@followup-rover', 'followup-rover', 'Followup Rover']) {
         const candidates = await api(
           `/games/${slug}/moderators/candidates?q=${encodeURIComponent(q)}`,
           admin,
@@ -1101,6 +1259,10 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         reasonCode: saved.reasonCode,
         targetSnapshot: saved.targetSnapshot!,
       },
+    });
+    await db.moderationCase.update({
+      where: { id: saved.caseId },
+      data: { reportCount: { increment: 1 } },
     });
     expect((await submit(source.id, await user())).status).toBe(201);
     expect(await cases(source.id)).toEqual([

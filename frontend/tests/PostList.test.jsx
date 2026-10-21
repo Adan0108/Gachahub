@@ -193,6 +193,8 @@ describe("PostList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Comments on Reply report" }));
     fireEvent.click(screen.getByRole("button", { name: "View 1 replies" }));
     fireEvent.click(screen.getByRole("button", { name: "Report reply" }));
+    expect(screen.getByRole('button',{name:'Submit report'})).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/reason/i), {target:{value:'UNMARKED_SPOILERS'}});
     expect(screen.getByRole("heading", { name: "What’s wrong with this comment?" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Submit report" }));
     await waitFor(() =>

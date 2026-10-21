@@ -201,6 +201,7 @@ export class ReportModerationService {
     assigneeId?: string,
   ) {
     let gameId: string | undefined;
+    let caseGameId: string | null;
     if (gameSlug !== undefined) {
       const moderationCase = await this.authorizeGameCase(
         gameSlug,
@@ -208,9 +209,10 @@ export class ReportModerationService {
         caseId,
       );
       gameId = moderationCase.gameId!;
+      caseGameId = moderationCase.gameId;
     } else {
       await this.authorizePlatform(userId);
-      await this.loadCase(caseId);
+      caseGameId = (await this.loadCase(caseId)).gameId;
     }
     const auditAction: CaseAuditAction =
       action === 'assign'
@@ -221,6 +223,8 @@ export class ReportModerationService {
             ? 'CASE_RESOLVED'
             : 'CASE_DISMISSED';
     const context: CaseTransitionContext = {
+      actorId: userId,
+      caseGameId,
       gameId,
       audit: (moderationCase, tx) =>
         this.auditLogService.recordOrThrow(

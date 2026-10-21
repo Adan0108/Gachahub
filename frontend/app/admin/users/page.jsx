@@ -2,6 +2,7 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
+import Link from "next/link";
 import { FiRotateCcw, FiSearch, FiSlash } from "react-icons/fi";
 import { AdminActionDialog } from "../../../components/admin/AdminActionDialog";
 import { AdminPagination } from "../../../components/admin/AdminPagination";
@@ -44,10 +45,9 @@ const STATUS_LABEL = { SUSPENDED: "suspended", BANNED: "banned", ACTIVE: "reacti
 export default function AdminUsersPage() {
   const { notice, showNotice } = useToast(2400);
   const { session, page, setPage, filters, setFilter, items, meta, invalidate, query } =
-    useAdminList(
-      (filters, page) => queries.adminUsers(filters.status, filters.search, page),
-      { prefix: queryKeys.adminUsers.all },
-    );
+    useAdminList((filters, page) => queries.adminUsers(filters.status, filters.search, page), {
+      prefix: queryKeys.adminUsers.all,
+    });
   // { user, nextStatus: "SUSPENDED" | "BANNED" | "ACTIVE" } - one target for both restrict and
   // reactivate, since both are just api.setUserStatus with a different nextStatus.
   const [target, setTarget] = useState(null);
@@ -149,13 +149,17 @@ export default function AdminUsersPage() {
                         <span>{user.name?.charAt(0)?.toUpperCase() || "U"}</span>
                         <div>
                           <b>{user.name}</b>
-                          <small>{user.id}</small>
+                          {user.username && <small>@{user.username}</small>}
                         </div>
                       </div>
                     </td>
                     <td>{user.email}</td>
                     <td>
-                      <span className="admin-type-badge">{user.role}</span>
+                      <span className="admin-type-badge">
+                        {{ ADMIN: "Admin", PLATFORM_MODERATOR: "Platform moderator", USER: "User" }[
+                          user.role
+                        ] || "User"}
+                      </span>
                     </td>
                     <td>
                       <span className={`admin-status ${USER_STATUS_CLASS[user.status] || ""}`}>
@@ -168,6 +172,14 @@ export default function AdminUsersPage() {
                       )}
                     </td>
                     <td>
+                      {user.status === "ACTIVE" && user.role !== "ADMIN" && (
+                        <Link
+                          className="admin-button admin-button-secondary"
+                          href={`/admin/moderators?search=${encodeURIComponent(user.username ? "@" + user.username : user.name)}`}
+                        >
+                          Manage moderation access
+                        </Link>
+                      )}
                       {user.status === "ACTIVE" ? (
                         <button
                           aria-label={`Restrict ${user.name}`}

@@ -1,4 +1,4 @@
-/* Case workspace only: admin pages retain their own palette and layout. */
+/* Case workspace and the affected moderation/admin review surfaces. */
 .moderation-workspace {
   --admin-bg: var(--bg);
   --admin-panel: var(--panel);
@@ -682,6 +682,41 @@
 .case-back-link { display: inline-flex; margin: 0 0 20px; font-weight: 700; }
 .platform-moderator-management { padding: 24px; margin-bottom: 28px; }
 .platform-moderator-selection { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+.moderation-review-surface .admin-main {
+  --admin-bg: var(--bg); --admin-panel: var(--panel); --admin-panel-raised: var(--panel2);
+  --admin-line: var(--line); --admin-text: var(--text); --admin-muted: var(--muted);
+  background: var(--bg); color: var(--text);
+}
+.moderation-review-surface :is(.admin-topbar, .admin-panel, .admin-dialog, .admin-scope-picker, .admin-toolbar, .admin-moderation-summary article) { background: var(--panel); color: var(--text); border-color: var(--line); }
+.moderation-review-surface :is(.admin-table th, .admin-scope-picker select, .admin-toolbar input, .admin-toolbar select, .admin-dialog textarea, .admin-dialog select, .admin-form input) { background: var(--panel2); color: var(--text); border-color: var(--line); }
+.moderation-review-surface .admin-table td { color: var(--text); }
+.moderation-review-surface .admin-table tbody tr:hover { background: var(--panel2); }
+.moderation-review-surface :is(.admin-type-badge, .admin-icon-button, .admin-button-secondary, .admin-dialog-heading button) { background: var(--panel2); color: var(--text); border-color: var(--line); }
+.moderation-review-surface .admin-type-badge { white-space: normal; }
+.moderation-review-surface a.admin-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; text-decoration: none; }
+.moderation-review-surface .admin-main a.admin-button-primary { background: var(--purple); border-color: var(--purple); color: #fff; }
+.moderation-review-surface .admin-search { background: var(--panel2); border-color: var(--line); }
+.moderation-review-surface .admin-search input { padding-inline: 0; }
+.moderation-review-surface :is(.admin-page-count, .admin-toolbar > span) { color: var(--purple); background: var(--panel2); border-color: var(--line); }
+.moderation-review-surface .admin-table td:last-child { min-width: 140px; }
+.moderation-review-surface .admin-table td:last-child .admin-button { margin: 4px; }
+.moderation-review-surface :is(button, a, input, select, textarea):focus-visible { outline: 3px solid var(--purple); outline-offset: 3px; }
+.moderation-review-surface :is(button, .admin-button)[disabled] { opacity: .55; cursor: not-allowed; }
+.moderation-review-surface .admin-moderation-summary article { display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.moderation-review-surface .admin-moderation-summary a { white-space: nowrap; }
+.case-back-link { min-height: 40px; align-items: center; padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); text-decoration: none; }
+.case-content-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 20px; }
+.case-content-controls > p { flex-basis: 100%; }
+.case-content-controls a.case-button { display: inline-flex; align-items: center; text-decoration: none; }
+.case-visibility-notice { font-weight: 700; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); }
+.case-visibility-warning { border-color: #b47b18; color: #ffd68b; background: #372a17; }
+:root[data-theme="light"] .case-visibility-warning { color: #704500; background: #fff1cb; }
+.moderation-review-surface .platform-moderator-management h2 { margin-top: 0; }
+.platform-moderator-management .admin-table-wrap { margin-top: 24px; }
+@media (max-width: 620px) {
+  .platform-moderator-management { padding: 16px; }
+  .case-content-controls .case-button { width: 100%; justify-content: center; }
+}
 @media (max-width: 980px) {
   .moderation-console.admin-shell { display: block; }
   .moderation-console .admin-sidebar { position: static; width: auto; height: auto; padding: 12px 18px; }
@@ -690,4 +725,103 @@
   .moderation-console .admin-nav a { justify-content: flex-start; min-height: 42px; padding: 8px 12px; }
   .moderation-console .admin-nav span { display: inline; }
   .moderation-console .admin-return-link { display: inline-flex; margin-top: 8px; padding: 4px 12px; }
+}
+/* Shared action controls: links and buttons use the same geometry and states. */
+:is(.moderation-review-surface, .moderation-workspace) {
+  --action-primary: #6341b7;
+  --action-primary-hover: #503194;
+  --action-primary-line: #ac91f2;
+  --action-line: #798299;
+  --action-focus: #c9baff;
+  --action-danger: #ffb7cf;
+  --action-danger-bg: #402335;
+  --action-danger-hover: #572c43;
+}
+:root[data-theme="light"] :is(.moderation-review-surface, .moderation-workspace) {
+  --action-primary-line: #6341b7;
+  --action-line: #86768f;
+  --action-focus: #6341b7;
+  --action-danger: #94143f;
+  --action-danger-bg: #fce5ee;
+  --action-danger-hover: #f8d0df;
+}
+:is(.moderation-review-surface, .moderation-workspace) :is(.admin-button, .admin-icon-button, .case-button, .case-back-link, :where(.admin-dialog-heading, .admin-action-heading, .case-pagination, .admin-pagination) > button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--action-line);
+  border-radius: 8px;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transform: none;
+  box-shadow: none;
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+:is(.moderation-review-surface, .moderation-workspace) :is(.admin-icon-button, .admin-dialog-heading button, .admin-action-heading > button) {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  padding: 10px;
+}
+:is(.moderation-review-surface, .moderation-workspace) :is(.admin-button, .admin-icon-button, .case-button, .case-back-link, :where(.admin-dialog-heading, .admin-action-heading, .case-pagination, .admin-pagination) > button):hover:not(:disabled) {
+  background: var(--panel);
+  border-color: var(--action-focus);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--action-focus);
+  transform: none;
+}
+:is(.moderation-review-surface, .moderation-workspace) :is(.admin-button-primary, .case-button-primary),
+.moderation-review-surface .admin-main a.admin-button-primary {
+  background: var(--action-primary);
+  border-color: var(--action-primary-line);
+  color: #fff;
+}
+:is(.moderation-review-surface, .moderation-workspace) :is(.admin-button-primary, .case-button-primary):hover:not(:disabled),
+.moderation-review-surface .admin-main a.admin-button-primary:hover {
+  background: var(--action-primary-hover);
+  border-color: var(--action-primary-line);
+  color: #fff;
+  box-shadow: none;
+}
+:is(.moderation-review-surface, .moderation-workspace) :is(.admin-button-danger, .admin-icon-danger, .case-button-danger) {
+  background: var(--action-danger-bg);
+  border-color: var(--action-danger);
+  color: var(--action-danger);
+}
+:is(.moderation-review-surface, .moderation-workspace) :is(.admin-button-danger, .admin-icon-danger, .case-button-danger):hover:not(:disabled) {
+  background: var(--action-danger-hover);
+  border-color: var(--action-danger);
+  color: var(--action-danger);
+  box-shadow: inset 0 0 0 1px var(--action-danger);
+}
+:is(.moderation-review-surface, .moderation-workspace) :is(button, a):focus-visible {
+  outline: 3px solid var(--action-focus);
+  outline-offset: 3px;
+}
+:is(.moderation-review-surface, .moderation-workspace) :is(button, .admin-button):disabled {
+  background: var(--panel2);
+  color: var(--muted);
+  border-color: var(--line);
+  box-shadow: none;
+  transform: none;
+  opacity: .65;
+  cursor: not-allowed;
+}
+.moderation-workspace .case-table th:last-child { width: 126px; }
+.moderation-workspace .case-table .case-button { white-space: nowrap; }
+@media (max-width: 620px) {
+  .platform-moderator-selection > .admin-button { width: 100%; }
+  .case-actions > button { flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.moderation-review-surface, .moderation-workspace) :is(button, .admin-button, .case-button, .case-back-link) { transition: none; }
 }

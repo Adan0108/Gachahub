@@ -48,6 +48,7 @@ export class OverviewService {
       moderatorCount,
       topGames,
       recentActivity,
+      caseCounts,
     ] = await Promise.all([
       this.usersRepository.countActive(),
       this.gamesRepository.countActive(),
@@ -58,6 +59,7 @@ export class OverviewService {
         page: 1,
         limit: RECENT_ACTIVITY_LIMIT,
       }),
+      this.reportsRepository.countActiveCases(),
     ]);
 
     const [openReportsByGame, userNameById] = await Promise.all([
@@ -75,6 +77,7 @@ export class OverviewService {
         { id: 'reports', value: openReports },
         { id: 'moderators', value: moderatorCount },
       ],
+      moderation: caseCounts,
       communities: topGames.map((game) => ({
         id: game.id,
         name: game.name,

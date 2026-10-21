@@ -146,6 +146,8 @@ describe('ReportsRepository creation retry boundaries', () => {
 
 describe('ReportsRepository direct case transitions', () => {
   const tx = {
+    user: { findUnique: jest.fn() },
+    $queryRaw: jest.fn(),
     moderationCase: { updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
   };
   const prisma = { $transaction: jest.fn() };
@@ -157,6 +159,11 @@ describe('ReportsRepository direct case transitions', () => {
       (work: (client: typeof tx) => Promise<unknown>) => work(tx),
     );
     tx.moderationCase.updateMany.mockResolvedValue({ count: 1 });
+    tx.user.findUnique.mockResolvedValue({
+      role: 'PLATFORM_MODERATOR',
+      status: 'ACTIVE',
+    });
+    tx.$queryRaw.mockResolvedValue([]);
     tx.moderationCase.findUniqueOrThrow.mockResolvedValue({
       id: 'case',
       status: 'IN_REVIEW',
@@ -167,13 +174,15 @@ describe('ReportsRepository direct case transitions', () => {
     'claims case directly with authoritative scope %s and atomic audit',
     async (gameId) => {
       const result = await repository.claimCase('case', 'mod', {
+        actorId: 'mod',
+        caseGameId: gameId ?? null,
         gameId,
         audit,
       });
       expect(tx.moderationCase.updateMany).toHaveBeenCalledWith({
         where: {
           id: 'case',
-          ...(gameId !== undefined ? { gameId } : {}),
+          gameId: gameId ?? null,
           status: { in: ['OPEN'] },
         },
         data: { status: 'IN_REVIEW', assignedModeratorId: 'mod' },
@@ -192,7 +201,7 @@ describe('ReportsRepository direct case transitions', () => {
     async (status) => {
       await repository.finalizeCase(
         { id: 'case', status, resolvedById: 'other', resolutionNote: 'Done' },
-        { gameId: 'game', audit },
+        { actorId: 'other', caseGameId: 'game', gameId: 'game', audit },
       );
       expect(tx.moderationCase.updateMany).toHaveBeenCalledWith({
         where: {
@@ -216,14 +225,18 @@ describe('ReportsRepository direct case transitions', () => {
       tx.moderationCase.updateMany.mockResolvedValue({ count: 0 });
       const result =
         action === 'claim'
-          ? await repository.claimCase('case', 'mod', { audit })
+          ? await repository.claimCase('case', 'mod', {
+              actorId: 'mod',
+              caseGameId: null,
+              audit,
+            })
           : await repository.finalizeCase(
               {
                 id: 'case',
                 status: action === 'resolve' ? 'RESOLVED' : 'DISMISSED',
                 resolvedById: 'mod',
               },
-              { audit },
+              { actorId: 'mod', caseGameId: null, audit },
             );
       expect(result).toBeNull();
       expect(tx.moderationCase.findUniqueOrThrow).not.toHaveBeenCalled();
@@ -233,9 +246,13 @@ describe('ReportsRepository direct case transitions', () => {
   it('propagates audit failure out of the same transaction', async () => {
     const error = new Error('audit failed');
     audit.mockRejectedValue(error);
-    await expect(repository.claimCase('case', 'mod', { audit })).rejects.toBe(
-      error,
-    );
+    await expect(
+      repository.claimCase('case', 'mod', {
+        actorId: 'mod',
+        caseGameId: null,
+        audit,
+      }),
+    ).rejects.toBe(error);
   });
 });
 

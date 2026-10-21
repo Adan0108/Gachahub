@@ -5,6 +5,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/moderation/cases" }));
 import { CaseQueue } from "../components/moderation/CaseQueue";
 import { CaseDetail } from "../components/moderation/CaseDetail";
 import { api } from "../lib/api";
+import { moderationError } from "../lib/moderation";
 
 const session = vi.hoisted(() => ({
   user: { id: "actor", status: "ACTIVE", role: "PLATFORM_MODERATOR" },
@@ -122,6 +123,146 @@ it("keeps ordinary game-moderator workload navigation inside the assigned game",
   expect(screen.queryByRole("navigation", { name: "Admin navigation" })).not.toBeInTheDocument();
 });
 
+it("never displays a raw internal server error", () => {
+  expect(moderationError({ status: 500, message: "SQL /server/private.ts" })).toBe(
+    "Something went wrong. Please try again.",
+  );
+  expect(moderationError(new Error("Internal detail"))).toBe(
+    "Something went wrong. Please try again.",
+  );
+});
+
+it("defaults to active cases and refreshes from the first cursor page", async () => {
+  api.listPlatformCases.mockResolvedValue({ items: [row], nextCursor: "next-cursor" });
+  mount(<CaseQueue />);
+  expect(screen.getByRole("option", { name: "Active cases" }).selected).toBe(true);
+  fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+  await waitFor(() =>
+    expect(api.listPlatformCases).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cursor: "next-cursor" }),
+      expect.anything(),
+    ),
+  );
+  await waitFor(() => expect(screen.getByRole("button", { name: "Refresh cases" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Refresh cases" }));
+  await waitFor(() =>
+    expect(api.listPlatformCases).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cursor: undefined }),
+      expect.anything(),
+    ),
+  );
+  expect(await screen.findByRole("button", { name: "Previous" })).toBeDisabled();
+});
+
+it.each(["POST", "COMMENT"])(
+  "opens %s context and confirms hide/restore independently of the case decision",
+  async (targetType) => {
+    record.targetType = targetType;
+    record.gameId = "game";
+    record.game = { name: "Game", slug: "game-a" };
+    record.target = {
+      targetType,
+      status: "PUBLISHED",
+      visibility: "PUBLIC",
+      content: "Live evidence",
+      postId: "parent",
+      post: { status: "PUBLISHED", visibility: "PUBLIC", id: "parent" },
+    };
+    vi.spyOn(api, "hideContent").mockImplementation(async () => {
+      record = { ...record, target: { ...record.target, status: "HIDDEN" } };
+      return {};
+    });
+    vi.spyOn(api, "restoreContent").mockImplementation(async () => {
+      record = { ...record, target: { ...record.target, status: "PUBLISHED" } };
+      return {};
+    });
+    mount(<CaseDetail caseId="case-1" />);
+    expect(await screen.findByRole("link", { name: "Open in context" })).toHaveAttribute(
+      "href",
+      targetType === "POST" ? "/post/post" : "/post/parent#comments",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: targetType === "POST" ? "Hide post" : "Hide comment" }),
+    );
+    expect(api.hideContent).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Hide content" }));
+    await waitFor(() =>
+      expect(api.hideContent).toHaveBeenCalledWith({
+        id: "post",
+        type: targetType,
+        gameSlug: "game-a",
+      }),
+    );
+    expect(await screen.findByText("Content status: Hidden")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Open in context" })).not.toBeInTheDocument();
+    expect(screen.getByText("Historical text")).toBeInTheDocument();
+    expect(api.resolvePlatformCase).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: targetType === "POST" ? "Restore post" : "Restore comment",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Restore content" }));
+    expect(await screen.findByText("Content status: Visible")).toBeVisible();
+  },
+);
+
+it("shows visibility in decisions, uses non-destructive No violation copy and does not auto-hide", async () => {
+  record.target.status = "PUBLISHED";
+  record.target.visibility = "PUBLIC";
+  vi.spyOn(api, "hideContent").mockResolvedValue({});
+  mount(<CaseDetail caseId="case-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Action taken" }));
+  const dialog = screen.getByRole("alertdialog");
+  expect(within(dialog).getByText(/Content status: Visible/)).toHaveClass(
+    "case-visibility-warning",
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  const noViolation = screen.getByRole("button", { name: "No violation" });
+  expect(noViolation.className).not.toContain("danger");
+  fireEvent.click(noViolation);
+  expect(screen.getByText("No policy violation was found.")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Record no violation" }));
+  await waitFor(() => expect(api.dismissPlatformCase).toHaveBeenCalled());
+  expect(api.hideContent).not.toHaveBeenCalled();
+});
+
+it("warns before replacing an existing assignee and does not mutate on cancel", async () => {
+  record.assignedModerator = { id: "old", name: "Alex Rivera" };
+  vi.spyOn(api, "searchPlatformCaseAssignees").mockResolvedValue({
+    items: [{ id: "new", name: "Luna Park", username: "luna", role: "PLATFORM_MODERATOR" }],
+  });
+  vi.spyOn(api, "assignPlatformCase").mockResolvedValue(record);
+  mount(<CaseDetail caseId="case-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Assign another moderator" }));
+  fireEvent.change(screen.getByRole("searchbox", { name: "Find moderator" }), {
+    target: { value: "@luna" },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Select Luna Park (@luna)" }));
+  expect(
+    screen.getByText(
+      "This case is currently assigned to Alex Rivera. Assign it to Luna Park instead?",
+    ),
+  ).toBeVisible();
+  expect(api.assignPlatformCase).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select Luna Park (@luna)" }));
+  fireEvent.click(screen.getByRole("button", { name: "Reassign case" }));
+  await waitFor(() =>
+    expect(api.assignPlatformCase).toHaveBeenCalledWith("case-1", { assigneeId: "new" }),
+  );
+});
+
+it("does not offer a personal content visibility action to a platform moderator", async () => {
+  record.target.status = "PUBLISHED";
+  record.target.visibility = "PUBLIC";
+  mount(<CaseDetail caseId="case-1" />);
+  expect(
+    await screen.findByText("An Admin must change visibility of content outside a community."),
+  ).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Hide post" })).not.toBeInTheDocument();
+});
+
 beforeEach(() => {
   session.user = { id: "actor", role: "PLATFORM_MODERATOR", status: "ACTIVE" };
   record = {
@@ -177,8 +318,8 @@ it.each(["ADMIN", "PLATFORM_MODERATOR"])(
     session.user.role = role;
     mount(<CaseQueue />);
     expect(await screen.findByRole("link", { name: "View case" })).toBeInTheDocument();
-    expect(screen.getByText("3 reports")).toBeInTheDocument();
-    expect(screen.getByText("2 people")).toBeInTheDocument();
+    expect(screen.getByText("Reported by 2 people")).toBeInTheDocument();
+    expect(screen.queryByText("3 reports")).not.toBeInTheDocument();
     expect(screen.getAllByRole("row")).toHaveLength(2);
     expect(Boolean(screen.queryByRole("link", { name: "Admin console" }))).toBe(role === "ADMIN");
   },
@@ -274,7 +415,7 @@ it.each(["USER", "GAME_MODERATOR"])("denies %s platform access even with assignm
 it("grants only assigned-game access to an ordinary moderator", async () => {
   session.user.role = "USER";
   const view = mount(<CaseQueue gameSlug="game-a" />);
-  expect(await screen.findByText("3 reports")).toBeInTheDocument();
+  expect(await screen.findByText("Reported by 2 people")).toBeInTheDocument();
   view.rerender(
     <QueryClientProvider client={new QueryClient()}>
       <CaseQueue gameSlug="game-b" />
@@ -292,7 +433,7 @@ it.each(["ADMIN", "PLATFORM_MODERATOR"])(
   async (role) => {
     session.user.role = role;
     mount(<CaseQueue gameSlug="game-b" />);
-    expect(await screen.findByText("3 reports")).toBeInTheDocument();
+    expect(await screen.findByText("Reported by 2 people")).toBeInTheDocument();
     expect(api.listModeratedGames).not.toHaveBeenCalled();
   },
 );
@@ -368,7 +509,7 @@ it.each(["RESOLVED", "DISMISSED"])(
     mount(<CaseDetail caseId="case-1" />);
     expect(await screen.findByText("No user reports available.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Assign to me" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Action taken" })).not.toBeInTheDocument();
   },
 );
 it("claims an OPEN case and refreshes detail", async () => {
@@ -380,19 +521,23 @@ it("claims an OPEN case and refreshes detail", async () => {
   expect(api.claimPlatformCase).toHaveBeenCalledWith("case-1", { resolutionNote: undefined });
 });
 it.each([
-  ["OPEN", "Resolve"],
-  ["OPEN", "Dismiss"],
-  ["IN_REVIEW", "Resolve"],
-  ["IN_REVIEW", "Dismiss"],
+  ["OPEN", "Action taken"],
+  ["OPEN", "No violation"],
+  ["IN_REVIEW", "Action taken"],
+  ["IN_REVIEW", "No violation"],
 ])("supports direct %s -> %s with optional note", async (status, action) => {
   record.status = status;
   mount(<CaseDetail caseId="case-1" />);
   fireEvent.click(await screen.findByRole("button", { name: action }));
   fireEvent.change(screen.getByLabelText("Decision note"), { target: { value: " Reviewed " } });
-  fireEvent.click(screen.getByRole("button", { name: `${action} case` }));
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: action === "Action taken" ? "Record action taken" : "Record no violation",
+    }),
+  );
   await waitFor(() =>
     expect(
-      api[action === "Resolve" ? "resolvePlatformCase" : "dismissPlatformCase"],
+      api[action === "Action taken" ? "resolvePlatformCase" : "dismissPlatformCase"],
     ).toHaveBeenCalledWith("case-1", { resolutionNote: "Reviewed" }),
   );
 });
@@ -415,8 +560,8 @@ it("keeps a rejected decision editable after a 400", async () => {
     Object.assign(new Error("Invalid note"), { status: 400 }),
   );
   mount(<CaseDetail caseId="case-1" />);
-  fireEvent.click(await screen.findByRole("button", { name: "Resolve" }));
-  fireEvent.click(screen.getByRole("button", { name: "Resolve case" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Action taken" }));
+  fireEvent.click(screen.getByRole("button", { name: "Record action taken" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Check the filters or note");
   expect(screen.getByRole("alertdialog")).toBeInTheDocument();
 });
