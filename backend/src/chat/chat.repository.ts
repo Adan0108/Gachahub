@@ -636,24 +636,32 @@ export class ChatRepository {
   }
 
   /** Finds encrypted messages newest-first with cursor pagination. */
+  /**
+   * Messages strictly older than `before`. An explicit (createdAt, id) boundary rather than
+   * Prisma's cursor + skip: the boundary message may since have been deleted, and then it is
+   * not among the filtered rows that skip would drop.
+   */
   findMessages(params: {
     conversationId: string;
-    beforeMessageId?: string;
+    before?: { id: string; createdAt: Date };
     limit: number;
   }) {
     return this.prisma.chatMessage.findMany({
       where: {
         conversationId: params.conversationId,
         status: 'SENT',
+        ...(params.before
+          ? {
+              OR: [
+                { createdAt: { lt: params.before.createdAt } },
+                {
+                  createdAt: params.before.createdAt,
+                  id: { lt: params.before.id },
+                },
+              ],
+            }
+          : {}),
       },
-      ...(params.beforeMessageId
-        ? {
-            cursor: {
-              id: params.beforeMessageId,
-            },
-            skip: 1,
-          }
-        : {}),
       take: params.limit,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: {
@@ -668,6 +676,14 @@ export class ChatRepository {
           orderBy: { sortOrder: 'asc' },
         },
       },
+    });
+  }
+
+  /** The position of any message in this conversation - shown, edit or deleted - to page from. */
+  findMessagePosition(messageId: string, conversationId: string) {
+    return this.prisma.chatMessage.findFirst({
+      where: { id: messageId, conversationId },
+      select: { id: true, createdAt: true },
     });
   }
 

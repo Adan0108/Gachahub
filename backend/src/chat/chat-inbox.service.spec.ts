@@ -61,6 +61,7 @@ describe('ChatInboxService', () => {
     findMessageBySenderClientMessageId: jest.fn(),
     findParticipants: jest.fn(),
     findSentMessageInConversation: jest.fn(),
+    findMessagePosition: jest.fn(),
     createMessage: jest.fn(),
     updateParticipantArchivedState: jest.fn(),
     createGameChatEmote: jest.fn(),
@@ -1085,8 +1086,10 @@ describe('ChatInboxService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
-      repository.findSentMessageInConversation.mockResolvedValue({
+      const createdAt = new Date('2026-10-20T10:00:00.000Z');
+      repository.findMessagePosition.mockResolvedValue({
         id: 'message-5',
+        createdAt,
       });
       repository.findMessages.mockResolvedValue([]);
 
@@ -1095,9 +1098,13 @@ describe('ChatInboxService', () => {
         limit: 30,
       });
 
+      expect(repository.findMessagePosition).toHaveBeenCalledWith(
+        'message-5',
+        'conversation-1',
+      );
       expect(repository.findMessages).toHaveBeenCalledWith({
         conversationId: 'conversation-1',
-        beforeMessageId: 'message-5',
+        before: { id: 'message-5', createdAt },
         limit: 30,
       });
     });
@@ -1138,7 +1145,7 @@ describe('ChatInboxService', () => {
         'user-1',
         'conversation-1',
       );
-      expect(repository.findSentMessageInConversation).not.toHaveBeenCalled();
+      expect(repository.findMessagePosition).not.toHaveBeenCalled();
       expect(repository.findMessages).not.toHaveBeenCalled();
     });
 
@@ -1147,7 +1154,7 @@ describe('ChatInboxService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
-      repository.findSentMessageInConversation.mockResolvedValue(null);
+      repository.findMessagePosition.mockResolvedValue(null);
 
       await expect(
         service.findMessages('user-1', 'conversation-1', {

@@ -123,22 +123,25 @@ export class ChatInboxService {
 
     const limit = query.limit;
 
+    let before: { id: string; createdAt: Date } | undefined;
     if (query.beforeMessageId) {
       this.historyFetchRateLimiter.assertNotRateLimited(userId, conversationId);
 
-      const cursorMessage =
-        await this.chatRepository.findSentMessageInConversation(
-          query.beforeMessageId,
-          conversationId,
-        );
-      if (!cursorMessage) {
+      // Any message of this conversation is a valid boundary: a page can end on an edit,
+      // and the boundary may be deleted before the next page is asked for.
+      const position = await this.chatRepository.findMessagePosition(
+        query.beforeMessageId,
+        conversationId,
+      );
+      if (!position) {
         throw new BadRequestException('Invalid pagination cursor');
       }
+      before = position;
     }
 
     const messages = await this.chatRepository.findMessages({
       conversationId,
-      beforeMessageId: query.beforeMessageId,
+      before,
       limit,
     });
     const nextBeforeMessageId = messages.at(-1)?.id ?? null;
