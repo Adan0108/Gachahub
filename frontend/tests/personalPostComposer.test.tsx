@@ -16,7 +16,7 @@ vi.mock("../lib/queries", () => ({
     }),
     categories: (slug: string) => ({
       queryKey: ["categories", slug],
-      queryFn: async () => [{ id: "category", name: "Guides" }],
+      queryFn: async () => [{ id: "category", slug: "guides", name: "Guides" }],
     }),
   },
 }));
@@ -65,7 +65,7 @@ describe("personal/community composer smoke", () => {
     renderComposer();
     await screen.findByRole("option", { name: "Test Game" });
     fireEvent.change(screen.getByLabelText("Post to"), { target: { value: "game" } });
-    fireEvent.change(screen.getByLabelText("Post type"), { target: { value: "GUIDE" } });
+    expect(screen.queryByLabelText("Post type")).not.toBeInTheDocument();
     await screen.findByRole("option", { name: "Guides" });
     fireEvent.change(screen.getByLabelText(/Category/), { target: { value: "category" } });
     fireEvent.change(screen.getByPlaceholderText("Give your post a clear title"), {
@@ -75,7 +75,7 @@ describe("personal/community composer smoke", () => {
     fireEvent.click(screen.getByRole("button", { name: "Publish post" }));
     await waitFor(() =>
       expect(mocks.createPost).toHaveBeenCalledWith(
-        expect.objectContaining({ gameId: "game", type: "GUIDE", categoryId: "category" }),
+        expect.objectContaining({ gameId: "game", categoryId: "category" }),
       ),
     );
   });
@@ -84,7 +84,8 @@ describe("personal/community composer smoke", () => {
     renderComposer();
     await screen.findByRole("option", { name: "Test Game" });
     fireEvent.change(screen.getByLabelText("Post to"), { target: { value: "game" } });
-    fireEvent.change(screen.getByLabelText("Post type"), { target: { value: "GUIDE" } });
+    await screen.findByRole("option", { name: "Guides" });
+    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "category" } });
     fireEvent.change(screen.getByLabelText("Post to"), { target: { value: "" } });
     fireEvent.change(screen.getByLabelText("Content"), { target: { value: "Personal again" } });
     fireEvent.click(screen.getByRole("button", { name: "Publish post" }));

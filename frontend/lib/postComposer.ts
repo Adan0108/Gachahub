@@ -21,7 +21,7 @@ type PostForm = {
   categoryId?: string;
   title: string;
   content: string;
-  type: string;
+  type?: string;
   status: string;
   visibility?: string;
   isSpoiler?: boolean;
@@ -64,7 +64,7 @@ export function buildPostPayload(form: PostForm, tags: string[], uploads: Confir
     ...(form.gameId && form.categoryId ? { categoryId: form.categoryId } : {}),
     ...(form.title.trim() ? { title: form.title.trim() } : {}),
     content: form.content.trim(),
-    ...(form.gameId ? { type: form.type } : {}),
+    ...(form.gameId && form.type ? { type: form.type } : {}),
     status: form.status,
     visibility: form.visibility,
     isSpoiler: form.isSpoiler,

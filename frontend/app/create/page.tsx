@@ -21,18 +21,6 @@ import { queries } from "../../lib/queries";
 import { QueryNotice } from "../../components/QueryNotice";
 import { PostMediaPreview } from "../../components/PostMediaPreview";
 
-const postTypes = [
-  "GENERAL",
-  "GUIDE",
-  "BUILD",
-  "TEAM",
-  "LORE",
-  "THEORY",
-  "QUESTION",
-  "NEWS",
-  "MEME",
-];
-
 export default function CreatePostPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -43,7 +31,6 @@ export default function CreatePostPage() {
     categoryId: "",
     title: "",
     content: "",
-    type: "GENERAL",
     visibility: "PUBLIC",
     status: "PUBLISHED",
     isSpoiler: false,
@@ -60,6 +47,15 @@ export default function CreatePostPage() {
     ...queries.categories(selectedGame?.slug),
     enabled: Boolean(selectedGame?.slug),
   });
+  const activeCategories: CategoryRecord[] =
+    selectedGame && !categories.isError
+      ? (categories.data || []).filter((category: CategoryRecord) => category.isActive !== false)
+      : [];
+  const generalCategory = activeCategories.find(
+    (category) => category.slug.toLowerCase() === "general",
+  );
+  const selectedCategory = activeCategories.find((category) => category.id === form.categoryId);
+  const categoryId = selectedGame ? selectedCategory?.id || generalCategory?.id || "" : "";
   const parsedTags = useMemo(() => parsePostTags(form.tags), [form.tags]);
   const tagError = getPostTagError(parsedTags);
 
@@ -73,7 +69,8 @@ export default function CreatePostPage() {
     ((!form.gameId && !form.title.trim()) || form.title.trim().length >= 3) &&
     form.content.trim().length > 0 &&
     !tagError &&
-    !fileError;
+    !fileError &&
+    (!form.gameId || Boolean(selectedGame));
   const publish = useMutation({
     mutationFn: async () => {
       let uploadResult;
@@ -103,7 +100,9 @@ export default function CreatePostPage() {
       }
 
       try {
-        const post = await api.createPost(buildPostPayload(form, parsedTags, uploads));
+        const post = await api.createPost(
+          buildPostPayload({ ...form, categoryId }, parsedTags, uploads),
+        );
         return { ok: true as const, post };
       } catch (error) {
         return {
@@ -200,29 +199,34 @@ export default function CreatePostPage() {
           {form.gameId && (
             <>
               <label>
-                Category <small>(optional)</small>
+                <span id="post-category-label">Category</span>
                 <select
-                  value={form.categoryId}
+                  aria-labelledby="post-category-label"
+                  aria-describedby="post-category-hint"
+                  value={
+                    selectedCategory?.slug.toLowerCase() === "general"
+                      ? ""
+                      : selectedCategory?.id || ""
+                  }
                   onChange={updateField("categoryId")}
-                  disabled={!form.gameId}
+                  disabled={!selectedGame || categories.isLoading || categories.isError}
                 >
-                  <option value="">No category</option>
-                  {(categories.data || []).map((category: CategoryRecord) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
+                  <option value="">General</option>
+                  {activeCategories
+                    .filter((category) => category.slug.toLowerCase() !== "general")
+                    .map((category: CategoryRecord) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
                 </select>
-              </label>
-              <label>
-                Post type
-                <select value={form.type} onChange={updateField("type")}>
-                  {postTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {type.charAt(0) + type.slice(1).toLowerCase()}
-                    </option>
-                  ))}
-                </select>
+                <small id="post-category-hint" role={categories.isError ? "status" : undefined}>
+                  {categories.isLoading
+                    ? "Loading this game's categories..."
+                    : categories.isError
+                      ? "Categories could not be loaded. You can still publish under General."
+                      : "Categories belong to the selected game. Choose General if none fit."}
+                </small>
               </label>
             </>
           )}
@@ -272,6 +276,7 @@ export default function CreatePostPage() {
           Content
           <>
             <textarea
+            aria-label="Content"
               aria-describedby="limit-frontendappcreatepagetsx-0"
               maxLength={30000}
               onChange={updateField("content")}
