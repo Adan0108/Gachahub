@@ -35,7 +35,11 @@ describe('GameModeratorsService', () => {
 
   const auditLogService = { record: jest.fn(), recordOrThrow: jest.fn() };
 
-  const tx = { tx: true };
+  const tx = {
+    tx: true,
+    user: { findUnique: jest.fn() },
+    moderationCase: { updateMany: jest.fn() },
+  };
 
   const prisma = {
     user: {
@@ -513,6 +517,35 @@ describe('GameModeratorsService', () => {
         },
         tx,
       );
+    });
+
+    it("hands the removed moderator's open cases in that game back to the queue", async () => {
+      gameModeratorsRepository.deleteByGameIdAndUserId.mockResolvedValue({
+        count: 1,
+      });
+      tx.user.findUnique.mockResolvedValue({ role: 'USER' });
+
+      await service.removeModerator('wuthering-waves', 'user-2', 'admin-1');
+
+      expect(tx.moderationCase.updateMany).toHaveBeenCalledWith({
+        where: {
+          gameId: 'game-1',
+          assignedModeratorId: 'user-2',
+          status: { in: ['OPEN', 'IN_REVIEW'] },
+        },
+        data: { assignedModeratorId: null, status: 'OPEN' },
+      });
+    });
+
+    it('keeps the cases of someone who can still moderate every game', async () => {
+      gameModeratorsRepository.deleteByGameIdAndUserId.mockResolvedValue({
+        count: 1,
+      });
+      tx.user.findUnique.mockResolvedValue({ role: 'PLATFORM_MODERATOR' });
+
+      await service.removeModerator('wuthering-waves', 'user-2', 'admin-1');
+
+      expect(tx.moderationCase.updateMany).not.toHaveBeenCalled();
     });
 
     it('answers 404, not a 500, when a concurrent removal already deleted the assignment', async () => {

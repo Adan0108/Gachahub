@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { loadActiveUser } from '../common/guards/active-user.util';
+import { releaseModeratorCases } from '../common/moderation/release-moderator-cases';
 import { searchModeratorCandidates } from '../common/moderation/search-moderator-candidates';
 
 @Injectable()
@@ -66,6 +67,19 @@ export class PlatformModeratorsService {
       });
       if (changed.count !== 1)
         throw new ConflictException('User access changed; search again');
+      if (!grant) {
+        // Cases in games they still moderate stay theirs
+        const games = await tx.gameModerator.findMany({
+          where: { userId: targetId },
+          select: { gameId: true },
+        });
+        await releaseModeratorCases(tx, targetId, {
+          OR: [
+            { gameId: null },
+            { gameId: { notIn: games.map((game) => game.gameId) } },
+          ],
+        });
+      }
       await this.audit.recordOrThrow(
         {
           action: grant ? 'MODERATOR_ASSIGNED' : 'MODERATOR_REMOVED',
