@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { DiscordLoggerService } from '../discord/discord-logger.service';
+import { MlsCommitConflictException } from '../exceptions/mls-commit-conflict.exception';
 import { RateLimitedException } from '../exceptions/rate-limited.exception';
 
 type ErrorResponse = {
@@ -17,6 +18,9 @@ type ErrorResponse = {
   code?: string;
   path: string;
   timestamp: string;
+  /** Only on a lost MLS commit race: the client applies the winner and retries. */
+  outcome?: 'conflict';
+  handshake?: object;
 };
 
 @Catch()
@@ -62,6 +66,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
       statusCode: status,
       message,
       ...(code ? { code } : {}),
+      ...(exception instanceof MlsCommitConflictException
+        ? { outcome: exception.outcome, handshake: exception.handshake }
+        : {}),
       path: request.url,
       timestamp: new Date().toISOString(),
     };

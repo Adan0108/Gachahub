@@ -1,4 +1,9 @@
-import { BadRequestException, type ArgumentsHost } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  type ArgumentsHost,
+} from '@nestjs/common';
+import { MlsCommitConflictException } from '../exceptions/mls-commit-conflict.exception';
 import { MembershipChangePendingException } from '../exceptions/membership-change-pending.exception';
 import { HttpExceptionFilter } from './http-exception.filter';
 
@@ -48,5 +53,33 @@ describe('HttpExceptionFilter', () => {
     filter.catch(new BadRequestException({ message: 'nope', code: 42 }), host);
 
     expect(sentBody()).not.toHaveProperty('code');
+  });
+
+  // #97: the client restores, applies the winner and retries only if the 409 carries it
+  it('sends the winning handshake of a lost MLS commit race', () => {
+    const handshake = { id: 'h-7', epoch: 7, payload: 'AAEC' };
+
+    filter.catch(new MlsCommitConflictException(handshake), host);
+
+    expect(response.status).toHaveBeenCalledWith(409);
+    expect(sentBody()).toMatchObject({
+      statusCode: 409,
+      outcome: 'conflict',
+      handshake,
+    });
+  });
+
+  it('never passes other fields of an ordinary conflict through', () => {
+    filter.catch(
+      new ConflictException({
+        message: 'x',
+        outcome: 'conflict',
+        handshake: {},
+      }),
+      host,
+    );
+
+    expect(sentBody()).not.toHaveProperty('outcome');
+    expect(sentBody()).not.toHaveProperty('handshake');
   });
 });
