@@ -1,3 +1,4 @@
+import { ModerationAnalysisScheduler } from '../src/moderation-analysis/moderation-analysis-scheduler.service';
 import { isolatedCaseDatabase } from './support/isolated-case-database';
 import { PlatformCaseModerationController } from '../src/reports/platform-moderation/platform-case-moderation.controller';
 jest.mock('@thallesp/nestjs-better-auth', () => {
@@ -239,6 +240,7 @@ describe('Optional-game comprehensive API/integration verification', () => {
         PostSaveService,
         PostSaveRepository,
         ReportsRepository,
+        ModerationAnalysisScheduler,
         ContentModerationService,
         FollowsService,
         FollowsRepository,

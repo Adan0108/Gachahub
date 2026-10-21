@@ -1,3 +1,4 @@
+import { ModerationAnalysisScheduler } from '../moderation-analysis/moderation-analysis-scheduler.service';
 import { decodeEvidenceCursor } from './domain/report-evidence-pagination';
 jest.mock('../prisma/prisma.service', () => ({ PrismaService: class {} }));
 import { ConflictException } from '@nestjs/common';
@@ -54,7 +55,12 @@ describe('ReportsRepository creation retry boundaries', () => {
     $queryRaw: jest.fn(),
   };
   const prisma = { $transaction: jest.fn() };
-  const repository = new ReportsRepository(prisma as unknown as PrismaService);
+  const repository = new ReportsRepository(
+    prisma as unknown as PrismaService,
+    {
+      scheduleIfNeeded: jest.fn().mockResolvedValue(undefined),
+    } as unknown as ModerationAnalysisScheduler,
+  );
   const unique = () =>
     new Prisma.PrismaClientKnownRequestError('unique conflict', {
       code: 'P2002',
@@ -152,7 +158,12 @@ describe('ReportsRepository direct case transitions', () => {
   };
   const prisma = { $transaction: jest.fn() };
   const audit = jest.fn();
-  const repository = new ReportsRepository(prisma as unknown as PrismaService);
+  const repository = new ReportsRepository(
+    prisma as unknown as PrismaService,
+    {
+      scheduleIfNeeded: jest.fn().mockResolvedValue(undefined),
+    } as unknown as ModerationAnalysisScheduler,
+  );
   beforeEach(() => {
     jest.resetAllMocks();
     prisma.$transaction.mockImplementation(
@@ -256,7 +267,12 @@ describe('ReportsRepository native case reads', () => {
       Promise.all(queries),
     ),
   };
-  const repository = new ReportsRepository(prisma as unknown as PrismaService);
+  const repository = new ReportsRepository(
+    prisma as unknown as PrismaService,
+    {
+      scheduleIfNeeded: jest.fn().mockResolvedValue(undefined),
+    } as unknown as ModerationAnalysisScheduler,
+  );
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.$transaction.mockImplementation((queries: Promise<unknown>[]) =>

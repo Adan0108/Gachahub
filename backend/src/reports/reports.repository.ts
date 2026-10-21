@@ -14,6 +14,7 @@ import {
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ReportTargetSnapshot } from './domain/report-target-snapshot';
+import { ModerationAnalysisScheduler } from '../moderation-analysis/moderation-analysis-scheduler.service';
 
 const reportReceiptSelect = {
   id: true,
@@ -76,7 +77,10 @@ export interface CaseTransitionContext {
 
 @Injectable()
 export class ReportsRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly analysisScheduler: ModerationAnalysisScheduler,
+  ) {}
 
   async findModerationCases(params: {
     gameId?: string | null;
@@ -530,6 +534,13 @@ export class ReportsRepository {
           await tx.moderationCase.update({
             where: { id: moderationCase.id },
             data: { reportCount, uniqueReporterCount: reporters.length },
+          });
+          await this.analysisScheduler.scheduleIfNeeded(tx, {
+            caseId: moderationCase.id,
+            sourceReportId: report.id,
+            targetType: params.targetType,
+            targetId: params.targetId,
+            snapshot: params.snapshot,
           });
           return report;
         });

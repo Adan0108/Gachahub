@@ -31,7 +31,14 @@ export async function isolatedCaseDatabase() {
   const ddl = generated.stdout
     .replace('CREATE SCHEMA IF NOT EXISTS "public";', '')
     .replace(/, 'CASE_(?:CLAIMED|RESOLVED|DISMISSED)'/g, '')
-    .replace(/, 'MODERATION_CASE'/g, '');
+    .replace(/, 'MODERATION_CASE'/g, '')
+    // Apply Stage 2A through its actual migration below.
+    .split(';')
+    .filter(
+      (statement) =>
+        !/moderation_analyses|ModerationAnalysisStatus/.test(statement),
+    )
+    .join(';');
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString)
     throw new Error('DATABASE_URL required for isolated PostgreSQL tests');
@@ -60,6 +67,15 @@ export async function isolatedCaseDatabase() {
         resolve(
           root,
           'prisma/migrations/20261020000000_case_workflow_audit/migration.sql',
+        ),
+        'utf8',
+      ),
+    );
+    await admin.query(
+      readFileSync(
+        resolve(
+          root,
+          'prisma/migrations/20261021000000_moderation_analysis_requests/migration.sql',
         ),
         'utf8',
       ),

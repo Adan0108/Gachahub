@@ -8,6 +8,7 @@ import { Kafka, type Producer } from 'kafkajs';
 
 import type { DomainEventType } from '../domain-events/domain-event.types';
 import { resolveDomainEventTopic } from './kafka-topics';
+import { KafkaBackgroundStart } from './kafka-background-start';
 
 export interface KafkaDomainEvent {
   eventId: string;
@@ -23,6 +24,11 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(KafkaProducerService.name);
 
   private readonly producer: Producer;
+  private readonly startup: KafkaBackgroundStart;
+
+  get isConnected(): boolean {
+    return this.startup.connected;
+  }
 
   constructor() {
     const brokers = process.env.KAFKA_BROKERS?.split(',')
@@ -44,21 +50,26 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.producer = kafka.producer();
+    this.startup = new KafkaBackgroundStart(
+      () => this.producer.connect(),
+      () => this.producer.disconnect(),
+      this.logger,
+    );
   }
 
-  async onModuleInit(): Promise<void> {
-    await this.producer.connect();
-
-    this.logger.log('Kafka producer connected');
+  onModuleInit(): void {
+    this.startup.start();
   }
 
   async onModuleDestroy(): Promise<void> {
-    await this.producer.disconnect();
+    await this.startup.stop();
 
     this.logger.log('Kafka producer disconnected');
   }
 
   async publish(event: KafkaDomainEvent): Promise<void> {
+    await this.startup.waitForAttempt();
+    if (!this.isConnected) throw new Error('Kafka producer is not connected');
     const topic = resolveDomainEventTopic(event.type);
 
     await this.producer.send({

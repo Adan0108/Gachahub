@@ -1,3 +1,8 @@
+import { OutboxRepository } from '../src/outbox/outbox.repository';
+import { OutboxEventPublisher } from '../src/outbox/outbox-event.publisher';
+import { KafkaProducerService } from '../src/kafka/kafka-producer.service';
+import { OutboxDispatcherService } from '../src/outbox/outbox-dispatcher.service';
+import { ModerationAnalysisScheduler } from '../src/moderation-analysis/moderation-analysis-scheduler.service';
 import { isolatedCaseDatabase } from './support/isolated-case-database';
 import { PlatformCaseModerationController } from '../src/reports/platform-moderation/platform-case-moderation.controller';
 type TestRequest = Request & {
@@ -212,6 +217,7 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         { provide: PrismaService, useValue: isolated.prisma },
         ReportsService,
         ReportsRepository,
+        ModerationAnalysisScheduler,
         ReportRateLimiterService,
         ReportModerationService,
         PostVisibilityService,
@@ -228,14 +234,9 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         OverviewService,
         GamesRepository,
         UsersRepository,
-        {
-          provide: EventPublisherPort,
-          useValue: {
-            publish: () => {
-              throw new Error('Report creation must not publish events');
-            },
-          },
-        },
+        OutboxRepository,
+        OutboxEventPublisher,
+        { provide: EventPublisherPort, useExisting: OutboxEventPublisher },
         {
           provide: DiscordLoggerService,
           useValue: { sendError: () => Promise.resolve() },
@@ -301,6 +302,251 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         await isolated?.cleanup();
       }
     }
+  });
+
+  describe('Stage 2A durable text analysis', () => {
+    const analyses = (caseId: string) =>
+      db.moderationAnalysis.findMany({
+        where: { caseId },
+        orderBy: { generation: 'asc' },
+      });
+    const requests = (caseId: string) =>
+      db.outboxEvent.findMany({
+        where: { aggregateId: caseId, type: 'moderation.analysis.requested' },
+      });
+
+    it('starts HTTP and accepts a durable Report with Kafka unavailable', async () => {
+      const kafka = new KafkaProducerService();
+      jest
+        .spyOn(kafka['producer'], 'connect')
+        .mockRejectedValue(new Error('Kafka unavailable'));
+      const module = await Test.createTestingModule({
+        controllers: [ReportsController],
+        providers: [
+          {
+            provide: ReportsService,
+            useValue: app.get<ReportsService>(ReportsService),
+          },
+          { provide: KafkaProducerService, useValue: kafka },
+        ],
+      }).compile();
+      const offlineApp = module.createNestApplication();
+      const reporter = await user();
+      offlineApp.use((req: TestRequest, _res: unknown, next: () => void) => {
+        req.session = { user: { id: reporter } };
+        next();
+      });
+      try {
+        await offlineApp.listen(0, '127.0.0.1');
+        const target = await post();
+        const response = await fetch(`${await offlineApp.getUrl()}/reports`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetType: 'POST',
+            targetId: target.id,
+            reasonCode: 'OTHER',
+          }),
+        });
+        expect(response.status).toBe(201);
+        const receipt = (await response.json()) as ApiBody;
+        await new OutboxDispatcherService(app.get(OutboxRepository), kafka)[
+          'dispatch'
+        ]();
+        expect(await requests(receipt.caseId)).toEqual([
+          expect.objectContaining({ status: 'PENDING', attemptCount: 0 }),
+        ]);
+        expect(await analyses(receipt.caseId)).toHaveLength(1);
+      } finally {
+        await offlineApp.close();
+      }
+    });
+
+    it('atomically schedules one small request, dedupes different reporters/reasons, and preserves duplicate rejection', async () => {
+      const target = await post(false, {
+        title: '  Title  ',
+        content: '  Body  ',
+      });
+      const reporter = await user();
+      const first = await submit(target.id, reporter, 'POST', {
+        details: 'Private complaint',
+      });
+      expect(first.status).toBe(201);
+      const [job] = await analyses(first.body.caseId);
+      expect(job).toMatchObject({
+        sourceReportId: first.body.id,
+        targetType: 'POST',
+        targetId: target.id,
+        generation: 1,
+        status: 'PENDING',
+        inputSchemaVersion: 1,
+        classifierProfile: 'moderation-text-v1',
+        inputSnapshot: { type: 'POST', title: 'Title', content: 'Body' },
+      });
+      const [event] = await requests(first.body.caseId);
+      expect(event).toMatchObject({
+        version: 1,
+        aggregateId: first.body.caseId,
+        status: 'PENDING',
+      });
+      expect(event.payload).toEqual({
+        analysisJobId: job.id,
+        caseId: job.caseId,
+        targetType: 'POST',
+        targetId: target.id,
+        generation: 1,
+        snapshotHash: job.snapshotHash,
+        inputSchemaVersion: 1,
+        classifierProfile: 'moderation-text-v1',
+      });
+      const second = await submit(target.id, await user(), 'POST', {
+        reasonCode: 'HATE',
+      });
+      expect(second.status).toBe(201);
+      expect(second.body.caseId).toBe(first.body.caseId);
+      expect((await submit(target.id, reporter)).status).toBe(409);
+      expect(await analyses(job.caseId)).toHaveLength(1);
+      expect(await requests(job.caseId)).toHaveLength(1);
+      expect(await db.report.count({ where: { caseId: job.caseId } })).toBe(2);
+      expect(
+        await db.moderationCase.findUnique({ where: { id: job.caseId } }),
+      ).toMatchObject({
+        reportCount: 2,
+        uniqueReporterCount: 2,
+        currentRiskScore: null,
+        currentRiskLevel: null,
+      });
+    });
+
+    it('schedules changed content in generation order; returning to old input reuses its job', async () => {
+      const target = await post();
+      const first = await submit(target.id, await user());
+      await db.post.update({
+        where: { id: target.id },
+        data: { content: 'Changed evidence' },
+      });
+      expect((await submit(target.id, await user())).status).toBe(201);
+      const jobs = await analyses(first.body.caseId);
+      expect(jobs.map((job) => job.generation)).toEqual([1, 2]);
+      expect(jobs[0].snapshotHash).not.toBe(jobs[1].snapshotHash);
+      expect(jobs[0].inputSnapshot).toMatchObject({
+        content: 'Original evidence',
+      });
+      await db.post.update({
+        where: { id: target.id },
+        data: { content: 'Original evidence' },
+      });
+      expect((await submit(target.id, await user())).status).toBe(201);
+      expect(await analyses(first.body.caseId)).toHaveLength(2);
+      expect(await requests(first.body.caseId)).toHaveLength(2);
+    });
+
+    it('copies COMMENT input and survives source Report deletion; case deletion owns lifecycle', async () => {
+      const target = await comment((await post()).id);
+      const first = await submit(target.id, await user(), 'COMMENT');
+      const [job] = await analyses(first.body.caseId);
+      expect(job.inputSnapshot).toEqual({
+        type: 'COMMENT',
+        content: 'Comment evidence',
+      });
+      await db.report.delete({ where: { id: first.body.id } });
+      expect(
+        await db.moderationAnalysis.findUnique({ where: { id: job.id } }),
+      ).toMatchObject({
+        sourceReportId: null,
+        inputSnapshot: job.inputSnapshot,
+      });
+      await db.moderationCase.delete({ where: { id: first.body.caseId } });
+      expect(
+        await db.moderationAnalysis.findUnique({ where: { id: job.id } }),
+      ).toBeNull();
+    });
+
+    it('does not reuse analysis across closed and new cases', async () => {
+      const target = await post();
+      const first = await submit(target.id, await user());
+      expect(
+        (
+          await api(
+            `/moderation/cases/${first.body.caseId}/resolve`,
+            admin,
+            {},
+            'PATCH',
+          )
+        ).status,
+      ).toBe(200);
+      const second = await submit(target.id, await user());
+      expect(second.status).toBe(201);
+      expect(second.body.caseId).not.toBe(first.body.caseId);
+      const [oldJob] = await analyses(first.body.caseId);
+      const [newJob] = await analyses(second.body.caseId);
+      expect(newJob.snapshotHash).toBe(oldJob.snapshotHash);
+      expect(newJob.id).not.toBe(oldJob.id);
+      expect(newJob.generation).toBe(1);
+      expect(await requests(second.body.caseId)).toHaveLength(1);
+    });
+
+    it.each(['moderationAnalysis', 'outboxEvent'] as const)(
+      'rolls back case/report/analysis when %s creation fails',
+      async (delegateName) => {
+        const target = await post();
+        const hook = intercept(
+          (tx) =>
+            new Proxy(tx, {
+              get(owner, key): unknown {
+                if (key !== delegateName) return Reflect.get(owner, key);
+                return new Proxy(Reflect.get(owner, key), {
+                  get(delegate, method): unknown {
+                    if (method === 'create')
+                      return () => {
+                        throw new Error('Injected scheduling failure');
+                      };
+                    return Reflect.get(delegate, method);
+                  },
+                });
+              },
+            }),
+        );
+        try {
+          expect((await submit(target.id, await user())).status).toBe(500);
+          expect(await cases(target.id)).toHaveLength(0);
+          expect(
+            await db.report.count({ where: { targetId: target.id } }),
+          ).toBe(0);
+          expect(
+            await db.moderationAnalysis.count({
+              where: { targetId: target.id },
+            }),
+          ).toBe(0);
+        } finally {
+          hook.mockRestore();
+        }
+      },
+    );
+
+    it('enforces both logical identity and generation uniqueness in PostgreSQL', async () => {
+      const target = await post();
+      const first = await submit(target.id, await user());
+      const [job] = await analyses(first.body.caseId);
+      const data = {
+        caseId: job.caseId,
+        targetType: job.targetType,
+        targetId: job.targetId,
+        inputSchemaVersion: job.inputSchemaVersion,
+        inputSnapshot: job.inputSnapshot!,
+        snapshotHash: job.snapshotHash,
+        classifierProfile: job.classifierProfile,
+        generation: 2,
+      };
+      await expect(
+        db.moderationAnalysis.create({ data }),
+      ).rejects.toMatchObject({ code: 'P2002' });
+      await expect(
+        db.moderationAnalysis.create({
+          data: { ...data, snapshotHash: 'different', generation: 1 },
+        }),
+      ).rejects.toMatchObject({ code: 'P2002' });
+    });
   });
 
   it('has the real active-target partial unique index', async () => {
@@ -688,6 +934,20 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
             uniqueReporterCount: expected,
           }),
         ]);
+        const [activeCase] = await cases(source.id);
+        expect(
+          await db.moderationAnalysis.count({
+            where: { caseId: activeCase.id },
+          }),
+        ).toBe(1);
+        expect(
+          await db.outboxEvent.count({
+            where: {
+              aggregateId: activeCase.id,
+              type: 'moderation.analysis.requested',
+            },
+          }),
+        ).toBe(1);
         expect(await db.report.count({ where: { targetId: source.id } })).toBe(
           expected,
         );
@@ -1160,6 +1420,7 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
     expect(
       await db.outboxEvent.count({
         where: {
+          type: { not: 'moderation.analysis.requested' },
           aggregateId: {
             in: [
               personal.id,

@@ -1,4 +1,5 @@
 export const DOMAIN_EVENT_TYPES = {
+  MODERATION_ANALYSIS_REQUESTED: 'moderation.analysis.requested',
   POST_LIKED: 'post.liked',
   COMMENT_CREATED: 'comment.created',
   USER_FOLLOWED: 'user.followed',
@@ -28,6 +29,16 @@ export type ChatParticipantAddedState = 'ACTIVE' | 'JOINING' | 'PENDING';
  * notification-specific enums.
  */
 export interface DomainEventPayloadMap {
+  'moderation.analysis.requested': {
+    analysisJobId: string;
+    caseId: string;
+    targetType: 'POST' | 'COMMENT';
+    targetId: string;
+    generation: number;
+    snapshotHash: string;
+    inputSchemaVersion: number;
+    classifierProfile: string;
+  };
   'post.liked': {
     postId: string;
     postAuthorId: string;
