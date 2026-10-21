@@ -61,6 +61,24 @@ describe('sendEncryptedChatMessage', () => {
     expect(result.message.id).toBe('msg-1');
   });
 
+  // #98: the server has it, so a local save error must not make the send look failed
+  it('still reports a send the server accepted as sent when keeping the local copy fails', async () => {
+    const { api } = await import('../../api');
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockResolvedValue(2);
+    engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
+    vi.mocked(api.sendChatMessage).mockResolvedValue({ message: { id: 'msg-9' } });
+    const save = vi
+      .spyOn(EncryptedIndexedDbMessagePlaintextStore.prototype, 'save')
+      .mockRejectedValueOnce(new Error('disk full'));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(
+      sendEncryptedChatMessage(engine as any, 'device-1', 'conv-1', 'user-bob', 'hi', 'client-9'),
+    ).resolves.toMatchObject({ message: { id: 'msg-9' } });
+    expect(save).toHaveBeenCalled();
+  });
+
   it('sends a link preview card inside the encrypted message and attaches its picture', async () => {
     const { api } = await import('../../api');
     const engine = fakeSyncEngine();

@@ -128,13 +128,18 @@ async function encryptAndSend(
     encryptionMeta: senderMeta(deviceId),
   });
 
-  await plaintextStore.save({
-    messageId: response.message.id,
-    conversationId,
-    senderDeviceId: deviceId,
-    epoch,
-    envelope,
-  });
+  // The server has the message: a local save error must not report the send as failed
+  await plaintextStore
+    .save({
+      messageId: response.message.id,
+      conversationId,
+      senderDeviceId: deviceId,
+      epoch,
+      envelope,
+    })
+    .catch((error: unknown) =>
+      console.warn(`Sent message ${response.message.id} could not be kept on this device`, error),
+    );
 
   return response;
 }

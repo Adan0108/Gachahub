@@ -67,17 +67,17 @@ export async function decryptPendingMessages(params: DecryptPendingParams): Prom
 
     for (const { message, release } of claimed) {
       try {
+        // Kept before the ratchet is saved: the key cannot be used again
         // eslint-disable-next-line no-await-in-loop -- each message must be applied in order
-        const result = await engine.processIncoming(conversationId, wire.get(message.id)!);
-        if (result.kind !== "application") continue;
-        // eslint-disable-next-line no-await-in-loop -- saved at once: the key cannot be used again
-        await store.save({
-          messageId: message.id,
-          conversationId,
-          senderDeviceId: result.senderDeviceId,
-          epoch: result.epoch,
-          envelope: result.envelope,
-        });
+        await engine.processIncoming(conversationId, wire.get(message.id)!, (decrypted) =>
+          store.save({
+            messageId: message.id,
+            conversationId,
+            senderDeviceId: decrypted.senderDeviceId,
+            epoch: decrypted.epoch,
+            envelope: decrypted.envelope,
+          }),
+        );
       } catch (error) {
         console.warn(`Could not decrypt message ${message.id} in the background`, error);
       } finally {

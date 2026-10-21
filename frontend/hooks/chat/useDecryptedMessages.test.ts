@@ -26,6 +26,21 @@ vi.mock('./useDeviceIdentity', () => ({ useDeviceIdentity: vi.fn() }));
 import { useSyncEngine } from './useSyncEngine';
 import { useDeviceIdentity } from './useDeviceIdentity';
 
+
+/** Acts like the real engine: hands a decrypted message to `keep` before returning it (see SyncEngine.processIncoming). */
+function keeping<T extends { processIncoming: (...args: never[]) => unknown }>(fake: T): T {
+  return {
+    ...fake,
+    processIncoming: async (id: unknown, wire: unknown, keep?: (result: unknown) => Promise<void>) => {
+      const result = (await (fake.processIncoming as (...args: unknown[]) => unknown)(id, wire, keep)) as
+        | { kind?: string }
+        | undefined;
+      if (result?.kind === 'application') await keep?.(result);
+      return result;
+    },
+  };
+}
+
 function fakeEngine() {
   return {
     isAtCurrentEpoch: vi.fn(),
@@ -110,7 +125,7 @@ describe('useDecryptedMessages', () => {
   it('does not lose a message an in-flight decrypt finishes for after a newer effect superseded it', async () => {
     const engine = fakeEngine();
     engine.isAtCurrentEpoch.mockResolvedValue(true);
-    vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+    vi.mocked(useSyncEngine).mockReturnValue(keeping(engine) as never);
 
     let resolveFirst: (value: unknown) => void = () => undefined;
     engine.processIncoming.mockImplementationOnce(
@@ -166,7 +181,7 @@ describe('useDecryptedMessages', () => {
   it('waits for a message the background is decrypting, then shows what it saved without decrypting it again', async () => {
     const engine = fakeEngine();
     engine.isAtCurrentEpoch.mockResolvedValue(true);
-    vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+    vi.mocked(useSyncEngine).mockReturnValue(keeping(engine) as never);
     const saved = new Map<string, unknown>();
     plaintextGet.mockImplementation(async (id: string) => saved.get(id));
 
@@ -196,7 +211,7 @@ describe('useDecryptedMessages', () => {
       epoch: 0,
       envelope: { v: 1, type: 'text', body: 'opened it myself' },
     });
-    vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+    vi.mocked(useSyncEngine).mockReturnValue(keeping(engine) as never);
 
     const release = claimDecrypt('m1')!;
     const hook = renderHook();
@@ -220,7 +235,7 @@ describe('useDecryptedMessages', () => {
       epoch: 0,
       envelope: { v: 1, type: 'text', body: 'hi' },
     });
-    vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+    vi.mocked(useSyncEngine).mockReturnValue(keeping(engine) as never);
 
     const msgInA = message('a1');
     const hook = renderHook();
@@ -245,7 +260,7 @@ describe('useDecryptedMessages', () => {
     const networkError = new Error('network down');
     engine.syncCommits.mockRejectedValue(networkError);
     engine.processIncoming.mockRejectedValue(new Error('not caught up yet'));
-    vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+    vi.mocked(useSyncEngine).mockReturnValue(keeping(engine) as never);
 
     const msg = message('m1');
     const hook = renderHook();
@@ -306,7 +321,7 @@ describe('useDecryptedMessages', () => {
             envelope: { v: 1, type: 'text', body: 'in b' },
           }),
     );
-    vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+    vi.mocked(useSyncEngine).mockReturnValue(keeping(engine) as never);
     const hook = renderHook();
 
     await hook.render({ conversationId: 'conv-a', messages: [message('a1')], currentUserId: 'me' });
@@ -351,7 +366,7 @@ describe('useDecryptedMessages', () => {
         epoch: 1,
         envelope: { v: 1, type: 'text', body: 'after the cooldown' },
       });
-      vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+      vi.mocked(useSyncEngine).mockReturnValue(keeping(engine) as never);
       const hook = renderHook();
 
       await hook.render({ conversationId: 'conv-1', messages: [message('m1')], currentUserId: 'me' });
@@ -373,7 +388,7 @@ describe('useDecryptedMessages', () => {
       engine.recoveryWaitMs.mockReturnValue(30_000);
       engine.syncCommits.mockRejectedValue(new GroupStateCorruptedError('conv-1'));
       engine.processIncoming.mockRejectedValue(new Error('no group'));
-      vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+      vi.mocked(useSyncEngine).mockReturnValue(keeping(engine) as never);
       const hook = renderHook();
 
       await hook.render({ conversationId: 'conv-1', messages: [message('m1')], currentUserId: 'me' });
@@ -390,7 +405,7 @@ describe('useDecryptedMessages', () => {
       engine.isAtCurrentEpoch.mockResolvedValue(false);
       engine.syncCommits.mockRejectedValue(new GroupStateCorruptedError('conv-1'));
       engine.processIncoming.mockRejectedValue(new Error('no group'));
-      vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+      vi.mocked(useSyncEngine).mockReturnValue(keeping(engine) as never);
       const hook = renderHook();
 
       await hook.render({ conversationId: 'conv-1', messages: [message('m1')], currentUserId: 'me' });
@@ -410,7 +425,7 @@ describe('useDecryptedMessages', () => {
         epoch: 1,
         envelope: { v: 1, type: 'text', body: 'hi' },
       });
-      vi.mocked(useSyncEngine).mockReturnValue(engine as never);
+      vi.mocked(useSyncEngine).mockReturnValue(keeping(engine) as never);
       const hook = renderHook();
 
       await hook.render({ conversationId: 'conv-1', messages: [message('m1')], currentUserId: 'me' });

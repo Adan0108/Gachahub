@@ -247,21 +247,23 @@ export function useDecryptedMessages(
       await Promise.all(
         pendingIncoming.map(async (message) => {
           try {
+            // Kept before the ratchet is saved, so a crash can never consume the key and lose the text
             const result = await syncEngine.processIncoming(
               conversationId,
               wireBytesByMessageId.get(message.id)!,
+              (decryptedMessage) =>
+                plaintextStore.save({
+                  messageId: message.id,
+                  conversationId,
+                  senderDeviceId: decryptedMessage.senderDeviceId,
+                  epoch: decryptedMessage.epoch,
+                  envelope: decryptedMessage.envelope,
+                }),
             );
             if (result.kind !== 'application') {
               setDecrypted((prev) => ({ ...prev, [message.id]: { status: 'unavailable' } }));
               return;
             }
-            await plaintextStore.save({
-              messageId: message.id,
-              conversationId,
-              senderDeviceId: result.senderDeviceId,
-              epoch: result.epoch,
-              envelope: result.envelope,
-            });
             setDecrypted((prev) => ({
               ...prev,
               [message.id]: { status: 'ok', envelope: result.envelope },
