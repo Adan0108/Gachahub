@@ -1,6 +1,7 @@
 export type PostAuditAction = 'POST_HIDDEN' | 'POST_RESTORED';
 export type CommentAuditAction = 'COMMENT_HIDDEN' | 'COMMENT_RESTORED';
 export type CaseAuditAction =
+  | 'CASE_ASSIGNED'
   | 'CASE_CLAIMED'
   | 'CASE_RESOLVED'
   | 'CASE_DISMISSED';
@@ -60,6 +61,7 @@ export type CaseAuditMetadata = {
   targetId: string;
   gameId: string | null;
   reportCount: number;
+  assignedModeratorId?: string | null;
   resolutionNote?: string;
 };
 

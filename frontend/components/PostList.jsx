@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -21,6 +21,7 @@ import {
   FiX,
 } from "react-icons/fi";
 import { useCurrentUser } from "../hooks/useCurrentUser";
+import { useToast } from "../hooks/useToast";
 import { useDismiss } from "../hooks/useDismiss";
 import { api } from "../lib/api";
 import { queries, queryKeys } from "../lib/queries";
@@ -219,6 +220,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
   const [reportReason, setReportReason] = useState("UNMARKED_SPOILERS");
   const [reportDetails, setReportDetails] = useState("");
   const [actionNotice, setActionNotice] = useState("");
+  const { notice, showNotice } = useToast(3500);
   const menuRef = useRef(null);
   const menuTriggerRef = useRef(null);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
@@ -228,6 +230,19 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
     contentRef: menuRef,
     triggerRef: menuTriggerRef,
   });
+  useLayoutEffect(() => {
+    if (!menuOpen || !menuRef.current || !menuTriggerRef.current) return;
+    const trigger = menuTriggerRef.current.getBoundingClientRect();
+    const menu = menuRef.current.getBoundingClientRect();
+    menuRef.current.style.top = `${Math.max(8, Math.min(trigger.bottom + 6, window.innerHeight - menu.height - 8))}px`;
+    menuRef.current.style.left = `${Math.max(8, Math.min(trigger.right - menu.width, window.innerWidth - menu.width - 8))}px`;
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [menuOpen, closeMenu]);
   const media = Array.isArray(post.media) ? post.media : [];
   const isFeed = variant === "feed";
   const liked = likeOverride?.liked ?? Boolean(post.likedByCurrentUser);
@@ -295,7 +310,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
     onSuccess: () => {
       setReportOpen(false);
       setReportDetails("");
-      setActionNotice("Report submitted. Thank you for helping keep the community safe.");
+      showNotice("Report submitted. Thank you for helping keep the community safe.");
     },
   });
 
@@ -387,7 +402,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
           >
             <FiMoreHorizontal />
           </button>
-          {menuOpen && (
+          {menuOpen && createPortal(
             <div className="post-options-menu" ref={menuRef} role="menu">
               <button
                 onClick={() => {
@@ -416,7 +431,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
               >
                 <FiFlag /> Report
               </button>
-            </div>
+            </div>, document.body
           )}
         </div>
       </div>
@@ -485,6 +500,7 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
       {(toggleLike.isError || toggleFollow.isError) && (
         <small className="post-action-error">Could not update this post. Try again.</small>
       )}
+      {notice && createPortal(<div className="toast" role="status">{notice}</div>, document.body)}
       {actionNotice && (
         <div className="post-action-notice" role="status">
           {actionNotice}
@@ -625,7 +641,9 @@ export function PostItem({ post, index = 0, detail = false, variant = "compact" 
               </label>
               {reportPost.isError && (
                 <small className="post-action-error" role="alert">
-                  {reportPost.error.message}
+                  {reportPost.error?.status === 409
+                    ? "You already reported this content. It is awaiting review."
+                    : "Report could not be submitted. Please try again."}
                 </small>
               )}
               <div className="post-report-actions">

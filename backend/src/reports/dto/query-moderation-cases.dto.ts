@@ -25,7 +25,7 @@ export class QueryModerationCasesDto {
 
   @ApiPropertyOptional({
     description:
-      'Opaque nextCursor encoding the exclusive createdAt/id boundary; omit for the first page.',
+      'Opaque nextCursor encoding the exclusive lastReportedAt/id boundary; omit for the first page.',
   })
   @IsOptional()
   @IsString()

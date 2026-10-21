@@ -155,7 +155,10 @@ export function AppShell({ children, initialTheme = "dark" }) {
     );
   }
 
-  if (admin) return children;
+  const platformCaseRoute = pathname.startsWith("/moderation/cases");
+  const privilegedGameRoute = pathname.startsWith("/moderator") &&
+    ["ADMIN", "PLATFORM_MODERATOR"].includes(user?.role);
+  if (admin || platformCaseRoute || privilegedGameRoute) return children;
 
   return (
     <div className={`app-shell ${studio ? "studio-shell" : ""}`}>

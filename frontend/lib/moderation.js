@@ -107,3 +107,7 @@ export const moderationError = (error) =>
   })[error?.status] ||
   error?.message ||
   "Could not load moderation data.";
+
+export const moderatorRoleLabel = (user, game) =>
+  user?.role === "ADMIN" ? "Admin" : user?.role === "PLATFORM_MODERATOR"
+    ? "Platform moderator" : game?.name ? `${game.name} moderator` : "Moderator";

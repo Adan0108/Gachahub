@@ -44,6 +44,7 @@ describe("AdminPage overview", () => {
 
   it.each([
     ["CASE_CLAIMED", "Case claimed", "MODERATION_CASE"],
+    ["CASE_ASSIGNED", "Case assigned", "MODERATION_CASE"],
     ["CASE_RESOLVED", "Case resolved", "MODERATION_CASE"],
     ["CASE_DISMISSED", "Case dismissed", "MODERATION_CASE"],
     ["REPORT_CLAIMED", "Report claimed", "REPORT"],

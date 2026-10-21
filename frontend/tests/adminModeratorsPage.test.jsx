@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AdminModeratorsPage from "../app/admin/moderators/page";
@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   getGames: vi.fn(),
   getGameModerators: vi.fn(),
   assignGameModerator: vi.fn(),
+  searchGameModeratorCandidates: vi.fn(),
   removeGameModerator: vi.fn(),
 }));
 
@@ -28,6 +29,7 @@ vi.mock("../lib/api", () => ({
     getGames: mocks.getGames,
     getGameModerators: mocks.getGameModerators,
     assignGameModerator: mocks.assignGameModerator,
+    searchGameModeratorCandidates: mocks.searchGameModeratorCandidates,
     removeGameModerator: mocks.removeGameModerator,
   },
   fallbackCategories: vi.fn(() => []),
@@ -65,6 +67,7 @@ describe("AdminModeratorsPage", () => {
     });
     mocks.getGameModerators.mockReset();
     mocks.assignGameModerator.mockReset().mockResolvedValue({});
+    mocks.searchGameModeratorCandidates.mockReset().mockResolvedValue({ items: [{ id: "candidate", name: "Radium", username: "radium", role: "USER" }] });
     mocks.removeGameModerator.mockReset().mockResolvedValue({});
   });
 
@@ -112,4 +115,17 @@ describe("AdminModeratorsPage", () => {
     expect(await screen.findByText(/moderator removed/i)).toBeInTheDocument();
     expect(mocks.removeGameModerator).toHaveBeenCalledWith("wuthering-waves", "user-1");
   });
+});
+
+it("searches community moderator candidates by identity instead of requesting a database ID", async () => {
+  mocks.getGameModerators.mockResolvedValue([]); renderPage();
+  const open = await screen.findByRole("button", { name: /Assign moderator/ });
+  await waitFor(() => expect(open).toBeEnabled());
+  fireEvent.click(open);
+  fireEvent.change(screen.getByRole("searchbox", { name: "Find moderator" }), { target: { value: "@radium" } });
+  fireEvent.click(await screen.findByRole("button", { name: "Select Radium (@radium)" }));
+  fireEvent.click(screen.getAllByRole("button", { name: /^Assign moderator$/ }).at(-1));
+  expect(await screen.findByText("Moderator assigned")).toBeVisible();
+  expect(mocks.assignGameModerator).toHaveBeenCalledWith("wuthering-waves", { userId: "candidate" });
+  expect(screen.queryByLabelText("User ID")).not.toBeInTheDocument();
 });

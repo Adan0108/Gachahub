@@ -26,7 +26,7 @@ export function ModerationNavigation({ user, onNavigate }) {
           Admin console
         </Link>
       )}
-      {user?.status === "ACTIVE" && !assignments.isError && assignments.data?.length > 0 && (
+      {user?.status === "ACTIVE" && !privileged && !assignments.isError && assignments.data?.length > 0 && (
         <Link href="/moderator" onClick={onNavigate} role="menuitem">
           My moderated games
         </Link>

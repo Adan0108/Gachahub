@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, expect, it, vi } from "vitest";
+vi.mock("next/navigation", () => ({ usePathname: () => "/moderation/cases" }));
 import { CaseQueue } from "../components/moderation/CaseQueue";
 import { CaseDetail } from "../components/moderation/CaseDetail";
 import { api } from "../lib/api";
@@ -305,7 +306,7 @@ it.each(["RESOLVED", "DISMISSED"])(
     mount(<CaseDetail caseId="case-1" />);
     expect(
       await screen.findByText(
-        "No user reports available. Reports may have been removed with an account.",
+        "No user reports available.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Assign to me" })).not.toBeInTheDocument();

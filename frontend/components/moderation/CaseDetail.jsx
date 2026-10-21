@@ -10,6 +10,7 @@ import {
   caseStatusLabel,
   moderationError,
   refreshModeration,
+  moderatorRoleLabel,
 } from "../../lib/moderation";
 import { AdminActionDialog } from "../admin/AdminActionDialog";
 import { AdminQueryBoundary } from "../admin/AdminQueryBoundary";
@@ -18,6 +19,7 @@ import { formatDate } from "./CaseQueue";
 import { CASE_STATUS_CLASS } from "../../lib/admin/statusTone";
 import Image from "next/image";
 import { ReasonSummary, reasonLabel } from "./CaseSummary";
+import { ModeratorPicker } from "./ModeratorPicker";
 import { AvatarFace } from "../AvatarFace";
 
 export function CaseDetail({ caseId, gameSlug = "" }) {
@@ -52,8 +54,13 @@ function CaseRecord({ item, gameSlug, actorId }) {
   const [note, setNote] = useState("");
   const [notice, setNotice] = useState("");
   const [denied, setDenied] = useState(false);
+  const [assigning, setAssigning] = useState(false);
   const mutation = useMutation({
-    mutationFn: ({ action, resolutionNote }) => {
+    mutationFn: ({ action, resolutionNote, assigneeId }) => {
+      if (action === "assign")
+        return gameSlug
+          ? api.assignGameCase(gameSlug, item.id, { assigneeId })
+          : api.assignPlatformCase(item.id, { assigneeId });
       const names = gameSlug
         ? { claim: "claimGameCase", resolve: "resolveGameCase", dismiss: "dismissGameCase" }
         : {
@@ -66,16 +73,19 @@ function CaseRecord({ item, gameSlug, actorId }) {
     },
     onSuccess: async (_, variables) => {
       setDecision(null);
+      setAssigning(false);
       setNote("");
       setNotice(
         variables.action === "claim"
           ? "Assigned to you."
-          : `Case ${variables.action === "resolve" ? "resolved" : "dismissed"}.`,
+          : variables.action === "assign"
+            ? "Case assignment updated."
+            : `Case ${variables.action === "resolve" ? "resolved" : "dismissed"}.`,
       );
       await refreshModeration(client, actorId);
     },
-    onError: async (error) => {
-      setNotice(moderationError(error));
+    onError: async (error, variables) => {
+      setNotice(variables.action === "assign" && error.status === 400 ? "That moderator is no longer eligible. Search again and choose another moderator." : moderationError(error));
       if ([401, 403, 404].includes(error.status)) {
         setDenied(true);
         setDecision(null);
@@ -178,7 +188,14 @@ function CaseRecord({ item, gameSlug, actorId }) {
                   {item.uniqueReporterCount} {item.uniqueReporterCount === 1 ? "person" : "people"}
                 </dd>
                 <dt>Assigned to</dt>
-                <dd>{item.assignedModerator?.name || "Unassigned"}</dd>
+                <dd>
+                  {item.assignedModerator?.name || "Unassigned"}
+                  {item.assignedModerator && (
+                    <small className="case-role-badge">
+                      {moderatorRoleLabel(item.assignedModerator, item.game)}
+                    </small>
+                  )}
+                </dd>
                 {(item.currentRiskLevel || item.currentRiskScore != null) && (
                   <>
                     <dt>Risk</dt>
@@ -214,6 +231,33 @@ function CaseRecord({ item, gameSlug, actorId }) {
                     >
                       Assign to me
                     </button>
+                  )}
+                  <button
+                    type="button"
+                    className="case-button case-button-secondary"
+                    disabled={mutation.isPending}
+                    onClick={() => {
+                      setAssigning((value) => !value);
+                      mutation.reset();
+                    }}
+                  >
+                    {assigning ? "Cancel assignment" : "Assign another moderator"}
+                  </button>
+                  {assigning && (
+                    <ModeratorPicker
+                      actorId={actorId}
+                      scopeKey={`${gameSlug}:${item.id}`}
+                      game={item.game}
+                      search={(q, options) =>
+                        gameSlug
+                          ? api.searchGameCaseAssignees(gameSlug, item.id, q, options)
+                          : api.searchPlatformCaseAssignees(item.id, q, options)
+                      }
+                      onSelect={(user) =>
+                        mutation.mutate({ action: "assign", assigneeId: user.id })
+                      }
+                      disabled={mutation.isPending}
+                    />
                   )}
                   {["resolve", "dismiss"].map((action) => (
                     <button
@@ -297,21 +341,19 @@ function CaseEvidence({ actorId, gameSlug, item, onDenied }) {
         <p role="alert">You no longer have access to these reports.</p>
       ) : (
         <>
-          {!rows.length && (
-            <p>No user reports available. Reports may have been removed with an account.</p>
-          )}
+          {!rows.length && <p>No user reports available.</p>}
           {rows.map((report) => (
             <article className="case-evidence-item" key={report.id}>
               <h3>{reasonLabel(report.reasonCode)}</h3>
               <p className="case-reporter">
                 <span className="case-person-avatar" aria-hidden="true">
                   <AvatarFace
-                    name={report.reporter?.name || "Reporter"}
+                    name={report.reporter?.name || "Deleted user"}
                     image={report.reporter?.image}
                   />
                 </span>
                 <span>
-                  Reported by {report.reporter?.name || "a former member"} ·{" "}
+                  Reported by {report.reporter?.name || "Deleted user"} ·{" "}
                   <time dateTime={report.createdAt}>{formatDate(report.createdAt)}</time>
                 </span>
               </p>

@@ -1,4 +1,5 @@
 "use client";
+import { AdminShell } from "../admin/AdminShell";
 
 import Link from "next/link";
 import { AdminState } from "../admin/AdminState";
@@ -40,20 +41,21 @@ export function ModerationWorkspace({ access, gameSlug = "", children }) {
         </Link>
       </section>
     );
-  return (
-    <main className="page moderation-workspace">
+  const content = (
+    <section className="page moderation-workspace">
       <div className="moderation-bar">
         <span className="moderation-brand">
           <FiShield aria-hidden="true" /> Safety workspace
         </span>
-        <nav className="moderation-navigation" aria-label="Moderation navigation">
+        <nav className="moderation-navigation" aria-label="Case workspace navigation">
           <Link href={casePath(gameSlug)}>{gameSlug ? "Community cases" : "All cases"}</Link>
           {access.privileged && gameSlug && <Link href="/moderation/cases">All cases</Link>}
-          <Link href="/moderator">My communities</Link>
+          {!access.privileged && <Link href="/moderator">My communities</Link>}
           {access.user.role === "ADMIN" && <Link href="/admin">Admin console</Link>}
         </nav>
       </div>
       {children}
-    </main>
+    </section>
   );
+  return access.privileged ? <AdminShell user={access.user} moderation>{content}</AdminShell> : content;
 }

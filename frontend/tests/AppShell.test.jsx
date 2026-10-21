@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AdminShell } from "../components/admin/AdminShell";
 import { AppShell } from "../components/AppShell";
 
 const mocks = vi.hoisted(() => ({ pathname: "/explore" }));
@@ -54,4 +55,16 @@ describe("AppShell navigation", () => {
     expect(document.body.style.overflow).toBe("");
     expect(screen.getByRole("complementary", { name: "Primary navigation" })).not.toHaveClass("open");
   });
+});
+
+it("preserves the existing admin shell through queue, detail and back navigation", () => {
+  const content = () => <AppShell><AdminShell user={{ role: "ADMIN", name: "Admin" }}><p>Review</p></AdminShell></AppShell>;
+  mocks.pathname = "/admin/moderation";
+  const page = render(content());
+  for (const route of ["/moderation/cases", "/moderation/cases/case", "/admin/moderation"]) {
+    mocks.pathname = route; page.rerender(content());
+    expect(screen.getByRole("navigation", { name: "Admin navigation" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Primary navigation" })).not.toBeInTheDocument();
+    if (route.startsWith("/moderation/cases")) expect(screen.getByRole("link", { name: "Cases" })).toHaveAttribute("aria-current", "page");
+  }
 });

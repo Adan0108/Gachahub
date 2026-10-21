@@ -24,21 +24,28 @@ const navigation = [
   { href: "/moderation/cases", label: "Cases", icon: FiAlertTriangle },
 ];
 
-export function AdminShell({ user, children }) {
-  const pathname = usePathname();
+export function AdminShell({ user, children, moderation = false }) {
+  const pathname = usePathname() || "";
+  const platformModerator = user?.role === "PLATFORM_MODERATOR";
+  const items = platformModerator
+    ? navigation.filter((item) => item.href === "/moderation/cases")
+    : navigation;
 
   return (
-    <div className="admin-shell">
+    <div className={`admin-shell${moderation ? " moderation-console" : ""}`}>
       <aside className="admin-sidebar">
         <div className="admin-brand">
           <BrandMark size={36} />
           <div>
             <b>GachaHub</b>
-            <small>Admin console</small>
+            <small>{platformModerator ? "Moderation console" : "Admin console"}</small>
           </div>
         </div>
-        <nav aria-label="Admin navigation" className="admin-nav">
-          {navigation.map(({ href, label, icon: Icon, exact }) => {
+        <nav
+          aria-label={platformModerator ? "Moderation navigation" : "Admin navigation"}
+          className="admin-nav"
+        >
+          {items.map(({ href, label, icon: Icon, exact }) => {
             const active = exact ? pathname === href : pathname.startsWith(href);
             return (
               <Link
@@ -60,14 +67,14 @@ export function AdminShell({ user, children }) {
       <div className="admin-main">
         <header className="admin-topbar">
           <div>
-            <span>Administration</span>
-            <small>Platform operations</small>
+            <span>{platformModerator ? "Moderation" : "Administration"}</span>
+            <small>{platformModerator ? "Platform safety" : "Platform operations"}</small>
           </div>
           <div className="admin-identity">
             <span>{user?.name?.charAt(0)?.toUpperCase() || "A"}</span>
             <div>
               <b>{user?.name || "Administrator"}</b>
-              <small>Admin</small>
+              <small>{platformModerator ? "Platform moderator" : "Admin"}</small>
             </div>
           </div>
         </header>

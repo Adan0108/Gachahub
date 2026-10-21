@@ -10,6 +10,7 @@ import {
   caseStatusLabel,
   moderationError,
   moderationKeys,
+  moderatorRoleLabel,
 } from "../../lib/moderation";
 import { CASE_STATUS_CLASS } from "../../lib/admin/statusTone";
 import { ContentPreview, ReasonSummary } from "./CaseSummary";
@@ -141,7 +142,7 @@ function ScopedCaseQueue({ access, gameSlug }) {
                   <th scope="col">Reports</th>
                   <th scope="col">Status</th>
                   <th scope="col">Assigned</th>
-                  <th scope="col">Updated</th>
+                  <th scope="col">Last reported</th>
                   <th scope="col">Action</th>
                 </tr>
               </thead>
@@ -171,15 +172,18 @@ function ScopedCaseQueue({ access, gameSlug }) {
                     </td>
                     <td data-label="Assigned">
                       {item.assignedModerator?.name || "Unassigned"}
+                      {item.assignedModerator && (
+                        <small>{moderatorRoleLabel(item.assignedModerator, item.game)}</small>
+                      )}
                       {item.currentRiskLevel && (
                         <small className="case-risk">
                           Risk: {item.currentRiskLevel.toLowerCase()}
                         </small>
                       )}
                     </td>
-                    <td data-label="Updated">
-                      <time dateTime={item.updatedAt} title={formatDate(item.updatedAt)}>
-                        {relativeDate(item.updatedAt)}
+                    <td data-label="Last reported">
+                      <time dateTime={item.lastReportedAt} title={formatDate(item.lastReportedAt)}>
+                        {relativeDate(item.lastReportedAt)}
                       </time>
                     </td>
                     <td data-label="Action">

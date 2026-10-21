@@ -666,3 +666,16 @@
     padding: 16px;
   }
 }
+
+.case-role-badge { display: block; width: fit-content; margin-top: 4px; font-size: 11px; color: var(--purple-soft); }
+.moderator-picker { grid-column: 1 / -1; width: 100%; min-width: 0; }
+.moderator-picker label { display: grid; gap: 8px; font-weight: 700; }
+.moderator-picker input { width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--panel2); }
+.moderator-picker ul { padding: 0; list-style: none; max-height: 300px; overflow-y: auto; }
+.moderator-picker li button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px; text-align: left; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); }
+.moderator-picker li button:hover { background: var(--panel2); }
+.moderator-picker li small { display: block; }
+
+/* Match case workspace surfaces to the selected theme inside the shared shell. */
+.moderation-console .admin-main { background: var(--bg); color: var(--text); }
+.moderation-console .admin-topbar { background: var(--panel); color: var(--text); border-color: var(--line); }

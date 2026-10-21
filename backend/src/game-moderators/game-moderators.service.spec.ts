@@ -40,6 +40,7 @@ describe('GameModeratorsService', () => {
   const prisma = {
     user: {
       findUnique: jest.fn(),
+      findMany: jest.fn(),
     },
     $transaction: jest.fn(),
   };
@@ -58,6 +59,48 @@ describe('GameModeratorsService', () => {
       prisma as unknown as PrismaService,
       auditLogService as unknown as AuditLogService,
     );
+  });
+
+  describe('moderator candidate identity search', () => {
+    it.each(['USER', 'PLATFORM_MODERATOR'])(
+      'does not let %s search role-grant candidates',
+      async (role) => {
+        prisma.user.findUnique.mockResolvedValue({
+          id: 'actor',
+          role,
+          status: 'ACTIVE',
+        });
+        await expect(
+          service.searchCandidates('game', 'actor', 'radium'),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+      },
+    );
+    it('lets ADMIN search active candidates outside existing assignments', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'admin',
+        role: 'ADMIN',
+        status: 'ACTIVE',
+      });
+      gameModeratorsRepository.findGameBySlug.mockResolvedValue({ id: 'game' });
+      prisma.user.findMany.mockResolvedValue([]);
+      await expect(
+        service.searchCandidates('slug', 'admin', '@rad'),
+      ).resolves.toEqual({ items: [] });
+      expect(prisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [
+              {
+                status: 'ACTIVE',
+                moderatedGames: { none: { gameId: 'game' } },
+              },
+              { username: 'rad' },
+            ],
+          },
+          take: 1,
+        }),
+      );
+    });
   });
 
   describe('assertCanModerateGame', () => {

@@ -1,3 +1,4 @@
+import { encodeCaseCursor } from '../domain/case-cursor';
 import { encodeEvidenceCursor } from '../domain/report-evidence-pagination';
 import {
   ConflictException,
@@ -138,7 +139,10 @@ describe('ReportModerationService', () => {
       };
       expect(
         await service.listCasesForPlatform('actor', {
-          cursor: encodeEvidenceCursor(cursor),
+          cursor: encodeCaseCursor({
+            id: cursor.id,
+            lastReportedAt: cursor.createdAt,
+          }),
         }),
       ).toEqual({ items: [moderationCase], nextCursor: 'next' });
       expect(reportsRepository.findModerationCases).toHaveBeenCalledWith({
@@ -146,7 +150,7 @@ describe('ReportModerationService', () => {
         status: undefined,
         targetType: undefined,
         limit: 20,
-        cursor,
+        cursor: { id: cursor.id, lastReportedAt: cursor.createdAt },
       });
       await expect(
         service.listCasesForPlatform('actor', { cursor: 'bad' }),

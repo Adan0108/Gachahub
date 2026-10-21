@@ -303,6 +303,268 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
     }
   });
 
+  describe('review fixes: assignment, retention and report activity', () => {
+    let platform: string;
+    let gameMod: string;
+    let wrongGameMod: string;
+    let inactive: string;
+    let ordinary: string;
+    let otherGameId: string;
+    beforeAll(async () => {
+      otherGameId = (
+        await db.game.create({
+          data: { name: 'Other scope', slug: `${prefix}-assignment-other` },
+        })
+      ).id;
+      const candidates = [
+        ['radium', 'PLATFORM_MODERATOR', 'ACTIVE'],
+        ['radiumone', 'USER', 'ACTIVE'],
+        ['radiumtwo', 'USER', 'ACTIVE'],
+        ['radiuminactive', 'PLATFORM_MODERATOR', 'SUSPENDED'],
+        ['radiumplain', 'USER', 'ACTIVE'],
+      ] as const;
+      const ids: string[] = [];
+      for (const [username, role, status] of candidates) {
+        const id = await user();
+        ids.push(id);
+        await db.user.update({
+          where: { id },
+          data: { username, name: username, role, status },
+        });
+      }
+      [platform, gameMod, wrongGameMod, inactive, ordinary] = ids;
+      await db.gameModerator.createMany({
+        data: [
+          { gameId, userId: gameMod },
+          { gameId: otherGameId, userId: wrongGameMod },
+        ],
+      });
+    });
+    afterAll(async () => {
+      if (db && otherGameId)
+        await db.game.delete({ where: { id: otherGameId } });
+    });
+
+    it('filters and ranks eligible assignees by exact scope; short prefixes stay quiet', async () => {
+      const personal = await submit((await post()).id, await user());
+      const game = await submit((await post(true)).id, await user());
+      const search = (caseId: string, q: string) =>
+        api(
+          `/moderation/cases/${caseId}/assignees?q=${encodeURIComponent(q)}`,
+          platform,
+        );
+      expect((await search(personal.body.caseId, '@rad')).body.items).toEqual(
+        [],
+      );
+      expect(
+        (await search(personal.body.caseId, '@radium')).body.items.map(
+          (u) => u.id,
+        ),
+      ).toEqual([platform]);
+      expect(
+        (await search(game.body.caseId, 'radium')).body.items.map((u) => u.id),
+      ).toEqual([platform, gameMod]);
+      expect(
+        (
+          await api(
+            `/games/${slug}/moderation/cases/${game.body.caseId}/assignees?q=radium`,
+            gameMod,
+          )
+        ).body.items.map((u) => u.id),
+      ).toEqual([platform, gameMod]);
+      expect(
+        (
+          await api(
+            `/moderation/cases/${game.body.caseId}/assignees?q=radium`,
+            ordinary,
+          )
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await api(
+            `/games/${slug}/moderation/cases/${game.body.caseId}/assignees?q=radium`,
+            wrongGameMod,
+          )
+        ).status,
+      ).toBe(403);
+    });
+
+    it('assigns eligible moderators and rejects arbitrary, inactive, wrong-game and unauthorized assignments', async () => {
+      const game = await submit((await post(true)).id, await user());
+      for (const id of [ordinary, inactive, wrongGameMod]) {
+        expect(
+          (
+            await api(
+              `/moderation/cases/${game.body.caseId}/assignee`,
+              platform,
+              { assigneeId: id },
+              'PATCH',
+            )
+          ).status,
+        ).toBe(400);
+      }
+      expect(
+        (
+          await api(
+            `/moderation/cases/${game.body.caseId}/assignee`,
+            ordinary,
+            { assigneeId: platform },
+            'PATCH',
+          )
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await api(
+            `/games/${slug}/moderation/cases/${game.body.caseId}/assignee`,
+            gameMod,
+            { assigneeId: platform },
+            'PATCH',
+          )
+        ).status,
+      ).toBe(200);
+      const assigned = await api(
+        `/moderation/cases/${game.body.caseId}/assignee`,
+        platform,
+        { assigneeId: gameMod },
+        'PATCH',
+      );
+      expect(assigned.status).toBe(200);
+      expect(assigned.body).toMatchObject({
+        assignedModeratorId: gameMod,
+        status: 'IN_REVIEW',
+        assignedModerator: { username: 'radiumone', role: 'USER' },
+      });
+      expect(
+        await db.auditLog.count({
+          where: { targetId: game.body.caseId, action: 'CASE_ASSIGNED' },
+        }),
+      ).toBe(2);
+      const personal = await submit((await post()).id, await user());
+      expect(
+        (
+          await api(
+            `/moderation/cases/${personal.body.caseId}/assignee`,
+            platform,
+            { assigneeId: gameMod },
+            'PATCH',
+          )
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await api(
+            `/moderation/cases/${personal.body.caseId}/assignee`,
+            platform,
+            { assigneeId: admin },
+            'PATCH',
+          )
+        ).status,
+      ).toBe(200);
+      await api(
+        `/moderation/cases/${game.body.caseId}/resolve`,
+        platform,
+        {},
+        'PATCH',
+      );
+      expect(
+        (
+          await api(
+            `/moderation/cases/${game.body.caseId}/assignee`,
+            platform,
+            { assigneeId: admin },
+            'PATCH',
+          )
+        ).status,
+      ).toBe(409);
+    });
+
+    it('preserves multiple deleted reporters and counters when another complaint arrives', async () => {
+      const target = await post();
+      const reporters = [await user(), await user(), await user()];
+      const first = await submit(target.id, reporters[0]);
+      for (const reporter of reporters.slice(1))
+        expect((await submit(target.id, reporter)).status).toBe(201);
+      await db.user.deleteMany({
+        where: { id: { in: reporters.slice(0, 2) } },
+      });
+      expect(
+        await db.report.count({ where: { caseId: first.body.caseId } }),
+      ).toBe(3);
+      expect(
+        await db.report.count({
+          where: { caseId: first.body.caseId, reporterId: null },
+        }),
+      ).toBe(2);
+      expect((await submit(target.id, await user())).status).toBe(201);
+      expect(
+        await db.moderationCase.findUnique({
+          where: { id: first.body.caseId },
+        }),
+      ).toMatchObject({ reportCount: 4, uniqueReporterCount: 4 });
+      const detail = await api(
+        `/moderation/cases/${first.body.caseId}`,
+        platform,
+      );
+      expect(detail.body.evidence.items).toHaveLength(4);
+      expect(
+        detail.body.evidence.items.filter(
+          (row) => (row as unknown as { reporter: unknown }).reporter === null,
+        ),
+      ).toHaveLength(2);
+    });
+
+    it('raises an old case on report activity without reordering it on workflow changes', async () => {
+      const oldTarget = await post(true);
+      const first = await submit(oldTarget.id, await user());
+      const second = await submit((await post(true)).id, await user());
+      await db.moderationCase.update({
+        where: { id: first.body.caseId },
+        data: { lastReportedAt: new Date('2020-01-01') },
+      });
+      await db.moderationCase.update({
+        where: { id: second.body.caseId },
+        data: { lastReportedAt: new Date('2021-01-01') },
+      });
+      expect(
+        (await api(`/games/${slug}/moderation/cases?limit=1`, gameMod)).body
+          .items[0].id,
+      ).not.toBe(first.body.caseId);
+      expect((await submit(oldTarget.id, await user())).status).toBe(201);
+      expect(
+        (await api(`/games/${slug}/moderation/cases?limit=1`, gameMod)).body
+          .items[0].id,
+      ).toBe(first.body.caseId);
+      const before = await db.moderationCase.findUniqueOrThrow({
+        where: { id: first.body.caseId },
+      });
+      expect(
+        (
+          await api(
+            `/moderation/cases/${first.body.caseId}/claim`,
+            platform,
+            {},
+            'PATCH',
+          )
+        ).status,
+      ).toBe(200);
+      const after = await db.moderationCase.findUniqueOrThrow({
+        where: { id: first.body.caseId },
+      });
+      expect(after.lastReportedAt).toEqual(before.lastReportedAt);
+      const page = await api(
+        `/games/${slug}/moderation/cases?limit=1`,
+        gameMod,
+      );
+      const next = await api(
+        `/games/${slug}/moderation/cases?limit=1&cursor=${page.body.nextCursor}`,
+        gameMod,
+      );
+      expect(next.body.items[0].id).not.toBe(page.body.items[0].id);
+    });
+  });
+
   it('has the real active-target partial unique index', async () => {
     const rows = await db.$queryRaw<
       Array<{ indexdef: string }>
@@ -483,16 +745,11 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
       (tx) =>
         new Proxy(tx, {
           get(target, key): unknown {
-            if (key !== 'moderationCase') return Reflect.get(target, key);
-            return new Proxy(target.moderationCase, {
-              get(owner, method): unknown {
-                if (method === 'update')
-                  return () => {
-                    throw new Error('Injected append counter failure');
-                  };
-                return Reflect.get(owner, method);
-              },
-            });
+            if (key === '$executeRaw')
+              return () => {
+                throw new Error('Injected append counter failure');
+              };
+            return Reflect.get(target, key);
           },
         }),
     );
@@ -598,6 +855,10 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         (tx) =>
           new Proxy(tx, {
             get(target, key): unknown {
+              if (failure === 'counter' && key === '$executeRaw')
+                return () => {
+                  throw new Error('Injected counter write failure');
+                };
               const delegate = Reflect.get(target, key) as object;
               if (key !== (failure === 'report' ? 'report' : 'moderationCase'))
                 return delegate;
@@ -1469,7 +1730,10 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
       expect(detail.status).toBe(200);
       expect(detail.body.reportCount).toBe(2);
       expect(detail.body.uniqueReporterCount).toBe(2);
-      expect(detail.body.evidence.items).toHaveLength(1);
+      expect(detail.body.evidence.items).toHaveLength(2);
+      expect(detail.body.evidence.items).toContainEqual(
+        expect.objectContaining({ reporter: null }),
+      );
       await db.post.delete({ where: { id: personalTarget } });
       const missing = await api(`${queue}/${personalCase}`, platformModerator);
       expect(missing.status).toBe(200);
@@ -1628,7 +1892,13 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
     for (let i = 0; i < 3; i++) {
       const source = await post(true);
       const row = await db.moderationCase.create({
-        data: { targetType: 'POST', targetId: source.id, gameId, createdAt },
+        data: {
+          targetType: 'POST',
+          targetId: source.id,
+          gameId,
+          createdAt,
+          lastReportedAt: createdAt,
+        },
       });
       ownIds.push(row.id);
     }

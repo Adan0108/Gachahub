@@ -640,6 +640,7 @@ export const api = {
     mutation(`/game-categories/${encodePathParam(categoryId)}`, updates, { method: "PATCH" }),
   getGameModerators: (gameSlug, options = {}) =>
     request(backendRoutes.gameModerators(gameSlug), options),
+  searchGameModeratorCandidates: (gameSlug, q, options = {}) => request(withQuery(`${backendRoutes.gameModerators(gameSlug)}/candidates`, { q }), options),
   assignGameModerator: (gameSlug, target) =>
     mutation(backendRoutes.gameModerators(gameSlug), target),
   removeGameModerator: (gameSlug, userId) =>
@@ -808,6 +809,8 @@ export const api = {
   getPlatformCase: (caseId, options = {}) => request(backendRoutes.platformCase(caseId), options),
   listPlatformCaseReports: (caseId, { cursor, limit } = {}, options = {}) =>
     request(withQuery(`${backendRoutes.platformCase(caseId)}/reports`, { cursor, limit }), options),
+  searchPlatformCaseAssignees: (caseId, q, options = {}) => request(withQuery(`${backendRoutes.platformCase(caseId)}/assignees`, { q }), options),
+  assignPlatformCase: (caseId, { assigneeId }) => mutation(`${backendRoutes.platformCase(caseId)}/assignee`, { assigneeId }, { method: "PATCH" }),
   claimPlatformCase: (caseId) => mutation(`${backendRoutes.platformCase(caseId)}/claim`, undefined, { method: "PATCH" }),
   resolvePlatformCase: (caseId, { resolutionNote } = {}) => mutation(`${backendRoutes.platformCase(caseId)}/resolve`, { resolutionNote }, { method: "PATCH" }),
   dismissPlatformCase: (caseId, { resolutionNote } = {}) => mutation(`${backendRoutes.platformCase(caseId)}/dismiss`, { resolutionNote }, { method: "PATCH" }),
@@ -816,6 +819,8 @@ export const api = {
   getGameCase: (gameSlug, caseId, options = {}) => request(backendRoutes.gameCase(gameSlug, caseId), options),
   listGameCaseReports: (gameSlug, caseId, { cursor, limit } = {}, options = {}) =>
     request(withQuery(`${backendRoutes.gameCase(gameSlug, caseId)}/reports`, { cursor, limit }), options),
+  searchGameCaseAssignees: (gameSlug, caseId, q, options = {}) => request(withQuery(`${backendRoutes.gameCase(gameSlug, caseId)}/assignees`, { q }), options),
+  assignGameCase: (gameSlug, caseId, { assigneeId }) => mutation(`${backendRoutes.gameCase(gameSlug, caseId)}/assignee`, { assigneeId }, { method: "PATCH" }),
   claimGameCase: (gameSlug, caseId) => mutation(`${backendRoutes.gameCase(gameSlug, caseId)}/claim`, undefined, { method: "PATCH" }),
   resolveGameCase: (gameSlug, caseId, { resolutionNote } = {}) => mutation(`${backendRoutes.gameCase(gameSlug, caseId)}/resolve`, { resolutionNote }, { method: "PATCH" }),
   dismissGameCase: (gameSlug, caseId, { resolutionNote } = {}) => mutation(`${backendRoutes.gameCase(gameSlug, caseId)}/dismiss`, { resolutionNote }, { method: "PATCH" }),

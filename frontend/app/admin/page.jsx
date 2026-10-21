@@ -29,6 +29,7 @@ const AUDIT_ACTION_LABEL = {
   COMMENT_HIDDEN: "Comment hidden",
   COMMENT_RESTORED: "Comment restored",
   CASE_CLAIMED: "Case claimed",
+  CASE_ASSIGNED: "Case assigned",
   CASE_RESOLVED: "Case resolved",
   CASE_DISMISSED: "Case dismissed",
   REPORT_CLAIMED: "Report claimed",

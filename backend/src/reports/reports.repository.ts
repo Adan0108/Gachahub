@@ -1,9 +1,16 @@
+import { encodeCaseCursor, type CaseCursor } from './domain/case-cursor';
+import { caseModeratorWhere } from '../common/guards/moderation-capabilities';
+import { searchModeratorCandidates } from '../common/moderation/search-moderator-candidates';
 import {
   encodeEvidenceCursor,
   type EvidenceCursor,
 } from './domain/report-evidence-pagination';
 import { projectReportSnapshot } from './domain/report-evidence.projection';
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  BadRequestException,
+  Injectable,
+} from '@nestjs/common';
 import {
   Prisma,
   type PostStatus,
@@ -36,10 +43,13 @@ const caseSummarySelect = {
   status: true,
   reportCount: true,
   uniqueReporterCount: true,
+  lastReportedAt: true,
   currentRiskScore: true,
   currentRiskLevel: true,
   assignedModeratorId: true,
-  assignedModerator: { select: { id: true, name: true, image: true } },
+  assignedModerator: {
+    select: { id: true, name: true, image: true, username: true, role: true },
+  },
   resolvedById: true,
   resolvedBy: { select: { id: true, name: true, image: true } },
   resolvedAt: true,
@@ -83,7 +93,7 @@ export class ReportsRepository {
     status?: ModerationCaseStatus;
     targetType?: ReportTargetType;
     limit: number;
-    cursor?: EvidenceCursor;
+    cursor?: CaseCursor;
   }) {
     const where: Prisma.ModerationCaseWhereInput = {
       ...(params.gameId !== undefined ? { gameId: params.gameId } : {}),
@@ -94,9 +104,9 @@ export class ReportsRepository {
       ...(params.cursor
         ? {
             OR: [
-              { createdAt: { lt: params.cursor.createdAt } },
+              { lastReportedAt: { lt: params.cursor.lastReportedAt } },
               {
-                createdAt: params.cursor.createdAt,
+                lastReportedAt: params.cursor.lastReportedAt,
                 id: { lt: params.cursor.id },
               },
             ],
@@ -106,7 +116,7 @@ export class ReportsRepository {
     const rows = await this.prisma.moderationCase.findMany({
       where,
       select: caseSummarySelect,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ lastReportedAt: 'desc' }, { id: 'desc' }],
       take: params.limit + 1,
     });
     const page = rows.slice(0, params.limit);
@@ -114,7 +124,7 @@ export class ReportsRepository {
     return {
       items: await this.enrichCasePage(page),
       nextCursor:
-        rows.length > params.limit && last ? encodeEvidenceCursor(last) : null,
+        rows.length > params.limit && last ? encodeCaseCursor(last) : null,
     };
   }
 
@@ -519,18 +529,22 @@ export class ReportsRepository {
             },
             select: reportReceiptSelect,
           });
-          const reportCount = await tx.report.count({
-            where: { caseId: moderationCase.id },
-          });
-          const reporters = await tx.report.findMany({
-            where: { caseId: moderationCase.id },
-            distinct: ['reporterId'],
-            select: { reporterId: true },
-          });
-          await tx.moderationCase.update({
-            where: { id: moderationCase.id },
-            data: { reportCount, uniqueReporterCount: reporters.length },
-          });
+          // Preserve historical totals, including already-deleted reporters. Advance
+          // unique reporters once per accepted complaint; never regroup null IDs.
+          // The case lock serializes appends; database time tracks report activity.
+          await tx.$executeRaw`
+            WITH totals AS (
+              SELECT COUNT(*)::int AS reports,
+                COUNT(DISTINCT "reporterId")::int AS reporters
+              FROM "reports" WHERE "caseId" = ${moderationCase.id}
+            )
+            UPDATE "moderation_cases" c SET
+              "reportCount" = GREATEST(c."reportCount" + 1, totals.reports),
+              "uniqueReporterCount" = GREATEST(c."uniqueReporterCount" + 1, totals.reporters),
+              "lastReportedAt" = GREATEST(c."lastReportedAt", clock_timestamp()),
+              "updatedAt" = clock_timestamp()
+            FROM totals WHERE c.id = ${moderationCase.id}
+          `;
           return report;
         });
         if (result) return result;
@@ -609,6 +623,31 @@ export class ReportsRepository {
     return Array.from(counts, ([gameId, count]) => ({ gameId, count }));
   }
 
+  searchAssignees(gameId: string | null, query: string) {
+    return searchModeratorCandidates(
+      this.prisma,
+      caseModeratorWhere(gameId),
+      query,
+    );
+  }
+
+  assignCase(
+    caseId: string,
+    assigneeId: string,
+    context: CaseTransitionContext,
+  ) {
+    return this.transitionCase(
+      caseId,
+      context,
+      {
+        status: 'IN_REVIEW',
+        assignedModeratorId: assigneeId,
+      },
+      OPEN_CASE_STATUSES,
+      assigneeId,
+    );
+  }
+
   async claimCase(
     caseId: string,
     moderatorId: string,
@@ -652,8 +691,35 @@ export class ReportsRepository {
     context: CaseTransitionContext,
     data: Prisma.ModerationCaseUncheckedUpdateManyInput,
     statuses: readonly ModerationCaseStatus[],
+    assigneeId?: string,
   ): Promise<CaseDetail | null> {
     return this.prisma.$transaction(async (tx) => {
+      if (assigneeId !== undefined) {
+        const cases = await tx.$queryRaw<Array<{ gameId: string | null }>>`
+          SELECT "gameId" FROM moderation_cases WHERE id = ${caseId}
+          AND status IN ('OPEN', 'IN_REVIEW') FOR UPDATE
+        `;
+        if (
+          !cases.length ||
+          (context.gameId !== undefined && cases[0].gameId !== context.gameId)
+        )
+          return null;
+        // Serialize against account role/status changes and assignment removal.
+        await tx.$queryRaw`SELECT id FROM "user" WHERE id = ${assigneeId} FOR SHARE`;
+        if (cases[0].gameId !== null) {
+          await tx.$queryRaw`SELECT id FROM game_moderators
+            WHERE "userId" = ${assigneeId} AND "gameId" = ${cases[0].gameId} FOR SHARE`;
+        }
+        const eligible = await tx.user.findFirst({
+          where: { id: assigneeId, ...caseModeratorWhere(cases[0].gameId) },
+          select: { id: true },
+        });
+        if (!eligible)
+          throw new BadRequestException(
+            'Choose an active moderator eligible for this case',
+          );
+      }
+
       // PostgreSQL rechecks status and game ownership after competing writers finish.
       const { count } = await tx.moderationCase.updateMany({
         where: {

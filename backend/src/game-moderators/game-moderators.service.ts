@@ -1,3 +1,4 @@
+import { searchModeratorCandidates } from '../common/moderation/search-moderator-candidates';
 import {
   BadRequestException,
   ConflictException,
@@ -41,6 +42,23 @@ export class GameModeratorsService {
    * - Throw 404 if the game does not exist.
    * - Return all moderator assignments for that game.
    */
+  async searchCandidates(gameSlug: string, actorId: string, q = '') {
+    const actor = await loadActiveUser(this.prisma, actorId);
+    if (actor.role !== 'ADMIN')
+      throw new ForbiddenException('Admin permission required');
+    const gameId = await this.resolveGameId(gameSlug);
+    return {
+      items: await searchModeratorCandidates(
+        this.prisma,
+        {
+          status: 'ACTIVE',
+          moderatedGames: { none: { gameId } },
+        },
+        q,
+      ),
+    };
+  }
+
   async findByGameSlug(gameSlug: string) {
     const game = await this.gameModeratorsRepository.findGameBySlug(gameSlug);
 

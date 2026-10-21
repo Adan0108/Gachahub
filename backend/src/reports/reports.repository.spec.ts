@@ -1,4 +1,4 @@
-import { decodeEvidenceCursor } from './domain/report-evidence-pagination';
+import { decodeCaseCursor } from './domain/case-cursor';
 jest.mock('../prisma/prisma.service', () => ({ PrismaService: class {} }));
 import { ConflictException } from '@nestjs/common';
 import { Prisma, ReportReason } from '../generated/prisma/client';
@@ -52,6 +52,7 @@ describe('ReportsRepository creation retry boundaries', () => {
       findUniqueOrThrow: jest.fn(),
     },
     $queryRaw: jest.fn(),
+    $executeRaw: jest.fn(),
   };
   const prisma = { $transaction: jest.fn() };
   const repository = new ReportsRepository(prisma as unknown as PrismaService);
@@ -92,10 +93,7 @@ describe('ReportsRepository creation retry boundaries', () => {
         status: { in: ['OPEN', 'IN_REVIEW'] },
       },
     });
-    expect(tx.moderationCase.update).toHaveBeenCalledWith({
-      where: { id: 'case' },
-      data: { reportCount: 3, uniqueReporterCount: 2 },
-    });
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
     expect(report).toMatchObject({
       id: 'report',
       caseId: 'case',
@@ -142,7 +140,7 @@ describe('ReportsRepository creation retry boundaries', () => {
       'You already have an open report on this content',
     );
     expect(tx.report.create).not.toHaveBeenCalled();
-    expect(tx.moderationCase.update).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
   });
 });
 
@@ -368,25 +366,25 @@ describe('ReportsRepository native case reads', () => {
     }
   });
   it('uses an exclusive tuple boundary, one lookahead and no OFFSET/count without a pagination mode', async () => {
-    const createdAt = new Date('2026-10-20T00:00:00.000Z');
+    const lastReportedAt = new Date('2026-10-20T00:00:00.000Z');
     prisma.moderationCase.findMany.mockResolvedValue(
       ['z', 'y', 'x'].map((id) => ({
         id,
         targetType: 'POST',
         targetId: id,
-        createdAt,
+        lastReportedAt,
       })),
     );
     const result = await repository.findModerationCases({
       limit: 2,
 
-      cursor: { id: 'zz', createdAt },
+      cursor: { id: 'zz', lastReportedAt },
       gameId: 'game',
     });
     expect(result.items.map((item) => item.id)).toEqual(['z', 'y']);
-    expect(decodeEvidenceCursor(result.nextCursor!)).toEqual({
+    expect(decodeCaseCursor(result.nextCursor!)).toEqual({
       id: 'y',
-      createdAt,
+      lastReportedAt,
     });
     const [args] = prisma.moderationCase.findMany.mock.calls[0] as unknown as [
       Record<string, unknown>,
@@ -395,7 +393,10 @@ describe('ReportsRepository native case reads', () => {
       take: 3,
       where: {
         gameId: 'game',
-        OR: [{ createdAt: { lt: createdAt } }, { createdAt, id: { lt: 'zz' } }],
+        OR: [
+          { lastReportedAt: { lt: lastReportedAt } },
+          { lastReportedAt, id: { lt: 'zz' } },
+        ],
       },
     });
     expect(args).not.toHaveProperty('skip');
@@ -444,7 +445,7 @@ describe('ReportsRepository native case reads', () => {
         expect.objectContaining({
           where,
           take: 11,
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          orderBy: [{ lastReportedAt: 'desc' }, { id: 'desc' }],
         }),
       );
       expect(prisma.moderationCase.count).not.toHaveBeenCalled();

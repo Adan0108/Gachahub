@@ -3,6 +3,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { FiAlertTriangle, FiPlus, FiTrash2, FiUserCheck, FiX } from "react-icons/fi";
+import { ModeratorPicker } from "../../../components/moderation/ModeratorPicker";
 import { AdminQueryBoundary } from "../../../components/admin/AdminQueryBoundary";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
@@ -12,20 +13,19 @@ import { useToast } from "../../../hooks/useToast";
 import { api } from "../../../lib/api";
 import { queries, queryKeys } from "../../../lib/queries";
 
-function AssignmentForm({ game, onClose, onSaved }) {
-  const [method, setMethod] = useState("email");
-  const [target, setTarget] = useState("");
+function AssignmentForm({ game, actorId, onClose, onSaved }) {
+  const [target, setTarget] = useState(null);
   const [error, setError] = useState("");
   const mutation = useMutation({
-    mutationFn: () => api.assignGameModerator(game.slug, { [method]: target.trim() }),
+    mutationFn: () => api.assignGameModerator(game.slug, { userId: target.id }),
     onSuccess: () => onSaved("Moderator assigned"),
     onError: (nextError) => setError(nextError.message || "Could not assign moderator"),
   });
 
   const submit = (event) => {
     event.preventDefault();
-    if (!target.trim()) {
-      setError(method === "email" ? "Enter the user's email address." : "Enter the user ID.");
+    if (!target) {
+      setError("Choose a moderator from the search results.");
       return;
     }
     mutation.mutate();
@@ -55,49 +55,10 @@ function AssignmentForm({ game, onClose, onSaved }) {
           </button>
         </div>
         <form className="admin-form" onSubmit={submit}>
-          <fieldset className="admin-segmented admin-form-wide">
-            <legend>Find user by</legend>
-            <label>
-              <input
-                checked={method === "email"}
-                name="method"
-                onChange={() => {
-                  setMethod("email");
-                  setTarget("");
-                  setError("");
-                }}
-                type="radio"
-              />
-              <span>Email</span>
-            </label>
-            <label>
-              <input
-                checked={method === "userId"}
-                name="method"
-                onChange={() => {
-                  setMethod("userId");
-                  setTarget("");
-                  setError("");
-                }}
-                type="radio"
-              />
-              <span>User ID</span>
-            </label>
-          </fieldset>
-          <label className="admin-form-wide">
-            <span>{method === "email" ? "User email" : "User ID"} *</span>
-            <input
-              autoFocus
-              name="target"
-              onChange={(event) => {
-                setTarget(event.target.value);
-                setError("");
-              }}
-              placeholder={method === "email" ? "moderator@example.com" : "User database ID"}
-              type={method === "email" ? "email" : "text"}
-              value={target}
-            />
-          </label>
+          <ModeratorPicker actorId={actorId} scopeKey={`grant:${game.slug}`} game={game} granting
+            search={(q, options) => api.searchGameModeratorCandidates(game.slug, q, options)}
+            onSelect={(user) => { setTarget(user); setError(""); }} disabled={mutation.isPending} />
+          {target && <p role="status">Selected {target.name}{target.username ? ` (@${target.username})` : ""}</p>}
           <p className="admin-form-note admin-form-wide">
             This grants moderation permission only within {game.name}. It does not change the user's
             platform role.
@@ -340,7 +301,7 @@ export default function AdminModeratorsPage() {
         </>
       )}
       {assigning && selectedGame ? (
-        <AssignmentForm game={selectedGame} onClose={() => setAssigning(false)} onSaved={refresh} />
+        <AssignmentForm actorId={session.user?.id} game={selectedGame} onClose={() => setAssigning(false)} onSaved={refresh} />
       ) : null}
       {removing && selectedGame ? (
         <RemovalDialog
