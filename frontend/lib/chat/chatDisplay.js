@@ -50,3 +50,13 @@ export function typingLabel(names) {
   if (names.length === 2) return `${names[0]} and ${names[1]} are typing...`;
   return `${names[0]} and ${names.length - 1} others are typing...`;
 }
+
+/** In a direct chat, the other person when you have blocked them; otherwise null. Groups are never blocked as a whole. */
+export function blockedPeerOf(conversation, userId) {
+  if (!conversation || conversation.type === "GROUP") return null;
+  return (
+    conversation.participants?.find(
+      (participant) => participant.userId !== userId && participant.isBlockedByMe,
+    ) ?? null
+  );
+}

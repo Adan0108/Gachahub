@@ -5,6 +5,7 @@ interface ThreadMessage {
   senderId?: string;
   createdAt?: string;
   contentType?: string;
+  status?: string;
 }
 
 type DecryptState = { status: 'pending' | 'ok' | 'unavailable' } | undefined;
@@ -23,6 +24,13 @@ export type ThreadItem<M extends ThreadMessage = ThreadMessage> =
       groupedWithNext: boolean;
     }
   | { kind: 'event'; event: MembershipEvent };
+
+/** A message the thread draws nothing for yet: still being decrypted, so it must not leave a divider or a gap behind. */
+function isStillDecrypting(message: ThreadMessage, decrypted: Record<string, DecryptState>): boolean {
+  if (message.contentType === 'SYSTEM' || message.status === 'DELETED') return false;
+  const state = decrypted[message.id];
+  return state === undefined || state.status === 'pending';
+}
 
 /** A gap this long gets its own timestamp divider. */
 export const TIMESTAMP_DIVIDER_GAP_MS = 45 * 60 * 1000;
@@ -44,6 +52,24 @@ function leadingUnreadableIds(
   return hidden;
 }
 
+/** The newest message from someone else that this device can never read (a conversation-start marker, or one it could not decrypt): marking it read clears everything unread before it. */
+export function newestUnreadableFromOthers(
+  messages: ThreadMessage[],
+  decrypted: Record<string, DecryptState>,
+  userId: string | undefined,
+): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (
+      message.senderId !== userId &&
+      (message.contentType === 'SYSTEM' || decrypted[message.id]?.status === 'unavailable')
+    ) {
+      return message.id;
+    }
+  }
+  return undefined;
+}
+
 /** The thread's rows in order: history banner, then messages with membership events sorted by server time (events first on ties). */
 export function buildThreadItems<M extends ThreadMessage>(input: {
   messages: M[];
@@ -56,18 +82,21 @@ export function buildThreadItems<M extends ThreadMessage>(input: {
   const pendingEvents = [...events].sort((a, b) => a.at - b.at);
 
   const items: ThreadItem<M>[] = hidden.size > 0 ? [{ kind: 'history-banner' }] : [];
+  // "Conversation started" only fills an empty chat: it goes as soon as anyone has written, and has no time of its own.
+  const hasWrittenMessage = messages.some(
+    (message) => message.contentType !== 'SYSTEM' && !hidden.has(message.id),
+  );
   let prevAt: number | undefined;
   messages.forEach((message, index) => {
-    if (hidden.has(message.id)) return;
+    if (hidden.has(message.id) || isStillDecrypting(message, decrypted)) return;
+    if (message.contentType === 'SYSTEM' && hasWrittenMessage) return;
     const sentAt = message.createdAt ? Date.parse(message.createdAt) : Number.NaN;
     while (pendingEvents[0] && !Number.isNaN(sentAt) && pendingEvents[0].at <= sentAt) {
       items.push({ kind: 'event', event: pendingEvents.shift()! });
     }
     const gap = Number.isNaN(sentAt) ? 0 : (prevAt === undefined ? Infinity : sentAt - prevAt);
-    const showDivider = gap >= TIMESTAMP_DIVIDER_GAP_MS;
-    // "Conversation started" reads as the thread's own opener; its divider sits under it, not above.
-    const isConversationStart = message.contentType === 'SYSTEM';
-    if (showDivider && !isConversationStart) items.push({ kind: 'timestamp', at: sentAt });
+    const showDivider = gap >= TIMESTAMP_DIVIDER_GAP_MS && message.contentType !== 'SYSTEM';
+    if (showDivider) items.push({ kind: 'timestamp', at: sentAt });
     items.push({
       kind: 'message',
       message,
@@ -76,7 +105,6 @@ export function buildThreadItems<M extends ThreadMessage>(input: {
       groupedWithPrevious: false,
       groupedWithNext: false,
     });
-    if (showDivider && isConversationStart) items.push({ kind: 'timestamp', at: sentAt });
     if (!Number.isNaN(sentAt)) prevAt = sentAt;
   });
   return withGrouping([...items, ...pendingEvents.map((event) => ({ kind: 'event' as const, event }))]);

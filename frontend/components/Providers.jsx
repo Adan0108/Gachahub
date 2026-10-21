@@ -1,7 +1,8 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { watchModerationSession } from "../lib/moderation";
+import { useEffect, useState } from "react";
 
 export function Providers({ children }) {
   const [queryClient] = useState(
@@ -15,6 +16,8 @@ export function Providers({ children }) {
         },
       }),
   );
+
+  useEffect(() => watchModerationSession(queryClient), [queryClient]);
 
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }

@@ -1,11 +1,9 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
-  IsOptional,
   IsString,
-  IsUrl,
   Matches,
   MaxLength,
 } from 'class-validator';
@@ -18,14 +16,6 @@ export class CreateGroupChatDto {
   @MaxLength(120)
   @Matches(/\S/)
   title!: string;
-
-  @ApiPropertyOptional({
-    example: 'https://cdn.gachahub.com/chat/groups/team-build.png',
-  })
-  @IsOptional()
-  @IsUrl()
-  @MaxLength(500)
-  photoUrl?: string;
 
   @ApiProperty({
     example: ['user-id-1', 'user-id-2'],

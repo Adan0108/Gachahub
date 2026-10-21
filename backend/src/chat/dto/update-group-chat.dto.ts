@@ -1,11 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsOptional,
-  IsString,
-  IsUrl,
-  Matches,
-  MaxLength,
-} from 'class-validator';
+import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 
 export class UpdateGroupChatDto {
   @ApiPropertyOptional({
@@ -16,12 +10,4 @@ export class UpdateGroupChatDto {
   @MaxLength(120)
   @Matches(/\S/)
   title?: string;
-
-  @ApiPropertyOptional({
-    example: 'https://cdn.gachahub.com/chat/groups/new-photo.png',
-  })
-  @IsOptional()
-  @IsUrl()
-  @MaxLength(500)
-  photoUrl?: string;
 }

@@ -10,7 +10,7 @@ import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { AuditLogQueryService } from './audit-log-query.service';
 import { QueryAuditLogsDto } from './dto/query-audit-logs.dto';
 
-/** No guard: the service authorizes against the routed game (same as ReportModerationController). */
+/** No guard: the service authorizes against the routed game (same as GameCaseModerationController). */
 @ApiTags('Audit Log')
 @ApiCookieAuth('better-auth.session_token')
 @Controller('games/:gameSlug/audit-logs')

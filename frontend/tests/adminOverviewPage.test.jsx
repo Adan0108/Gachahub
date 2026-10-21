@@ -42,6 +42,21 @@ describe("AdminPage overview", () => {
     mocks.getAdminOverview.mockReset();
   });
 
+  it.each([
+    ["CASE_CLAIMED", "Case claimed", "MODERATION_CASE"],
+    ["CASE_ASSIGNED", "Case assigned", "MODERATION_CASE"],
+    ["CASE_RESOLVED", "Case resolved", "MODERATION_CASE"],
+    ["CASE_DISMISSED", "Case dismissed", "MODERATION_CASE"],
+    ["REPORT_CLAIMED", "Report claimed", "REPORT"],
+    ["REPORT_RESOLVED", "Report resolved", "REPORT"],
+    ["REPORT_DISMISSED", "Report dismissed", "REPORT"],
+  ])("renders current and historical %s audit labels", async (action, label, targetType) => {
+    mocks.getAdminOverview.mockResolvedValue({ metrics: [], communities: [], activity: [{ id: "audit", action, targetType, targetId: "target", occurredAt: new Date().toISOString(), actorName: "Reviewer" }] });
+    renderPage();
+    expect(await screen.findByText(label)).toBeInTheDocument();
+    if (targetType === "MODERATION_CASE") expect(screen.getByRole("link", { name: "Case target" })).toHaveAttribute("href", "/moderation/cases/target");
+  });
+
   it("renders real counts with the frontend's own label, no fabricated trend percentage", async () => {
     mocks.getAdminOverview.mockResolvedValue({
       metrics: [{ id: "members", value: 150000 }],

@@ -36,6 +36,7 @@ describe('OverviewService', () => {
     findTopByMemberCount: jest.fn(),
   };
   const reportsRepository = {
+    countActiveCases: jest.fn(),
     countOpen: jest.fn(),
     countOpenByGameIds: jest.fn(),
   };
@@ -51,6 +52,10 @@ describe('OverviewService', () => {
     gamesRepository.countActive.mockResolvedValue(6);
     gamesRepository.findTopByMemberCount.mockResolvedValue([]);
     reportsRepository.countOpen.mockResolvedValue(9);
+    reportsRepository.countActiveCases.mockResolvedValue({
+      openCases: 5,
+      unassignedCases: 2,
+    });
     reportsRepository.countOpenByGameIds.mockResolvedValue([]);
     gameModeratorsRepository.count.mockResolvedValue(14);
     auditLogQueryService.listAllForAdmin.mockResolvedValue({
@@ -76,6 +81,7 @@ describe('OverviewService', () => {
       { id: 'reports', value: 9 },
       { id: 'moderators', value: 14 },
     ]);
+    expect(result.moderation).toEqual({ openCases: 5, unassignedCases: 2 });
     expect(usersRepository.countActive).toHaveBeenCalled();
     expect(gamesRepository.countActive).toHaveBeenCalled();
   });

@@ -1,5 +1,6 @@
 import type { AttachmentFile, EncryptedBlobRef } from '../contract/types';
 import { isAttachmentEnvelope } from './attachmentEnvelope';
+import { isPostShareEnvelope } from '../messaging/postShareEnvelope';
 import { MAX_FILE_NAME_LENGTH } from './limits';
 
 export type AttachmentKind = 'image' | 'video' | 'file';
@@ -85,18 +86,23 @@ export function chunkVisualAttachments<T>(
 /** What a thread bubble should show for a decrypted envelope; null means an unsupported type. */
 export type EnvelopeView =
   | { kind: 'text'; text: string }
-  | { kind: 'attachment'; caption: string; files: AttachmentFile[] };
+  | { kind: 'attachment'; caption: string; files: AttachmentFile[] }
+  | { kind: 'post'; caption: string; postId: string };
 
 export function envelopeView(envelope: unknown): EnvelopeView | null {
   if (isAttachmentEnvelope(envelope)) {
     return { kind: 'attachment', caption: envelope.body ?? '', files: envelope.files };
   }
+  if (isPostShareEnvelope(envelope)) {
+    return { kind: 'post', caption: envelope.body ?? '', postId: envelope.postId };
+  }
   const { type, body } = (envelope ?? {}) as { type?: unknown; body?: unknown };
   return type === 'text' && typeof body === 'string' ? { kind: 'text', text: body } : null;
 }
 
-/** No caption and nothing but images/video: the bubble chrome would just be a frame around the media. */
+/** No caption and nothing but images/video, or a shared post card: the bubble chrome would just be a frame around it. */
 export function isMediaOnlyView(view: EnvelopeView | null): boolean {
+  if (view?.kind === 'post') return !view.caption;
   return (
     view?.kind === 'attachment' &&
     !view.caption &&

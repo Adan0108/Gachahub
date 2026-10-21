@@ -6,6 +6,7 @@ import { ConversationRowMenu } from "../components/chat/ConversationRowMenu";
 
 const mocks = vi.hoisted(() => ({
   block: vi.fn(),
+  unblock: vi.fn(),
   archive: vi.fn(),
   unarchive: vi.fn(),
   remove: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock("../hooks/useCurrentUser", () => ({
 vi.mock("../lib/api", () => ({
   api: {
     blockChatConversation: mocks.block,
+    unblockChatUser: mocks.unblock,
     archiveChatConversation: mocks.archive,
     unarchiveChatConversation: mocks.unarchive,
     deleteChatConversation: mocks.remove,
@@ -275,7 +277,7 @@ describe("ConversationRowMenu", () => {
 
       fireEvent.click(item("Archive chat"));
 
-      expect(await screen.findByRole("status")).toHaveTextContent("Couldn't do that. Try again.");
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Couldn't archive. Try again."));
       expect(onGone).not.toHaveBeenCalled();
     });
   });
@@ -335,7 +337,19 @@ describe("ConversationRowMenu", () => {
       await waitFor(() => expect(onGone).toHaveBeenCalledWith("c1"));
     });
 
-    it("stays open with a message when deleting fails", async () => {
+    it("closes the question at once, and says so when the chat is deleted", async () => {
+      mocks.remove.mockResolvedValue({});
+      setup();
+      open();
+      fireEvent.click(item("Delete chat"));
+
+      fireEvent.click(screen.getByRole("button", { name: "Delete chat" }));
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(await screen.findByRole("status")).toHaveTextContent("Chat deleted.");
+    });
+
+    it("says so when the server refuses, and the chat stays", async () => {
       mocks.remove.mockRejectedValue(new Error("nope"));
       const { onGone } = setup();
       open();
@@ -343,24 +357,8 @@ describe("ConversationRowMenu", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Delete chat" }));
 
-      expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't delete this chat. Try again.");
-      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Couldn't delete. Try again."));
       expect(onGone).not.toHaveBeenCalled();
-    });
-
-    it("does not show the last failure when it is opened again", async () => {
-      mocks.remove.mockRejectedValueOnce(new Error("nope"));
-      setup();
-      open();
-      fireEvent.click(item("Delete chat"));
-      fireEvent.click(screen.getByRole("button", { name: "Delete chat" }));
-      await screen.findByRole("alert");
-      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-
-      open();
-      fireEvent.click(item("Delete chat"));
-
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
   });
 
@@ -372,11 +370,11 @@ describe("ConversationRowMenu", () => {
       fireEvent.click(item("Block"));
 
       const dialog = screen.getByRole("dialog", { name: "Block Bob?" });
-      expect(within(dialog).getByText(/read or send messages/)).toBeInTheDocument();
+      expect(within(dialog).getByText(/send them messages/)).toBeInTheDocument();
       expect(mocks.block).not.toHaveBeenCalled();
     });
 
-    it("blocks when confirmed and tells the list it is gone", async () => {
+    it("blocks when confirmed, and the chat stays in the list", async () => {
       const { onGone } = setup();
       open();
       fireEvent.click(item("Block"));
@@ -384,7 +382,24 @@ describe("ConversationRowMenu", () => {
       fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Block" }));
 
       await waitFor(() => expect(mocks.block).toHaveBeenCalledWith("c1"));
-      await waitFor(() => expect(onGone).toHaveBeenCalledWith("c1"));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(onGone).not.toHaveBeenCalled();
+    });
+
+    it("offers Unblock for someone you blocked, and unblocks them without asking", async () => {
+      mocks.unblock.mockResolvedValue({ unblockedCount: 1 });
+      setup(
+        dm({
+          participants: [member("me", "Me", { isMuted: false }), member("peer", "Bob", { isBlockedByMe: true })],
+        }),
+      );
+      open();
+
+      expect(screen.queryByRole("menuitem", { name: /^Block/ })).not.toBeInTheDocument();
+      fireEvent.click(item("Unblock"));
+
+      await waitFor(() => expect(mocks.unblock).toHaveBeenCalledWith("peer"));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
 
     it("does nothing when cancelled", () => {
@@ -397,18 +412,7 @@ describe("ConversationRowMenu", () => {
       expect(mocks.block).not.toHaveBeenCalled();
     });
 
-    it("stays open with a message when blocking fails", async () => {
-      mocks.block.mockRejectedValue(new Error("nope"));
-      setup();
-      open();
-      fireEvent.click(item("Block"));
-
-      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Block" }));
-
-      expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't block this chat. Try again.");
-    });
-
-    it("disables the confirm button while it is working", async () => {
+    it("closes the question at once and says it is done, before the server has answered", async () => {
       let finish = () => {};
       mocks.block.mockReturnValue(new Promise((resolve) => (finish = () => resolve({}))));
       setup();
@@ -417,8 +421,20 @@ describe("ConversationRowMenu", () => {
 
       fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Block" }));
 
-      await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Block" })).toBeDisabled());
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(await screen.findByRole("status")).toHaveTextContent("Blocked.");
       await act(async () => finish());
+    });
+
+    it("says so when blocking fails", async () => {
+      mocks.block.mockRejectedValue(new Error("nope"));
+      setup();
+      open();
+      fireEvent.click(item("Block"));
+
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Block" }));
+
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Couldn't block. Try again."));
     });
   });
 });

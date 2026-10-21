@@ -5,8 +5,11 @@ import { ChatController } from './chat.controller';
 import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
 import { ChatMessagingService } from './chat-messaging.service';
+import { ChatGroupPhotoRepository } from './chat-group-photo.repository';
+import { ChatGroupPhotoService } from './chat-group-photo.service';
 import { ChatGroupService } from './chat-group.service';
 import { ChatInboxService } from './chat-inbox.service';
+import { ChatEmotesService } from './chat-emotes.service';
 import { ChatMessageActionsService } from './chat-message-actions.service';
 import { ChatMessageEditService } from './chat-message-edit.service';
 import { ChatReceiptsService } from './chat-receipts.service';
@@ -64,8 +67,11 @@ import { NotificationModule } from '../notifications/notification.module';
     ChatMembershipService,
     ChatInviteExpiryService,
     ChatGroupService,
+    ChatGroupPhotoRepository,
+    ChatGroupPhotoService,
     ChatInboxService,
     ChatMessageActionsService,
+    ChatEmotesService,
     ChatMessageEditService,
     ChatReceiptsService,
     ChatTypingGateway,
@@ -81,5 +87,6 @@ import { NotificationModule } from '../notifications/notification.module';
       useClass: OpaqueMessageEncryptionService,
     },
   ],
+  exports: [ChatAccessService],
 })
 export class ChatModule {}

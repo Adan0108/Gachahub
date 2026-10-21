@@ -1,3 +1,4 @@
+import { startTiming } from '../../chat/chatTiming';
 import { registerSessionCleanup } from '../../sessionCleanup';
 import type { EncryptedBlobRef } from '../contract/types';
 import { AttachmentError, decryptAttachment } from './attachmentCrypto';
@@ -81,6 +82,7 @@ async function download(source: AttachmentSource, signal: AbortSignal): Promise<
   if (!isTrustedBlobUrl(source.url)) {
     throw new AttachmentError('malformed', 'Attachment location is not trusted');
   }
+  const stop = startTiming('attachment downloaded', { file: source.cacheKey });
   const response = await fetch(source.url, { credentials: 'omit', redirect: 'error', signal });
   if (!response.ok) throw new Error(`Download failed (${response.status})`);
 
@@ -90,6 +92,7 @@ async function download(source: AttachmentSource, signal: AbortSignal): Promise<
   if (source.size !== undefined && ciphertext.byteLength !== limit) {
     throw new AttachmentError('integrity', 'Downloaded file has the wrong size');
   }
+  stop({ bytes: ciphertext.byteLength });
   const plaintext = await decryptAttachment(ciphertext, source.ref, maxBytes);
   return new Blob([plaintext as BlobPart], { type: safeBlobType(source.mime) });
 }

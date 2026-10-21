@@ -27,6 +27,7 @@ import { MlsRequestRateLimiterService } from './mls-request-rate-limiter.service
 import { MlsSelfJoinRateLimiterService } from './mls-self-join-rate-limiter.service';
 import {
   assertExternalJoinSigned,
+  assertRemovedLeafIsJoiner,
   assertJoinerMatchesDevice,
   readExternalJoin,
 } from './mls-external-commit.util';
@@ -128,7 +129,7 @@ export class MlsHandshakesService {
     }));
   }
 
-  /** A device adds itself to the group via a public external commit; only a plain join by the caller's own device is accepted. */
+  /** A device adds itself to the group via a public external commit, or replaces its own old leaf when it lost its state; nothing else is accepted. */
   async submitExternalJoin(
     userId: string,
     conversationId: string,
@@ -143,14 +144,15 @@ export class MlsHandshakesService {
     );
 
     const payload = new Uint8Array(Buffer.from(dto.payload, 'base64'));
-    assertJoinerMatchesDevice(
-      readExternalJoin(payload, conversationId, dto.epoch),
-      {
-        userId,
-        deviceId: dto.deviceId,
-        signaturePublicKey: device.signaturePublicKey,
-      },
-    );
+    const joiner = readExternalJoin(payload, conversationId, dto.epoch);
+    const expected = {
+      userId,
+      deviceId: dto.deviceId,
+      signaturePublicKey: device.signaturePublicKey,
+    };
+    assertJoinerMatchesDevice(joiner, expected);
+    // A Remove in the commit means the device is replacing its own old leaf, not adding a new one.
+    const resync = joiner.removedLeafIndex !== undefined;
 
     // Only the live frontier needs a fresh signature check; the epoch compare-and-set refuses settled epochs.
     const currentEpoch =
@@ -172,6 +174,13 @@ export class MlsHandshakesService {
         snapshot.payload,
         device.signaturePublicKey,
       );
+      if (joiner.removedLeafIndex !== undefined) {
+        assertRemovedLeafIsJoiner(
+          joiner.removedLeafIndex,
+          snapshot.payload,
+          expected,
+        );
+      }
     }
 
     const groupInfo = await this.decodeGroupInfo(
@@ -189,6 +198,7 @@ export class MlsHandshakesService {
       payload,
       payloadSha256: createHash('sha256').update(payload).digest('hex'),
       groupInfo,
+      resync,
     });
 
     return this.toSubmitResponse(result);

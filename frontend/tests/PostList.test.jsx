@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   createReport: vi.fn(() => Promise.resolve({ id: "report-1" })),
   share: vi.fn(() => Promise.resolve()),
   push: vi.fn(),
+  isAuthenticated: true,
 }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push }) }));
@@ -22,11 +23,13 @@ vi.mock("@tanstack/react-query", () => ({
                 id: "comment-1",
                 content: "Original comment",
                 author: { name: "Reviewer" },
-                replyCount: 0,
+                replyCount: 1,
               },
             ],
           }
-        : null,
+        : options.queryKey?.[0] === "comment-replies"
+          ? { items: [{ id: "reply-1", content: "A reply", author: { name: "Replier" } }] }
+          : null,
     isLoading: false,
     isError: false,
   })),
@@ -43,7 +46,20 @@ vi.mock("@tanstack/react-query", () => ({
   }),
 }));
 vi.mock("../hooks/useCurrentUser", () => ({
-  useCurrentUser: () => ({ user: { id: "viewer" }, isAuthenticated: true }),
+  useCurrentUser: () => ({ user: { id: "viewer" }, isAuthenticated: mocks.isAuthenticated }),
+}));
+// The real dialog needs the chat engine; here it only has to open and hand back its two actions.
+vi.mock("../components/SharePostDialog", () => ({
+  SharePostDialog: ({ postId, onClose, onNativeShare }) => (
+    <div role="dialog" aria-label={`share ${postId}`}>
+      <button onClick={onNativeShare} type="button">
+        native share
+      </button>
+      <button onClick={onClose} type="button">
+        close dialog
+      </button>
+    </div>
+  ),
 }));
 vi.mock("../lib/api", () => ({
   api: {
@@ -65,8 +81,9 @@ vi.mock("../lib/api", () => ({
 }));
 
 describe("PostList", () => {
-  it("shares a feed post with the browser share sheet", async () => {
+  it("opens the send dialog for a signed-in reader, which can still use the browser share sheet", async () => {
     mocks.share.mockClear();
+    mocks.isAuthenticated = true;
     Object.defineProperty(navigator, "share", { configurable: true, value: mocks.share });
 
     render(
@@ -77,11 +94,37 @@ describe("PostList", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /^share$/i }));
+    expect(screen.getByRole("dialog", { name: "share post-share" })).toBeInTheDocument();
+    expect(mocks.share).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "native share" }));
     await waitFor(() =>
       expect(mocks.share).toHaveBeenCalledWith(
-        expect.objectContaining({ title: "Share me", url: expect.stringContaining("/post/post-share") }),
+        expect.objectContaining({
+          title: "Share me",
+          url: expect.stringContaining("/post/post-share"),
+        }),
       ),
     );
+  });
+
+  it("shares straight to the browser share sheet for someone not signed in", async () => {
+    mocks.share.mockClear();
+    mocks.isAuthenticated = false;
+    Object.defineProperty(navigator, "share", { configurable: true, value: mocks.share });
+
+    render(
+      <PostList
+        posts={[{ id: "post-guest", title: "Share me", author: "Author", content: "Body" }]}
+        variant="feed"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^share$/i }));
+
+    await waitFor(() => expect(mocks.share).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    mocks.isAuthenticated = true;
   });
 
   it("opens the post menu and submits a report", async () => {
@@ -105,6 +148,60 @@ describe("PostList", () => {
         targetId: "post-report",
         reasonCode: "COMMERCIAL_SPAM",
         details: "Repeated ads",
+      }),
+    );
+  });
+
+  it("submits a comment complaint using the comment ID and native target type", async () => {
+    mocks.createReport.mockClear();
+    render(
+      <PostList
+        posts={[{ id: "post-comment-report", title: "Comment report", author: "Author" }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Comments on Comment report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Report comment" }));
+    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: "HARASSMENT" } });
+    fireEvent.change(screen.getByLabelText(/details/i), { target: { value: "Comment evidence" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit report" }));
+    await waitFor(() =>
+      expect(mocks.createReport).toHaveBeenCalledWith({
+        targetType: "COMMENT",
+        targetId: "comment-1",
+        reasonCode: "HARASSMENT",
+        details: "Comment evidence",
+      }),
+    );
+  });
+
+  it("asks a guest to sign in before opening comment reporting", () => {
+    mocks.isAuthenticated = false;
+    mocks.push.mockClear();
+    const { container } = render(
+      <PostList posts={[{ id: "guest-report", title: "Guest report", author: "Author" }]} />,
+    );
+    fireEvent.click(container.querySelector(".post-social button:nth-child(2)"));
+    fireEvent.click(screen.getByRole("button", { name: "Report comment" }));
+    expect(mocks.push).toHaveBeenCalledWith("/login");
+    expect(screen.queryByRole("dialog", { name: /Report comment/ })).not.toBeInTheDocument();
+    mocks.isAuthenticated = true;
+  });
+
+  it("reports a reply as COMMENT evidence using the reply ID", async () => {
+    mocks.createReport.mockClear();
+    render(<PostList posts={[{ id: "reply-report", title: "Reply report", author: "Author" }]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Comments on Reply report" }));
+    fireEvent.click(screen.getByRole("button", { name: "View 1 replies" }));
+    fireEvent.click(screen.getByRole("button", { name: "Report reply" }));
+    expect(screen.getByRole('button',{name:'Submit report'})).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/reason/i), {target:{value:'UNMARKED_SPOILERS'}});
+    expect(screen.getByRole("heading", { name: "What’s wrong with this comment?" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Submit report" }));
+    await waitFor(() =>
+      expect(mocks.createReport).toHaveBeenCalledWith({
+        targetType: "COMMENT",
+        targetId: "reply-1",
+        reasonCode: "UNMARKED_SPOILERS",
       }),
     );
   });

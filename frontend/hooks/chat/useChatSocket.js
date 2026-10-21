@@ -6,6 +6,7 @@ import { api } from '../../lib/api';
 import { applyReceiptsEvent } from '../../lib/chat/receiptEvents';
 import { queryKeys } from '../../lib/queries';
 import { useSharedSocket } from '../../lib/socket/sharedSocket';
+import { logTiming } from '../../lib/chat/chatTiming';
 import { typingSignal } from '../../lib/chat/chatTypingSignal';
 
 // How long a typing:start this tab sent stays valid without a fresh ping before it emits
@@ -67,6 +68,10 @@ export function useChatSocket() {
     removers.push(() => clearTimeout(deliveredTimer));
 
     on('message:created', (event) => {
+      logTiming('push received', {
+        messageId: event.messageId,
+        sinceSavedMs: Date.now() - Date.parse(event.createdAt),
+      });
       acknowledgeDelivery(event.messageId);
       queryClient.setQueryData(queryKeys.chatMessages(event.conversationId), (old) => {
         if (!old || old.items.some((item) => item.id === event.messageId)) {

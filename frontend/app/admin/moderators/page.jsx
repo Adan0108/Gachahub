@@ -1,8 +1,12 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { FiAlertTriangle, FiPlus, FiTrash2, FiUserCheck, FiX } from "react-icons/fi";
+import { ModeratorPicker } from "../../../components/moderation/ModeratorPicker";
+import { AvatarFace } from "../../../components/AvatarFace";
+import { PlatformModeratorManagement } from "../../../components/admin/PlatformModeratorManagement";
 import { AdminQueryBoundary } from "../../../components/admin/AdminQueryBoundary";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
@@ -12,20 +16,25 @@ import { useToast } from "../../../hooks/useToast";
 import { api } from "../../../lib/api";
 import { queries, queryKeys } from "../../../lib/queries";
 
-function AssignmentForm({ game, onClose, onSaved }) {
-  const [method, setMethod] = useState("email");
-  const [target, setTarget] = useState("");
+function PlatformModeratorsWithSearch({ actorId }) {
+  const params = useSearchParams();
+  const search = params?.get("search")?.slice(0, 100) || "";
+  return <PlatformModeratorManagement key={search} actorId={actorId} initialSearch={search} />;
+}
+
+function AssignmentForm({ game, actorId, onClose, onSaved }) {
+  const [target, setTarget] = useState(null);
   const [error, setError] = useState("");
   const mutation = useMutation({
-    mutationFn: () => api.assignGameModerator(game.slug, { [method]: target.trim() }),
+    mutationFn: () => api.assignGameModerator(game.slug, { userId: target.id }),
     onSuccess: () => onSaved("Moderator assigned"),
     onError: (nextError) => setError(nextError.message || "Could not assign moderator"),
   });
 
   const submit = (event) => {
     event.preventDefault();
-    if (!target.trim()) {
-      setError(method === "email" ? "Enter the user's email address." : "Enter the user ID.");
+    if (!target) {
+      setError("Choose a moderator from the search results.");
       return;
     }
     mutation.mutate();
@@ -55,49 +64,24 @@ function AssignmentForm({ game, onClose, onSaved }) {
           </button>
         </div>
         <form className="admin-form" onSubmit={submit}>
-          <fieldset className="admin-segmented admin-form-wide">
-            <legend>Find user by</legend>
-            <label>
-              <input
-                checked={method === "email"}
-                name="method"
-                onChange={() => {
-                  setMethod("email");
-                  setTarget("");
-                  setError("");
-                }}
-                type="radio"
-              />
-              <span>Email</span>
-            </label>
-            <label>
-              <input
-                checked={method === "userId"}
-                name="method"
-                onChange={() => {
-                  setMethod("userId");
-                  setTarget("");
-                  setError("");
-                }}
-                type="radio"
-              />
-              <span>User ID</span>
-            </label>
-          </fieldset>
-          <label className="admin-form-wide">
-            <span>{method === "email" ? "User email" : "User ID"} *</span>
-            <input
-              autoFocus
-              name="target"
-              onChange={(event) => {
-                setTarget(event.target.value);
-                setError("");
-              }}
-              placeholder={method === "email" ? "moderator@example.com" : "User database ID"}
-              type={method === "email" ? "email" : "text"}
-              value={target}
-            />
-          </label>
+          <ModeratorPicker
+            actorId={actorId}
+            scopeKey={`grant:${game.slug}`}
+            game={game}
+            granting
+            search={(q, options) => api.searchGameModeratorCandidates(game.slug, q, options)}
+            onSelect={(user) => {
+              setTarget(user);
+              setError("");
+            }}
+            disabled={mutation.isPending}
+          />
+          {target && (
+            <p role="status">
+              Selected {target.name}
+              {target.username ? ` (@${target.username})` : ""}
+            </p>
+          )}
           <p className="admin-form-note admin-form-wide">
             This grants moderation permission only within {game.name}. It does not change the user's
             platform role.
@@ -212,7 +196,17 @@ export default function AdminModeratorsPage() {
       <div className="admin-page-heading">
         <div>
           <span className="admin-eyebrow">Permissions</span>
-          <h1>Game moderators</h1>
+          <h1>Moderators</h1>
+          <p>Manage platform access and separate game assignments.</p>
+        </div>
+      </div>
+      <Suspense fallback={<AdminState kind="loading" title="Loading platform moderators" />}>
+        <PlatformModeratorsWithSearch actorId={session.user.id} />
+      </Suspense>
+      <div className="admin-page-heading">
+        <div>
+          <span className="admin-eyebrow">Permissions</span>
+          <h2>Game moderators</h2>
           <p>Assign and revoke moderation access for individual communities.</p>
         </div>
         <button
@@ -296,8 +290,21 @@ export default function AdminModeratorsPage() {
                       <tr key={assignment.id || assignment.user.id}>
                         <td>
                           <div className="admin-user-cell">
-                            <span>{assignment.user.name?.charAt(0)?.toUpperCase() || "M"}</span>
-                            <b>{assignment.user.name || "Unnamed user"}</b>
+                            <span className="case-person-avatar">
+                              <AvatarFace
+                                name={assignment.user.name}
+                                image={assignment.user.image}
+                              />
+                            </span>
+                            <div>
+                              <b>{assignment.user.name || "Unnamed user"}</b>
+                              {assignment.user.username && (
+                                <small>@{assignment.user.username}</small>
+                              )}
+                              <small>
+                                Game moderator for {selectedGame?.name || "this community"}
+                              </small>
+                            </div>
                           </div>
                         </td>
                         <td>{assignment.user.email}</td>
@@ -340,7 +347,12 @@ export default function AdminModeratorsPage() {
         </>
       )}
       {assigning && selectedGame ? (
-        <AssignmentForm game={selectedGame} onClose={() => setAssigning(false)} onSaved={refresh} />
+        <AssignmentForm
+          actorId={session.user?.id}
+          game={selectedGame}
+          onClose={() => setAssigning(false)}
+          onSaved={refresh}
+        />
       ) : null}
       {removing && selectedGame ? (
         <RemovalDialog

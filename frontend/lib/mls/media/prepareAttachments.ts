@@ -83,7 +83,14 @@ async function prepareOne(
   };
 }
 
-/** Encrypts and uploads one file at a time, recording each in `done` so a failure never orphans finished files. */
+/** How many files are encrypted and uploaded at the same moment: enough to overlap the waiting, few enough to keep the tab responsive. */
+export const PREPARE_CONCURRENCY = 3;
+
+/**
+ * Encrypts and uploads the files a few at a time, recording each in `done` as it finishes so a
+ * failure never orphans finished files. After a failure nothing new is started, the ones already
+ * under way are let finish (and kept), and the first error is thrown.
+ */
 export async function prepareAttachments(
   files: File[],
   upload: BlobUploader,
@@ -98,9 +105,22 @@ export async function prepareAttachments(
   const visualCount = files.filter((file) => attachmentKind(file.type) !== 'file').length;
   const thumbnailMaxEdge = visualCount === 1 ? THUMBNAIL_MAX_EDGE_SOLO : THUMBNAIL_MAX_EDGE_GROUPED;
 
-  for (const [index, file] of files.entries()) {
-    if (done.has(index)) continue;
-    done.set(index, await prepareOne(file, upload, onStage, thumbnailMaxEdge));
-  }
+  const waiting = files.map((_, index) => index).filter((index) => !done.has(index));
+  let failure: { error: unknown } | undefined;
+
+  const worker = async () => {
+    for (let index = waiting.shift(); index !== undefined; index = waiting.shift()) {
+      if (failure) return;
+      try {
+        done.set(index, await prepareOne(files[index]!, upload, onStage, thumbnailMaxEdge));
+      } catch (error) {
+        failure ??= { error };
+        return;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(PREPARE_CONCURRENCY, waiting.length) }, worker));
+
+  if (failure) throw failure.error;
   return files.map((_, index) => done.get(index)!);
 }

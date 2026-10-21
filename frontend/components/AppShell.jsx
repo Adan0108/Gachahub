@@ -11,6 +11,7 @@ import { useDeviceIdentity } from "../hooks/chat/useDeviceIdentity";
 import { useAppSocket } from "../hooks/useAppSocket";
 import { useChatSocket } from "../hooks/chat/useChatSocket";
 import { useNotificationSocket } from "../hooks/useNotificationSocket";
+import { usePresenceSocket } from "../hooks/presence/usePresenceSocket";
 import { BrandMark } from "./BrandMark";
 import { glyph, navItems } from "./constants";
 import { DevToolsPanel } from "./DevToolsPanel";
@@ -102,6 +103,8 @@ export function AppShell({ children, initialTheme = "dark" }) {
   useChatSocket();
   // Keeps the top-bar bell live on every page.
   useNotificationSocket();
+  // Counts this tab as online and applies other people's presence changes live.
+  usePresenceSocket();
   const router = useRouter();
   const menuButtonRef = useRef(null);
   const menuCloseButtonRef = useRef(null);
@@ -152,7 +155,10 @@ export function AppShell({ children, initialTheme = "dark" }) {
     );
   }
 
-  if (admin) return children;
+  const platformCaseRoute = pathname.startsWith("/moderation/cases");
+  const privilegedGameRoute = pathname.startsWith("/moderator") &&
+    ["ADMIN", "PLATFORM_MODERATOR"].includes(user?.role);
+  if (admin || platformCaseRoute || privilegedGameRoute) return children;
 
   return (
     <div className={`app-shell ${studio ? "studio-shell" : ""}`}>

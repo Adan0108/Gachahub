@@ -10,6 +10,7 @@ import { useCursorFeed } from "../../../hooks/useCursorFeed";
 import { useCurrentUser } from "../../../hooks/useCurrentUser";
 import { Art } from "../../../components/Art";
 import { BuildCard } from "../../../components/BuildCard";
+import { CommunityChat } from "../../../components/community/CommunityChat";
 import { PostList } from "../../../components/PostList";
 import { QueryNotice } from "../../../components/QueryNotice";
 import { SectionTitle } from "../../../components/SectionTitle";
@@ -35,6 +36,9 @@ const teamComps = [
   },
 ];
 
+// Tabs the page owns; every other tab is one of the game's categories.
+const FIXED_TABS = ["Overview", "Chat", "Builds", "Teams"];
+
 function CommunityContent() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -49,6 +53,7 @@ function CommunityContent() {
     const items = categoriesQuery.data || (api.usingMocks ? fallbacks.categories() : []);
     return [
       "Overview",
+      "Chat",
       ...items.filter((category) => category.isActive !== false).map((category) => category.name),
       "Builds",
       "Teams",
@@ -58,9 +63,7 @@ function CommunityContent() {
   const selectedCategory = (
     categoriesQuery.data || (api.usingMocks ? fallbacks.categories() : [])
   ).find((category) => category.name === activeTab);
-  const categorySlug = ["Overview", "Builds", "Teams"].includes(activeTab)
-    ? undefined
-    : selectedCategory?.slug;
+  const categorySlug = FIXED_TABS.includes(activeTab) ? undefined : selectedCategory?.slug;
   const shouldLoadFeed = activeTab === "Overview" || Boolean(categorySlug);
   const { user, isLoading: sessionLoading } = useCurrentUser();
   const membership = useCommunityMembership(slug, user?.id);
@@ -146,7 +149,9 @@ function CommunityContent() {
           className={`join-btn ${joined ? "joined" : ""}`}
           aria-pressed={joined}
           onClick={membership.toggle}
-          disabled={sessionLoading || membership.isLoading || membership.isPending || membership.isError}
+          disabled={
+            sessionLoading || membership.isLoading || membership.isPending || membership.isError
+          }
           type="button"
         >
           {joined ? `${glyph.check} Joined` : "+ Join"}
@@ -162,7 +167,11 @@ function CommunityContent() {
           </div>
         </div>
       </section>
-      <QueryNotice isError={membership.isError} errorText={membership.error?.message || "Could not update community membership."} onRetry={membership.retry} />
+      <QueryNotice
+        isError={membership.isError}
+        errorText={membership.error?.message || "Could not update community membership."}
+        onRetry={membership.retry}
+      />
       <div className="tabs wide" aria-label="Community content" role="tablist">
         {categories.map((item) => (
           <Link
@@ -237,7 +246,20 @@ function CommunityContent() {
             </>
           )}
 
-          {!["Overview", "Builds", "Teams"].includes(activeTab) && (
+          {activeTab === "Chat" && (
+            <CommunityChat
+              canJoin={!sessionLoading && !membership.isLoading}
+              isCheckingMembership={sessionLoading || membership.isLoading}
+              communityName={community.name}
+              isJoined={joined}
+              isJoining={membership.isPending}
+              onJoin={membership.toggle}
+              slug={slug}
+              focusMessageId={searchParams.get("message") || undefined}
+            />
+          )}
+
+          {!FIXED_TABS.includes(activeTab) && (
             <>
               <SectionTitle>{activeTab} discussions</SectionTitle>
               <QueryNotice

@@ -1,8 +1,10 @@
 import { AuditTargetType } from '../generated/prisma/client';
 import type {
+  ChatChannelAuditMetadata,
   CommentAuditMetadata,
   PostAuditMetadata,
   ReportAuditMetadata,
+  CaseAuditMetadata,
 } from '../audit-log/audit-log.types';
 import type { AuditLogQueryService } from '../audit-log/audit-log-query.service';
 
@@ -63,11 +65,22 @@ function resolveTargetName(
         ? `${metadata.reportedTargetType} ${metadata.reportedTargetId}`
         : null;
     }
+    case AuditTargetType.MODERATION_CASE: {
+      const metadata = entry.metadata as CaseAuditMetadata | null;
+      return metadata?.targetId
+        ? `${metadata.targetType} ${metadata.targetId}`
+        : null;
+    }
     case AuditTargetType.USER:
       return userNameById.get(entry.targetId) ?? null;
     case AuditTargetType.GAME:
       // Already denormalized on the row - no extra lookup needed.
       return entry.gameSlug ?? null;
+    case AuditTargetType.CHANNEL:
+      return (entry.metadata as ChatChannelAuditMetadata | null)?.name ?? null;
+    case AuditTargetType.CHAT_MESSAGE:
+      // A message has no title of its own; the room it was in is the useful context.
+      return null;
     default: {
       const exhaustiveCheck: never = entry.targetType;
       return exhaustiveCheck;

@@ -28,7 +28,13 @@ const person = (id, name) => ({ userId: id, state: "ACTIVE", user: { id, name } 
 const direct = { id: "c1", type: "DIRECT", participants: [person("me", "Me"), person("peer", "Mado")] };
 const group = { id: "g1", type: "GROUP", title: "Squad", participants: [person("me", "Me"), person("a", "Ann")] };
 
-function renderPanel({ conversation = direct, isBlockPending = false, onBlock = vi.fn() } = {}) {
+function renderPanel({
+  conversation = direct,
+  isBlockPending = false,
+  isUnblockPending = false,
+  onBlock = vi.fn(),
+  onUnblock = vi.fn(),
+} = {}) {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <ConversationInfoPanel
@@ -39,7 +45,9 @@ function renderPanel({ conversation = direct, isBlockPending = false, onBlock = 
         isBlockPending={isBlockPending}
         isGroup={conversation.type === "GROUP"}
         isOpen
+        isUnblockPending={isUnblockPending}
         onBlock={onBlock}
+        onUnblock={onUnblock}
         onClose={vi.fn()}
         onOpenAttachment={vi.fn()}
         search={{ messagesById: new Map(), hiddenMessageIds: new Set(), history: {}, onJump: vi.fn() }}
@@ -48,7 +56,7 @@ function renderPanel({ conversation = direct, isBlockPending = false, onBlock = 
       />
     </QueryClientProvider>,
   );
-  return { onBlock };
+  return { onBlock, onUnblock };
 }
 
 const blockRow = () => screen.getByRole("button", { name: "Block" });
@@ -68,7 +76,7 @@ describe("ConversationInfoPanel blocking", () => {
 
     fireEvent.click(blockRow());
 
-    expect(within(screen.getByRole("dialog")).getByText(/read or send messages/)).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByText(/send them messages/)).toBeInTheDocument();
   });
 
   it("starts on Cancel, so a stray Enter does not block anyone", () => {
@@ -136,10 +144,71 @@ describe("ConversationInfoPanel blocking", () => {
     expect(blockRow()).toBeDisabled();
   });
 
+  describe("a person you blocked", () => {
+    const blockedDirect = {
+      ...direct,
+      participants: [person("me", "Me"), { ...person("peer", "Mado"), isBlockedByMe: true }],
+    };
+
+    it("offers Unblock instead of Block, with no question asked", () => {
+      const { onUnblock } = renderPanel({ conversation: blockedDirect });
+
+      expect(screen.queryByRole("button", { name: "Block" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Unblock" }));
+
+      expect(onUnblock).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("cannot be unblocked twice while it is going through", () => {
+      renderPanel({ conversation: blockedDirect, isUnblockPending: true });
+
+      expect(screen.getByRole("button", { name: "Unblock" })).toBeDisabled();
+    });
+  });
+
   it("has no Block on a group, where it would cut you off from everyone", () => {
     renderPanel({ conversation: group });
 
     expect(screen.queryByRole("button", { name: "Block" })).not.toBeInTheDocument();
+  });
+
+  describe("layout", () => {
+    it("has no Profile button, since there is no profile page to open", () => {
+      renderPanel();
+
+      expect(screen.queryByRole("button", { name: "Profile" })).not.toBeInTheDocument();
+    });
+
+    it("folds the media and files rows away and opens them again", () => {
+      renderPanel();
+      const toggle = screen.getByRole("button", { name: "Media and files" });
+
+      expect(screen.getByRole("button", { name: /^Files/ })).toBeInTheDocument();
+      fireEvent.click(toggle);
+      expect(screen.queryByRole("button", { name: /^Files/ })).not.toBeInTheDocument();
+      fireEvent.click(toggle);
+      expect(screen.getByRole("button", { name: /^Files/ })).toBeInTheDocument();
+    });
+
+    it("puts Media where Profile was for someone who cannot add people", () => {
+      renderPanel({ conversation: group });
+
+      expect(screen.getAllByRole("button", { name: /^Media/ }).length).toBeGreaterThan(0);
+      expect(screen.queryByRole("button", { name: "Add people" })).not.toBeInTheDocument();
+    });
+
+    it("puts Add people there for a group owner, and it opens the members and the picker", () => {
+      const owned = { ...group, participants: [{ ...person("me", "Me"), role: "OWNER" }, person("a", "Ann")] };
+      renderPanel({ conversation: owned });
+      fireEvent.click(screen.getByRole("button", { name: /Members/ }));
+      expect(screen.queryByText("Ann")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByText("Add people", { selector: "button" }));
+
+      expect(screen.getByText("Ann")).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "Add people" })).toBeInTheDocument();
+    });
   });
 
   it("sits on top of the whole page, not inside the panel that opened it", () => {

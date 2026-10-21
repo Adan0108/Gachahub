@@ -1,6 +1,7 @@
 import { keepPreviousData } from "@tanstack/react-query";
 import { cursorFeedOptions } from "./cursorFeed";
 import { api, fallbackCategories, fallbackGame, fallbackGames, fallbackPosts } from "./api";
+import { bindSignedInAccount } from "./mls/mlsAccountSession";
 
 // Normalizes an unpaginated, bare-array admin endpoint (categories, moderators) into the same
 // { items, meta } shape every paginated admin query already returns, so useAdminList's generic
@@ -41,10 +42,6 @@ export const queryKeys = {
   comments: (postId) => ["comments", postId],
   replies: (commentId) => ["comment-replies", commentId],
   adminOverview: { all: ["admin", "overview"] },
-  adminReports: {
-    all: ["admin", "reports"],
-    list: (status, page, limit = 20) => ["admin", "reports", { status, page, limit }],
-  },
   adminUsers: {
     all: ["admin", "users"],
     list: (status, search, page) => ["admin", "users", { status, search, page }],
@@ -61,10 +58,16 @@ export const queryKeys = {
   notifications: ["notifications"],
   notificationList: ["notifications", "list"],
   notificationUnreadCount: ["notifications", "unread-count"],
+  myPresence: ["presence", "me"],
   chatConversations: ["chat", "conversations"],
   chatArchivedConversations: ["chat", "archived"],
   chatRequests: ["chat", "requests"],
+  chatBlockedUsers: ["chat", "blocked"],
   chatMessages: (conversationId) => ["chat", "messages", conversationId],
+  chatEmotes: ["chat", "emotes"],
+  communityChannels: (slug) => ["community-chat", slug, "channels"],
+  communityMessages: (slug, channelId) => ["community-chat", slug, "messages", channelId],
+  communityMembers: (slug, query) => ["community-chat", slug, "members", query],
   // Socket-pushed only - nobody ever fetches this over REST, useChatSocket just writes into it.
   chatTyping: (conversationId) => ["chat", "typing", conversationId],
   // Same idea: the one-shot "your message request was accepted" event, keyed per conversation.
@@ -141,7 +144,12 @@ export const queries = {
   }),
   currentUser: () => ({
     queryKey: queryKeys.currentUser,
-    queryFn: ({ signal }) => api.getCurrentUser({ signal }),
+    queryFn: async ({ signal }) => {
+      const user = await api.getCurrentUser({ signal });
+      // Before anything reads the user: local encrypted data is per account, and a different one reloads the page
+      bindSignedInAccount(user?.id);
+      return user;
+    },
     retry: false,
     staleTime: 30_000,
   }),
@@ -211,13 +219,6 @@ export const queries = {
     retry: 1,
     staleTime: 30_000,
   }),
-  adminReports: (status = "", page = 1, limit = 20) => ({
-    queryKey: queryKeys.adminReports.list(status, page, limit),
-    queryFn: ({ signal }) => api.listReports({ status, page, limit }, { signal }),
-    placeholderData: keepPreviousData,
-    retry: 1,
-    staleTime: 15_000,
-  }),
   adminUsers: (status = "", search = "", page = 1) => ({
     queryKey: queryKeys.adminUsers.list(status, search, page),
     queryFn: ({ signal }) => api.listAdminUsers({ status, search, page, limit: 20 }, { signal }),
@@ -264,6 +265,12 @@ export const queries = {
     staleTime: 30_000,
     refetchInterval: 60_000,
   }),
+  chatBlockedUsers: () => ({
+    queryKey: queryKeys.chatBlockedUsers,
+    queryFn: ({ signal }) => api.getBlockedChatUsers({ signal }),
+    retry: 1,
+    staleTime: 15_000,
+  }),
   chatArchivedConversations: () => ({
     queryKey: queryKeys.chatArchivedConversations,
     queryFn: api.getArchivedChatConversations,
@@ -276,6 +283,25 @@ export const queries = {
     retry: 1,
     staleTime: 10_000,
     refetchInterval: 15_000,
+  }),
+  myPresence: () => ({
+    queryKey: queryKeys.myPresence,
+    queryFn: api.getMyPresence,
+    retry: 1,
+    staleTime: 60_000,
+  }),
+  communityChannels: (slug) => ({
+    queryKey: queryKeys.communityChannels(slug),
+    queryFn: () => api.getCommunityChannels(slug),
+    enabled: Boolean(slug),
+    retry: false,
+    staleTime: 15_000,
+  }),
+  chatEmotes: () => ({
+    queryKey: queryKeys.chatEmotes,
+    queryFn: api.getChatEmotes,
+    retry: 1,
+    staleTime: 5 * 60_000,
   }),
   chatMessages: (conversationId) => ({
     queryKey: queryKeys.chatMessages(conversationId),

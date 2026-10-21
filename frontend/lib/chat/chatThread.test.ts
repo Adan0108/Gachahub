@@ -5,6 +5,7 @@ import {
   membershipEventText,
   messageDividerLabel,
   messageFullTimestamp,
+  newestUnreadableFromOthers,
   readableNeighbors,
   replyOriginalSenderLabel,
   threadItemKey,
@@ -20,6 +21,7 @@ const message = (id: string, minute: number, contentType?: string, senderId = 'a
   senderId,
   createdAt: at(minute),
   contentType,
+  status: undefined as string | undefined,
 });
 const decrypted = (statuses: Record<string, Status>) =>
   Object.fromEntries(Object.entries(statuses).map(([id, status]) => [id, { status }]));
@@ -53,6 +55,41 @@ describe('eventsForDisplay', () => {
 });
 
 describe('buildThreadItems', () => {
+  describe('a message still being decrypted', () => {
+    const build = (messages: ReturnType<typeof message>[], states: Record<string, Status>) =>
+      buildThreadItems({ messages, decrypted: decrypted(states), events: [], collapseLeading: false });
+
+    it('leaves no divider behind, since nothing is drawn for it', () => {
+      const items = build([message('a', 0), message('b', 120), message('c', 240)], { a: 'ok', b: 'pending' });
+
+      // b is not drawn yet, and c has no decrypt state either, so only a is on screen
+      expect(shape(items)).toEqual(['timestamp', 'a']);
+    });
+
+    it('does not break the gap logic for the messages around it', () => {
+      const items = build([message('a', 0), message('b', 10), message('c', 20)], { a: 'ok', b: 'pending', c: 'ok' });
+
+      // a and c are 20 minutes apart: no divider, same as if b were not there
+      expect(shape(items)).toEqual(['timestamp', 'a', 'c']);
+    });
+
+    it('gets its divider once it can be drawn', () => {
+      const messages = [message('a', 0), message('b', 120)];
+
+      expect(shape(build(messages, { a: 'ok', b: 'pending' }))).toEqual(['timestamp', 'a']);
+      expect(shape(build(messages, { a: 'ok', b: 'ok' }))).toEqual(['timestamp', 'a', 'timestamp', 'b']);
+    });
+
+    it('still counts an unsent message, a start marker and an unavailable message as drawn', () => {
+      const items = build(
+        [{ ...message('a', 0), status: 'DELETED' }, message('b', 120, 'SYSTEM'), message('c', 240)],
+        { c: 'unavailable' },
+      );
+
+      expect(shape(items)).toEqual(['timestamp', 'a', 'timestamp', 'c']);
+    });
+  });
+
   it('collapses leading undecryptable messages into one banner', () => {
     const items = buildThreadItems({
       messages: [message('a', 1), message('b', 2), message('c', 3)],
@@ -73,14 +110,14 @@ describe('buildThreadItems', () => {
     expect(shape(items)).toEqual(['timestamp', 'a', 'b', 'c']);
   });
 
-  it('steps over the conversation-started row and pending messages while collapsing', () => {
+  it('steps over the conversation-started row, and leaves out pending messages, while collapsing', () => {
     const items = buildThreadItems({
       messages: [message('s', 0, 'SYSTEM'), message('a', 1), message('p', 2), message('c', 3)],
       decrypted: decrypted({ a: 'unavailable', p: 'pending', c: 'ok' }),
       events: [],
       collapseLeading: true,
     });
-    expect(shape(items)).toEqual(['history-banner', 's', 'timestamp', 'p', 'c']);
+    expect(shape(items)).toEqual(['history-banner', 'timestamp', 'c']);
   });
 
   it('shows no banner when nothing is unreadable, and keeps everything when told not to collapse', () => {
@@ -131,14 +168,24 @@ describe('buildThreadItems', () => {
     expect(items[0]).toMatchObject({ kind: 'timestamp', at: Date.parse(at(1)) });
   });
 
-  it('puts the divider under "conversation started", not above it', () => {
+  it('drops "conversation started" as soon as someone has written', () => {
     const items = buildThreadItems({
-      messages: [message('s', 0, 'SYSTEM')],
-      decrypted: decrypted({ s: 'ok' }),
+      messages: [message('s', 0, 'SYSTEM'), message('a', 1)],
+      decrypted: decrypted({ s: 'ok', a: 'ok' }),
       events: [],
       collapseLeading: true,
     });
-    expect(shape(items)).toEqual(['s', 'timestamp']);
+    expect(shape(items)).toEqual(['timestamp', 'a']);
+  });
+
+  it('shows "conversation started" alone, with no time, until somebody writes', () => {
+    const items = buildThreadItems({
+      messages: [message('s', 0, 'SYSTEM')],
+      decrypted: decrypted({}),
+      events: [],
+      collapseLeading: true,
+    });
+    expect(shape(items)).toEqual(['s']);
   });
 
   it('gives a message a full divider once the gap since the last one passes 45 minutes', () => {
@@ -224,17 +271,6 @@ describe('buildThreadItems', () => {
       collapseLeading: true,
     });
     expect(items[2]).toMatchObject({ message: { id: 'b' }, gapBefore: true, groupedWithPrevious: false });
-  });
-
-  it('never stacks the conversation-started row with a real message', () => {
-    const items = buildThreadItems({
-      messages: [message('s', 0, 'SYSTEM'), message('a', 1)],
-      decrypted: decrypted({ a: 'ok' }),
-      events: [],
-      collapseLeading: true,
-    });
-    const real = items.find((i) => i.kind === 'message' && i.message.id === 'a');
-    expect(real).toMatchObject({ groupedWithPrevious: false });
   });
 });
 
@@ -349,5 +385,41 @@ describe('readableNeighbors / wasLikelySentDuringAbsence', () => {
     const neighbors = readableNeighbors(messages, decrypted({ a: 'ok', b: 'ok', c: 'unavailable' }));
     expect(wasLikelySentDuringAbsence(neighbors, 0)).toBe(false);
     expect(wasLikelySentDuringAbsence(neighbors, 2)).toBe(false);
+  });
+});
+
+describe('newestUnreadableFromOthers', () => {
+  const others = (id: string, minute: number, contentType?: string) =>
+    message(id, minute, contentType, 'bob');
+
+  it('is the newest message from someone else this device could not decrypt', () => {
+    const messages = [others('a', 1), others('b', 2), message('mine', 3, undefined, 'alice')];
+
+    expect(
+      newestUnreadableFromOthers(messages, decrypted({ a: 'unavailable', b: 'unavailable' }), 'alice'),
+    ).toBe('b');
+  });
+
+  it('counts the conversation-start marker, which is never decrypted', () => {
+    const messages = [others('start', 1, 'SYSTEM'), message('mine', 2, undefined, 'alice')];
+
+    expect(newestUnreadableFromOthers(messages, decrypted({}), 'alice')).toBe('start');
+  });
+
+  it('ignores messages that were read, are still being decrypted, or are the viewers own', () => {
+    const messages = [
+      others('read', 1),
+      others('later', 2),
+      message('mine', 3, 'SYSTEM', 'alice'),
+      message('mine-gone', 4, undefined, 'alice'),
+    ];
+
+    expect(
+      newestUnreadableFromOthers(
+        messages,
+        decrypted({ read: 'ok', later: 'pending', 'mine-gone': 'unavailable' }),
+        'alice',
+      ),
+    ).toBeUndefined();
   });
 });

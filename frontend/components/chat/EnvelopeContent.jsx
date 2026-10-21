@@ -11,6 +11,7 @@ import { readLinkPreviews } from "../../lib/mls/messaging/linkPreviewEnvelope";
 import { ChatAttachments } from "./ChatAttachments";
 import { DraftLinkPreviewCard, ReceivedLinkPreviewCard } from "./LinkPreviewCard";
 import { LinkifiedText } from "./LinkifiedText";
+import { SharedPostCard } from "./SharedPostCard";
 import "./ChatAttachments.css";
 
 /** The body of one decrypted message bubble; envelope types this build can't show get a plain note. */
@@ -38,6 +39,17 @@ export function EnvelopeContent({ envelope, messageId, media }) {
   }
   if (view?.kind === "attachment") {
     return <ChatAttachments envelope={envelope} media={media} messageId={messageId} />;
+  }
+  if (view?.kind === "post") {
+    if (!view.caption) return <SharedPostCard postId={view.postId} />;
+    return (
+      <div className="chat-text-with-preview">
+        <p>
+          <LinkifiedText text={view.caption} />
+        </p>
+        <SharedPostCard postId={view.postId} />
+      </div>
+    );
   }
   return <p className="chat-message-unsupported">This message type isn&apos;t supported yet.</p>;
 }
