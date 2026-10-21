@@ -22,6 +22,9 @@ const mocks = vi.hoisted(() => ({
   assignGameModerator: vi.fn(),
   searchGameModeratorCandidates: vi.fn(),
   removeGameModerator: vi.fn(),
+  searchPlatformModeratorCandidates: vi.fn(),
+  grantPlatformModerator: vi.fn(),
+  revokePlatformModerator: vi.fn(),
 }));
 
 vi.mock("../lib/api", () => ({
@@ -31,6 +34,9 @@ vi.mock("../lib/api", () => ({
     assignGameModerator: mocks.assignGameModerator,
     searchGameModeratorCandidates: mocks.searchGameModeratorCandidates,
     removeGameModerator: mocks.removeGameModerator,
+    searchPlatformModeratorCandidates: mocks.searchPlatformModeratorCandidates,
+    grantPlatformModerator: mocks.grantPlatformModerator,
+    revokePlatformModerator: mocks.revokePlatformModerator,
   },
   fallbackCategories: vi.fn(() => []),
   fallbackGame: vi.fn(),
@@ -67,8 +73,83 @@ describe("AdminModeratorsPage", () => {
     });
     mocks.getGameModerators.mockReset();
     mocks.assignGameModerator.mockReset().mockResolvedValue({});
-    mocks.searchGameModeratorCandidates.mockReset().mockResolvedValue({ items: [{ id: "candidate", name: "Radium", username: "radium", role: "USER" }] });
+    mocks.searchGameModeratorCandidates.mockReset().mockResolvedValue({
+      items: [{ id: "candidate", name: "Radium", username: "radium", role: "USER" }],
+    });
     mocks.removeGameModerator.mockReset().mockResolvedValue({});
+    mocks.searchPlatformModeratorCandidates.mockReset().mockResolvedValue({
+      items: [
+        { id: "platform-target", name: "Review Rover", username: "review-rover", role: "USER" },
+      ],
+    });
+    mocks.grantPlatformModerator.mockReset().mockResolvedValue({});
+    mocks.revokePlatformModerator.mockReset().mockResolvedValue({});
+  });
+
+  it.each(["USER", "PLATFORM_MODERATOR"])(
+    "requires confirmation before changing %s platform access",
+    async (role) => {
+      mocks.getGameModerators.mockResolvedValue([]);
+      mocks.searchPlatformModeratorCandidates.mockResolvedValue({
+        items: [{ id: "platform-target", name: "Review Rover", username: "review-rover", role }],
+      });
+      renderPage();
+      fireEvent.change(screen.getByRole("searchbox", { name: "Find user or platform moderator" }), {
+        target: { value: "@review-rover" },
+      });
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Select Review Rover (@review-rover)" }),
+      );
+      const revoke = role === "PLATFORM_MODERATOR";
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: revoke ? "Revoke Platform moderator" : "Grant Platform moderator",
+        }),
+      );
+      expect(mocks.grantPlatformModerator).not.toHaveBeenCalled();
+      expect(mocks.revokePlatformModerator).not.toHaveBeenCalled();
+      expect(screen.getByRole("alertdialog")).toBeVisible();
+      if (revoke)
+        expect(
+          screen.getByText(/Normal user access and any game moderator assignments remain/),
+        ).toBeVisible();
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: revoke ? "Remove platform access" : "Grant platform access",
+        }),
+      );
+      await waitFor(() =>
+        expect(
+          revoke ? mocks.revokePlatformModerator : mocks.grantPlatformModerator,
+        ).toHaveBeenCalledWith("platform-target"),
+      );
+      expect(
+        await screen.findByText(
+          revoke
+            ? "Platform moderator access removed. Normal user access remains."
+            : "Platform moderator access granted.",
+        ),
+      ).toBeVisible();
+    },
+  );
+
+  it("keeps a failed privilege confirmation open and allows cancellation without a change", async () => {
+    mocks.getGameModerators.mockResolvedValue([]);
+    mocks.grantPlatformModerator.mockRejectedValue(new Error("User access changed; search again"));
+    renderPage();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find user or platform moderator" }), {
+      target: { value: "Review Rover" },
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select Review Rover (@review-rover)" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Grant Platform moderator" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(mocks.grantPlatformModerator).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Grant Platform moderator" }));
+    fireEvent.click(screen.getByRole("button", { name: "Grant platform access" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("User access changed; search again");
+    expect(screen.getByRole("alertdialog")).toBeVisible();
   });
 
   it("lists moderators assigned to the first community by default", async () => {
@@ -76,10 +157,7 @@ describe("AdminModeratorsPage", () => {
     renderPage();
 
     expect(await screen.findByText("Rover")).toBeInTheDocument();
-    expect(mocks.getGameModerators).toHaveBeenCalledWith(
-      "wuthering-waves",
-      expect.anything(),
-    );
+    expect(mocks.getGameModerators).toHaveBeenCalledWith("wuthering-waves", expect.anything());
   });
 
   it("shows an empty state when the selected community has no moderators", async () => {
@@ -99,10 +177,7 @@ describe("AdminModeratorsPage", () => {
     });
 
     expect(await screen.findByText("Rover")).toBeInTheDocument();
-    expect(mocks.getGameModerators).toHaveBeenLastCalledWith(
-      "genshin-impact",
-      expect.anything(),
-    );
+    expect(mocks.getGameModerators).toHaveBeenLastCalledWith("genshin-impact", expect.anything());
   });
 
   it("removes a moderator after confirming the dialog", async () => {
@@ -118,14 +193,19 @@ describe("AdminModeratorsPage", () => {
 });
 
 it("searches community moderator candidates by identity instead of requesting a database ID", async () => {
-  mocks.getGameModerators.mockResolvedValue([]); renderPage();
+  mocks.getGameModerators.mockResolvedValue([]);
+  renderPage();
   const open = await screen.findByRole("button", { name: /Assign moderator/ });
   await waitFor(() => expect(open).toBeEnabled());
   fireEvent.click(open);
-  fireEvent.change(screen.getByRole("searchbox", { name: "Find moderator" }), { target: { value: "@radium" } });
+  fireEvent.change(screen.getByRole("searchbox", { name: "Find moderator" }), {
+    target: { value: "@radium" },
+  });
   fireEvent.click(await screen.findByRole("button", { name: "Select Radium (@radium)" }));
   fireEvent.click(screen.getAllByRole("button", { name: /^Assign moderator$/ }).at(-1));
   expect(await screen.findByText("Moderator assigned")).toBeVisible();
-  expect(mocks.assignGameModerator).toHaveBeenCalledWith("wuthering-waves", { userId: "candidate" });
+  expect(mocks.assignGameModerator).toHaveBeenCalledWith("wuthering-waves", {
+    userId: "candidate",
+  });
   expect(screen.queryByLabelText("User ID")).not.toBeInTheDocument();
 });

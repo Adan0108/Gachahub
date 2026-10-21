@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { FiAlertTriangle, FiPlus, FiTrash2, FiUserCheck, FiX } from "react-icons/fi";
 import { ModeratorPicker } from "../../../components/moderation/ModeratorPicker";
+import { PlatformModeratorManagement } from "../../../components/admin/PlatformModeratorManagement";
 import { AdminQueryBoundary } from "../../../components/admin/AdminQueryBoundary";
 import { AdminShell } from "../../../components/admin/AdminShell";
 import { AdminState } from "../../../components/admin/AdminState";
@@ -55,10 +56,24 @@ function AssignmentForm({ game, actorId, onClose, onSaved }) {
           </button>
         </div>
         <form className="admin-form" onSubmit={submit}>
-          <ModeratorPicker actorId={actorId} scopeKey={`grant:${game.slug}`} game={game} granting
+          <ModeratorPicker
+            actorId={actorId}
+            scopeKey={`grant:${game.slug}`}
+            game={game}
+            granting
             search={(q, options) => api.searchGameModeratorCandidates(game.slug, q, options)}
-            onSelect={(user) => { setTarget(user); setError(""); }} disabled={mutation.isPending} />
-          {target && <p role="status">Selected {target.name}{target.username ? ` (@${target.username})` : ""}</p>}
+            onSelect={(user) => {
+              setTarget(user);
+              setError("");
+            }}
+            disabled={mutation.isPending}
+          />
+          {target && (
+            <p role="status">
+              Selected {target.name}
+              {target.username ? ` (@${target.username})` : ""}
+            </p>
+          )}
           <p className="admin-form-note admin-form-wide">
             This grants moderation permission only within {game.name}. It does not change the user's
             platform role.
@@ -173,7 +188,15 @@ export default function AdminModeratorsPage() {
       <div className="admin-page-heading">
         <div>
           <span className="admin-eyebrow">Permissions</span>
-          <h1>Game moderators</h1>
+          <h1>Moderators</h1>
+          <p>Manage platform access and separate game assignments.</p>
+        </div>
+      </div>
+      <PlatformModeratorManagement actorId={session.user.id} />
+      <div className="admin-page-heading">
+        <div>
+          <span className="admin-eyebrow">Permissions</span>
+          <h2>Game moderators</h2>
           <p>Assign and revoke moderation access for individual communities.</p>
         </div>
         <button
@@ -301,7 +324,12 @@ export default function AdminModeratorsPage() {
         </>
       )}
       {assigning && selectedGame ? (
-        <AssignmentForm actorId={session.user?.id} game={selectedGame} onClose={() => setAssigning(false)} onSaved={refresh} />
+        <AssignmentForm
+          actorId={session.user?.id}
+          game={selectedGame}
+          onClose={() => setAssigning(false)}
+          onSaved={refresh}
+        />
       ) : null}
       {removing && selectedGame ? (
         <RemovalDialog

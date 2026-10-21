@@ -1,4 +1,4 @@
 import { CaseQueue } from "../../../components/moderation/CaseQueue";
-export default function Page() {
-  return <CaseQueue />;
+export default async function Page({ searchParams }) {
+  return <CaseQueue query={await searchParams} />;
 }

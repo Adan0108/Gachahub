@@ -679,3 +679,15 @@
 /* Match case workspace surfaces to the selected theme inside the shared shell. */
 .moderation-console .admin-main { background: var(--bg); color: var(--text); }
 .moderation-console .admin-topbar { background: var(--panel); color: var(--text); border-color: var(--line); }
+.case-back-link { display: inline-flex; margin: 0 0 20px; font-weight: 700; }
+.platform-moderator-management { padding: 24px; margin-bottom: 28px; }
+.platform-moderator-selection { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+@media (max-width: 980px) {
+  .moderation-console.admin-shell { display: block; }
+  .moderation-console .admin-sidebar { position: static; width: auto; height: auto; padding: 12px 18px; }
+  .moderation-console .admin-brand { display: none; }
+  .moderation-console .admin-nav { display: flex; flex-wrap: wrap; gap: 6px; }
+  .moderation-console .admin-nav a { justify-content: flex-start; min-height: 42px; padding: 8px 12px; }
+  .moderation-console .admin-nav span { display: inline; }
+  .moderation-console .admin-return-link { display: inline-flex; margin-top: 8px; padding: 4px 12px; }
+}

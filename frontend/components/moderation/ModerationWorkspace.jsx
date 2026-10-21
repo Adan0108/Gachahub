@@ -5,8 +5,9 @@ import Link from "next/link";
 import { AdminState } from "../admin/AdminState";
 import { FiShield } from "react-icons/fi";
 import { casePath } from "../../lib/moderation";
+import { caseViews, queueUrl } from "../../lib/moderation-queue";
 
-export function ModerationWorkspace({ access, gameSlug = "", children }) {
+export function ModerationWorkspace({ access, gameSlug = "", view = "all", children }) {
   if (access.isLoading)
     return (
       <section className="page moderation-workspace">
@@ -50,12 +51,31 @@ export function ModerationWorkspace({ access, gameSlug = "", children }) {
         <nav className="moderation-navigation" aria-label="Case workspace navigation">
           <Link href={casePath(gameSlug)}>{gameSlug ? "Community cases" : "All cases"}</Link>
           {access.privileged && gameSlug && <Link href="/moderation/cases">All cases</Link>}
-          {!access.privileged && <Link href="/moderator">My communities</Link>}
+          {!access.privileged && (
+            <>
+              {caseViews.slice(1).map((item) => (
+                <Link
+                  key={item.value}
+                  aria-current={view === item.value ? "page" : undefined}
+                  href={queueUrl(gameSlug, { view: item.value })}
+                >
+                  {item.label}
+                </Link>
+              ))}
+              <Link href="/moderator">My communities</Link>
+            </>
+          )}
           {access.user.role === "ADMIN" && <Link href="/admin">Admin console</Link>}
         </nav>
       </div>
       {children}
     </section>
   );
-  return access.privileged ? <AdminShell user={access.user} moderation>{content}</AdminShell> : content;
+  return access.privileged ? (
+    <AdminShell user={access.user} moderation gameSlug={gameSlug} view={view}>
+      {content}
+    </AdminShell>
+  ) : (
+    content
+  );
 }

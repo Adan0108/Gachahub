@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, expect, it, vi } from "vitest";
 vi.mock("next/navigation", () => ({ usePathname: () => "/moderation/cases" }));
@@ -60,6 +60,68 @@ function mount(component) {
     </QueryClientProvider>,
   );
 }
+it.each(["all", "assigned", "unassigned", "history"])(
+  "requests the %s workload server-side and marks one sidebar entry active",
+  async (view) => {
+    mount(<CaseQueue query={{ view, targetType: "COMMENT" }} />);
+    await waitFor(() =>
+      expect(api.listPlatformCases).toHaveBeenCalledWith(
+        expect.objectContaining({ view, targetType: "COMMENT" }),
+        expect.anything(),
+      ),
+    );
+    const nav = screen.getByRole("navigation", { name: "Moderation navigation" });
+    const labels = {
+      all: "Cases",
+      assigned: "Assigned to me",
+      unassigned: "Unassigned",
+      history: "Resolved / History",
+    };
+    expect(within(nav).getByRole("link", { name: labels[view] })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+    expect(screen.queryByRole("link", { name: "My communities" })).not.toBeInTheDocument();
+  },
+);
+
+it.each(["", "game-a"])(
+  "preserves filters and cursor in detail and back links for scope %s",
+  async (gameSlug) => {
+    const query = { view: "assigned", targetType: "COMMENT", cursor: "safe-cursor" };
+    const result = mount(<CaseQueue gameSlug={gameSlug} query={query} />);
+    const link = await screen.findByRole("link", { name: "View case" });
+    const href = new URL(link.href);
+    expect(href.pathname).toBe(
+      gameSlug ? "/moderator/game-a/cases/case-1" : "/moderation/cases/case-1",
+    );
+    const context = href.searchParams.get("queue");
+    expect(new URLSearchParams(context).get("cursor")).toBe("safe-cursor");
+    result.unmount();
+    mount(<CaseDetail gameSlug={gameSlug} caseId="case-1" queue={context} />);
+    const backUrl = new URL(screen.getByRole("link", { name: "← Back to cases" }).href);
+    expect(backUrl.pathname).toBe(gameSlug ? "/moderator/game-a/cases" : "/moderation/cases");
+    expect(backUrl.searchParams.get("view")).toBe("assigned");
+    expect(backUrl.searchParams.get("targetType")).toBe("COMMENT");
+    expect(backUrl.searchParams.get("cursor")).toBe("safe-cursor");
+  },
+);
+
+it("keeps ordinary game-moderator workload navigation inside the assigned game", async () => {
+  session.user = { id: "actor", role: "USER", status: "ACTIVE" };
+  mount(<CaseQueue gameSlug="game-a" query={{ view: "unassigned" }} />);
+  expect(await screen.findByRole("link", { name: "Assigned to me" })).toHaveAttribute(
+    "href",
+    "/moderator/game-a/cases?view=assigned",
+  );
+  expect(screen.getByRole("link", { name: "Resolved / History" })).toHaveAttribute(
+    "href",
+    "/moderator/game-a/cases?view=history",
+  );
+  expect(screen.queryByRole("navigation", { name: "Admin navigation" })).not.toBeInTheDocument();
+});
+
 beforeEach(() => {
   session.user = { id: "actor", role: "PLATFORM_MODERATOR", status: "ACTIVE" };
   record = {
@@ -144,7 +206,7 @@ it("shows content identity, top reasons and one detail link without fetching per
   expect(screen.getByText("+1 more")).toBeVisible();
   expect(screen.queryByText("Other concern")).not.toBeInTheDocument();
   expect(screen.getByText("Needs review", { selector: "span" })).toBeVisible();
-  expect(screen.getByText("Unassigned")).toBeVisible();
+  expect(screen.getByText("Unassigned", { selector: "td" })).toBeVisible();
   expect(screen.getByRole("link", { name: "View case" })).toHaveAttribute(
     "href",
     "/moderation/cases/case-1",
@@ -304,11 +366,7 @@ it.each(["RESOLVED", "DISMISSED"])(
     record.status = status;
     record.evidence = { items: [], nextCursor: null };
     mount(<CaseDetail caseId="case-1" />);
-    expect(
-      await screen.findByText(
-        "No user reports available.",
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("No user reports available.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Assign to me" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
   },
@@ -473,49 +531,77 @@ it("keeps archived communities selectable by name without restricting their stat
   );
 });
 
-it.each(["", "game-a"])("navigates cursor boundaries and the terminal batch in scope %s", async (gameSlug) => {
-  const list = gameSlug ? api.listGameCases : api.listPlatformCases;
-  const calls = (query, options) => [
-    ...(gameSlug ? [gameSlug] : []), expect.objectContaining(query), options || expect.anything(),
-  ];
-  list.mockImplementation(async (...args) => args[gameSlug ? 1 : 0].cursor
-    ? { items: [{ ...row, id: "older", targetPreview: { title: "Older content" } }], nextCursor: null }
-    : { items: [row], nextCursor: "older-boundary" });
-  mount(<CaseQueue gameSlug={gameSlug} />);
-  expect(await screen.findByText("Guide to team building")).toBeVisible();
-  expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
-  fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  expect(await screen.findByText("Older content")).toBeVisible();
-  expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
-  expect(screen.queryByText("Guide to team building")).not.toBeInTheDocument();
-  expect(list).toHaveBeenLastCalledWith(...calls({ cursor: "older-boundary", limit: 20 }));
-  fireEvent.click(screen.getByRole("button", { name: "Previous" }));
-  expect(await screen.findByText("Guide to team building")).toBeVisible();
-  expect(list).toHaveBeenLastCalledWith(...calls({ cursor: undefined, limit: 20 }));
-  fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  await screen.findByText("Older content");
-  fireEvent.change(screen.getByLabelText("Content type"), { target: { value: "COMMENT" } });
-  await waitFor(() => expect(list).toHaveBeenLastCalledWith(
-    ...calls({ cursor: undefined, targetType: "COMMENT", limit: 20 }),
-  ));
-  expect(await screen.findByRole("button", { name: "Previous" })).toBeDisabled();
-  for (const args of list.mock.calls) {
-    expect(args[gameSlug ? 1 : 0]).not.toHaveProperty("page");
-    expect(args[gameSlug ? 1 : 0]).not.toHaveProperty("pagination");
-  }
-});
+it.each(["", "game-a"])(
+  "navigates cursor boundaries and the terminal batch in scope %s",
+  async (gameSlug) => {
+    const list = gameSlug ? api.listGameCases : api.listPlatformCases;
+    const calls = (query, options) => [
+      ...(gameSlug ? [gameSlug] : []),
+      expect.objectContaining(query),
+      options || expect.anything(),
+    ];
+    list.mockImplementation(async (...args) =>
+      args[gameSlug ? 1 : 0].cursor
+        ? {
+            items: [{ ...row, id: "older", targetPreview: { title: "Older content" } }],
+            nextCursor: null,
+          }
+        : { items: [row], nextCursor: "older-boundary" },
+    );
+    mount(<CaseQueue gameSlug={gameSlug} />);
+    expect(await screen.findByText("Guide to team building")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Older content")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+    expect(screen.queryByText("Guide to team building")).not.toBeInTheDocument();
+    expect(list).toHaveBeenLastCalledWith(...calls({ cursor: "older-boundary", limit: 20 }));
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    expect(await screen.findByText("Guide to team building")).toBeVisible();
+    expect(list).toHaveBeenLastCalledWith(...calls({ cursor: undefined, limit: 20 }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Older content");
+    fireEvent.change(screen.getByLabelText("Content type"), { target: { value: "COMMENT" } });
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(
+        ...calls({ cursor: undefined, targetType: "COMMENT", limit: 20 }),
+      ),
+    );
+    expect(await screen.findByRole("button", { name: "Previous" })).toBeDisabled();
+    for (const args of list.mock.calls) {
+      expect(args[gameSlug ? 1 : 0]).not.toHaveProperty("page");
+      expect(args[gameSlug ? 1 : 0]).not.toHaveProperty("pagination");
+    }
+  },
+);
 
 it("starts a fresh traversal when the game route changes", async () => {
   api.listGameCases.mockResolvedValue({ items: [row], nextCursor: "game-a-boundary" });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = render(<QueryClientProvider client={client}><CaseQueue gameSlug="game-a" /></QueryClientProvider>);
+  const view = render(
+    <QueryClientProvider client={client}>
+      <CaseQueue gameSlug="game-a" />
+    </QueryClientProvider>,
+  );
   fireEvent.click(await screen.findByRole("button", { name: "Next" }));
-  await waitFor(() => expect(api.listGameCases).toHaveBeenLastCalledWith(
-    "game-a", expect.objectContaining({ cursor: "game-a-boundary" }), expect.anything(),
-  ));
-  view.rerender(<QueryClientProvider client={client}><CaseQueue gameSlug="game-b" /></QueryClientProvider>);
-  await waitFor(() => expect(api.listGameCases).toHaveBeenLastCalledWith(
-    "game-b", expect.objectContaining({ cursor: undefined }), expect.anything(),
-  ));
+  await waitFor(() =>
+    expect(api.listGameCases).toHaveBeenLastCalledWith(
+      "game-a",
+      expect.objectContaining({ cursor: "game-a-boundary" }),
+      expect.anything(),
+    ),
+  );
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <CaseQueue gameSlug="game-b" />
+    </QueryClientProvider>,
+  );
+  await waitFor(() =>
+    expect(api.listGameCases).toHaveBeenLastCalledWith(
+      "game-b",
+      expect.objectContaining({ cursor: undefined }),
+      expect.anything(),
+    ),
+  );
   expect(await screen.findByRole("button", { name: "Previous" })).toBeDisabled();
 });

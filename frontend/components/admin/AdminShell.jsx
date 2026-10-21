@@ -5,6 +5,9 @@ import { usePathname } from "next/navigation";
 import {
   FiActivity,
   FiAlertTriangle,
+  FiArchive,
+  FiInbox,
+  FiUserCheck,
   FiChevronLeft,
   FiFileText,
   FiFlag,
@@ -13,6 +16,7 @@ import {
   FiUsers,
 } from "react-icons/fi";
 import { BrandMark } from "../BrandMark";
+import { caseViews, queueUrl } from "../../lib/moderation-queue";
 
 const navigation = [
   { href: "/admin", label: "Overview", icon: FiGrid, exact: true },
@@ -20,16 +24,24 @@ const navigation = [
   { href: "/admin/content", label: "Content", icon: FiFileText },
   { href: "/admin/moderation", label: "Moderation", icon: FiShield },
   { href: "/admin/users", label: "Users", icon: FiUsers },
-  { href: "/admin/moderators", label: "Game moderators", icon: FiFlag },
+  { href: "/admin/moderators", label: "Moderators", icon: FiFlag },
   { href: "/moderation/cases", label: "Cases", icon: FiAlertTriangle },
 ];
 
-export function AdminShell({ user, children, moderation = false }) {
+export function AdminShell({ user, children, moderation = false, gameSlug = "", view = "all" }) {
   const pathname = usePathname() || "";
   const platformModerator = user?.role === "PLATFORM_MODERATOR";
-  const items = platformModerator
-    ? navigation.filter((item) => item.href === "/moderation/cases")
-    : navigation;
+  const items =
+    moderation || platformModerator
+      ? caseViews.map((item) => ({
+          href: queueUrl(gameSlug, { view: item.value }),
+          label: item.label,
+          icon:
+            { assigned: FiUserCheck, unassigned: FiInbox, history: FiArchive }[item.value] ||
+            FiAlertTriangle,
+          view: item.value,
+        }))
+      : navigation;
 
   return (
     <div className={`admin-shell${moderation ? " moderation-console" : ""}`}>
@@ -45,10 +57,16 @@ export function AdminShell({ user, children, moderation = false }) {
           aria-label={platformModerator ? "Moderation navigation" : "Admin navigation"}
           className="admin-nav"
         >
-          {items.map(({ href, label, icon: Icon, exact }) => {
-            const active = exact ? pathname === href : pathname.startsWith(href);
+          {items.map(({ href, label, icon: Icon, exact, view: itemView }) => {
+            const active = itemView
+              ? view === itemView
+              : exact
+                ? pathname === href
+                : pathname.startsWith(href);
             return (
               <Link
+                aria-label={label}
+                title={label}
                 aria-current={active ? "page" : undefined}
                 className={active ? "active" : ""}
                 href={href}

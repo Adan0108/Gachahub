@@ -91,11 +91,32 @@ export class ReportsRepository {
   async findModerationCases(params: {
     gameId?: string | null;
     status?: ModerationCaseStatus;
+    view?: 'all' | 'assigned' | 'unassigned' | 'history';
+    moderatorId?: string;
     targetType?: ReportTargetType;
     limit: number;
     cursor?: CaseCursor;
   }) {
     const where: Prisma.ModerationCaseWhereInput = {
+      ...(params.view && params.view !== 'all'
+        ? {
+            AND: [
+              {
+                status: {
+                  in:
+                    params.view === 'history'
+                      ? ['RESOLVED', 'DISMISSED']
+                      : ['OPEN', 'IN_REVIEW'],
+                },
+              },
+              ...(params.view === 'assigned'
+                ? [{ assignedModeratorId: params.moderatorId }]
+                : params.view === 'unassigned'
+                  ? [{ assignedModeratorId: null }]
+                  : []),
+            ],
+          }
+        : {}),
       ...(params.gameId !== undefined ? { gameId: params.gameId } : {}),
       ...(params.status !== undefined ? { status: params.status } : {}),
       ...(params.targetType !== undefined

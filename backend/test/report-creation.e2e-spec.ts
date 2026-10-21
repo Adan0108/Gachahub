@@ -1,5 +1,8 @@
 import { isolatedCaseDatabase } from './support/isolated-case-database';
 import { PlatformCaseModerationController } from '../src/reports/platform-moderation/platform-case-moderation.controller';
+import { PlatformModeratorsController } from '../src/game-moderators/platform-moderators.controller';
+import { PlatformModeratorsService } from '../src/game-moderators/platform-moderators.service';
+import { GameModeratorsController } from '../src/game-moderators/game-moderators.controller';
 type TestRequest = Request & {
   user?: { id: string };
   session?: { user: { id: string } };
@@ -202,6 +205,8 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
     isolated = await isolatedCaseDatabase();
     const module = await Test.createTestingModule({
       controllers: [
+        PlatformModeratorsController,
+        GameModeratorsController,
         ReportsController,
         PlatformCaseModerationController,
         GameCaseModerationController,
@@ -219,6 +224,7 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         FollowsRepository,
         GameModeratorsService,
         GameModeratorsRepository,
+        PlatformModeratorsService,
         AuditLogService,
         AuditLogRepository,
         AuditLogQueryService,
@@ -301,6 +307,261 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         await isolated?.cleanup();
       }
     }
+  });
+
+  describe('navigation and platform moderator privileges', () => {
+    it('grants/revokes atomically, audits roles, retains game assignments and immediately changes live access', async () => {
+      const target = await user();
+      await db.gameModerator.create({ data: { gameId, userId: target } });
+      const route = `/platform-moderators/${target}`;
+      expect((await api('/moderation/cases', target)).status).toBe(403);
+      expect((await api(route, admin, {}, 'POST')).status).toBe(201);
+      expect((await api('/moderation/cases', target)).status).toBe(200);
+      expect((await api(route, admin, {}, 'POST')).status).toBe(409);
+      expect((await api(route, admin, undefined, 'DELETE')).status).toBe(200);
+      expect((await api('/moderation/cases', target)).status).toBe(403);
+      expect(
+        (await api(`/games/${slug}/moderation/cases`, target)).status,
+      ).toBe(200);
+      expect((await api(route, admin, undefined, 'DELETE')).status).toBe(409);
+      expect(
+        await db.gameModerator.count({ where: { gameId, userId: target } }),
+      ).toBe(1);
+      const logs = await db.auditLog.findMany({
+        where: { targetId: target },
+        orderBy: { createdAt: 'asc' },
+      });
+      expect(logs).toHaveLength(2);
+      expect(logs.map((log) => log.metadata)).toEqual([
+        {
+          scope: 'platform',
+          previousRole: 'USER',
+          newRole: 'PLATFORM_MODERATOR',
+        },
+        {
+          scope: 'platform',
+          previousRole: 'PLATFORM_MODERATOR',
+          newRole: 'USER',
+        },
+      ]);
+      expect(
+        logs.every(
+          (log) => log.actorId === admin && log.createdAt instanceof Date,
+        ),
+      ).toBe(true);
+    });
+
+    it('rejects non-admin actors, inactive actors/targets, missing targets and Admin demotion', async () => {
+      const target = await user();
+      const platform = await user();
+      await db.user.update({
+        where: { id: platform },
+        data: { role: 'PLATFORM_MODERATOR' },
+      });
+      for (const actor of [author, platform]) {
+        expect(
+          (await api(`/platform-moderators/${target}`, actor, {}, 'POST'))
+            .status,
+        ).toBe(403);
+        expect(
+          (
+            await api(
+              `/platform-moderators/${platform}`,
+              actor,
+              undefined,
+              'DELETE',
+            )
+          ).status,
+        ).toBe(403);
+        expect(
+          (await api('/platform-moderators/candidates?q=review', actor)).status,
+        ).toBe(403);
+      }
+      for (const method of ['POST', 'DELETE'])
+        expect(
+          (await api(`/platform-moderators/${admin}`, admin, undefined, method))
+            .status,
+        ).toBe(400);
+      const anotherAdmin = await user();
+      await db.user.update({
+        where: { id: anotherAdmin },
+        data: { role: 'ADMIN' },
+      });
+      for (const method of ['POST', 'DELETE'])
+        expect(
+          (
+            await api(
+              `/platform-moderators/${anotherAdmin}`,
+              admin,
+              undefined,
+              method,
+            )
+          ).status,
+        ).toBe(400);
+      for (const status of ['BANNED', 'SUSPENDED', 'DELETED'] as const) {
+        await db.user.update({ where: { id: target }, data: { status } });
+        expect(
+          (
+            await api(
+              `/platform-moderators/${target}`,
+              admin,
+              undefined,
+              'DELETE',
+            )
+          ).status,
+        ).toBe(400);
+        expect(
+          (await api(`/platform-moderators/${target}`, admin, {}, 'POST'))
+            .status,
+        ).toBe(400);
+        await db.user.update({
+          where: { id: platform },
+          data: { status, role: 'ADMIN' },
+        });
+        expect(
+          (await api(`/platform-moderators/${target}`, platform, {}, 'POST'))
+            .status,
+        ).toBe(403);
+      }
+      expect(
+        (await api(`/platform-moderators/${prefix}-missing`, admin, {}, 'POST'))
+          .status,
+      ).toBe(404);
+      expect(await db.auditLog.count({ where: { targetId: target } })).toBe(0);
+    });
+
+    it('rolls back role on audit failure and writes no audit on mutation failure', async () => {
+      const target = await user();
+      const route = `/platform-moderators/${target}`;
+      const audit = jest
+        .spyOn(app.get(AuditLogRepository), 'create')
+        .mockRejectedValueOnce(new Error('Injected platform audit failure'));
+      try {
+        expect((await api(route, admin, {}, 'POST')).status).toBe(500);
+      } finally {
+        audit.mockRestore();
+      }
+      expect(
+        (await db.user.findUniqueOrThrow({ where: { id: target } })).role,
+      ).toBe('USER');
+      const transaction = intercept(
+        (tx) =>
+          new Proxy(tx, {
+            get(target, key): unknown {
+              if (key !== 'user') return Reflect.get(target, key);
+              return new Proxy(target.user, {
+                get(owner, method): unknown {
+                  if (method !== 'updateMany')
+                    return Reflect.get(owner, method);
+                  return () => {
+                    throw new Error('Injected platform mutation failure');
+                  };
+                },
+              });
+            },
+          }),
+      );
+      try {
+        expect((await api(route, admin, {}, 'POST')).status).toBe(500);
+      } finally {
+        transaction.mockRestore();
+      }
+      expect(
+        (await db.user.findUniqueOrThrow({ where: { id: target } })).role,
+      ).toBe('USER');
+      expect(await db.auditLog.count({ where: { targetId: target } })).toBe(0);
+    });
+
+    it('keeps workload predicates and exclusive cursor pagination inside the exact scope', async () => {
+      const ids: string[] = [];
+      for (const [status, assignedModeratorId] of [
+        ['OPEN', null],
+        ['IN_REVIEW', moderator],
+        ['IN_REVIEW', secondModerator],
+        ['RESOLVED', moderator],
+        ['DISMISSED', null],
+      ] as const) {
+        const source = await post(true);
+        ids.push(
+          (
+            await db.moderationCase.create({
+              data: {
+                targetId: source.id,
+                targetType: 'POST',
+                gameId,
+                status,
+                assignedModeratorId,
+              },
+            })
+          ).id,
+        );
+      }
+      const root = `/games/${slug}/moderation/cases`;
+      const own = await api(`${root}?view=assigned`, moderator);
+      expect(own.body.items.map((item) => item.id)).toEqual([ids[1]]);
+      const unassigned = await api(`${root}?view=unassigned`, moderator);
+      expect(unassigned.body.items.map((item) => item.id)).toContain(ids[0]);
+      expect(unassigned.body.items.map((item) => item.id)).not.toContain(
+        ids[4],
+      );
+      const history = await api(`${root}?view=history&limit=1`, moderator);
+      expect(history.body.items).toHaveLength(1);
+      const next = await api(
+        `${root}?view=history&limit=1&cursor=${history.body.nextCursor}`,
+        moderator,
+      );
+      expect(
+        new Set(
+          [...history.body.items, ...next.body.items].map((item) => item.id),
+        ),
+      ).toEqual(new Set(ids.slice(3)));
+      expect((await api(`${root}?view=invalid`, moderator)).status).toBe(400);
+      expect(
+        (await api(`/moderation/cases?view=assigned`, moderator)).status,
+      ).toBe(403);
+    });
+
+    it('reuses bounded identity search and verifies exact-game grants, duplicates and Admin-only management', async () => {
+      const target = await user();
+      await db.user.update({
+        where: { id: target },
+        data: { username: 'followup-rover', name: 'Followup Rover' },
+      });
+      for (const q of ['@followup-rover', 'followup-rov', 'Followup Rover']) {
+        const candidates = await api(
+          `/games/${slug}/moderators/candidates?q=${encodeURIComponent(q)}`,
+          admin,
+        );
+        expect(candidates.status).toBe(200);
+        expect(candidates.body.items.map((item) => item.id)).toContain(target);
+      }
+      expect(
+        (await api('/platform-moderators/candidates?q=fol', admin)).body.items,
+      ).toEqual([]);
+      expect(
+        (
+          await api('/platform-moderators/candidates?q=followup', admin)
+        ).body.items.map((item) => item.id),
+      ).toContain(target);
+      const root = `/games/${slug}/moderators`;
+      expect((await api(root, author, { userId: target })).status).toBe(403);
+      expect((await api(root, admin, { userId: target })).status).toBe(201);
+      expect((await api(root, admin, { userId: target })).status).toBe(409);
+      expect(
+        (await api(`${root}/candidates?q=followup`, admin)).body.items,
+      ).toEqual([]);
+      expect(
+        await db.gameModerator.count({ where: { userId: target, gameId } }),
+      ).toBe(1);
+      await db.user.update({
+        where: { id: target },
+        data: { status: 'BANNED' },
+      });
+      expect(
+        (await api('/platform-moderators/candidates?q=followup', admin)).body
+          .items,
+      ).toEqual([]);
+    });
   });
 
   describe('review fixes: assignment, retention and report activity', () => {

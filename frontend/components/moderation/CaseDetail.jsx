@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
+import { queueBackUrl, queueFilters } from "../../lib/moderation-queue";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { useModerationAccess } from "../../hooks/admin/useModerationAccess";
@@ -22,14 +24,25 @@ import { ReasonSummary, reasonLabel } from "./CaseSummary";
 import { ModeratorPicker } from "./ModeratorPicker";
 import { AvatarFace } from "../AvatarFace";
 
-export function CaseDetail({ caseId, gameSlug = "" }) {
+export function CaseDetail({ caseId, gameSlug = "", queue = "" }) {
   const access = useModerationAccess(gameSlug);
   const query = useQuery({
     ...caseDetailOptions(access.user?.id, gameSlug, caseId),
     enabled: access.allowed && Boolean(caseId),
   });
   return (
-    <ModerationWorkspace access={access} gameSlug={gameSlug}>
+    <ModerationWorkspace
+      access={access}
+      gameSlug={gameSlug}
+      view={
+        queueFilters(
+          Object.fromEntries(new URLSearchParams(typeof queue === "string" ? queue : "")),
+        ).view
+      }
+    >
+      <Link className="case-back-link" href={queueBackUrl(gameSlug, queue)}>
+        ← Back to cases
+      </Link>
       <AdminQueryBoundary
         query={query}
         loading={{ title: "Loading case" }}
@@ -85,7 +98,11 @@ function CaseRecord({ item, gameSlug, actorId }) {
       await refreshModeration(client, actorId);
     },
     onError: async (error, variables) => {
-      setNotice(variables.action === "assign" && error.status === 400 ? "That moderator is no longer eligible. Search again and choose another moderator." : moderationError(error));
+      setNotice(
+        variables.action === "assign" && error.status === 400
+          ? "That moderator is no longer eligible. Search again and choose another moderator."
+          : moderationError(error),
+      );
       if ([401, 403, 404].includes(error.status)) {
         setDenied(true);
         setDecision(null);

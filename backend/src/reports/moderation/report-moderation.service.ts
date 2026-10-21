@@ -55,7 +55,7 @@ export class ReportModerationService {
         : scope === 'platform'
           ? null
           : undefined;
-    return this.listCases(gameId, query);
+    return this.listCases(gameId, query, userId);
   }
 
   async getCaseForPlatform(userId: string, caseId: string) {
@@ -82,7 +82,7 @@ export class ReportModerationService {
       gameSlug,
       userId,
     );
-    return this.listCases(gameId, query);
+    return this.listCases(gameId, query, userId);
   }
 
   async getCaseForGame(gameSlug: string, userId: string, caseId: string) {
@@ -271,12 +271,14 @@ export class ReportModerationService {
   private async listCases(
     gameId: string | null | undefined,
     query: QueryModerationCasesDto,
+    moderatorId: string,
   ) {
     const cursor =
       query.cursor === undefined ? undefined : decodeCaseCursor(query.cursor);
     if (cursor === null) throw new BadRequestException('Invalid case cursor');
     return this.reportsRepository.findModerationCases({
       gameId,
+      ...(query.view ? { view: query.view, moderatorId } : {}),
       status: query.status,
       targetType: query.targetType,
       limit: query.limit ?? 20,

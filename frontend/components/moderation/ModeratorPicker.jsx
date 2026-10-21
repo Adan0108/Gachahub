@@ -14,6 +14,7 @@ export function ModeratorPicker({
   onSelect,
   disabled = false,
   granting = false,
+  label = "Find moderator",
 }) {
   const [query, setQuery] = useState("");
   const normalized = query.trim();
@@ -30,10 +31,10 @@ export function ModeratorPicker({
   return (
     <div className="moderator-picker">
       <label>
-        Find moderator
+        {label}
         <input
           type="search"
-          aria-label="Find moderator"
+          aria-label={label}
           autoFocus
           maxLength={100}
           value={query}

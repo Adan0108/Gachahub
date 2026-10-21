@@ -804,8 +804,11 @@ export const api = {
     };
   },
   getAdminOverview: (options = {}) => request(backendRoutes.adminOverview, options),
-  listPlatformCases: ({ cursor, limit, status, targetType, scope, gameSlug } = {}, options = {}) =>
-    request(withQuery(backendRoutes.platformCases, { cursor, limit, status, targetType, scope, gameSlug }), options),
+  searchPlatformModeratorCandidates: (q, options = {}) => request(withQuery('/platform-moderators/candidates', { q }), options),
+  grantPlatformModerator: (userId) => mutation(`/platform-moderators/${encodeURIComponent(userId)}`, undefined),
+  revokePlatformModerator: (userId) => mutation(`/platform-moderators/${encodeURIComponent(userId)}`, undefined, { method: 'DELETE' }),
+  listPlatformCases: ({ cursor, limit, status, targetType, scope, gameSlug, view } = {}, options = {}) =>
+    request(withQuery(backendRoutes.platformCases, { cursor, limit, status, targetType, scope, gameSlug, view }), options),
   getPlatformCase: (caseId, options = {}) => request(backendRoutes.platformCase(caseId), options),
   listPlatformCaseReports: (caseId, { cursor, limit } = {}, options = {}) =>
     request(withQuery(`${backendRoutes.platformCase(caseId)}/reports`, { cursor, limit }), options),
@@ -814,8 +817,8 @@ export const api = {
   claimPlatformCase: (caseId) => mutation(`${backendRoutes.platformCase(caseId)}/claim`, undefined, { method: "PATCH" }),
   resolvePlatformCase: (caseId, { resolutionNote } = {}) => mutation(`${backendRoutes.platformCase(caseId)}/resolve`, { resolutionNote }, { method: "PATCH" }),
   dismissPlatformCase: (caseId, { resolutionNote } = {}) => mutation(`${backendRoutes.platformCase(caseId)}/dismiss`, { resolutionNote }, { method: "PATCH" }),
-  listGameCases: (gameSlug, { cursor, limit, status, targetType } = {}, options = {}) =>
-    request(withQuery(backendRoutes.gameCases(gameSlug), { cursor, limit, status, targetType }), options),
+  listGameCases: (gameSlug, { cursor, limit, status, targetType, view } = {}, options = {}) =>
+    request(withQuery(backendRoutes.gameCases(gameSlug), { cursor, limit, status, targetType, view }), options),
   getGameCase: (gameSlug, caseId, options = {}) => request(backendRoutes.gameCase(gameSlug, caseId), options),
   listGameCaseReports: (gameSlug, caseId, { cursor, limit } = {}, options = {}) =>
     request(withQuery(`${backendRoutes.gameCase(gameSlug, caseId)}/reports`, { cursor, limit }), options),

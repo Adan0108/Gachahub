@@ -108,7 +108,11 @@ export type AuditEntry = AuditEntryBase &
     | {
         action: ModeratorAuditAction;
         targetType: 'USER';
-        metadata?: undefined;
+        metadata?: {
+          scope: 'platform';
+          previousRole: 'USER' | 'PLATFORM_MODERATOR';
+          newRole: 'USER' | 'PLATFORM_MODERATOR';
+        };
       }
     | {
         action: UserModerationAuditAction;

@@ -18,30 +18,30 @@ import { AdminQueryBoundary } from "../admin/AdminQueryBoundary";
 import { ModerationWorkspace } from "./ModerationWorkspace";
 import { api } from "../../lib/api";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
+import { caseViews, queueFilters, queueUrl } from "../../lib/moderation-queue";
 
-export function CaseQueue({ gameSlug = "" }) {
+export function CaseQueue({ gameSlug = "", query = {} }) {
   const access = useModerationAccess(gameSlug);
   return (
     <ScopedCaseQueue
-      key={`${access.user?.id || "guest"}:${gameSlug}`}
+      key={`${access.user?.id || "guest"}:${gameSlug}:${JSON.stringify(query)}`}
       access={access}
       gameSlug={gameSlug}
+      initialQuery={query}
     />
   );
 }
 
-function ScopedCaseQueue({ access, gameSlug }) {
-  const [filters, setFilters] = useState({
-    status: "",
-    targetType: "",
-    scope: "all",
-    gameSlug: "",
-  });
-  const [cursors, setCursors] = useState([undefined]);
+function ScopedCaseQueue({ access, gameSlug, initialQuery }) {
+  const [filters, setFilters] = useState(() => queueFilters(initialQuery));
+  const [cursors, setCursors] = useState([
+    typeof initialQuery.cursor === "string" ? initialQuery.cursor : undefined,
+  ]);
   const cursor = cursors.at(-1);
   const queryFilters = gameSlug
     ? {
         status: filters.status,
+        view: filters.view,
         targetType: filters.targetType,
         cursor,
         limit: 20,
@@ -62,12 +62,13 @@ function ScopedCaseQueue({ access, gameSlug }) {
     setCursors([undefined]);
   };
   const rows = query.data?.items || [];
+  const queueContext = queueUrl(gameSlug, filters, cursor).split("?")[1];
   return (
-    <ModerationWorkspace access={access} gameSlug={gameSlug}>
+    <ModerationWorkspace access={access} gameSlug={gameSlug} view={filters.view}>
       <div className="admin-page-heading case-heading">
         <div>
           <span className="admin-eyebrow">Moderation</span>
-          <h1>Cases</h1>
+          <h1>{caseViews.find((item) => item.value === filters.view)?.label || "Cases"}</h1>
           <p>Review reported content and the complaints behind it.</p>
         </div>
       </div>
@@ -187,7 +188,11 @@ function ScopedCaseQueue({ access, gameSlug }) {
                       </time>
                     </td>
                     <td data-label="Action">
-                      <Link href={casePath(gameSlug, item.id)}>View case</Link>
+                      <Link
+                        href={`${casePath(gameSlug, item.id)}${queueContext ? `?queue=${encodeURIComponent(queueContext)}` : ""}`}
+                      >
+                        View case
+                      </Link>
                     </td>
                   </tr>
                 ))}
