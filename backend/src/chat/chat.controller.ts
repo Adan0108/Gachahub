@@ -30,6 +30,7 @@ import { CreateGroupChatDto } from './dto/create-group-chat.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
 import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
 import { MarkMessagesDeliveredDto } from './dto/mark-messages-delivered.dto';
+import { QueryChatConversationsDto } from './dto/query-chat-conversations.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
 import { ReactToMessageDto } from './dto/react-to-message.dto';
 import { SendMessageDto } from './dto/send-message.dto';
@@ -96,8 +97,11 @@ export class ChatController {
   @ApiOperation({
     summary: 'List accepted chat conversations for the current user',
   })
-  listConversations(@Session() session: UserSession) {
-    return this.chatInboxService.listConversations(session.user.id);
+  listConversations(
+    @Session() session: UserSession,
+    @Query() query: QueryChatConversationsDto,
+  ) {
+    return this.chatInboxService.listConversations(session.user.id, query);
   }
 
   /**

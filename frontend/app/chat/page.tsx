@@ -105,6 +105,7 @@ import { useConversationPreviews } from "../../hooks/chat/useConversationPreview
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
 import { useMentionPicker } from "../../hooks/useMentionPicker";
 import { useSendCooldown } from "../../hooks/chat/useSendCooldown";
+import { useOlderInbox } from "../../hooks/chat/useOlderInbox";
 import type { ApiError } from "../../lib/api";
 import { addMessageToCache } from "../../lib/chat/messageCache";
 import { MentionMenu } from "../../components/MentionMenu";
@@ -226,6 +227,15 @@ function ChatPageContent() {
   // The text message search was last run for (on Enter); null until it has been used.
   const [messageQuery, setMessageQuery] = useState<string | null>(null);
   const conversations = useQuery({ ...queries.chatConversations(), enabled: isAuthenticated });
+  const olderInbox = useOlderInbox(
+    conversations.data as ChatListConversation[] | undefined,
+    isAuthenticated,
+  );
+  // The inbox as loaded so far: its first page, then any older pages asked for.
+  const inboxList = useMemo(
+    () => [...((conversations.data ?? []) as ChatListConversation[]), ...olderInbox.conversations],
+    [conversations.data, olderInbox.conversations],
+  );
   const requests = useQuery({ ...queries.chatRequests(), enabled: isAuthenticated });
   const archived = useQuery({
     ...queries.chatArchivedConversations(),
@@ -254,7 +264,7 @@ function ChatPageContent() {
   const listByView = { inbox: conversations, requests, archived, blocked: conversations };
   const listQuery = listByView[view];
   const directChatByUserId = new Map(
-    ((conversations.data ?? []) as ChatListConversation[])
+    inboxList
       .filter((conversation) => conversation.type === "DIRECT")
       .flatMap((conversation) =>
         conversation.participants
@@ -262,7 +272,9 @@ function ChatPageContent() {
           .map((participant): [string, string] => [participant.userId, conversation.id]),
       ),
   );
-  const rawList: ChatListConversation[] = listQuery.data || [];
+  const listData: ChatListConversation[] | undefined =
+    view === "inbox" || view === "blocked" ? inboxList : listQuery.data;
+  const rawList: ChatListConversation[] = listData || [];
   const searchTerms = parseSearchQuery(search);
   const isFiltering = searchTerms.length > 0;
   const currentList = isFiltering
@@ -281,8 +293,12 @@ function ChatPageContent() {
     enabled: isAuthenticated && Boolean(activeId),
   });
   const typingNames = useTypingNames(activeConversation, user?.id);
-  const conversationPreviews = useConversationPreviews(listQuery.data, user?.id);
-  useBackgroundDecrypt(listQuery.data, user?.id, activeId);
+  const conversationPreviews = useConversationPreviews(listData, user?.id);
+  useBackgroundDecrypt(
+    listData as Parameters<typeof useBackgroundDecrypt>[0],
+    user?.id,
+    activeId,
+  );
   const {
     displayMessages,
     isLoadingOlder,
@@ -1238,11 +1254,21 @@ function ChatPageContent() {
                 view={view}
               />
             ))}
+            {view === "inbox" && !isFiltering && olderInbox.hasMore && (
+              <button
+                className="chat-load-older-conversations"
+                disabled={olderInbox.isLoading}
+                onClick={olderInbox.loadMore}
+                type="button"
+              >
+                {olderInbox.isLoading ? "Loading..." : "Load older chats"}
+              </button>
+            )}
           </div>
           )}
           {messageQuery !== null && (
             <SidebarMessageSearch
-              conversations={listQuery.data}
+              conversations={listData ?? []}
               onSelect={openMessageSearch}
               query={messageQuery}
               userId={user?.id}

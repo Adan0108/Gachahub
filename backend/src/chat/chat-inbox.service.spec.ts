@@ -656,6 +656,91 @@ describe('ChatInboxService', () => {
       );
     });
 
+    // #105: the inbox comes in pages instead of every conversation at once.
+    describe('in pages', () => {
+      it('gives every pinned conversation and the newest unpinned ones first', async () => {
+        repository.findInboxConversations
+          .mockResolvedValueOnce([
+            buildConversation(
+              'conv-pinned',
+              new Date('2024-01-01'),
+              new Date('2024-01-01'),
+            ),
+          ])
+          .mockResolvedValueOnce([
+            buildConversation('conv-newest', new Date('2024-01-05'), null),
+          ]);
+
+        const result = await service.listConversations('user-1', {
+          limit: 50,
+        });
+
+        expect(repository.findInboxConversations).toHaveBeenCalledWith(
+          'user-1',
+          'ACTIVE',
+          { pinned: true },
+        );
+        expect(repository.findInboxConversations).toHaveBeenCalledWith(
+          'user-1',
+          'ACTIVE',
+          { pinned: false, limit: 50, before: undefined },
+        );
+        expect(result.map((conversation) => conversation.id)).toEqual([
+          'conv-pinned',
+          'conv-newest',
+        ]);
+      });
+
+      it('continues after the last unpinned conversation, without the pinned ones again', async () => {
+        repository.findInboxConversations.mockResolvedValue([]);
+
+        await service.listConversations('user-1', {
+          limit: 50,
+          beforeUpdatedAt: '2024-01-05T00:00:00.000Z',
+          beforeId: 'conv-newest',
+        });
+
+        expect(repository.findInboxConversations).toHaveBeenCalledTimes(1);
+        expect(repository.findInboxConversations).toHaveBeenCalledWith(
+          'user-1',
+          'ACTIVE',
+          {
+            pinned: false,
+            limit: 50,
+            before: {
+              updatedAt: new Date('2024-01-05T00:00:00.000Z'),
+              id: 'conv-newest',
+            },
+          },
+        );
+      });
+
+      it('orders conversations active at the same moment by id, as the pages do', async () => {
+        const at = new Date('2024-01-05');
+        repository.findInboxConversations.mockResolvedValue([
+          buildConversation('conv-a', at, null),
+          buildConversation('conv-b', at, null),
+        ]);
+
+        const result = await service.listConversations('user-1');
+
+        expect(result.map((conversation) => conversation.id)).toEqual([
+          'conv-b',
+          'conv-a',
+        ]);
+      });
+
+      it.each([
+        [{ limit: 50, beforeId: 'conv-1' }],
+        [{ limit: 50, beforeUpdatedAt: '2024-01-05T00:00:00.000Z' }],
+        [{ beforeUpdatedAt: '2024-01-05T00:00:00.000Z', beforeId: 'conv-1' }],
+      ])('refuses a half or limitless cursor %j', async (query) => {
+        await expect(
+          service.listConversations('user-1', query),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      });
+    });
+
     it("masks another participant's BLOCKED state as ACTIVE so it isn't leaked to the viewer", async () => {
       repository.findInboxConversations.mockResolvedValue([
         {

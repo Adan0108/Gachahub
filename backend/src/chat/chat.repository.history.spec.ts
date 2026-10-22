@@ -65,6 +65,37 @@ describe('ChatRepository history paging', () => {
     ]);
   });
 
+  // #105: one inbox page, strictly after the last conversation the client has, by (updatedAt, id).
+  it('pages unpinned inbox conversations after a cursor, newest first with an id tie-breaker', async () => {
+    const updatedAt = new Date('2026-10-20T10:00:00.000Z');
+
+    await repository.findInboxConversations('user-1', 'ACTIVE', {
+      pinned: false,
+      limit: 50,
+      before: { updatedAt, id: 'conv-9' },
+    });
+
+    const [args] = prisma.chatConversation.findMany.mock.calls[0] as [
+      Record<string, unknown>,
+    ];
+    expect(args.where).toEqual({
+      participants: {
+        some: {
+          userId: 'user-1',
+          state: 'ACTIVE',
+          deletedAt: null,
+          pinnedAt: null,
+        },
+      },
+      OR: [
+        { updatedAt: { lt: updatedAt } },
+        { updatedAt, id: { lt: 'conv-9' } },
+      ],
+    });
+    expect(args.take).toBe(50);
+    expect(args.orderBy).toEqual([{ updatedAt: 'desc' }, { id: 'desc' }]);
+  });
+
   // #102: a client only drops a deleted message it already loaded if history says it was deleted.
   it('returns deleted messages as tombstones instead of leaving them out', async () => {
     await repository.findMessages({

@@ -504,8 +504,20 @@ export class ChatRepository {
     });
   }
 
-  /** Finds convos for one inbox state, including the latest encrypted message. */
-  findInboxConversations(userId: string, state: ChatParticipantState) {
+  /**
+   * Finds convos for one inbox state, including the latest encrypted message. With `page`, only
+   * this user's pinned (`pinned: true`) or unpinned ones, newest first by (updatedAt, id), after
+   * the `before` conversation when given.
+   */
+  findInboxConversations(
+    userId: string,
+    state: ChatParticipantState,
+    page?: {
+      pinned: boolean;
+      limit?: number;
+      before?: { updatedAt: Date; id: string };
+    },
+  ) {
     return this.prisma.chatConversation.findMany({
       where: {
         participants: {
@@ -513,9 +525,22 @@ export class ChatRepository {
             userId,
             state,
             deletedAt: null,
+            ...(page ? { pinnedAt: page.pinned ? { not: null } : null } : {}),
           },
         },
+        ...(page?.before
+          ? {
+              OR: [
+                { updatedAt: { lt: page.before.updatedAt } },
+                {
+                  updatedAt: page.before.updatedAt,
+                  id: { lt: page.before.id },
+                },
+              ],
+            }
+          : {}),
       },
+      ...(page?.limit ? { take: page.limit } : {}),
       include: {
         participants: {
           include: {
@@ -544,9 +569,7 @@ export class ChatRepository {
           },
         },
       },
-      orderBy: {
-        updatedAt: 'desc',
-      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
     });
   }
 

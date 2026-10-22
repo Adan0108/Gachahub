@@ -11,6 +11,7 @@ import { maskReceiptsForViewer } from './receipt.mapper';
 import { BlocksService } from '../blocks/blocks.service';
 import { ChatMembershipService } from './membership/chat-membership.service';
 import { ChatHistoryFetchRateLimiterService } from './chat-history-fetch-rate-limiter.service';
+import { QueryChatConversationsDto } from './dto/query-chat-conversations.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import type { ChatDeliveryPort } from './ports/chat-delivery.port';
@@ -40,19 +41,61 @@ export class ChatInboxService {
    * Only ACTIVE participant records are returned here.
    * Pending stranger messages are listed separately.
    */
-  async listConversations(userId: string) {
-    const conversations = await this.chatRepository.findInboxConversations(
-      userId,
-      'ACTIVE',
-    );
+  async listConversations(
+    userId: string,
+    page: QueryChatConversationsDto = {},
+  ) {
+    const conversations = await this.findInboxPage(userId, page);
 
     const summaries = await this.toConversationSummaries(conversations, userId);
 
     return summaries.sort((a, b) => {
       if (a.pinnedAt && !b.pinnedAt) return -1;
       if (!a.pinnedAt && b.pinnedAt) return 1;
-      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      // Same order as the pages: newest first, then by id, so paging never skips or repeats one.
+      return (
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() ||
+        (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)
+      );
     });
+  }
+
+  /**
+   * The conversations of one inbox page. Without a limit, the whole inbox. The first page is every
+   * pinned conversation, which always sorts on top, plus the newest unpinned ones; later pages are
+   * unpinned only, after the given conversation.
+   */
+  private async findInboxPage(userId: string, page: QueryChatConversationsDto) {
+    const { limit, beforeUpdatedAt, beforeId } = page;
+    if ((beforeUpdatedAt === undefined) !== (beforeId === undefined)) {
+      throw new BadRequestException(
+        'beforeUpdatedAt and beforeId must be sent together',
+      );
+    }
+    if (!limit) {
+      if (beforeId) {
+        throw new BadRequestException('A cursor needs a limit');
+      }
+      return this.chatRepository.findInboxConversations(userId, 'ACTIVE');
+    }
+
+    const before =
+      beforeUpdatedAt && beforeId
+        ? { updatedAt: new Date(beforeUpdatedAt), id: beforeId }
+        : undefined;
+    const [pinned, unpinned] = await Promise.all([
+      before
+        ? []
+        : this.chatRepository.findInboxConversations(userId, 'ACTIVE', {
+            pinned: true,
+          }),
+      this.chatRepository.findInboxConversations(userId, 'ACTIVE', {
+        pinned: false,
+        limit,
+        before,
+      }),
+    ]);
+    return [...pinned, ...unpinned];
   }
 
   /**
