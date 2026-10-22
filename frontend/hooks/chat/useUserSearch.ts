@@ -7,6 +7,7 @@ export interface UserSearchResult {
   id: string;
   name: string;
   image?: string | null;
+  username?: string | null;
 }
 
 export const USER_SEARCH_MIN_CHARS = 2;

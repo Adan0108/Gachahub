@@ -15,6 +15,16 @@ import {
 } from '../../generated/prisma/client';
 
 export class QueryModerationCasesDto {
+  @ApiPropertyOptional({ enum: ['all', 'assigned', 'unassigned', 'history'] })
+  @IsOptional()
+  @IsEnum({
+    all: 'all',
+    assigned: 'assigned',
+    unassigned: 'unassigned',
+    history: 'history',
+  })
+  view?: 'all' | 'assigned' | 'unassigned' | 'history';
+
   @ApiPropertyOptional({ default: 20, minimum: 1, maximum: 100 })
   @IsOptional()
   @Type(() => Number)
@@ -25,7 +35,7 @@ export class QueryModerationCasesDto {
 
   @ApiPropertyOptional({
     description:
-      'Opaque nextCursor encoding the exclusive createdAt/id boundary; omit for the first page.',
+      'Opaque nextCursor encoding the exclusive lastReportedAt/id boundary; omit for the first page.',
   })
   @IsOptional()
   @IsString()

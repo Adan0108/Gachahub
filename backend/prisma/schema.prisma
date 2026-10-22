@@ -1065,7 +1065,7 @@ enum ModerationRiskLevel {
 model Report {
   id         String           @id @default(cuid())
   caseId     String
-  reporterId String
+  reporterId String?
   targetType ReportTargetType
   targetId   String
   reasonCode ReportReason
@@ -1076,7 +1076,7 @@ model Report {
 
   createdAt DateTime @default(now())
 
-  reporter User                 @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  reporter User?                @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: SetNull)
   case     ModerationCase       @relation(fields: [caseId], references: [id], onDelete: Cascade)
   analyses ModerationAnalysis[]
 
@@ -1098,6 +1098,7 @@ model ModerationCase {
   status              ModerationCaseStatus @default(OPEN)
   reportCount         Int                  @default(0)
   uniqueReporterCount Int                  @default(0)
+  lastReportedAt      DateTime             @default(now())
   currentRiskScore    Float?
   currentRiskLevel    ModerationRiskLevel?
 
@@ -1120,6 +1121,8 @@ model ModerationCase {
   // Prisma cannot express this constraint; preserve the hand-written index.
   // Do not add an unconditional @@unique: closed cases must allow a new case for the target.
   @@index([gameId, status, createdAt])
+  @@index([lastReportedAt, id])
+  @@index([gameId, status, lastReportedAt, id])
   @@index([gameId, createdAt])
   @@index([status, currentRiskLevel, createdAt])
   @@index([targetType, targetId])
@@ -1165,6 +1168,7 @@ enum AuditAction {
   REPORT_RESOLVED
   REPORT_DISMISSED
   CASE_CLAIMED
+  CASE_ASSIGNED
   CASE_RESOLVED
   CASE_DISMISSED
   MODERATOR_ASSIGNED

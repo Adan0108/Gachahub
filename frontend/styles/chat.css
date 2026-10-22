@@ -841,10 +841,11 @@
 }
 
 .post-options-menu {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 6px);
-  right: 0;
+  position: fixed;
+  z-index: 1200;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
   display: grid;
   width: 190px;
   border: 1px solid var(--line);
@@ -1401,6 +1402,35 @@
   gap: 4px;
 }
 
+.create-post-media.drag-active {
+  border-color: var(--accent, #9366ff);
+  background: var(--panel2);
+}
+
+.create-post-upload:focus-within {
+  outline: 2px solid var(--accent, #9366ff);
+  outline-offset: 3px;
+}
+
+.create-post-files img,
+.create-post-files video {
+  width: min(240px, 100%);
+  max-height: 180px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #080b12;
+}
+
+.create-post-files li {
+  flex-wrap: wrap;
+}
+
+.create-post-files li > span {
+  flex: 1;
+  min-width: 80px;
+  overflow-wrap: anywhere;
+}
+
 .create-post-upload {
   width: auto;
 }
@@ -1436,6 +1466,8 @@
 }
 
 .create-post-files button {
+  min-width: 44px;
+  min-height: 44px;
   display: grid;
   place-items: center;
   border: 0;
@@ -4115,11 +4147,13 @@
   grid-column: 1 / -1;
 }
 
-.home-page .post-feed-card .post-body > p {
-  display: block;
-  overflow: visible;
+.home-page .post-feed-card .post-body:not(.full) > p {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   font-size: 14px;
-  -webkit-line-clamp: unset;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .home-page .post-feed-card .post-social {
@@ -4252,6 +4286,189 @@
 
 .chat-message-edit-status .chat-message-retry {
   font-size: 11px;
+}
+
+.post,
+.post button,
+.post input,
+.post textarea {
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+.post .post-content-link b {
+  font-family: inherit;
+  font-weight: 600;
+}
+
+.post-delete-notice-region {
+  position: fixed;
+  z-index: 2000;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+}
+
+.post-delete-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--post-success, #65d6a3) 32%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 95%, var(--post-success, #65d6a3));
+  color: var(--text);
+  box-shadow: 0 8px 28px #0004;
+  font: 14px/1.5 "Segoe UI", Arial, sans-serif;
+  animation: post-notice-enter 180ms ease-out both;
+}
+
+.post-delete-notice > svg {
+  color: var(--post-success, #65d6a3);
+  font-size: 20px;
+  flex-shrink: 0;
+  animation: post-success-enter 240ms ease-out both;
+}
+
+:root[data-theme="light"] .post-delete-notice {
+  --post-success: #187348;
+}
+
+.post-delete-notice button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.post.post-feed-card {
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  font-family: "Segoe UI", Arial, sans-serif;
+  overflow: visible;
+  background: color-mix(in srgb, var(--panel) 95%, var(--purple));
+  border-color: color-mix(in srgb, var(--line) 85%, var(--purple));
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.post.post-feed-card:hover {
+  transform: none;
+  border-color: color-mix(in srgb, var(--line) 55%, var(--purple));
+  box-shadow: 0 8px 24px #05071320;
+}
+
+.post .post-content-link b {
+  color: color-mix(in srgb, var(--text) 80%, var(--purple));
+}
+
+.post-delete-dialog {
+  animation: post-dialog-enter 160ms ease-out both;
+}
+
+.post-delete-dialog .remove-message-confirm.danger {
+  background: #b62f40;
+  color: #fff;
+  transition: background 140ms ease;
+}
+
+.post-delete-dialog .remove-message-confirm.danger:hover:not(:disabled) {
+  background: #972637;
+}
+
+@keyframes post-notice-enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes post-success-enter {
+  from { opacity: 0; transform: scale(.8); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes post-dialog-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .post-delete-notice,
+  .post-delete-notice > svg,
+  .post-delete-dialog {
+    animation: none;
+  }
+
+  .post.post-feed-card,
+  .post-delete-dialog .remove-message-confirm.danger {
+    transition: none;
+  }
+}
+
+.post.post-feed-card .post-content-link {
+  grid-column: 2;
+  grid-row: 1;
+  width: auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.post.post-feed-card .post-content-link b {
+  font-family: inherit;
+  font-weight: 600;
+}
+
+.post.post-feed-card .post-head-actions {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.post.post-feed-card .post-options-menu {
+  font-family: inherit;
+}
+
+.post.post-feed-card .post-options-menu button {
+  font-family: inherit;
+  font-weight: 500;
+}
+
+.post-delete-dialog,
+.post-delete-dialog button,
+.post-delete-dialog .remove-message-head h2 {
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+.post-delete-dialog .remove-message-head h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.post-delete-dialog .remove-message-actions button {
+  min-height: 40px;
+  font-weight: 600;
+}
+
+.post-delete-dialog .remove-message-cancel {
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--text);
+}
+
+@media (max-width: 620px) {
+  .post.post-feed-card {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
+  .post.post-feed-card .post-thumb {
+    width: 36px;
+    height: 36px;
+  }
+
+  .post.post-feed-card .post-head-actions .tag {
+    display: none;
+  }
 }
 
 .remove-message-modal {

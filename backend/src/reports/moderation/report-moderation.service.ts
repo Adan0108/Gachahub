@@ -1,3 +1,4 @@
+import { decodeCaseCursor } from '../domain/case-cursor';
 import {
   BadRequestException,
   ConflictException,
@@ -25,7 +26,7 @@ import {
 type CaseDetail = NonNullable<
   Awaited<ReturnType<ReportsRepository['findModerationCaseById']>>
 >;
-type CaseAction = 'claim' | 'resolve' | 'dismiss';
+type CaseAction = 'claim' | 'assign' | 'resolve' | 'dismiss';
 
 /** Scope-specific authorization around one shared case read/workflow implementation. */
 @Injectable()
@@ -54,7 +55,7 @@ export class ReportModerationService {
         : scope === 'platform'
           ? null
           : undefined;
-    return this.listCases(gameId, query);
+    return this.listCases(gameId, query, userId);
   }
 
   async getCaseForPlatform(userId: string, caseId: string) {
@@ -81,7 +82,7 @@ export class ReportModerationService {
       gameSlug,
       userId,
     );
-    return this.listCases(gameId, query);
+    return this.listCases(gameId, query, userId);
   }
 
   async getCaseForGame(gameSlug: string, userId: string, caseId: string) {
@@ -98,6 +99,48 @@ export class ReportModerationService {
   ) {
     await this.authorizeGameCase(gameSlug, userId, caseId);
     return this.caseReports(caseId, query);
+  }
+
+  async searchAssignees(
+    userId: string,
+    caseId: string,
+    q = '',
+    gameSlug?: string,
+  ) {
+    const item =
+      gameSlug !== undefined
+        ? await this.authorizeGameCase(gameSlug, userId, caseId)
+        : (await this.authorizePlatform(userId), await this.loadCase(caseId));
+    return {
+      items: await this.reportsRepository.searchAssignees(item.gameId, q),
+    };
+  }
+
+  assignCaseForPlatform(userId: string, caseId: string, assigneeId: string) {
+    return this.mutateCase(
+      userId,
+      caseId,
+      'assign',
+      undefined,
+      undefined,
+      assigneeId,
+    );
+  }
+
+  assignCaseForGame(
+    gameSlug: string,
+    userId: string,
+    caseId: string,
+    assigneeId: string,
+  ) {
+    return this.mutateCase(
+      userId,
+      caseId,
+      'assign',
+      undefined,
+      gameSlug,
+      assigneeId,
+    );
   }
 
   claimCaseForPlatform(userId: string, caseId: string) {
@@ -155,8 +198,10 @@ export class ReportModerationService {
     action: CaseAction,
     note?: string,
     gameSlug?: string,
+    assigneeId?: string,
   ) {
     let gameId: string | undefined;
+    let caseGameId: string | null;
     if (gameSlug !== undefined) {
       const moderationCase = await this.authorizeGameCase(
         gameSlug,
@@ -164,17 +209,22 @@ export class ReportModerationService {
         caseId,
       );
       gameId = moderationCase.gameId!;
+      caseGameId = moderationCase.gameId;
     } else {
       await this.authorizePlatform(userId);
-      await this.loadCase(caseId);
+      caseGameId = (await this.loadCase(caseId)).gameId;
     }
     const auditAction: CaseAuditAction =
-      action === 'claim'
-        ? 'CASE_CLAIMED'
-        : action === 'resolve'
-          ? 'CASE_RESOLVED'
-          : 'CASE_DISMISSED';
+      action === 'assign'
+        ? 'CASE_ASSIGNED'
+        : action === 'claim'
+          ? 'CASE_CLAIMED'
+          : action === 'resolve'
+            ? 'CASE_RESOLVED'
+            : 'CASE_DISMISSED';
     const context: CaseTransitionContext = {
+      actorId: userId,
+      caseGameId,
       gameId,
       audit: (moderationCase, tx) =>
         this.auditLogService.recordOrThrow(
@@ -191,6 +241,7 @@ export class ReportModerationService {
               targetId: moderationCase.targetId,
               gameId: moderationCase.gameId,
               reportCount: moderationCase.reportCount,
+              assignedModeratorId: moderationCase.assignedModeratorId,
               ...(moderationCase.resolutionNote
                 ? { resolutionNote: moderationCase.resolutionNote }
                 : {}),
@@ -201,17 +252,19 @@ export class ReportModerationService {
     };
     // Conditional database update, not the earlier read, decides whether this action wins.
     const result =
-      action === 'claim'
-        ? await this.reportsRepository.claimCase(caseId, userId, context)
-        : await this.reportsRepository.finalizeCase(
-            {
-              id: caseId,
-              status: action === 'resolve' ? 'RESOLVED' : 'DISMISSED',
-              resolvedById: userId,
-              resolutionNote: normalizeText(note),
-            },
-            context,
-          );
+      action === 'assign'
+        ? await this.reportsRepository.assignCase(caseId, assigneeId!, context)
+        : action === 'claim'
+          ? await this.reportsRepository.claimCase(caseId, userId, context)
+          : await this.reportsRepository.finalizeCase(
+              {
+                id: caseId,
+                status: action === 'resolve' ? 'RESOLVED' : 'DISMISSED',
+                resolvedById: userId,
+                resolutionNote: normalizeText(note),
+              },
+              context,
+            );
     if (!result)
       throw new ConflictException(
         'This moderation case is no longer eligible for this action',
@@ -222,14 +275,14 @@ export class ReportModerationService {
   private async listCases(
     gameId: string | null | undefined,
     query: QueryModerationCasesDto,
+    moderatorId: string,
   ) {
     const cursor =
-      query.cursor === undefined
-        ? undefined
-        : decodeEvidenceCursor(query.cursor);
+      query.cursor === undefined ? undefined : decodeCaseCursor(query.cursor);
     if (cursor === null) throw new BadRequestException('Invalid case cursor');
     return this.reportsRepository.findModerationCases({
       gameId,
+      ...(query.view ? { view: query.view, moderatorId } : {}),
       status: query.status,
       targetType: query.targetType,
       limit: query.limit ?? 20,

@@ -1,3 +1,6 @@
+jest.mock('../src/auth/session-terminator.service', () => ({
+  SessionTerminator: class {},
+}));
 import { OutboxRepository } from '../src/outbox/outbox.repository';
 import { OutboxEventPublisher } from '../src/outbox/outbox-event.publisher';
 import { KafkaProducerService } from '../src/kafka/kafka-producer.service';
@@ -5,6 +8,12 @@ import { OutboxDispatcherService } from '../src/outbox/outbox-dispatcher.service
 import { ModerationAnalysisScheduler } from '../src/moderation-analysis/moderation-analysis-scheduler.service';
 import { isolatedCaseDatabase } from './support/isolated-case-database';
 import { PlatformCaseModerationController } from '../src/reports/platform-moderation/platform-case-moderation.controller';
+import { PlatformModeratorsController } from '../src/game-moderators/platform-moderators.controller';
+import { PlatformModeratorsService } from '../src/game-moderators/platform-moderators.service';
+import { GameModeratorsController } from '../src/game-moderators/game-moderators.controller';
+import { AdminUsersController } from '../src/users/admin-users.controller';
+import { UserModerationService } from '../src/users/user-moderation.service';
+import { SessionTerminator } from '../src/auth/session-terminator.service';
 type TestRequest = Request & {
   user?: { id: string };
   session?: { user: { id: string } };
@@ -207,6 +216,9 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
     isolated = await isolatedCaseDatabase();
     const module = await Test.createTestingModule({
       controllers: [
+        PlatformModeratorsController,
+        GameModeratorsController,
+        AdminUsersController,
         ReportsController,
         PlatformCaseModerationController,
         GameCaseModerationController,
@@ -225,6 +237,7 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         FollowsRepository,
         GameModeratorsService,
         GameModeratorsRepository,
+        PlatformModeratorsService,
         AuditLogService,
         AuditLogRepository,
         AuditLogQueryService,
@@ -237,6 +250,11 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         OutboxRepository,
         OutboxEventPublisher,
         { provide: EventPublisherPort, useExisting: OutboxEventPublisher },
+        UserModerationService,
+        {
+          provide: SessionTerminator,
+          useValue: { terminateAllSessions: () => Promise.resolve() },
+        },
         {
           provide: DiscordLoggerService,
           useValue: { sendError: () => Promise.resolve() },
@@ -549,6 +567,672 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
     });
   });
 
+  describe('MVP transactional authorization and bounded lists', () => {
+    it.each(['claim', 'assign', 'resolve', 'dismiss'] as const)(
+      'rejects platform %s if the actor loses their role after service authorization',
+      async (action) => {
+        const actor = await user();
+        await db.user.update({
+          where: { id: actor },
+          data: { role: 'PLATFORM_MODERATOR' },
+        });
+        const result = await submit((await post()).id, await user());
+        const before = await db.moderationCase.findUniqueOrThrow({
+          where: { id: result.body.caseId },
+        });
+        let revoked = false;
+        const hook = intercept(
+          (tx) =>
+            new Proxy(tx, {
+              get(target, key): unknown {
+                if (key !== '$queryRaw') return Reflect.get(target, key);
+                return async (
+                  query: TemplateStringsArray,
+                  ...values: unknown[]
+                ) => {
+                  if (!revoked) {
+                    revoked = true;
+                    await db.user.update({
+                      where: { id: actor },
+                      data: { role: 'USER' },
+                    });
+                  }
+                  return tx.$queryRaw(query, ...values);
+                };
+              },
+            }),
+        );
+        try {
+          expect(
+            (
+              await api(
+                `/moderation/cases/${result.body.caseId}/${action === 'assign' ? 'assignee' : action}`,
+                actor,
+                action === 'assign' ? { assigneeId: admin } : {},
+                'PATCH',
+              )
+            ).status,
+          ).toBe(403);
+        } finally {
+          hook.mockRestore();
+        }
+        expect(revoked).toBe(true);
+        expect(
+          await db.moderationCase.findUniqueOrThrow({
+            where: { id: before.id },
+          }),
+        ).toEqual(before);
+        expect(
+          await db.auditLog.count({ where: { targetId: before.id } }),
+        ).toBe(0);
+      },
+    );
+    it.each(['claim', 'assign', 'resolve', 'dismiss'] as const)(
+      'rejects game %s if the exact assignment is removed after service authorization',
+      async (action) => {
+        const actor = await user();
+        await db.gameModerator.create({ data: { userId: actor, gameId } });
+        const result = await submit((await post(true)).id, await user());
+        const before = await db.moderationCase.findUniqueOrThrow({
+          where: { id: result.body.caseId },
+        });
+        let revoked = false;
+        const hook = intercept(
+          (tx) =>
+            new Proxy(tx, {
+              get(target, key): unknown {
+                if (key !== '$queryRaw') return Reflect.get(target, key);
+                return async (
+                  query: TemplateStringsArray,
+                  ...values: unknown[]
+                ) => {
+                  if (!revoked) {
+                    revoked = true;
+                    await db.gameModerator.deleteMany({
+                      where: { userId: actor, gameId },
+                    });
+                  }
+                  return tx.$queryRaw(query, ...values);
+                };
+              },
+            }),
+        );
+        try {
+          expect(
+            (
+              await api(
+                `/games/${slug}/moderation/cases/${result.body.caseId}/${action === 'assign' ? 'assignee' : action}`,
+                actor,
+                action === 'assign' ? { assigneeId: admin } : {},
+                'PATCH',
+              )
+            ).status,
+          ).toBe(403);
+        } finally {
+          hook.mockRestore();
+        }
+        expect(revoked).toBe(true);
+        expect(
+          await db.moderationCase.findUniqueOrThrow({
+            where: { id: before.id },
+          }),
+        ).toEqual(before);
+        expect(
+          await db.auditLog.count({ where: { targetId: before.id } }),
+        ).toBe(0);
+      },
+    );
+    it('reuses the Admin Users role-filtered bounded list and prevents non-admin access', async () => {
+      const targets = [await user(), await user(), await user()];
+      await db.user.updateMany({
+        where: { id: { in: targets } },
+        data: { role: 'PLATFORM_MODERATOR' },
+      });
+      const one = await api(
+        '/admin/users?role=PLATFORM_MODERATOR&limit=2&page=1',
+        admin,
+      );
+      expect(one.status).toBe(200);
+      expect(one.body.items).toHaveLength(2);
+      expect(
+        one.body.items.every((item) => item.role === 'PLATFORM_MODERATOR'),
+      ).toBe(true);
+      expect(one.body.items[0]).toHaveProperty('username');
+      expect(one.body.items[0]).toHaveProperty('image');
+      const two = await api(
+        '/admin/users?role=PLATFORM_MODERATOR&limit=2&page=2',
+        admin,
+      );
+      expect(
+        new Set([...one.body.items, ...two.body.items].map((item) => item.id))
+          .size,
+      ).toBe(3);
+      expect(
+        (await api('/admin/users?role=PLATFORM_MODERATOR', targets[0])).status,
+      ).toBe(403);
+      expect(
+        (await api('/admin/users?role=PLATFORM_MODERATOR', author)).status,
+      ).toBe(403);
+    });
+  });
+
+  describe('navigation and platform moderator privileges', () => {
+    it('grants/revokes atomically, audits roles, retains game assignments and immediately changes live access', async () => {
+      const target = await user();
+      await db.gameModerator.create({ data: { gameId, userId: target } });
+      const route = `/platform-moderators/${target}`;
+      expect((await api('/moderation/cases', target)).status).toBe(403);
+      expect((await api(route, admin, {}, 'POST')).status).toBe(201);
+      expect((await api('/moderation/cases', target)).status).toBe(200);
+      expect((await api(route, admin, {}, 'POST')).status).toBe(409);
+      expect((await api(route, admin, undefined, 'DELETE')).status).toBe(200);
+      expect((await api('/moderation/cases', target)).status).toBe(403);
+      expect(
+        (await api(`/games/${slug}/moderation/cases`, target)).status,
+      ).toBe(200);
+      expect((await api(route, admin, undefined, 'DELETE')).status).toBe(409);
+      expect(
+        await db.gameModerator.count({ where: { gameId, userId: target } }),
+      ).toBe(1);
+      const logs = await db.auditLog.findMany({
+        where: { targetId: target },
+        orderBy: { createdAt: 'asc' },
+      });
+      expect(logs).toHaveLength(2);
+      expect(logs.map((log) => log.metadata)).toEqual([
+        {
+          scope: 'platform',
+          previousRole: 'USER',
+          newRole: 'PLATFORM_MODERATOR',
+        },
+        {
+          scope: 'platform',
+          previousRole: 'PLATFORM_MODERATOR',
+          newRole: 'USER',
+        },
+      ]);
+      expect(
+        logs.every(
+          (log) => log.actorId === admin && log.createdAt instanceof Date,
+        ),
+      ).toBe(true);
+    });
+
+    it('rejects non-admin actors, inactive actors/targets, missing targets and Admin demotion', async () => {
+      const target = await user();
+      const platform = await user();
+      await db.user.update({
+        where: { id: platform },
+        data: { role: 'PLATFORM_MODERATOR' },
+      });
+      for (const actor of [author, platform]) {
+        expect(
+          (await api(`/platform-moderators/${target}`, actor, {}, 'POST'))
+            .status,
+        ).toBe(403);
+        expect(
+          (
+            await api(
+              `/platform-moderators/${platform}`,
+              actor,
+              undefined,
+              'DELETE',
+            )
+          ).status,
+        ).toBe(403);
+        expect(
+          (await api('/platform-moderators/candidates?q=review', actor)).status,
+        ).toBe(403);
+      }
+      for (const method of ['POST', 'DELETE'])
+        expect(
+          (await api(`/platform-moderators/${admin}`, admin, undefined, method))
+            .status,
+        ).toBe(400);
+      const anotherAdmin = await user();
+      await db.user.update({
+        where: { id: anotherAdmin },
+        data: { role: 'ADMIN' },
+      });
+      for (const method of ['POST', 'DELETE'])
+        expect(
+          (
+            await api(
+              `/platform-moderators/${anotherAdmin}`,
+              admin,
+              undefined,
+              method,
+            )
+          ).status,
+        ).toBe(400);
+      for (const status of ['BANNED', 'SUSPENDED', 'DELETED'] as const) {
+        await db.user.update({ where: { id: target }, data: { status } });
+        expect(
+          (
+            await api(
+              `/platform-moderators/${target}`,
+              admin,
+              undefined,
+              'DELETE',
+            )
+          ).status,
+        ).toBe(400);
+        expect(
+          (await api(`/platform-moderators/${target}`, admin, {}, 'POST'))
+            .status,
+        ).toBe(400);
+        await db.user.update({
+          where: { id: platform },
+          data: { status, role: 'ADMIN' },
+        });
+        expect(
+          (await api(`/platform-moderators/${target}`, platform, {}, 'POST'))
+            .status,
+        ).toBe(403);
+      }
+      expect(
+        (await api(`/platform-moderators/${prefix}-missing`, admin, {}, 'POST'))
+          .status,
+      ).toBe(404);
+      expect(await db.auditLog.count({ where: { targetId: target } })).toBe(0);
+    });
+
+    it('rolls back role on audit failure and writes no audit on mutation failure', async () => {
+      const target = await user();
+      const route = `/platform-moderators/${target}`;
+      const audit = jest
+        .spyOn(app.get(AuditLogRepository), 'create')
+        .mockRejectedValueOnce(new Error('Injected platform audit failure'));
+      try {
+        expect((await api(route, admin, {}, 'POST')).status).toBe(500);
+      } finally {
+        audit.mockRestore();
+      }
+      expect(
+        (await db.user.findUniqueOrThrow({ where: { id: target } })).role,
+      ).toBe('USER');
+      const transaction = intercept(
+        (tx) =>
+          new Proxy(tx, {
+            get(target, key): unknown {
+              if (key !== 'user') return Reflect.get(target, key);
+              return new Proxy(target.user, {
+                get(owner, method): unknown {
+                  if (method !== 'updateMany')
+                    return Reflect.get(owner, method);
+                  return () => {
+                    throw new Error('Injected platform mutation failure');
+                  };
+                },
+              });
+            },
+          }),
+      );
+      try {
+        expect((await api(route, admin, {}, 'POST')).status).toBe(500);
+      } finally {
+        transaction.mockRestore();
+      }
+      expect(
+        (await db.user.findUniqueOrThrow({ where: { id: target } })).role,
+      ).toBe('USER');
+      expect(await db.auditLog.count({ where: { targetId: target } })).toBe(0);
+    });
+
+    it('keeps workload predicates and exclusive cursor pagination inside the exact scope', async () => {
+      const ids: string[] = [];
+      for (const [status, assignedModeratorId] of [
+        ['OPEN', null],
+        ['IN_REVIEW', moderator],
+        ['IN_REVIEW', secondModerator],
+        ['RESOLVED', moderator],
+        ['DISMISSED', null],
+      ] as const) {
+        const source = await post(true);
+        ids.push(
+          (
+            await db.moderationCase.create({
+              data: {
+                targetId: source.id,
+                targetType: 'POST',
+                gameId,
+                status,
+                assignedModeratorId,
+              },
+            })
+          ).id,
+        );
+      }
+      const root = `/games/${slug}/moderation/cases`;
+      const own = await api(`${root}?view=assigned`, moderator);
+      expect(own.body.items.map((item) => item.id)).toEqual([ids[1]]);
+      const unassigned = await api(`${root}?view=unassigned`, moderator);
+      expect(unassigned.body.items.map((item) => item.id)).toContain(ids[0]);
+      expect(unassigned.body.items.map((item) => item.id)).not.toContain(
+        ids[4],
+      );
+      const history = await api(`${root}?view=history&limit=1`, moderator);
+      expect(history.body.items).toHaveLength(1);
+      const next = await api(
+        `${root}?view=history&limit=1&cursor=${history.body.nextCursor}`,
+        moderator,
+      );
+      expect(
+        new Set(
+          [...history.body.items, ...next.body.items].map((item) => item.id),
+        ),
+      ).toEqual(new Set(ids.slice(3)));
+      expect((await api(`${root}?view=invalid`, moderator)).status).toBe(400);
+      expect(
+        (await api(`/moderation/cases?view=assigned`, moderator)).status,
+      ).toBe(403);
+    });
+
+    it('reuses bounded identity search and verifies exact-game grants, duplicates and Admin-only management', async () => {
+      const target = await user();
+      await db.user.update({
+        where: { id: target },
+        data: { username: 'followup-rover', name: 'Followup Rover' },
+      });
+      for (const q of ['@followup-rover', 'followup-rover', 'Followup Rover']) {
+        const candidates = await api(
+          `/games/${slug}/moderators/candidates?q=${encodeURIComponent(q)}`,
+          admin,
+        );
+        expect(candidates.status).toBe(200);
+        expect(candidates.body.items.map((item) => item.id)).toContain(target);
+      }
+      expect(
+        (await api('/platform-moderators/candidates?q=fol', admin)).body.items,
+      ).toEqual([]);
+      expect(
+        (
+          await api('/platform-moderators/candidates?q=followup', admin)
+        ).body.items.map((item) => item.id),
+      ).toContain(target);
+      const root = `/games/${slug}/moderators`;
+      expect((await api(root, author, { userId: target })).status).toBe(403);
+      expect((await api(root, admin, { userId: target })).status).toBe(201);
+      expect((await api(root, admin, { userId: target })).status).toBe(409);
+      expect(
+        (await api(`${root}/candidates?q=followup`, admin)).body.items,
+      ).toEqual([]);
+      expect(
+        await db.gameModerator.count({ where: { userId: target, gameId } }),
+      ).toBe(1);
+      await db.user.update({
+        where: { id: target },
+        data: { status: 'BANNED' },
+      });
+      expect(
+        (await api('/platform-moderators/candidates?q=followup', admin)).body
+          .items,
+      ).toEqual([]);
+    });
+  });
+
+  describe('review fixes: assignment, retention and report activity', () => {
+    let platform: string;
+    let gameMod: string;
+    let wrongGameMod: string;
+    let inactive: string;
+    let ordinary: string;
+    let otherGameId: string;
+    beforeAll(async () => {
+      otherGameId = (
+        await db.game.create({
+          data: { name: 'Other scope', slug: `${prefix}-assignment-other` },
+        })
+      ).id;
+      const candidates = [
+        ['radium', 'PLATFORM_MODERATOR', 'ACTIVE'],
+        ['radiumone', 'USER', 'ACTIVE'],
+        ['radiumtwo', 'USER', 'ACTIVE'],
+        ['radiuminactive', 'PLATFORM_MODERATOR', 'SUSPENDED'],
+        ['radiumplain', 'USER', 'ACTIVE'],
+      ] as const;
+      const ids: string[] = [];
+      for (const [username, role, status] of candidates) {
+        const id = await user();
+        ids.push(id);
+        await db.user.update({
+          where: { id },
+          data: { username, name: username, role, status },
+        });
+      }
+      [platform, gameMod, wrongGameMod, inactive, ordinary] = ids;
+      await db.gameModerator.createMany({
+        data: [
+          { gameId, userId: gameMod },
+          { gameId: otherGameId, userId: wrongGameMod },
+        ],
+      });
+    });
+    afterAll(async () => {
+      if (db && otherGameId)
+        await db.game.delete({ where: { id: otherGameId } });
+    });
+
+    it('filters and ranks eligible assignees by exact scope; short prefixes stay quiet', async () => {
+      const personal = await submit((await post()).id, await user());
+      const game = await submit((await post(true)).id, await user());
+      const search = (caseId: string, q: string) =>
+        api(
+          `/moderation/cases/${caseId}/assignees?q=${encodeURIComponent(q)}`,
+          platform,
+        );
+      expect((await search(personal.body.caseId, '@rad')).body.items).toEqual(
+        [],
+      );
+      expect(
+        (await search(personal.body.caseId, '@radium')).body.items.map(
+          (u) => u.id,
+        ),
+      ).toEqual([platform]);
+      expect(
+        (await search(game.body.caseId, 'radium')).body.items.map((u) => u.id),
+      ).toEqual([platform, gameMod]);
+      expect(
+        (
+          await api(
+            `/games/${slug}/moderation/cases/${game.body.caseId}/assignees?q=radium`,
+            gameMod,
+          )
+        ).body.items.map((u) => u.id),
+      ).toEqual([platform, gameMod]);
+      expect(
+        (
+          await api(
+            `/moderation/cases/${game.body.caseId}/assignees?q=radium`,
+            ordinary,
+          )
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await api(
+            `/games/${slug}/moderation/cases/${game.body.caseId}/assignees?q=radium`,
+            wrongGameMod,
+          )
+        ).status,
+      ).toBe(403);
+    });
+
+    it('assigns eligible moderators and rejects arbitrary, inactive, wrong-game and unauthorized assignments', async () => {
+      const game = await submit((await post(true)).id, await user());
+      for (const id of [ordinary, inactive, wrongGameMod]) {
+        expect(
+          (
+            await api(
+              `/moderation/cases/${game.body.caseId}/assignee`,
+              platform,
+              { assigneeId: id },
+              'PATCH',
+            )
+          ).status,
+        ).toBe(400);
+      }
+      expect(
+        (
+          await api(
+            `/moderation/cases/${game.body.caseId}/assignee`,
+            ordinary,
+            { assigneeId: platform },
+            'PATCH',
+          )
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await api(
+            `/games/${slug}/moderation/cases/${game.body.caseId}/assignee`,
+            gameMod,
+            { assigneeId: platform },
+            'PATCH',
+          )
+        ).status,
+      ).toBe(200);
+      const assigned = await api(
+        `/moderation/cases/${game.body.caseId}/assignee`,
+        platform,
+        { assigneeId: gameMod },
+        'PATCH',
+      );
+      expect(assigned.status).toBe(200);
+      expect(assigned.body).toMatchObject({
+        assignedModeratorId: gameMod,
+        status: 'IN_REVIEW',
+        assignedModerator: { username: 'radiumone', role: 'USER' },
+      });
+      expect(
+        await db.auditLog.count({
+          where: { targetId: game.body.caseId, action: 'CASE_ASSIGNED' },
+        }),
+      ).toBe(2);
+      const personal = await submit((await post()).id, await user());
+      expect(
+        (
+          await api(
+            `/moderation/cases/${personal.body.caseId}/assignee`,
+            platform,
+            { assigneeId: gameMod },
+            'PATCH',
+          )
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await api(
+            `/moderation/cases/${personal.body.caseId}/assignee`,
+            platform,
+            { assigneeId: admin },
+            'PATCH',
+          )
+        ).status,
+      ).toBe(200);
+      await api(
+        `/moderation/cases/${game.body.caseId}/resolve`,
+        platform,
+        {},
+        'PATCH',
+      );
+      expect(
+        (
+          await api(
+            `/moderation/cases/${game.body.caseId}/assignee`,
+            platform,
+            { assigneeId: admin },
+            'PATCH',
+          )
+        ).status,
+      ).toBe(409);
+    });
+
+    it('preserves multiple deleted reporters and counters when another complaint arrives', async () => {
+      const target = await post();
+      const reporters = [await user(), await user(), await user()];
+      const first = await submit(target.id, reporters[0]);
+      for (const reporter of reporters.slice(1))
+        expect((await submit(target.id, reporter)).status).toBe(201);
+      await db.user.deleteMany({
+        where: { id: { in: reporters.slice(0, 2) } },
+      });
+      expect(
+        await db.report.count({ where: { caseId: first.body.caseId } }),
+      ).toBe(3);
+      expect(
+        await db.report.count({
+          where: { caseId: first.body.caseId, reporterId: null },
+        }),
+      ).toBe(2);
+      expect((await submit(target.id, await user())).status).toBe(201);
+      expect(
+        await db.moderationCase.findUnique({
+          where: { id: first.body.caseId },
+        }),
+      ).toMatchObject({ reportCount: 4, uniqueReporterCount: 4 });
+      const detail = await api(
+        `/moderation/cases/${first.body.caseId}`,
+        platform,
+      );
+      expect(detail.body.evidence.items).toHaveLength(4);
+      expect(
+        detail.body.evidence.items.filter(
+          (row) => (row as unknown as { reporter: unknown }).reporter === null,
+        ),
+      ).toHaveLength(2);
+    });
+
+    it('raises an old case on report activity without reordering it on workflow changes', async () => {
+      const oldTarget = await post(true);
+      const first = await submit(oldTarget.id, await user());
+      const second = await submit((await post(true)).id, await user());
+      await db.moderationCase.update({
+        where: { id: first.body.caseId },
+        data: { lastReportedAt: new Date('2020-01-01') },
+      });
+      await db.moderationCase.update({
+        where: { id: second.body.caseId },
+        data: { lastReportedAt: new Date('2021-01-01') },
+      });
+      expect(
+        (await api(`/games/${slug}/moderation/cases?limit=1`, gameMod)).body
+          .items[0].id,
+      ).not.toBe(first.body.caseId);
+      expect((await submit(oldTarget.id, await user())).status).toBe(201);
+      expect(
+        (await api(`/games/${slug}/moderation/cases?limit=1`, gameMod)).body
+          .items[0].id,
+      ).toBe(first.body.caseId);
+      const before = await db.moderationCase.findUniqueOrThrow({
+        where: { id: first.body.caseId },
+      });
+      expect(
+        (
+          await api(
+            `/moderation/cases/${first.body.caseId}/claim`,
+            platform,
+            {},
+            'PATCH',
+          )
+        ).status,
+      ).toBe(200);
+      const after = await db.moderationCase.findUniqueOrThrow({
+        where: { id: first.body.caseId },
+      });
+      expect(after.lastReportedAt).toEqual(before.lastReportedAt);
+      const page = await api(
+        `/games/${slug}/moderation/cases?limit=1`,
+        gameMod,
+      );
+      const next = await api(
+        `/games/${slug}/moderation/cases?limit=1&cursor=${page.body.nextCursor}`,
+        gameMod,
+      );
+      expect(next.body.items[0].id).not.toBe(page.body.items[0].id);
+    });
+  });
+
   it('has the real active-target partial unique index', async () => {
     const rows = await db.$queryRaw<
       Array<{ indexdef: string }>
@@ -729,16 +1413,11 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
       (tx) =>
         new Proxy(tx, {
           get(target, key): unknown {
-            if (key !== 'moderationCase') return Reflect.get(target, key);
-            return new Proxy(target.moderationCase, {
-              get(owner, method): unknown {
-                if (method === 'update')
-                  return () => {
-                    throw new Error('Injected append counter failure');
-                  };
-                return Reflect.get(owner, method);
-              },
-            });
+            if (key === '$executeRaw')
+              return () => {
+                throw new Error('Injected append counter failure');
+              };
+            return Reflect.get(target, key);
           },
         }),
     );
@@ -830,6 +1509,10 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         targetSnapshot: saved.targetSnapshot!,
       },
     });
+    await db.moderationCase.update({
+      where: { id: saved.caseId },
+      data: { reportCount: { increment: 1 } },
+    });
     expect((await submit(source.id, await user())).status).toBe(201);
     expect(await cases(source.id)).toEqual([
       expect.objectContaining({ reportCount: 3, uniqueReporterCount: 2 }),
@@ -844,6 +1527,10 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
         (tx) =>
           new Proxy(tx, {
             get(target, key): unknown {
+              if (failure === 'counter' && key === '$executeRaw')
+                return () => {
+                  throw new Error('Injected counter write failure');
+                };
               const delegate = Reflect.get(target, key) as object;
               if (key !== (failure === 'report' ? 'report' : 'moderationCase'))
                 return delegate;
@@ -1730,7 +2417,10 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
       expect(detail.status).toBe(200);
       expect(detail.body.reportCount).toBe(2);
       expect(detail.body.uniqueReporterCount).toBe(2);
-      expect(detail.body.evidence.items).toHaveLength(1);
+      expect(detail.body.evidence.items).toHaveLength(2);
+      expect(detail.body.evidence.items).toContainEqual(
+        expect.objectContaining({ reporter: null }),
+      );
       await db.post.delete({ where: { id: personalTarget } });
       const missing = await api(`${queue}/${personalCase}`, platformModerator);
       expect(missing.status).toBe(200);
@@ -1889,7 +2579,13 @@ describe('Report creation and case workflow (real PostgreSQL)', () => {
     for (let i = 0; i < 3; i++) {
       const source = await post(true);
       const row = await db.moderationCase.create({
-        data: { targetType: 'POST', targetId: source.id, gameId, createdAt },
+        data: {
+          targetType: 'POST',
+          targetId: source.id,
+          gameId,
+          createdAt,
+          lastReportedAt: createdAt,
+        },
       });
       ownIds.push(row.id);
     }

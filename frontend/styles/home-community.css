@@ -751,13 +751,22 @@
   gap: 13px;
 }
 
-.post-feed-card .post-body > p {
-  display: block;
-  overflow: visible;
+.post-feed-card .post-body:not(.full) > p {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   color: var(--text);
   font-size: 14px;
   line-height: 1.65;
-  -webkit-line-clamp: unset;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.post-read-more {
+  width: fit-content;
+  color: var(--muted-strong);
+  font-size: 14px;
+  text-underline-offset: 3px;
 }
 
 .post-feed-card .post-media-wrap {

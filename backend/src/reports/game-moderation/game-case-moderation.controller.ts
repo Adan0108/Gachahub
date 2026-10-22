@@ -1,3 +1,5 @@
+import { AssignCaseDto } from '../dto/assign-case.dto';
+import { QueryCaseAssigneesDto } from '../dto/query-case-assignees.dto';
 import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -54,7 +56,7 @@ export class GameCaseModerationController {
   })
   @ApiOkResponse({
     description:
-      '{items,nextCursor}: native case summaries with game/user summaries, stored counters, risk, assignment/resolution timestamps. nextCursor is null at the end; evidence and target bodies are excluded. Lightweight targetPreview is {title (max 160), excerpt (max 240), thumbnailUrl (one image), author {id,name,username,image}} or null; targetState is available/deleted/missing. reasonSummary is [{reasonCode,count}], grouped from surviving evidence, count DESC then reasonCode ASC (at most 10 enum reasons). No reports[] or full content/media/storage fields. Cursor encodes the exclusive {createdAt,id} boundary. Stable createdAt DESC,id DESC; evidence remains in detail.',
+      '{items,nextCursor}: native case summaries with game/user summaries, stored counters, risk, assignment/resolution timestamps. nextCursor is null at the end; evidence and target bodies are excluded. Lightweight targetPreview is {title (max 160), excerpt (max 240), thumbnailUrl (one image), author {id,name,username,image}} or null; targetState is available/deleted/missing. reasonSummary is [{reasonCode,count}], grouped from surviving evidence, count DESC then reasonCode ASC (at most 10 enum reasons). No reports[] or full content/media/storage fields. Cursor encodes the exclusive {createdAt,id} boundary. Stable lastReportedAt DESC,id DESC; evidence remains in detail.',
   })
   @ApiOperation({
     summary: 'List case workflows in this exact game.',
@@ -114,7 +116,7 @@ export class GameCaseModerationController {
   @ApiOperation({
     summary: 'Read bounded complaint evidence for this game case.',
     description:
-      'limit default 20/max 100; opaque cursor uses exclusive createdAt DESC,id DESC boundary. Returns {items,nextCursor}; raw targetSnapshot is excluded.',
+      'limit default 20/max 100; opaque cursor uses exclusive lastReportedAt DESC,id DESC boundary. Returns {items,nextCursor}; raw targetSnapshot is excluded.',
   })
   reports(
     @Param('gameSlug') gameSlug: string,
@@ -127,6 +129,40 @@ export class GameCaseModerationController {
       session.user.id,
       caseId,
       query,
+    );
+  }
+
+  @Get(':caseId/assignees')
+  @ApiOperation({ summary: 'Find eligible assignees for this exact game case' })
+  assignees(
+    @Param('gameSlug') gameSlug: string,
+    @Session() session: UserSession,
+    @Param('caseId') caseId: string,
+    @Query() query: QueryCaseAssigneesDto,
+  ) {
+    return this.reportModerationService.searchAssignees(
+      session.user.id,
+      caseId,
+      query.q,
+      gameSlug,
+    );
+  }
+
+  @Patch(':caseId/assignee')
+  @ApiOperation({
+    summary: 'Assign or reassign an active game case to an eligible moderator',
+  })
+  assign(
+    @Param('gameSlug') gameSlug: string,
+    @Session() session: UserSession,
+    @Param('caseId') caseId: string,
+    @Body() dto: AssignCaseDto,
+  ) {
+    return this.reportModerationService.assignCaseForGame(
+      gameSlug,
+      session.user.id,
+      caseId,
+      dto.assigneeId,
     );
   }
 

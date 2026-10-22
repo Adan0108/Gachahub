@@ -1,9 +1,17 @@
+import { encodeCaseCursor, type CaseCursor } from './domain/case-cursor';
+import { caseModeratorWhere } from '../common/guards/moderation-capabilities';
+import { lockModerationActor } from '../common/moderation/lock-moderation-actor';
+import { searchModeratorCandidates } from '../common/moderation/search-moderator-candidates';
 import {
   encodeEvidenceCursor,
   type EvidenceCursor,
 } from './domain/report-evidence-pagination';
 import { projectReportSnapshot } from './domain/report-evidence.projection';
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  BadRequestException,
+  Injectable,
+} from '@nestjs/common';
 import {
   Prisma,
   type PostStatus,
@@ -37,10 +45,13 @@ const caseSummarySelect = {
   status: true,
   reportCount: true,
   uniqueReporterCount: true,
+  lastReportedAt: true,
   currentRiskScore: true,
   currentRiskLevel: true,
   assignedModeratorId: true,
-  assignedModerator: { select: { id: true, name: true, image: true } },
+  assignedModerator: {
+    select: { id: true, name: true, image: true, username: true, role: true },
+  },
   resolvedById: true,
   resolvedBy: { select: { id: true, name: true, image: true } },
   resolvedAt: true,
@@ -67,6 +78,8 @@ type CaseDetail = Prisma.ModerationCaseGetPayload<{
 }>;
 
 export interface CaseTransitionContext {
+  actorId: string;
+  caseGameId: string | null;
   // Platform actions omit this predicate; game actions must recheck exact ownership in the write.
   gameId?: string;
   audit: (
@@ -85,11 +98,32 @@ export class ReportsRepository {
   async findModerationCases(params: {
     gameId?: string | null;
     status?: ModerationCaseStatus;
+    view?: 'all' | 'assigned' | 'unassigned' | 'history';
+    moderatorId?: string;
     targetType?: ReportTargetType;
     limit: number;
-    cursor?: EvidenceCursor;
+    cursor?: CaseCursor;
   }) {
     const where: Prisma.ModerationCaseWhereInput = {
+      ...((params.view && params.view !== 'all') || params.status === undefined
+        ? {
+            AND: [
+              {
+                status: {
+                  in:
+                    params.view === 'history'
+                      ? ['RESOLVED', 'DISMISSED']
+                      : ['OPEN', 'IN_REVIEW'],
+                },
+              },
+              ...(params.view === 'assigned'
+                ? [{ assignedModeratorId: params.moderatorId }]
+                : params.view === 'unassigned'
+                  ? [{ assignedModeratorId: null }]
+                  : []),
+            ],
+          }
+        : {}),
       ...(params.gameId !== undefined ? { gameId: params.gameId } : {}),
       ...(params.status !== undefined ? { status: params.status } : {}),
       ...(params.targetType !== undefined
@@ -98,9 +132,9 @@ export class ReportsRepository {
       ...(params.cursor
         ? {
             OR: [
-              { createdAt: { lt: params.cursor.createdAt } },
+              { lastReportedAt: { lt: params.cursor.lastReportedAt } },
               {
-                createdAt: params.cursor.createdAt,
+                lastReportedAt: params.cursor.lastReportedAt,
                 id: { lt: params.cursor.id },
               },
             ],
@@ -110,7 +144,7 @@ export class ReportsRepository {
     const rows = await this.prisma.moderationCase.findMany({
       where,
       select: caseSummarySelect,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ lastReportedAt: 'desc' }, { id: 'desc' }],
       take: params.limit + 1,
     });
     const page = rows.slice(0, params.limit);
@@ -118,7 +152,7 @@ export class ReportsRepository {
     return {
       items: await this.enrichCasePage(page),
       nextCursor:
-        rows.length > params.limit && last ? encodeEvidenceCursor(last) : null,
+        rows.length > params.limit && last ? encodeCaseCursor(last) : null,
     };
   }
 
@@ -325,7 +359,14 @@ export class ReportsRepository {
         updatedAt: true,
         author: { select: { id: true, name: true, image: true } },
         post: {
-          select: { id: true, gameId: true, status: true, deletedAt: true },
+          select: {
+            id: true,
+            gameId: true,
+            status: true,
+            deletedAt: true,
+            visibility: true,
+            authorId: true,
+          },
         },
       },
     });
@@ -485,7 +526,7 @@ export class ReportsRepository {
           });
           if (moderationCase) {
             // Serialize reporters of an existing case. This also protects the
-            // duplicate check and recomputed counters across server instances.
+            // duplicate check and atomic counters across server instances.
             const locked = await tx.$queryRaw<Array<{ id: string }>>`
               SELECT "id" FROM "moderation_cases"
               WHERE "id" = ${moderationCase.id}
@@ -523,18 +564,17 @@ export class ReportsRepository {
             },
             select: reportReceiptSelect,
           });
-          const reportCount = await tx.report.count({
-            where: { caseId: moderationCase.id },
-          });
-          const reporters = await tx.report.findMany({
-            where: { caseId: moderationCase.id },
-            distinct: ['reporterId'],
-            select: { reporterId: true },
-          });
-          await tx.moderationCase.update({
-            where: { id: moderationCase.id },
-            data: { reportCount, uniqueReporterCount: reporters.length },
-          });
+          // Preserve historical totals, including already-deleted reporters. Advance
+          // unique reporters once per accepted complaint; never regroup null IDs.
+          // The case lock serializes appends; database time tracks report activity.
+          await tx.$executeRaw`
+            UPDATE "moderation_cases" c SET
+              "reportCount" = c."reportCount" + 1,
+              "uniqueReporterCount" = c."uniqueReporterCount" + 1,
+              "lastReportedAt" = GREATEST(c."lastReportedAt", clock_timestamp() AT TIME ZONE 'UTC'),
+              "updatedAt" = clock_timestamp() AT TIME ZONE 'UTC'
+            WHERE c.id = ${moderationCase.id}
+          `;
           await this.analysisScheduler.scheduleIfNeeded(tx, {
             caseId: moderationCase.id,
             sourceReportId: report.id,
@@ -592,6 +632,17 @@ export class ReportsRepository {
     });
   }
 
+  async countActiveCases() {
+    const where = { status: { in: [...OPEN_CASE_STATUSES] } };
+    const [openCases, unassignedCases] = await Promise.all([
+      this.prisma.moderationCase.count({ where }),
+      this.prisma.moderationCase.count({
+        where: { ...where, assignedModeratorId: null },
+      }),
+    ]);
+    return { openCases, unassignedCases };
+  }
+
   /**
    * Open report count per game, scoped to the given game ids - used by the
    * admin dashboard to annotate its communities snapshot. Takes the ids the
@@ -618,6 +669,31 @@ export class ReportsRepository {
       }
     }
     return Array.from(counts, ([gameId, count]) => ({ gameId, count }));
+  }
+
+  searchAssignees(gameId: string | null, query: string) {
+    return searchModeratorCandidates(
+      this.prisma,
+      caseModeratorWhere(gameId),
+      query,
+    );
+  }
+
+  assignCase(
+    caseId: string,
+    assigneeId: string,
+    context: CaseTransitionContext,
+  ) {
+    return this.transitionCase(
+      caseId,
+      context,
+      {
+        status: 'IN_REVIEW',
+        assignedModeratorId: assigneeId,
+      },
+      OPEN_CASE_STATUSES,
+      assigneeId,
+    );
   }
 
   async claimCase(
@@ -663,12 +739,35 @@ export class ReportsRepository {
     context: CaseTransitionContext,
     data: Prisma.ModerationCaseUncheckedUpdateManyInput,
     statuses: readonly ModerationCaseStatus[],
+    assigneeId?: string,
   ): Promise<CaseDetail | null> {
     return this.prisma.$transaction(async (tx) => {
+      await lockModerationActor(
+        tx,
+        context.actorId,
+        context.gameId,
+        assigneeId,
+      );
+      if (assigneeId !== undefined) {
+        if (context.caseGameId !== null) {
+          await tx.$queryRaw`SELECT id FROM game_moderators
+            WHERE "userId" = ${assigneeId} AND "gameId" = ${context.caseGameId} FOR SHARE`;
+        }
+        const eligible = await tx.user.findFirst({
+          where: { id: assigneeId, ...caseModeratorWhere(context.caseGameId) },
+          select: { id: true },
+        });
+        if (!eligible)
+          throw new BadRequestException(
+            'Choose an active moderator eligible for this case',
+          );
+      }
+
       // PostgreSQL rechecks status and game ownership after competing writers finish.
       const { count } = await tx.moderationCase.updateMany({
         where: {
           id: caseId,
+          gameId: context.caseGameId,
           ...(context.gameId !== undefined ? { gameId: context.gameId } : {}),
           status: { in: [...statuses] },
         },

@@ -1,3 +1,5 @@
+import { releaseModeratorCases } from '../common/moderation/release-moderator-cases';
+import { searchModeratorCandidates } from '../common/moderation/search-moderator-candidates';
 import {
   BadRequestException,
   ConflictException,
@@ -41,6 +43,23 @@ export class GameModeratorsService {
    * - Throw 404 if the game does not exist.
    * - Return all moderator assignments for that game.
    */
+  async searchCandidates(gameSlug: string, actorId: string, q = '') {
+    const actor = await loadActiveUser(this.prisma, actorId);
+    if (actor.role !== 'ADMIN')
+      throw new ForbiddenException('Admin permission required');
+    const gameId = await this.resolveGameId(gameSlug);
+    return {
+      items: await searchModeratorCandidates(
+        this.prisma,
+        {
+          status: 'ACTIVE',
+          moderatedGames: { none: { gameId } },
+        },
+        q,
+      ),
+    };
+  }
+
   async findByGameSlug(gameSlug: string) {
     const game = await this.gameModeratorsRepository.findGameBySlug(gameSlug);
 
@@ -282,6 +301,15 @@ export class GameModeratorsService {
 
       if (count === 0) {
         throw new NotFoundException('Moderator assignment not found');
+      }
+
+      // A platform moderator can still work this game's cases
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      });
+      if (!user || !hasPlatformModerationCapability(user.role)) {
+        await releaseModeratorCases(tx, userId, { gameId: game.id });
       }
 
       await this.auditLogService.recordOrThrow(

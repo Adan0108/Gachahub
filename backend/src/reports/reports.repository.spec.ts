@@ -1,5 +1,5 @@
 import { ModerationAnalysisScheduler } from '../moderation-analysis/moderation-analysis-scheduler.service';
-import { decodeEvidenceCursor } from './domain/report-evidence-pagination';
+import { decodeCaseCursor } from './domain/case-cursor';
 jest.mock('../prisma/prisma.service', () => ({ PrismaService: class {} }));
 import { ConflictException } from '@nestjs/common';
 import { Prisma, ReportReason } from '../generated/prisma/client';
@@ -53,6 +53,7 @@ describe('ReportsRepository creation retry boundaries', () => {
       findUniqueOrThrow: jest.fn(),
     },
     $queryRaw: jest.fn(),
+    $executeRaw: jest.fn(),
   };
   const prisma = { $transaction: jest.fn() };
   const repository = new ReportsRepository(
@@ -98,10 +99,7 @@ describe('ReportsRepository creation retry boundaries', () => {
         status: { in: ['OPEN', 'IN_REVIEW'] },
       },
     });
-    expect(tx.moderationCase.update).toHaveBeenCalledWith({
-      where: { id: 'case' },
-      data: { reportCount: 3, uniqueReporterCount: 2 },
-    });
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
     expect(report).toMatchObject({
       id: 'report',
       caseId: 'case',
@@ -148,12 +146,14 @@ describe('ReportsRepository creation retry boundaries', () => {
       'You already have an open report on this content',
     );
     expect(tx.report.create).not.toHaveBeenCalled();
-    expect(tx.moderationCase.update).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
   });
 });
 
 describe('ReportsRepository direct case transitions', () => {
   const tx = {
+    user: { findUnique: jest.fn() },
+    $queryRaw: jest.fn(),
     moderationCase: { updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
   };
   const prisma = { $transaction: jest.fn() };
@@ -170,6 +170,11 @@ describe('ReportsRepository direct case transitions', () => {
       (work: (client: typeof tx) => Promise<unknown>) => work(tx),
     );
     tx.moderationCase.updateMany.mockResolvedValue({ count: 1 });
+    tx.user.findUnique.mockResolvedValue({
+      role: 'PLATFORM_MODERATOR',
+      status: 'ACTIVE',
+    });
+    tx.$queryRaw.mockResolvedValue([]);
     tx.moderationCase.findUniqueOrThrow.mockResolvedValue({
       id: 'case',
       status: 'IN_REVIEW',
@@ -180,13 +185,15 @@ describe('ReportsRepository direct case transitions', () => {
     'claims case directly with authoritative scope %s and atomic audit',
     async (gameId) => {
       const result = await repository.claimCase('case', 'mod', {
+        actorId: 'mod',
+        caseGameId: gameId ?? null,
         gameId,
         audit,
       });
       expect(tx.moderationCase.updateMany).toHaveBeenCalledWith({
         where: {
           id: 'case',
-          ...(gameId !== undefined ? { gameId } : {}),
+          gameId: gameId ?? null,
           status: { in: ['OPEN'] },
         },
         data: { status: 'IN_REVIEW', assignedModeratorId: 'mod' },
@@ -205,7 +212,7 @@ describe('ReportsRepository direct case transitions', () => {
     async (status) => {
       await repository.finalizeCase(
         { id: 'case', status, resolvedById: 'other', resolutionNote: 'Done' },
-        { gameId: 'game', audit },
+        { actorId: 'other', caseGameId: 'game', gameId: 'game', audit },
       );
       expect(tx.moderationCase.updateMany).toHaveBeenCalledWith({
         where: {
@@ -229,14 +236,18 @@ describe('ReportsRepository direct case transitions', () => {
       tx.moderationCase.updateMany.mockResolvedValue({ count: 0 });
       const result =
         action === 'claim'
-          ? await repository.claimCase('case', 'mod', { audit })
+          ? await repository.claimCase('case', 'mod', {
+              actorId: 'mod',
+              caseGameId: null,
+              audit,
+            })
           : await repository.finalizeCase(
               {
                 id: 'case',
                 status: action === 'resolve' ? 'RESOLVED' : 'DISMISSED',
                 resolvedById: 'mod',
               },
-              { audit },
+              { actorId: 'mod', caseGameId: null, audit },
             );
       expect(result).toBeNull();
       expect(tx.moderationCase.findUniqueOrThrow).not.toHaveBeenCalled();
@@ -246,9 +257,13 @@ describe('ReportsRepository direct case transitions', () => {
   it('propagates audit failure out of the same transaction', async () => {
     const error = new Error('audit failed');
     audit.mockRejectedValue(error);
-    await expect(repository.claimCase('case', 'mod', { audit })).rejects.toBe(
-      error,
-    );
+    await expect(
+      repository.claimCase('case', 'mod', {
+        actorId: 'mod',
+        caseGameId: null,
+        audit,
+      }),
+    ).rejects.toBe(error);
   });
 });
 
@@ -384,25 +399,25 @@ describe('ReportsRepository native case reads', () => {
     }
   });
   it('uses an exclusive tuple boundary, one lookahead and no OFFSET/count without a pagination mode', async () => {
-    const createdAt = new Date('2026-10-20T00:00:00.000Z');
+    const lastReportedAt = new Date('2026-10-20T00:00:00.000Z');
     prisma.moderationCase.findMany.mockResolvedValue(
       ['z', 'y', 'x'].map((id) => ({
         id,
         targetType: 'POST',
         targetId: id,
-        createdAt,
+        lastReportedAt,
       })),
     );
     const result = await repository.findModerationCases({
       limit: 2,
 
-      cursor: { id: 'zz', createdAt },
+      cursor: { id: 'zz', lastReportedAt },
       gameId: 'game',
     });
     expect(result.items.map((item) => item.id)).toEqual(['z', 'y']);
-    expect(decodeEvidenceCursor(result.nextCursor!)).toEqual({
+    expect(decodeCaseCursor(result.nextCursor!)).toEqual({
       id: 'y',
-      createdAt,
+      lastReportedAt,
     });
     const [args] = prisma.moderationCase.findMany.mock.calls[0] as unknown as [
       Record<string, unknown>,
@@ -411,7 +426,10 @@ describe('ReportsRepository native case reads', () => {
       take: 3,
       where: {
         gameId: 'game',
-        OR: [{ createdAt: { lt: createdAt } }, { createdAt, id: { lt: 'zz' } }],
+        OR: [
+          { lastReportedAt: { lt: lastReportedAt } },
+          { lastReportedAt, id: { lt: 'zz' } },
+        ],
       },
     });
     expect(args).not.toHaveProperty('skip');
@@ -460,7 +478,7 @@ describe('ReportsRepository native case reads', () => {
         expect.objectContaining({
           where,
           take: 11,
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          orderBy: [{ lastReportedAt: 'desc' }, { id: 'desc' }],
         }),
       );
       expect(prisma.moderationCase.count).not.toHaveBeenCalled();

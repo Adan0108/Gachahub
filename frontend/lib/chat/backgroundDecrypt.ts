@@ -49,7 +49,7 @@ export async function decryptPendingMessages(params: DecryptPendingParams): Prom
       if (!release) continue;
       claimed.push({ message, release });
 
-      // eslint-disable-next-line no-await-in-loop -- cheap local read, and the claim above must come first
+      // A cheap local read; the claim above must come first.
       if (await store.get(message.id)) {
         release();
         claimed.pop();
@@ -67,10 +67,10 @@ export async function decryptPendingMessages(params: DecryptPendingParams): Prom
 
     for (const { message, release } of claimed) {
       try {
-        // eslint-disable-next-line no-await-in-loop -- each message must be applied in order
+        // Each message must be applied in order.
         const result = await engine.processIncoming(conversationId, wire.get(message.id)!);
         if (result.kind !== "application") continue;
-        // eslint-disable-next-line no-await-in-loop -- saved at once: the key cannot be used again
+        // Save at once: the key cannot be used again.
         await store.save({
           messageId: message.id,
           conversationId,
