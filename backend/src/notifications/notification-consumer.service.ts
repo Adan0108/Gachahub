@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Kafka, type Consumer, type EachMessagePayload } from 'kafkajs';
 
+import { MAX_GROUP_MEMBERS } from '../chat/membership/leaf-entitlement';
 import type {
   DomainEventPayloadMap,
   DomainEventType,
@@ -34,8 +35,8 @@ type ChatMessageSentPayload = DomainEventPayloadMap['chat.message.sent'];
 type ChatParticipantAddedPayload =
   DomainEventPayloadMap['chat.participant.added'];
 
-/** Group member cap (CreateGroupChatDto/UpdateGroupMembersDto: 99) plus one, so recipientUserIds can never legitimately exceed it. */
-const MAX_CHAT_RECIPIENTS = 100;
+/** A message's recipients are everyone in its group but the sender, so they never legitimately exceed the group cap. */
+const MAX_CHAT_RECIPIENTS = MAX_GROUP_MEMBERS;
 
 /** An event that can never succeed, no matter how many times Kafka redelivers it - handleMessage logs and drops it instead of retrying. */
 export class PermanentEventError extends Error {}

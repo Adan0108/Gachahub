@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import type { ChatParticipantState } from '../../generated/prisma/client';
 import { EventPublisherPort } from '../../domain-events/event-publisher.port';
 import type { ChatParticipantAddedState } from '../../domain-events/domain-event.types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ChatMembershipRepository } from './chat-membership.repository';
+import { MAX_GROUP_MEMBERS } from './leaf-entitlement';
 import {
   GROUP_MANAGER_ROLES,
   lockAndAssertActorRole,
@@ -72,6 +73,20 @@ export class ChatMembershipService {
           conversationId,
           requests,
         );
+
+      // Counted after the write, under the same lock: two adds at once cannot both pass the cap.
+      // Throwing rolls the whole add back.
+      if (
+        changes.length > 0 &&
+        (await this.chatMembershipRepository.countGroupMembers(
+          tx,
+          conversationId,
+        )) > MAX_GROUP_MEMBERS
+      ) {
+        throw new BadRequestException(
+          `A group can have at most ${MAX_GROUP_MEMBERS} members`,
+        );
+      }
 
       if (changes.length > 0) {
         await this.eventPublisher.publishMany(

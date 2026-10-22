@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { ChatMembershipRepository } from './chat-membership.repository';
 
 jest.mock('./chat-membership.repository', () => ({
@@ -11,6 +11,7 @@ describe('ChatMembershipService', () => {
   const repository = {
     changeMembership: jest.fn(),
     changeMembershipInTransaction: jest.fn(),
+    countGroupMembers: jest.fn(),
   };
   const eventPublisher = { publish: jest.fn(), publishMany: jest.fn() };
   // The locked actor lookup: the actor still manages the group unless a test revokes them via actorRow
@@ -37,6 +38,7 @@ describe('ChatMembershipService', () => {
       (_conversationId: string, requests: unknown[]) =>
         Promise.resolve(requests.length),
     );
+    repository.countGroupMembers.mockResolvedValue(3);
     repository.changeMembershipInTransaction.mockImplementation(
       (_tx: unknown, _conversationId: string, requests: unknown[]) =>
         // Default double: every request became a genuine ACTIVE transition. Individual tests
@@ -212,6 +214,38 @@ describe('ChatMembershipService', () => {
         'conv-1',
         [{ userId: 'u2', event: 'ADD_DIRECT' }],
       );
+    });
+
+    // #103: the count is taken under the lock after the write, so concurrent adds cannot both get in.
+    it('refuses an add that takes the group past 100 members, and publishes nothing', async () => {
+      repository.countGroupMembers.mockResolvedValue(101);
+
+      await expect(
+        service.addMembers(
+          'conv-1',
+          [{ userId: 'u2', entitlement: 'DIRECT' }],
+          'actor-1',
+        ),
+      ).rejects.toThrow(
+        new BadRequestException('A group can have at most 100 members'),
+      );
+      expect(repository.countGroupMembers).toHaveBeenCalledWith(
+        fakeTx,
+        'conv-1',
+      );
+      expect(eventPublisher.publishMany).not.toHaveBeenCalled();
+    });
+
+    it('lets an add that fills the group to exactly 100 through', async () => {
+      repository.countGroupMembers.mockResolvedValue(100);
+
+      await expect(
+        service.addMembers(
+          'conv-1',
+          [{ userId: 'u2', entitlement: 'DIRECT' }],
+          'actor-1',
+        ),
+      ).resolves.toEqual({ count: 1 });
     });
   });
 

@@ -9,6 +9,13 @@ export const ENTITLED_TO_LEAF_STATES: readonly ChatParticipantState[] = [
   'BLOCKED',
 ];
 
+/**
+ * Most people a group can hold, counting everyone entitled to a leaf (invitees included): the
+ * creator plus the 99 a create or add request may name, and what the notification consumer
+ * accepts as recipients of one message.
+ */
+export const MAX_GROUP_MEMBERS = 100;
+
 const ENTITLED_TO_LEAF: ReadonlySet<ChatParticipantState> = new Set(
   ENTITLED_TO_LEAF_STATES,
 );
