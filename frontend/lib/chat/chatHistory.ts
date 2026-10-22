@@ -4,27 +4,34 @@ export interface HistoryMessage {
 }
 
 /**
+ * The one message order everywhere: by time, then by id, as the server pages history. Two
+ * messages sent in the same millisecond keep the same order however they arrived.
+ */
+export function compareMessages(a: HistoryMessage, b: HistoryMessage): number {
+  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
+  if (a.id === b.id) return 0;
+  return a.id < b.id ? -1 : 1;
+}
+
+/**
  * Which messages left the end of the newest-messages window since the last poll and belong in
  * already-loaded older history.
  *
  * A deleted message stays in the window as a tombstone (findMessages returns DELETED rows), and a
- * pushed delete marks the cached copy first (useChatSocket), so what falls out is already marked.
- * These checks keep anything missing for another reason from being rescued: a window that didn't
- * stay full lost nothing off its end, and a message that fell off the end is older than everything
- * still in the window. Still missed: a delete this device never heard about, landing in the same
- * poll as enough new messages to push its tombstone out, moves the old copy to older history.
+ * pushed delete marks the cached copy first (useChatSocket), so nothing goes missing because it
+ * was deleted. Anything that was in the window and is now before its oldest message fell off the
+ * end, including when the window shrank: live pushes can grow it past a page, and the next poll
+ * brings it back to one page.
  */
 export function messagesFallenOutOfWindow<Message extends HistoryMessage>(
   previous: readonly Message[],
   latest: readonly Message[],
 ): Message[] {
-  if (latest.length < previous.length) return [];
-
-  const oldestKeptCreatedAt = latest[0]?.createdAt;
-  if (oldestKeptCreatedAt === undefined) return [];
+  const oldestKept = latest[0];
+  if (oldestKept === undefined) return [];
 
   const currentIds = new Set(latest.map((message) => message.id));
   return previous.filter(
-    (message) => !currentIds.has(message.id) && message.createdAt < oldestKeptCreatedAt,
+    (message) => !currentIds.has(message.id) && compareMessages(message, oldestKept) < 0,
   );
 }

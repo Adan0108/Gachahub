@@ -4,7 +4,16 @@ import { addMessageToCache } from "../lib/chat/messageCache";
 import { queryKeys } from "../lib/queries";
 
 const key = queryKeys.chatMessages("c1");
-const page = (...ids: string[]) => ({ items: ids.map((id) => ({ id })), meta: { nextBeforeMessageId: null } });
+// Sent in this order, one second apart.
+const SENT_ORDER = ["old", "mid", "new"];
+const message = (id: string) => ({
+  id,
+  createdAt: `2026-10-22T10:00:0${SENT_ORDER.indexOf(id)}.000Z`,
+});
+const page = (...ids: string[]) => ({
+  items: ids.map(message),
+  meta: { nextBeforeMessageId: null },
+});
 
 /** A watched messages query whose fetches are answered by hand, in the order they were made. */
 function setup() {
@@ -36,7 +45,7 @@ describe("addMessageToCache (#95)", () => {
     void client.refetchQueries({ queryKey: key });
     await settle();
     const staleFetch = pending.shift()!;
-    await addMessageToCache(client, "c1", { id: "new" });
+    await addMessageToCache(client, "c1", message("new"));
     staleFetch(page("old"));
     await settle();
 
@@ -49,7 +58,7 @@ describe("addMessageToCache (#95)", () => {
     await settle();
     const firstFetch = pending.shift()!;
 
-    const added = addMessageToCache(client, "c1", { id: "new" });
+    const added = addMessageToCache(client, "c1", message("new"));
     firstFetch(page("old"));
     await settle();
     pending.shift()!(page("old", "new"));
@@ -64,8 +73,21 @@ describe("addMessageToCache (#95)", () => {
     pending.shift()!(page("old", "new"));
     await settle();
 
-    await addMessageToCache(client, "c1", { id: "new" });
+    await addMessageToCache(client, "c1", message("new"));
 
     expect(ids()).toEqual(["old", "new"]);
+  });
+
+  // #101: pushes can arrive out of order; the thread must still read in the order they were sent.
+  it("puts a pushed message where it belongs, not just at the end", async () => {
+    const { client, pending, unsubscribe, ids } = setup();
+    cleanup = unsubscribe;
+    pending.shift()!(page("old"));
+    await settle();
+
+    await addMessageToCache(client, "c1", message("new"));
+    await addMessageToCache(client, "c1", message("mid"));
+
+    expect(ids()).toEqual(["old", "mid", "new"]);
   });
 });

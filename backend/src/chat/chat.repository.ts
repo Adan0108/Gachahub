@@ -532,9 +532,8 @@ export class ChatRepository {
         messages: {
           // an edit is never the "last message" of a conversation
           where: { contentType: { not: 'EDIT' } },
-          orderBy: {
-            createdAt: 'desc',
-          },
+          // Same order as history, so two messages sent in the same millisecond agree on the last.
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           take: 1,
           include: {
             receipts: {

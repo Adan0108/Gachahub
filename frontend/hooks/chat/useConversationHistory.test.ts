@@ -116,13 +116,26 @@ describe("useConversationHistory", () => {
     await hook.unmount();
   });
 
-  it("does not bring a deleted message back", async () => {
+  it("shows a deleted message once, as the tombstone the server sends", async () => {
     const hook = renderHistory();
     await hook.render({ conversationId: "c1", page: page(range(1, 10), null) });
 
-    await hook.render({ conversationId: "c1", page: page(range(2, 10), null) });
+    const tombstone = { ...message(1), status: "DELETED" } as Message;
+    await hook.render({ conversationId: "c1", page: page([tombstone, ...range(2, 10)], null) });
 
-    expect(ids(hook.value.displayMessages)).toEqual(ids(range(2, 10)));
+    expect(ids(hook.value.displayMessages)).toEqual(ids(range(1, 10)));
+    expect(hook.value.displayMessages[0]).toMatchObject({ status: "DELETED" });
+    await hook.unmount();
+  });
+
+  // #101: live pushes grow the newest window past a page; the next poll brings it back to one page.
+  it("keeps the messages a shrinking newest window dropped", async () => {
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(1, 59), "m1") });
+
+    await hook.render({ conversationId: "c1", page: page(range(10, 59), "m10") });
+
+    expect(ids(hook.value.displayMessages)).toEqual(ids(range(1, 59)));
     await hook.unmount();
   });
 

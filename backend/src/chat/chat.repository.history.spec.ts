@@ -12,6 +12,7 @@ import { ChatRepository } from './chat.repository';
 describe('ChatRepository history paging', () => {
   const prisma = {
     chatMessage: { findFirst: jest.fn(), findMany: jest.fn() },
+    chatConversation: { findMany: jest.fn() },
   };
   const repository = new ChatRepository(
     prisma as unknown as PrismaService,
@@ -49,6 +50,19 @@ describe('ChatRepository history paging', () => {
         { createdAt, id: { lt: 'deleted-4' } },
       ],
     });
+  });
+
+  // #101: the inbox's last message must be the one history shows last, even within one millisecond.
+  it('picks the last message of each inbox conversation in the history order, time then id', async () => {
+    await repository.findInboxConversations('user-1', 'ACTIVE');
+
+    const [args] = prisma.chatConversation.findMany.mock.calls[0] as [
+      { include: { messages: { orderBy: unknown } } },
+    ];
+    expect(args.include.messages.orderBy).toEqual([
+      { createdAt: 'desc' },
+      { id: 'desc' },
+    ]);
   });
 
   // #102: a client only drops a deleted message it already loaded if history says it was deleted.
