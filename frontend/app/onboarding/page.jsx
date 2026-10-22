@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { BrandMark } from "../../components/BrandMark";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -107,7 +108,7 @@ export default function OnboardingPage() {
       <section className="auth-card">
         <div className="auth-card-header">
           <Link href="/" className="auth-brand">
-            <span>✦</span>
+            <BrandMark size={38} />
             GachaHub
           </Link>
         </div>
