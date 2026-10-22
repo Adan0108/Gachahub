@@ -1,14 +1,150 @@
-# MLS chat encryption — threat model and decisions
+# MLS chat encryption — threat model
 
-Step 0 of the E2E encryption plan. Everything downstream (library choice,
-schema, wrapper design) depends on these being settled first, not discovered
-mid-implementation.
+The first part is the current threat model, checked against the code on
+22 October 2026. The second part is the history: the decisions as they were
+made, with their dates. Where the two disagree, the current part is right.
+When the code changes what is protected, update the current part and add a
+dated note to the history.
 
-Items marked **Decided** are the default this doc proposes — flag if you
-disagree. Items marked **OPEN** are product/UX calls only you can make;
-implementation should not proceed on those paths until one is picked.
+## Current threat model (22 October 2026)
 
-## 1. What server compromise means for this system
+### What is protected, and against whom
+
+- Message text, attachments and link preview cards are encrypted with MLS
+  (`ts-mls`) on the sending device. The server, the database and the storage
+  provider only hold ciphertext.
+- This protects against passive compromise (a database snapshot, a leaked
+  backup, a subpoena) and network eavesdropping.
+- The server is the key directory and the membership authority. A malicious
+  server can register a device under someone's account or fake membership,
+  and clients will accept it. Safety numbers are the only defence, and only
+  for people who compare them (below).
+
+### Identity and safety numbers
+
+- An MLS member is a device, not a user. Each device has its own MLS
+  identity and signature key (`ChatDevice`, at most 10 active per user).
+- Clients check that every credential in a Commit, Welcome or self-join
+  matches the `userId`/`deviceId` it claims. This catches buggy or tampered
+  clients, not a server that lies about keys.
+- Safety numbers are built (`frontend/lib/mls/verification/`). A number is a
+  SHA-256 over the signature keys of the devices this device sees in its own
+  copy of the group tree, not the server's list. Both people compare one
+  pair number out of band.
+- Verification is stored per pair of users, encrypted on this device only.
+  If a verified peer adds a device, the chat shows "New device"; if a
+  verified device's key changes, it shows a red alert.
+- Each device derives "X joined", "X left" and "X signed in on a new device"
+  notices itself from the Commits it verified (`membershipEvents.ts`), so
+  they do not depend on the server telling the truth.
+
+### Membership
+
+- The server's `ChatParticipant` rows decide who may be in a conversation;
+  MLS decides who can read it. Clients compare the whole MLS tree against
+  the server roster and treat a mismatch as an error.
+- Adds and removes are ordinary Commits by an online member's client. There
+  is no `external_senders`: the server never proposes anything. Removals
+  (leave, kick, ban, revoked or dormant device) are picked up by any online
+  member through membership work (`membership-work.ts`).
+- A device with no one online to add it joins by external commit against the
+  latest signed `mls_group_infos` snapshot; the server checks the signature.
+- A group invitee (`PENDING`) is in the MLS group from invite time. An
+  ignored invite expires after 14 days. A key-package claim for a pending
+  invitee rechecks blocks and the `NO_ONE` setting at claim time.
+- Sends are refused while a member is `LEAVING`, so a leaf that is about to
+  be removed cannot read them. The sender's client removes it and retries.
+- Devices unseen for 60 days are retired. At the 10-device cap the
+  least-recently-seen device is evicted, or the new device is refused if all
+  ten were used in the last 14 days.
+
+### Storage and history
+
+- A message key can be used once (forward secrecy). Each device decrypts a
+  message once and keeps the plaintext in IndexedDB, encrypted with a
+  non-extractable WebCrypto key.
+- A received message's plaintext is saved before the advanced ratchet state,
+  so a crash in between cannot lose it (F08, #98). A send the server
+  accepted is reported as sent even if keeping the local copy fails.
+- A new device cannot read messages from before it joined. The thread shows
+  a banner instead of an empty history.
+- Optional history backup (`chat-backup`) uploads each message's plaintext
+  again, encrypted with AES-GCM under a recovery key only the user holds and
+  bound to the user, conversation and message ids. Without the key nobody
+  can open it, and it cannot be reset.
+
+### Concurrency and lost commits
+
+- Every change to a conversation's group state, sends included, runs under a
+  Web Locks cross-tab lock for that device and conversation. If the browser
+  has no Web Locks, secure sending is refused instead of letting two tabs
+  reuse a sender generation (F01, #92).
+- When two Commits race for an epoch, the server answers 409 with
+  `outcome: 'conflict'` and the winning handshake. The exception filter
+  passes exactly those two fields through, and the losing client applies the
+  winner and retries (F07, #97).
+
+### Attachments and link previews
+
+- Files and thumbnails are encrypted on the device with AES-256-GCM, a fresh
+  key and IV per file (`frontend/lib/mls/media/`). The key, IV, SHA-256,
+  name and type travel inside the MLS message. The server and storage
+  provider see only opaque blobs, their sizes, and whether each is a file or
+  a thumbnail.
+- Link previews are fetched by the server (`POST /link-previews`), so the
+  server sees every link someone previews in chat and caches the result in
+  Redis for 6 hours, keyed by a hash of the link. The card and its picture
+  are then encrypted like an attachment.
+
+### Metadata the server sees in plaintext
+
+- Who talks to whom, when, how often, and how big each message is.
+- `contentType`, `replyToId`, reactions (`emoji`/`emoteId`), and
+  `mentionUserIds` (the people a message @mentions, sent beside the
+  ciphertext so notifications work).
+- The ids of attached blobs, and the links that get previewed (above).
+- `encryptionMeta` is a free-form object capped at 20000 characters of JSON.
+  Nothing structurally stops a buggy client from putting plaintext in it.
+
+### Logging
+
+- Only 5xx errors go to Discord, with the query string stripped from the
+  path and fields truncated to Discord's limits. There is no dedicated
+  redaction of key packages, Welcomes or ciphertext: no server code is known
+  to put them in an error message, but nothing prevents it either.
+- Outside development, a 5xx answer tells the client only "Something went
+  wrong" and leaves out the error code.
+
+### Retention
+
+- Pruned daily: consumed Welcomes after 30 days, Welcomes of revoked
+  devices, commit faults after 180 days, and claimed single-use key packages
+  30 days after claim. Expired key packages are purged hourly.
+- Never pruned: `mls_handshakes` (members catch up by replaying every
+  Commit) and removed `mls_group_members` rows (lagging members need the old
+  roster).
+
+### Known gaps
+
+- A fully malicious server is only caught by people who compare safety
+  numbers. There are no member-signed invites and no key transparency.
+- Verification lives on one device and does not follow a user to their
+  other devices.
+- "Delete for everyone" relies on every recipient's client deleting its
+  local copy, and open windows and the local plaintext store are not all
+  told yet (#102).
+- The server sees previewed links and the metadata above.
+- Logging has no dedicated redaction of MLS bytes.
+
+## History
+
+The decisions below were written from 14 to 25 September 2026 and are kept
+as they were, with the notes added at the time. Several are superseded, some
+more than once; the current part above is what holds now. In particular,
+the plan below says safety numbers and encrypted attachments were deferred;
+both have since been built.
+
+### 1. What server compromise means for this system (2026-09-14)
 
 **Decided:** v1 assumes the server is honest about identity binding. An MLS
 `BasicCredential` is just a name string — nothing cryptographically proves a
@@ -37,7 +173,7 @@ thing that catches a truly malicious server, and it's a real gap in v1's
 threat coverage — written down here so it stays a conscious tradeoff, not a
 silently-skipped feature.
 
-## 2. Device model
+### 2. Device model (2026-09-14)
 
 **Decided:** an MLS member is a device, not a user. `ChatParticipant`,
 receipts, and socket rooms (`userRoom(userId)`) all stay user-scoped for
@@ -78,7 +214,7 @@ very different location/IP than usual) is a related but separate feature —
 tracked in `BACKLOG.md`, not a blocker for the encryption work in this
 branch.
 
-## 3. Membership authority — who authorizes adds/removes
+### 3. Membership authority — who authorizes adds/removes (2026-09-14)
 
 **Decided:** the server's `ChatParticipant` rows remain the source of truth
 for *who is allowed to be in a conversation*; MLS enforces *who can
@@ -185,7 +321,7 @@ New gaps this decision opens, not yet fully closed:
   would let any member or external joiner commit a signed leave proposal, and is
   the thing to look at if that delay ever matters.
 
-## 4. Direct messages need devices to exist first
+### 4. Direct messages need devices to exist first (2026-09-14)
 
 **Decided:** `createDirectMessage` currently creates the conversation and
 first message in one step. Under MLS, sending the first DM requires, in
@@ -196,7 +332,7 @@ registered devices (never logged in on a device that generated one), the DM
 cannot be created yet. The UI needs an explicit state for this — not a
 generic error.
 
-## 5. History does not survive reload — by design
+### 5. History does not survive reload — by design (2026-09-14)
 
 **Decided:** MLS deletes each message's key immediately after one decrypt;
 that deletion is what provides forward secrecy. A client cannot re-decrypt
@@ -211,7 +347,7 @@ that deletion is what provides forward secrecy. A client cannot re-decrypt
   device joined aren't available here") instead of showing an empty or
   broken-looking thread.
 
-## 6. Metadata the server still sees in plaintext
+### 6. Metadata the server still sees in plaintext (2026-09-14)
 
 Written down so nobody assumes more privacy than actually exists:
 
@@ -244,7 +380,7 @@ Written down so nobody assumes more privacy than actually exists:
   (deletes its local plaintext copy). The server can't force this. UI copy
   must not promise permanent deletion from other people's devices.
 
-## 7. Logging hygiene
+### 7. Logging hygiene (2026-09-14)
 
 **Decided:** `DiscordLoggerService` (on `main`) already sends request paths,
 error messages, and stack traces to Discord on 5xx. Before any MLS
@@ -253,7 +389,7 @@ message can ever include raw key package bytes, Welcome bytes, or
 ciphertext — those should be truncated/redacted at the same point stack
 traces already are, not trusted to "just not come up."
 
-## Summary of decisions (2026-09-14)
+### Summary of decisions (2026-09-14)
 
 1. Fingerprint/safety-number verification — deferred to fast-follow, not v1.
 2. New device approval — silent registration, with a visible in-conversation
@@ -272,7 +408,7 @@ All four decisions above are locked in as the intended design; #4 is not yet
 implemented (see §6). The library question is settled (`ts-mls`) and the core
 encryption path is built; what remains open is listed in `BACKLOG.md`.
 
-## 8. Update (2026-09-22): what the running code actually defends
+### 8. Update (2026-09-22): what the running code actually defends
 
 Written against the `feat/chat-e2e-encryption` branch, so §1's decision stays
 honest as features land.
@@ -297,7 +433,7 @@ Planned upgrades, in cost order: client-generated "X joined" notices, a
 per-user device list, member-signed invites, key transparency / safety
 numbers (see BACKLOG.md).
 
-## 9. Retention (2026-09-25): what is pruned, and what is kept on purpose
+### 9. Retention (2026-09-25): what is pruned, and what is kept on purpose
 
 `MlsRetentionService` (`src/mls-retention/`, daily 5am) prunes, in batches:
 
@@ -329,3 +465,13 @@ WHERE state = 'PENDING'`, `mls_welcomes(conversationId)`,
 `chat_devices(lastSeenAt)` index. They are built `CONCURRENTLY ... IF NOT
 EXISTS`: a failed build leaves an INVALID index that a retry silently skips,
 so check `pg_index.indisvalid`, `DROP INDEX CONCURRENTLY` it, then re-run.
+
+### 10. Update (2026-10-22): current summary added
+
+Moved everything above into this history and wrote the current threat model
+at the top (#106). Since 25 September: safety numbers and client-derived
+device notices were built, attachments and link preview cards are encrypted,
+history backup exists, `mentionUserIds` became new plaintext metadata, and
+the audit's MLS fixes landed: no sending without Web Locks (F01, #92), the
+409 conflict keeps the winning handshake (F07, #97), and plaintext is saved
+before the ratchet (F08, #98).
