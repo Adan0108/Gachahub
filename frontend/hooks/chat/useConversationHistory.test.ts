@@ -2,6 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setSharedSocket } from "../../lib/socket/sharedSocket";
 import { useConversationHistory, type ConversationHistory } from "./useConversationHistory";
 
 const { getChatMessages } = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
@@ -290,6 +291,34 @@ describe("useConversationHistory", () => {
 
     expect(ids(hook.value.displayMessages)).toEqual(["m1", "m2", "m3", "m4", "m5"]);
     await hook.unmount();
+  });
+
+  // #102: older history is never refetched, so a delete someone else pushes must reach it here.
+  it("marks a deleted message in older history when the delete is pushed, for this conversation only", async () => {
+    const handlers = new Map<string, (event: unknown) => void>();
+    const socket = {
+      on: (event: string, handler: (event: unknown) => void) => handlers.set(event, handler),
+      off: (event: string) => handlers.delete(event),
+    };
+    setSharedSocket(socket as never);
+    getChatMessages.mockResolvedValue(page(range(1, 2), null));
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+    await hook.scrollToTop();
+
+    await act(async () => {
+      handlers.get("message:deleted")?.({ conversationId: "other", messageId: "m2" });
+      handlers.get("message:deleted")?.({ conversationId: "c1", messageId: "m1" });
+    });
+    await flush();
+
+    const status = (id: string) =>
+      (hook.value.displayMessages.find((item) => item.id === id) as { status?: string }).status;
+    expect(status("m1")).toBe("DELETED");
+    expect(status("m2")).toBeUndefined();
+    await hook.unmount();
+    expect(handlers.has("message:deleted")).toBe(false);
+    setSharedSocket(null);
   });
 });
 

@@ -640,6 +640,8 @@ export class ChatRepository {
    * Messages strictly older than `before`. An explicit (createdAt, id) boundary rather than
    * Prisma's cursor + skip: the boundary message may since have been deleted, and then it is
    * not among the filtered rows that skip would drop.
+   * Deleted messages come back as tombstones (no ciphertext), so every client that loaded one
+   * learns it is gone and drops its own copy.
    */
   findMessages(params: {
     conversationId: string;
@@ -649,7 +651,6 @@ export class ChatRepository {
     return this.prisma.chatMessage.findMany({
       where: {
         conversationId: params.conversationId,
-        status: 'SENT',
         ...(params.before
           ? {
               OR: [

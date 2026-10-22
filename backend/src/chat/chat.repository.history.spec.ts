@@ -44,11 +44,23 @@ describe('ChatRepository history paging', () => {
     expect(args).not.toHaveProperty('skip');
     expect(args.where).toEqual({
       conversationId: 'conversation-1',
-      status: 'SENT',
       OR: [
         { createdAt: { lt: createdAt } },
         { createdAt, id: { lt: 'deleted-4' } },
       ],
     });
+  });
+
+  // #102: a client only drops a deleted message it already loaded if history says it was deleted.
+  it('returns deleted messages as tombstones instead of leaving them out', async () => {
+    await repository.findMessages({
+      conversationId: 'conversation-1',
+      limit: 50,
+    });
+
+    const [args] = prisma.chatMessage.findMany.mock.calls[0] as [
+      { where: Record<string, unknown> },
+    ];
+    expect(args.where).not.toHaveProperty('status');
   });
 });

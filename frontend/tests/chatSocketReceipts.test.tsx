@@ -208,3 +208,25 @@ describe("useChatSocket receipts events", () => {
     expect(invalidate).not.toHaveBeenCalled();
   });
 });
+
+// #102: the cached copy must say deleted before the refetch, or one pushed out of the window moves to older history as it was.
+describe("useChatSocket message deletes", () => {
+  beforeEach(() => {
+    mocks.handlers = {};
+  });
+
+  it("marks the message deleted in the cached thread at once, then fetches the thread fresh", () => {
+    const { client, invalidate } = setup({
+      items: [
+        { id: "m1", senderId: "bob", createdAt: AT, status: "SENT" },
+        { id: "m2", senderId: "bob", createdAt: AT, status: "SENT" },
+      ],
+    });
+
+    mocks.handlers["message:deleted"]!({ conversationId: "c1", messageId: "m1" });
+
+    const items = client.getQueryData<{ items: any[] }>(KEY)!.items;
+    expect(items.map((item) => item.status)).toEqual(["DELETED", "SENT"]);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: KEY });
+  });
+});

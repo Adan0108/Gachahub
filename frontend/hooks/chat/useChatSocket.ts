@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { addMessageToCache } from "../../lib/chat/messageCache";
 import { applyReceiptsEvent } from "../../lib/chat/receiptEvents";
+import { withOptimisticDelete } from "../../lib/chat/chatThread";
 import { queryKeys } from "../../lib/queries";
 import { useSharedSocket } from "../../lib/socket/sharedSocket";
 import { logTiming } from "../../lib/chat/chatTiming";
@@ -124,8 +125,16 @@ export function useChatSocket() {
     };
     on("reaction:added", refetchConversationMessages);
     on("reaction:removed", refetchConversationMessages);
-    on("message:deleted", refetchConversationMessages);
     on("message:edited", refetchConversationMessages);
+    // Marked at once as well: a message the refetch pushes out of the newest window moves to older
+    // history as the copy cached here, so that copy must already say it was deleted.
+    on("message:deleted", (event: ConversationEvent & { messageId: string }) => {
+      queryClient.setQueryData<CachedMessages>(
+        queryKeys.chatMessages(event.conversationId),
+        (old) => (old ? { ...old, items: withOptimisticDelete(old.items, event.messageId) } : old),
+      );
+      refetchConversationMessages(event);
+    });
 
     // Someone's device got, or read up to, messages in a thread: put it straight on the cached messages.
     on("receipts:updated", (event: ReceiptsEvent) => {
