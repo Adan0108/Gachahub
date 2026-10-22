@@ -394,6 +394,7 @@ describe('NotificationService', () => {
       NotificationEntityType.POST,
       NotificationEntityType.COMMENT,
       NotificationEntityType.MESSAGE,
+      NotificationEntityType.COMMUNITY_MESSAGE,
     ])('should allow USER_MENTIONED targeting %s', async (entityType) => {
       repositoryMock.findRecipientById.mockResolvedValue({
         id: recipientId,
