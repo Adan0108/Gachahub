@@ -13,9 +13,19 @@ import { sessionRoom, userRoom } from './socket.util';
 import { websocketGatewayOptions } from './websocket-gateway.options';
 import { auth } from '../auth/auth';
 
+// A login is checked again when it expires and at least this often, so a socket whose login
+// expired or was deleted stops receiving within this long even if no revoke reached it.
+const SESSION_RECHECK_MS = 10 * 60_000;
+// After a backend hiccup during a recheck, try again this soon instead of dropping the socket.
+const SESSION_RETRY_MS = 60_000;
+
+type Identity = { userId: string; sessionId: string; expiresAt: number };
+
 // only custom bit is userId, rest stay default event maps
 interface SocketData {
   userId?: string;
+  /** When this socket's login expires (ms); refreshed by each recheck, so a renewed login keeps it. */
+  sessionExpiresAt?: number;
   /**
    * Resolves once this connection's auth attempt has settled (success or not). Sibling gateways on
    * this same socket (e.g. ChatTypingGateway) can be reached before handleConnection's async auth
@@ -48,6 +58,7 @@ export class WebsocketGateway
   server: Server;
 
   private readonly logger = new Logger(WebsocketGateway.name);
+  private readonly recheckTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(private readonly socketRegistry: SocketRegistry) {}
 
@@ -88,12 +99,54 @@ export class WebsocketGateway
     }
 
     socket.data.userId = identity.userId;
+    socket.data.sessionExpiresAt = identity.expiresAt;
     await socket.join(userRoom(identity.userId));
     await socket.join(sessionRoom(identity.sessionId));
+    // A revoke that landed between the check above and joining its room reached nobody: look again.
+    await this.recheckSession(socket);
   }
 
   handleDisconnect(socket: AppSocket) {
+    clearTimeout(this.recheckTimers.get(socket.id));
+    this.recheckTimers.delete(socket.id);
     this.logger.debug(`Socket disconnected: ${socket.id}`);
+  }
+
+  /** Ends the socket once its login is gone or expired; otherwise checks again at the new expiry. */
+  private async recheckSession(socket: AppSocket): Promise<void> {
+    if (socket.disconnected) return;
+    // disableRefresh: an open socket must not keep a login alive that the person stopped using.
+    const identity = await this.authenticate(socket, { disableRefresh: true });
+    if (socket.disconnected) return;
+
+    if (identity === 'no-session') {
+      socket.emit('session:revoked');
+      socket.disconnect(true);
+      return;
+    }
+    if (identity === 'error') {
+      if ((socket.data.sessionExpiresAt ?? 0) <= Date.now()) {
+        socket.disconnect(true);
+        return;
+      }
+      this.scheduleRecheck(socket, SESSION_RETRY_MS);
+      return;
+    }
+
+    socket.data.sessionExpiresAt = identity.expiresAt;
+    this.scheduleRecheck(socket, identity.expiresAt - Date.now());
+  }
+
+  private scheduleRecheck(socket: AppSocket, delayMs: number) {
+    clearTimeout(this.recheckTimers.get(socket.id));
+    const timer = setTimeout(
+      () => void this.recheckSession(socket),
+      Number.isFinite(delayMs)
+        ? Math.max(0, Math.min(delayMs, SESSION_RECHECK_MS))
+        : SESSION_RECHECK_MS,
+    );
+    timer.unref?.();
+    this.recheckTimers.set(socket.id, timer);
   }
 
   /**
@@ -103,14 +156,20 @@ export class WebsocketGateway
    */
   private async authenticate(
     socket: Socket,
-  ): Promise<{ userId: string; sessionId: string } | 'no-session' | 'error'> {
+    query?: { disableRefresh: true },
+  ): Promise<Identity | 'no-session' | 'error'> {
     try {
       const result = await auth.api.getSession({
         headers: this.toHeaders(socket.handshake.headers),
+        ...(query ? { query } : {}),
       });
 
       return result
-        ? { userId: result.user.id, sessionId: result.session.id }
+        ? {
+            userId: result.user.id,
+            sessionId: result.session.id,
+            expiresAt: new Date(result.session.expiresAt).getTime(),
+          }
         : 'no-session';
     } catch (error) {
       this.logger.warn(`Socket auth failed: ${(error as Error).message}`);
