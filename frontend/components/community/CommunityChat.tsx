@@ -193,6 +193,7 @@ export function CommunityChat({
 
       <CommunityComposer
         channel={channel}
+        cooldownSeconds={chat.sendCooldownSeconds}
         slug={slug}
         disabledReason={lockedReason}
         onCancelReply={() => setReplyTo(null)}

@@ -27,6 +27,7 @@ export function CommunityComposer({
   onCancelReply,
   onSend,
   disabledReason,
+  cooldownSeconds = 0,
 }: {
   slug: string;
   channel: { name: string; slowmodeSeconds: number };
@@ -34,6 +35,8 @@ export function CommunityComposer({
   onCancelReply: () => void;
   onSend: (text: string, files: File[]) => void;
   disabledReason?: string | null;
+  /** Seconds until sending is allowed again after sending too fast; 0 when it is. */
+  cooldownSeconds?: number;
 }) {
   const [draft, setDraft] = useState("");
   const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -43,7 +46,7 @@ export function CommunityComposer({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const trimmed = draft.trim();
-  const canSend = Boolean(trimmed) || files.length > 0;
+  const canSend = (Boolean(trimmed) || files.length > 0) && cooldownSeconds === 0;
   const mention = useMentionPicker(draft, setDraft, inputRef);
   const suggestions = useCommunityMemberSuggestions(slug, mention.query);
 
@@ -264,6 +267,11 @@ export function CommunityComposer({
           </div>
         )}
       </div>
+      {cooldownSeconds > 0 && (
+        <small className="community-error" role="status">
+          You&apos;re sending messages too fast. You can send again in {cooldownSeconds}s.
+        </small>
+      )}
       {channel.slowmodeSeconds > 0 && (
         <small className="community-hint">
           Slow mode: one message every {channel.slowmodeSeconds}s

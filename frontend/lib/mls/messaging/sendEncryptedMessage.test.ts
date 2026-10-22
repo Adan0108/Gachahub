@@ -21,6 +21,19 @@ function fakeSyncEngine() {
   };
 }
 
+// Sends are paced against the server's limit for the whole file; each test runs an hour later, so
+// earlier tests' sends never hold it up.
+const realNow = Date.now.bind(Date);
+let hoursLater = 0;
+beforeEach(() => {
+  hoursLater += 1;
+  vi.spyOn(Date, "now").mockImplementation(() => realNow() + hoursLater * 3_600_000);
+});
+
+const flushPromises = async () => {
+  for (let i = 0; i < 200; i += 1) await Promise.resolve();
+};
+
 describe("sendEncryptedChatMessage", () => {
   it("rejects oversized plaintext before consuming an encryption step", async () => {
     const { api } = await import("../../api");
@@ -112,6 +125,97 @@ describe("sendEncryptedChatMessage", () => {
       sendEncryptedChatMessage(engine as any, "device-1", "conv-1", "user-bob", "hi", "client-9"),
     ).resolves.toMatchObject({ message: { id: "msg-9" } });
     expect(save).toHaveBeenCalled();
+  });
+
+  // Spammed sends all at once queued on the server's lock; the last ones timed out here though the server stored them.
+  it("sends one message of a conversation at a time, in the order they were sent", async () => {
+    const { api } = await import("../../api");
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockResolvedValue(2);
+    engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
+    const answers: Array<() => void> = [];
+    vi.mocked(api.sendChatMessage).mockImplementation(
+      (_conversationId, payload) =>
+        new Promise((resolve) => {
+          answers.push(() => resolve({ message: { id: `msg-${payload.clientMessageId}` } }));
+        }),
+    );
+
+    const first = sendEncryptedChatMessage(engine as any, "device-1", "conv-q", "user-bob", "a", "a");
+    const second = sendEncryptedChatMessage(engine as any, "device-1", "conv-q", "user-bob", "b", "b");
+    await vi.waitFor(() => expect(api.sendChatMessage).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(api.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    answers.shift()!();
+    await expect(first).resolves.toMatchObject({ message: { id: "msg-a" } });
+    await vi.waitFor(() => expect(api.sendChatMessage).toHaveBeenCalledTimes(2));
+    answers.shift()!();
+    await expect(second).resolves.toMatchObject({ message: { id: "msg-b" } });
+    expect(vi.mocked(api.sendChatMessage).mock.calls.map(([, payload]) => payload.clientMessageId)).toEqual(["a", "b"]);
+  });
+
+  it("sends the same ciphertext again after a timeout, and keeps the text of the message the server stored", async () => {
+    const { api } = await import("../../api");
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockResolvedValue(2);
+    engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([7]), epoch: 2 });
+    vi.mocked(api.sendChatMessage)
+      .mockRejectedValueOnce(Object.assign(new Error("timed out"), { name: "TimeoutError" }))
+      .mockResolvedValueOnce({ message: { id: "msg-stored" } });
+
+    await expect(
+      sendEncryptedChatMessage(engine as any, "device-1", "conv-t", "user-bob", "hi", "client-t"),
+    ).resolves.toMatchObject({ message: { id: "msg-stored" } });
+
+    const [firstTry, secondTry] = vi.mocked(api.sendChatMessage).mock.calls.map(([, payload]) => payload);
+    expect(secondTry).toEqual(firstTry);
+    expect(engine.encryptMessage).toHaveBeenCalledTimes(1);
+    const kept = await new EncryptedIndexedDbMessagePlaintextStore().get("msg-stored");
+    expect(kept?.envelope).toMatchObject({ type: "text", body: "hi" });
+  });
+
+  // Typed a second apart, sends could still reach the server in a rush behind a slow one and be refused.
+  it("spaces sends out so the server's limit is never crossed, across conversations too", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const { api } = await import("../../api");
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockResolvedValue(2);
+    engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
+    const save = vi
+      .spyOn(EncryptedIndexedDbMessagePlaintextStore.prototype, "save")
+      .mockResolvedValue();
+    vi.mocked(api.sendChatMessage).mockImplementation(async (_conversationId, payload) => ({
+      message: { id: payload.clientMessageId },
+    }));
+
+    const sends = Array.from({ length: 7 }, (_, i) =>
+      sendEncryptedChatMessage(engine as any, "device-1", i % 2 ? "conv-p1" : "conv-p2", "user-bob", "x", `p${i}`),
+    );
+    await flushPromises();
+    expect(api.sendChatMessage).toHaveBeenCalledTimes(6);
+
+    await vi.advanceTimersByTimeAsync(5_500);
+    await flushPromises();
+    expect(api.sendChatMessage).toHaveBeenCalledTimes(7);
+    await Promise.all(sends);
+    save.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it("does not send again after the server refused the message", async () => {
+    const { api } = await import("../../api");
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockResolvedValue(2);
+    engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
+    vi.mocked(api.sendChatMessage).mockRejectedValueOnce(
+      Object.assign(new Error("Slow down"), { status: 429 }),
+    );
+
+    await expect(
+      sendEncryptedChatMessage(engine as any, "device-1", "conv-r", "user-bob", "hi", "client-r"),
+    ).rejects.toThrow("Slow down");
+    expect(api.sendChatMessage).toHaveBeenCalledTimes(1);
   });
 
   it("sends a link preview card inside the encrypted message and attaches its picture", async () => {

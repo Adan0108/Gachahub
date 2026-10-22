@@ -104,6 +104,8 @@ import { useConversationActions } from "../../hooks/chat/useConversationActions"
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
 import { useMentionPicker } from "../../hooks/useMentionPicker";
+import { useSendCooldown } from "../../hooks/chat/useSendCooldown";
+import type { ApiError } from "../../lib/api";
 import { addMessageToCache } from "../../lib/chat/messageCache";
 import { MentionMenu } from "../../components/MentionMenu";
 import { matchMembers, mentionedIds } from "../../lib/mentions";
@@ -352,6 +354,7 @@ function ChatPageContent() {
   const mergeIntoMessageCache = (conversationId: string, message: ThreadMessage) => {
     void addMessageToCache(queryClient, conversationId, message);
   };
+  const sendCooldown = useSendCooldown();
   const sendMessage = useMutation({
     mutationFn: ({ text, clientId, files, replyToId, preview, mentionUserIds }: SendDraft) =>
       withDeviceRecovery(async () => {
@@ -398,6 +401,8 @@ function ChatPageContent() {
       queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
     },
     onError: (error, variables) => {
+      const { status, retryAfterSeconds } = error as ApiError;
+      if (status === 429) sendCooldown.noteRateLimited(retryAfterSeconds);
       setPendingMessages((prev) =>
         prev.map((pending) =>
           pending.clientId === variables.clientId ? { ...pending, failed: true } : pending,
@@ -406,6 +411,7 @@ function ChatPageContent() {
     },
   });
   const retryPendingMessage = (pending: PendingMessage) => {
+    if (!sendCooldown.tryConsume()) return;
     setPendingMessages((prev) =>
       prev.map((item) => (item.clientId === pending.clientId ? { ...item, failed: false } : item)),
     );
@@ -1586,10 +1592,16 @@ function ChatPageContent() {
                     onSubmit={(event) => {
                       event.preventDefault();
                       if (draftTooLarge) return;
-                      if (messageEdit.target) return messageEdit.submit();
+                      if (messageEdit.target) {
+                        // Leaving edit mode unchanged sends nothing, so only a real edit waits.
+                        const sendsEdit = draft.trim() && draft.trim() !== messageEdit.target.text.trim();
+                        if (!sendsEdit || sendCooldown.tryConsume()) messageEdit.submit();
+                        return;
+                      }
                       const text = encodeEmotes(draft.trim(), pickedEmotesRef.current);
                       const files = attachmentPicker.files;
                       if (!text && files.length === 0) return;
+                      if (!sendCooldown.tryConsume()) return;
                       const clientId = crypto.randomUUID();
                       const preview =
                         files.length === 0 ? (linkPreview.preview ?? undefined) : undefined;
@@ -1662,6 +1674,7 @@ function ChatPageContent() {
                     aria-label={messageEdit.target ? "Save edit" : "Send"}
                     disabled={
                       draftTooLarge ||
+                      sendCooldown.isCoolingDown ||
                       (messageEdit.target
                         ? !draft.trim()
                         : !draft.trim() && attachmentPicker.files.length === 0)
@@ -1687,6 +1700,12 @@ function ChatPageContent() {
                         ? " Limit reached."
                         : " Accents and emoji use more space."}
                   </small>
+                  {sendCooldown.isCoolingDown && (
+                    <small className="field-limit field-warning chat-message-limit" role="status">
+                      You&apos;re sending messages too fast. You can send again in{" "}
+                      {sendCooldown.secondsLeft}s.
+                    </small>
+                  )}
                 </>
               ) : deviceError ? (
                 <div className="chat-composer-disabled error">
