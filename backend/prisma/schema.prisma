@@ -1132,6 +1132,8 @@ model ModerationCase {
 
 enum ModerationAnalysisStatus {
   PENDING
+  SUCCEEDED
+  FAILED
 }
 
 model ModerationAnalysis {
@@ -1146,8 +1148,11 @@ model ModerationAnalysis {
   snapshotHash       String
   classifierProfile  String
   status             ModerationAnalysisStatus @default(PENDING)
-  createdAt          DateTime                 @default(now())
-  updatedAt          DateTime                 @updatedAt
+
+  result Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   case         ModerationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
   sourceReport Report?        @relation(fields: [sourceReportId], references: [id], onDelete: SetNull)
