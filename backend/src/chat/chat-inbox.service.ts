@@ -86,11 +86,8 @@ export class ChatInboxService {
     const [pinned, unpinned] = await Promise.all([
       before
         ? []
-        : this.chatRepository.findInboxConversations(userId, 'ACTIVE', {
-            pinned: true,
-          }),
-      this.chatRepository.findInboxConversations(userId, 'ACTIVE', {
-        pinned: false,
+        : this.chatRepository.findPinnedInboxConversations(userId, 'ACTIVE'),
+      this.chatRepository.findUnpinnedInboxPage(userId, 'ACTIVE', {
         limit,
         before,
       }),

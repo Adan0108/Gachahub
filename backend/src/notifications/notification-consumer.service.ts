@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Kafka, type Consumer, type EachMessagePayload } from 'kafkajs';
 
-import { MAX_GROUP_MEMBERS } from '../chat/membership/leaf-entitlement';
+import { MAX_GROUP_MEMBERS } from '../chat/group-size-policy';
 import type {
   DomainEventPayloadMap,
   DomainEventType,

@@ -78,6 +78,8 @@ describe('ChatInboxService', () => {
     updateMessage: jest.fn(),
     softDeleteMessage: jest.fn(),
     findInboxConversations: jest.fn(),
+    findPinnedInboxConversations: jest.fn(),
+    findUnpinnedInboxPage: jest.fn(),
     findConversationType: jest.fn(),
     countUnreadMessagesForConversations: jest.fn(),
     countUnreadMessagesForUser: jest.fn(),
@@ -659,31 +661,29 @@ describe('ChatInboxService', () => {
     // #105: the inbox comes in pages instead of every conversation at once.
     describe('in pages', () => {
       it('gives every pinned conversation and the newest unpinned ones first', async () => {
-        repository.findInboxConversations
-          .mockResolvedValueOnce([
-            buildConversation(
-              'conv-pinned',
-              new Date('2024-01-01'),
-              new Date('2024-01-01'),
-            ),
-          ])
-          .mockResolvedValueOnce([
-            buildConversation('conv-newest', new Date('2024-01-05'), null),
-          ]);
+        repository.findPinnedInboxConversations.mockResolvedValue([
+          buildConversation(
+            'conv-pinned',
+            new Date('2024-01-01'),
+            new Date('2024-01-01'),
+          ),
+        ]);
+        repository.findUnpinnedInboxPage.mockResolvedValue([
+          buildConversation('conv-newest', new Date('2024-01-05'), null),
+        ]);
 
         const result = await service.listConversations('user-1', {
           limit: 50,
         });
 
-        expect(repository.findInboxConversations).toHaveBeenCalledWith(
+        expect(repository.findPinnedInboxConversations).toHaveBeenCalledWith(
           'user-1',
           'ACTIVE',
-          { pinned: true },
         );
-        expect(repository.findInboxConversations).toHaveBeenCalledWith(
+        expect(repository.findUnpinnedInboxPage).toHaveBeenCalledWith(
           'user-1',
           'ACTIVE',
-          { pinned: false, limit: 50, before: undefined },
+          { limit: 50, before: undefined },
         );
         expect(result.map((conversation) => conversation.id)).toEqual([
           'conv-pinned',
@@ -692,7 +692,7 @@ describe('ChatInboxService', () => {
       });
 
       it('continues after the last unpinned conversation, without the pinned ones again', async () => {
-        repository.findInboxConversations.mockResolvedValue([]);
+        repository.findUnpinnedInboxPage.mockResolvedValue([]);
 
         await service.listConversations('user-1', {
           limit: 50,
@@ -700,12 +700,11 @@ describe('ChatInboxService', () => {
           beforeId: 'conv-newest',
         });
 
-        expect(repository.findInboxConversations).toHaveBeenCalledTimes(1);
-        expect(repository.findInboxConversations).toHaveBeenCalledWith(
+        expect(repository.findPinnedInboxConversations).not.toHaveBeenCalled();
+        expect(repository.findUnpinnedInboxPage).toHaveBeenCalledWith(
           'user-1',
           'ACTIVE',
           {
-            pinned: false,
             limit: 50,
             before: {
               updatedAt: new Date('2024-01-05T00:00:00.000Z'),

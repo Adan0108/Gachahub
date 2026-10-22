@@ -4,7 +4,7 @@ import { EventPublisherPort } from '../../domain-events/event-publisher.port';
 import type { ChatParticipantAddedState } from '../../domain-events/domain-event.types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ChatMembershipRepository } from './chat-membership.repository';
-import { MAX_GROUP_MEMBERS } from './leaf-entitlement';
+import { MAX_GROUP_MEMBERS } from '../group-size-policy';
 import {
   GROUP_MANAGER_ROLES,
   lockAndAssertActorRole,

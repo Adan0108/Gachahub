@@ -69,8 +69,7 @@ describe('ChatRepository history paging', () => {
   it('pages unpinned inbox conversations after a cursor, newest first with an id tie-breaker', async () => {
     const updatedAt = new Date('2026-10-20T10:00:00.000Z');
 
-    await repository.findInboxConversations('user-1', 'ACTIVE', {
-      pinned: false,
+    await repository.findUnpinnedInboxPage('user-1', 'ACTIVE', {
       limit: 50,
       before: { updatedAt, id: 'conv-9' },
     });

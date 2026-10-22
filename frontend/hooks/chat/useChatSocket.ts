@@ -6,6 +6,7 @@ import { api } from "../../lib/api";
 import { addMessageToCache } from "../../lib/chat/messageCache";
 import { applyReceiptsEvent } from "../../lib/chat/receiptEvents";
 import { withOptimisticDelete } from "../../lib/chat/chatThread";
+import { messageDeletedSignal } from "../../lib/chat/messageDeletedSignal";
 import { queryKeys } from "../../lib/queries";
 import { useSharedSocket } from "../../lib/socket/sharedSocket";
 import { logTiming } from "../../lib/chat/chatTiming";
@@ -127,12 +128,14 @@ export function useChatSocket() {
     on("reaction:removed", refetchConversationMessages);
     on("message:edited", refetchConversationMessages);
     // Marked at once as well: a message the refetch pushes out of the newest window moves to older
-    // history as the copy cached here, so that copy must already say it was deleted.
+    // history as the copy cached here, so that copy must already say it was deleted. Older history
+    // lives outside the cache, so it hears about the delete through messageDeletedSignal.
     on("message:deleted", (event: ConversationEvent & { messageId: string }) => {
       queryClient.setQueryData<CachedMessages>(
         queryKeys.chatMessages(event.conversationId),
         (old) => (old ? { ...old, items: withOptimisticDelete(old.items, event.messageId) } : old),
       );
+      messageDeletedSignal.emit(event.conversationId, event.messageId);
       refetchConversationMessages(event);
     });
 

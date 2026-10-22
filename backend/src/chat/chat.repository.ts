@@ -19,6 +19,16 @@ import {
   type PrismaTransaction,
 } from '../media/media.repository';
 
+/**
+ * The one order of a conversation's messages, newest first: by time, then id for messages in the
+ * same millisecond. History pages, the inbox's last message and the read marker all use it, and
+ * the client sorts the same way (frontend/lib/chat/chatHistory.ts compareMessages).
+ */
+const NEWEST_MESSAGE_FIRST: Prisma.ChatMessageOrderByWithRelationInput[] = [
+  { createdAt: 'desc' },
+  { id: 'desc' },
+];
+
 /** An upload already validated by ChatService, ready to be claimed and attached to a message. */
 export type ChatMessageMediaInput = {
   mediaUploadId: string;
@@ -504,43 +514,55 @@ export class ChatRepository {
     });
   }
 
-  /**
-   * Finds convos for one inbox state, including the latest encrypted message. With `page`, only
-   * this user's pinned (`pinned: true`) or unpinned ones, newest first by (updatedAt, id), after
-   * the `before` conversation when given.
-   */
-  findInboxConversations(
+  /** Finds every convo for one inbox state, including the latest encrypted message. */
+  findInboxConversations(userId: string, state: ChatParticipantState) {
+    return this.inboxQuery(userId, { userId, state, deletedAt: null });
+  }
+
+  /** This user's pinned convos for one inbox state: few, and always all on the first page. */
+  findPinnedInboxConversations(userId: string, state: ChatParticipantState) {
+    return this.inboxQuery(userId, {
+      userId,
+      state,
+      deletedAt: null,
+      pinnedAt: { not: null },
+    });
+  }
+
+  /** One page of this user's unpinned convos, newest first by (updatedAt, id), after `before` when given. */
+  findUnpinnedInboxPage(
     userId: string,
     state: ChatParticipantState,
-    page?: {
-      pinned: boolean;
-      limit?: number;
-      before?: { updatedAt: Date; id: string };
-    },
+    page: { limit: number; before?: { updatedAt: Date; id: string } },
+  ) {
+    const { before } = page;
+    return this.inboxQuery(
+      userId,
+      { userId, state, deletedAt: null, pinnedAt: null },
+      {
+        take: page.limit,
+        ...(before && {
+          OR: [
+            { updatedAt: { lt: before.updatedAt } },
+            { updatedAt: before.updatedAt, id: { lt: before.id } },
+          ],
+        }),
+      },
+    );
+  }
+
+  /** The inbox query all three share: the viewer's participant row filter, plus paging. */
+  private inboxQuery(
+    userId: string,
+    viewer: Prisma.ChatParticipantWhereInput,
+    page: { take?: number; OR?: Prisma.ChatConversationWhereInput[] } = {},
   ) {
     return this.prisma.chatConversation.findMany({
       where: {
-        participants: {
-          some: {
-            userId,
-            state,
-            deletedAt: null,
-            ...(page ? { pinnedAt: page.pinned ? { not: null } : null } : {}),
-          },
-        },
-        ...(page?.before
-          ? {
-              OR: [
-                { updatedAt: { lt: page.before.updatedAt } },
-                {
-                  updatedAt: page.before.updatedAt,
-                  id: { lt: page.before.id },
-                },
-              ],
-            }
-          : {}),
+        participants: { some: viewer },
+        ...(page.OR && { OR: page.OR }),
       },
-      ...(page?.limit ? { take: page.limit } : {}),
+      ...(page.take && { take: page.take }),
       include: {
         participants: {
           include: {
@@ -558,7 +580,7 @@ export class ChatRepository {
           // an edit is never the "last message" of a conversation
           where: { contentType: { not: 'EDIT' } },
           // Same order as history, so two messages sent in the same millisecond agree on the last.
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          orderBy: NEWEST_MESSAGE_FIRST,
           take: 1,
           include: {
             receipts: {
@@ -686,7 +708,7 @@ export class ChatRepository {
           : {}),
       },
       take: params.limit,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: NEWEST_MESSAGE_FIRST,
       include: {
         receipts: true,
         reactions: {
@@ -842,7 +864,7 @@ export class ChatRepository {
               conversationId: params.conversationId,
               contentType: { not: 'EDIT' },
             },
-            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            orderBy: NEWEST_MESSAGE_FIRST,
           });
 
       if (!lastReadMessage) {

@@ -187,10 +187,7 @@ async function main() {
       chats.findInboxConversations(VIEWER, 'ACTIVE'),
     );
     const firstPage = await time(() =>
-      chats.findInboxConversations(VIEWER, 'ACTIVE', {
-        pinned: false,
-        limit: 50,
-      }),
+      chats.findUnpinnedInboxPage(VIEWER, 'ACTIVE', { limit: 50 }),
     );
     const ids = fullInbox.result.map((conversation) => conversation.id);
     const unreadForInbox = await time(() =>

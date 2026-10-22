@@ -6,33 +6,13 @@ import { MAX_EDIT_TEXT_CHARS, buildEditEnvelope } from "../../lib/mls/messaging/
 
 import type { ClipboardEvent, DragEvent } from "react";
 import type { QueryKey } from "@tanstack/react-query";
-import type { ChatConversation, ChatUser } from "../../lib/chat/chatDisplay";
+import type { ChatUser } from "../../lib/chat/chatDisplay";
 import type { ThreadMessage } from "../../hooks/chat/useThreadData";
-import type { PreparedFiles, AttachmentStage } from "../../lib/mls/media/prepareAttachments";
-import type { LinkPreviewData } from "../../lib/mls/media/prepareLinkPreview";
-import type { PreparedPreviews } from "../../lib/mls/messaging/sendLinkPreview";
-type ChatListConversation = ChatConversation & {
-  lastMessage?: { id: string; senderId: string; status?: string; createdAt: string } | null;
-  unreadCount?: number;
-};
 interface PickerUser {
   id: string;
   name: string;
   email?: string;
   image?: string | null;
-}
-interface SendDraft {
-  preview?: LinkPreviewData;
-  text: string;
-  clientId: string;
-  files: File[];
-  replyToId?: string;
-  mentionUserIds?: string[];
-}
-interface PendingMessage extends SendDraft {
-  conversationId: string;
-  failed?: boolean;
-  stage?: AttachmentStage;
 }
 interface MessagePage {
   items: ThreadMessage[];
@@ -104,9 +84,8 @@ import { useConversationActions } from "../../hooks/chat/useConversationActions"
 import { useConversationPreviews } from "../../hooks/chat/useConversationPreviews";
 import { useMessageEdit } from "../../hooks/chat/useMessageEdit";
 import { useMentionPicker } from "../../hooks/useMentionPicker";
-import { useSendCooldown } from "../../hooks/chat/useSendCooldown";
-import { useOlderInbox } from "../../hooks/chat/useOlderInbox";
-import type { ApiError } from "../../lib/api";
+import { useChatSend } from "../../hooks/chat/useChatSend";
+import { useChatLists, type ChatListConversation, type ChatListView } from "../../hooks/chat/useChatLists";
 import { addMessageToCache } from "../../lib/chat/messageCache";
 import { MentionMenu } from "../../components/MentionMenu";
 import { matchMembers, mentionedIds } from "../../lib/mentions";
@@ -128,13 +107,8 @@ import { useToast } from "../../hooks/useToast";
 import { ComposerEmojiButton } from "../../components/chat/ComposerEmojiButton";
 import { encodeEmotes } from "../../lib/emoji/emoteText";
 import { useThreadData } from "../../hooks/chat/useThreadData";
-import {
-  sendEncryptedChatMessage,
-  sendEncryptedEdit,
-} from "../../lib/mls/messaging/sendEncryptedMessage";
+import { sendEncryptedEdit } from "../../lib/mls/messaging/sendEncryptedMessage";
 
-import { sendAttachmentsWithCache } from "../../lib/mls/messaging/sendEncryptedAttachment";
-import { previewForSend } from "../../lib/mls/messaging/sendLinkPreview";
 import {
   flattenOtherAttachments,
   flattenVisualAttachments,
@@ -218,7 +192,7 @@ function ChatPageContent() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
-  const [view, setView] = useState<"inbox" | "requests" | "archived" | "blocked">("inbox");
+  const [view, setView] = useState<ChatListView>("inbox");
   const [selectedId, setSelectedId] = useState("");
   // /chat?c=<conversation id> (a clicked notification) opens that conversation; the id is then taken off the address.
   const requestedId = useSearchParams().get("c") ?? "";
@@ -226,21 +200,15 @@ function ChatPageContent() {
   const [search, setSearch] = useState("");
   // The text message search was last run for (on Enter); null until it has been used.
   const [messageQuery, setMessageQuery] = useState<string | null>(null);
-  const conversations = useQuery({ ...queries.chatConversations(), enabled: isAuthenticated });
-  const olderInbox = useOlderInbox(
-    conversations.data as ChatListConversation[] | undefined,
-    isAuthenticated,
-  );
-  // The inbox as loaded so far: its first page, then any older pages asked for.
-  const inboxList = useMemo(
-    () => [...((conversations.data ?? []) as ChatListConversation[]), ...olderInbox.conversations],
-    [conversations.data, olderInbox.conversations],
-  );
-  const requests = useQuery({ ...queries.chatRequests(), enabled: isAuthenticated });
-  const archived = useQuery({
-    ...queries.chatArchivedConversations(),
-    enabled: isAuthenticated && view === "archived",
-  });
+  const {
+    conversations,
+    requests,
+    blockedUsers,
+    olderInbox,
+    listQuery,
+    listData,
+    directChatByUserId,
+  } = useChatLists(view, isAuthenticated, user?.id);
   // The conversation can be an inbox chat or a request, so it is opened once both lists are in.
   const [pendingOpenId, setPendingOpenId] = useState("");
   if (requestedId !== handledRequestId) {
@@ -256,24 +224,6 @@ function ChatPageContent() {
   useEffect(() => {
     if (requestedId) router.replace("/chat");
   }, [requestedId, router]);
-  const blockedUsers = useQuery({
-    ...queries.chatBlockedUsers(),
-    enabled: isAuthenticated && view === "blocked",
-  });
-  // The blocked view lists people, not conversations; the inbox stays the list behind it.
-  const listByView = { inbox: conversations, requests, archived, blocked: conversations };
-  const listQuery = listByView[view];
-  const directChatByUserId = new Map(
-    inboxList
-      .filter((conversation) => conversation.type === "DIRECT")
-      .flatMap((conversation) =>
-        conversation.participants
-          .filter((participant) => participant.userId !== user?.id)
-          .map((participant): [string, string] => [participant.userId, conversation.id]),
-      ),
-  );
-  const listData: ChatListConversation[] | undefined =
-    view === "inbox" || view === "blocked" ? inboxList : listQuery.data;
   const rawList: ChatListConversation[] = listData || [];
   const searchTerms = parseSearchQuery(search);
   const isFiltering = searchTerms.length > 0;
@@ -348,18 +298,12 @@ function ChatPageContent() {
     preview: string;
   } | null>(null);
   const { draft, setDraft, setDraftFor } = useConversationDrafts(activeId);
-  // Sent messages awaiting the network, keyed by a client-side id.
-  const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
   const attachmentPicker = useAttachmentPicker();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   // Counts nested dragenter/dragleave pairs as the pointer crosses child elements, so only the
   // outermost dragleave (count back to 0) actually clears the overlay.
   const dragDepthRef = useRef(0);
-  // Uploaded attachment entries by clientId, so a retry re-sends without re-uploading.
-  const uploadedAttachmentsRef = useRef(new Map<string, PreparedFiles>());
-  // Link preview cards already prepared by clientId, so a retry re-sends the same card without uploading its picture again.
-  const preparedPreviewsRef = useRef<PreparedPreviews>(new Map());
   const recipientIds = () =>
     activeConversation?.type === "GROUP"
       ? otherActiveMemberIds(activeConversation, user?.id)
@@ -370,75 +314,14 @@ function ChatPageContent() {
   const mergeIntoMessageCache = (conversationId: string, message: ThreadMessage) => {
     void addMessageToCache(queryClient, conversationId, message);
   };
-  const sendCooldown = useSendCooldown();
-  const sendMessage = useMutation({
-    mutationFn: ({ text, clientId, files, replyToId, preview, mentionUserIds }: SendDraft) =>
-      withDeviceRecovery(async () => {
-        if (files?.length) {
-          return sendAttachmentsWithCache({
-            syncEngine: syncEngine!,
-            deviceId: deviceCredential!.deviceId,
-            conversationId: activeId,
-            recipientUserId: recipientIds(),
-            files,
-            caption: text,
-            clientMessageId: clientId,
-            uploaded: uploadedAttachmentsRef.current,
-            onStage: (stage) =>
-              setPendingMessages((prev) =>
-                prev.map((item) => (item.clientId === clientId ? { ...item, stage } : item)),
-              ),
-          });
-        }
-        const card = await previewForSend({
-          preview,
-          clientMessageId: clientId,
-          prepared: preparedPreviewsRef.current,
-        });
-        return sendEncryptedChatMessage(
-          syncEngine!,
-          deviceCredential!.deviceId,
-          activeId,
-          recipientIds(),
-          text,
-          clientId,
-          replyToId,
-          card,
-          mentionUserIds,
-        );
-      }),
-    onSuccess: (response, variables) => {
-      uploadedAttachmentsRef.current.delete(variables.clientId);
-      preparedPreviewsRef.current.delete(variables.clientId);
-      setPendingMessages((prev) =>
-        prev.filter((pending) => pending.clientId !== variables.clientId),
-      );
-      mergeIntoMessageCache(response.conversationId ?? activeId, response.message);
-      queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
-    },
-    onError: (error, variables) => {
-      const { status, retryAfterSeconds } = error as ApiError;
-      if (status === 429) sendCooldown.noteRateLimited(retryAfterSeconds);
-      setPendingMessages((prev) =>
-        prev.map((pending) =>
-          pending.clientId === variables.clientId ? { ...pending, failed: true } : pending,
-        ),
-      );
-    },
+  const chatSend = useChatSend({
+    conversationId: activeId,
+    syncEngine,
+    deviceId: deviceCredential?.deviceId,
+    recipientIds,
+    withDeviceRecovery,
   });
-  const retryPendingMessage = (pending: PendingMessage) => {
-    if (!sendCooldown.tryConsume()) return;
-    setPendingMessages((prev) =>
-      prev.map((item) => (item.clientId === pending.clientId ? { ...item, failed: false } : item)),
-    );
-    sendMessage.mutate({
-      text: pending.text,
-      clientId: pending.clientId,
-      files: pending.files,
-      preview: pending.preview,
-      mentionUserIds: pending.mentionUserIds,
-    });
-  };
+  const { pendingMessages, cooldown: sendCooldown } = chatSend;
 
   const composerInputRef = useRef<HTMLInputElement | null>(null);
   const mentionable = activeMembers(activeConversation)
@@ -882,7 +765,7 @@ function ChatPageContent() {
     : isDeviceReady && syncEngine
       ? "End-to-end encrypted"
       : "Setting up encryption...";
-  const shownError = actionError || sendMessage.error || (isDeviceReady ? deviceError : undefined);
+  const shownError = actionError || chatSend.sendError || (isDeviceReady ? deviceError : undefined);
   // Verifying a safety number is only meaningful for a specific peer, so it's DM-only here too.
   const verifyPeerCandidate = safetyPeerIds[0];
   const verifyPeerSafety = verifyPeerCandidate ? safety.byUser[verifyPeerCandidate] : undefined;
@@ -1440,7 +1323,7 @@ function ChatPageContent() {
                               {pending.failed ? (
                                 <button
                                   className="chat-message-retry"
-                                  onClick={() => retryPendingMessage(pending)}
+                                  onClick={() => chatSend.retry(pending)}
                                   type="button"
                                 >
                                   Failed to send - tap to retry
@@ -1627,23 +1510,17 @@ function ChatPageContent() {
                       const text = encodeEmotes(draft.trim(), pickedEmotesRef.current);
                       const files = attachmentPicker.files;
                       if (!text && files.length === 0) return;
-                      if (!sendCooldown.tryConsume()) return;
-                      const clientId = crypto.randomUUID();
                       const preview =
                         files.length === 0 ? (linkPreview.preview ?? undefined) : undefined;
                       const mentionUserIds = mentionedIds(text, mentionable);
-                      // Show the bubble and free the input; the send reconciles in the background.
-                      setPendingMessages((prev) => [
-                        ...prev,
-                        { clientId, text, files, preview, mentionUserIds, conversationId: activeId },
-                      ]);
+                      const replyToId = replyTarget?.id;
+                      // Shows the bubble at once; the send reconciles in the background. Refused while cooling down.
+                      if (!chatSend.send({ text, files, preview, mentionUserIds, replyToId })) return;
                       setDraft("");
                       attachmentPicker.clear();
                       setDismissedErrorMessage(null);
                       typingSignal.stop(activeId);
-                      const replyToId = replyTarget?.id;
                       setReplyTarget(null);
-                      sendMessage.mutate({ text, clientId, files, replyToId, preview, mentionUserIds });
                     }}
                   >
                   <MentionMenu items={mentionSuggestions} picker={mention} />

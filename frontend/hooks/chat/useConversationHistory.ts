@@ -5,7 +5,7 @@ import type { RefObject, UIEvent } from "react";
 import { api } from "../../lib/api";
 import { messagesFallenOutOfWindow, type HistoryMessage } from "../../lib/chat/chatHistory";
 import { withOptimisticDelete } from "../../lib/chat/chatThread";
-import { useSharedSocket } from "../../lib/socket/sharedSocket";
+import { messageDeletedSignal } from "../../lib/chat/messageDeletedSignal";
 
 const PAGE_SIZE = 50;
 const NEAR_TOP_PX = 80;
@@ -88,18 +88,15 @@ export function useConversationHistory<Message extends HistoryMessage>(
   }, [conversationId]);
 
   // Older pages live only here, never in the query cache a delete refetches, so a pushed delete is applied here too.
-  const socket = useSharedSocket();
-  useEffect(() => {
-    if (!socket) return undefined;
-    const markDeleted = (event: { conversationId: string; messageId: string }) => {
-      if (event.conversationId !== conversationId) return;
-      setOlderMessages((previous) => withOptimisticDelete(previous, event.messageId));
-    };
-    socket.on("message:deleted", markDeleted);
-    return () => {
-      socket.off("message:deleted", markDeleted);
-    };
-  }, [socket, conversationId]);
+  useEffect(
+    () =>
+      messageDeletedSignal.subscribe((deletedIn, messageId) => {
+        if (deletedIn === conversationId) {
+          setOlderMessages((previous) => withOptimisticDelete(previous, messageId));
+        }
+      }),
+    [conversationId],
+  );
 
   const latest = useMemo(() => newestPage?.items ?? [], [newestPage?.items]);
   const hasMoreHistory = typeof nextBeforeMessageId === "string";

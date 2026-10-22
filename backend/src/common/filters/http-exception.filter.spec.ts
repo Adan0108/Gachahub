@@ -145,4 +145,20 @@ describe('HttpExceptionFilter', () => {
     expect(sentBody()).not.toHaveProperty('outcome');
     expect(sentBody()).not.toHaveProperty('handshake');
   });
+
+  // Any exception can add its own vetted fields; the filter itself never names one.
+  it('adds the fields any exception chooses to share, on a client error only', () => {
+    class WithExtras extends HttpException {
+      responseExtras() {
+        return { retryWith: 'smaller-batch' };
+      }
+    }
+
+    filter.catch(new WithExtras('Too big', 413), host);
+    expect(sentBody()).toMatchObject({ retryWith: 'smaller-batch' });
+
+    response.json.mockClear();
+    filter.catch(new WithExtras('Broke', 503), host);
+    expect(sentBody()).not.toHaveProperty('retryWith');
+  });
 });

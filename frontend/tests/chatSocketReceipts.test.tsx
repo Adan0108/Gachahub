@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatSocket } from "../hooks/chat/useChatSocket";
 import { queryKeys } from "../lib/queries";
+import { messageDeletedSignal } from "../lib/chat/messageDeletedSignal";
 
 const mocks = vi.hoisted(() => ({
   handlers: {} as Record<string, (payload: any) => void>,
@@ -228,5 +229,18 @@ describe("useChatSocket message deletes", () => {
     const items = client.getQueryData<{ items: any[] }>(KEY)!.items;
     expect(items.map((item) => item.status)).toEqual(["DELETED", "SENT"]);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: KEY });
+  });
+
+  it("tells older history outside the cache about the delete", () => {
+    const heard: string[][] = [];
+    const stop = messageDeletedSignal.subscribe((conversationId, messageId) =>
+      heard.push([conversationId, messageId]),
+    );
+    setup();
+
+    mocks.handlers["message:deleted"]!({ conversationId: "c1", messageId: "m1" });
+
+    expect(heard).toEqual([["c1", "m1"]]);
+    stop();
   });
 });

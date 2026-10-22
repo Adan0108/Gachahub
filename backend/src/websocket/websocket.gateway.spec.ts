@@ -4,6 +4,7 @@ jest.mock('../auth/auth', () => ({
 
 import { WebsocketGateway } from './websocket.gateway';
 import { SocketRegistry } from './socket-registry.service';
+import { SocketSessionWatcher } from './socket-session-watcher.service';
 import { auth } from '../auth/auth';
 
 const getSession = auth.api.getSession as unknown as jest.Mock;
@@ -29,7 +30,7 @@ describe('WebsocketGateway', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     socketRegistry = new SocketRegistry();
-    gateway = new WebsocketGateway(socketRegistry);
+    gateway = new WebsocketGateway(socketRegistry, new SocketSessionWatcher());
   });
 
   describe('handleConnection', () => {
