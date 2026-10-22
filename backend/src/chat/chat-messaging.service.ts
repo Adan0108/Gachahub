@@ -114,6 +114,25 @@ export class ChatMessagingService {
       };
     }
 
+    // "Start a chat" with someone you already have a visible chat with opens that chat: another
+    // "conversation started" marker would land in it, and clients that only page the inbox cannot
+    // always tell the chat exists. Hidden or archived on your side, the marker still brings it back.
+    if (existingPair && dto.message.contentType === 'SYSTEM') {
+      const mine = existingPair.conversation.participants.find(
+        (participant) => participant.userId === senderId,
+      );
+      if (mine?.state === 'ACTIVE' && !mine.deletedAt) {
+        const theirs = existingPair.conversation.participants.find(
+          (participant) => participant.userId === dto.recipientUserId,
+        );
+        return {
+          conversationId: existingPair.conversation.id,
+          message: null,
+          recipientState: theirs?.state ?? null,
+        };
+      }
+    }
+
     // Only known when the direct pair already exists; a new conversation has no id to check group_id against.
     const preparedPayload = await this.messageEncryption.preparePayload(
       dto.message,
@@ -159,7 +178,7 @@ export class ChatMessagingService {
     );
 
     let result: Awaited<
-      ReturnType<typeof this.chatRepository.createDirectConversationWithMessage>
+      ReturnType<ChatRepository['createDirectConversationWithMessage']>
     >;
 
     try {

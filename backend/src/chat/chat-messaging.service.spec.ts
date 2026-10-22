@@ -346,6 +346,56 @@ describe('ChatMessagingService', () => {
       });
     });
 
+    describe('starting a chat that already exists', () => {
+      const pair = (myState: string, deletedAt: Date | null = null) => ({
+        conversation: {
+          id: 'conversation-1',
+          participants: [
+            { userId: 'user-1', state: myState, deletedAt },
+            { userId: 'user-2', state: 'PENDING', deletedAt: null },
+          ],
+        },
+      });
+      const start = () =>
+        service.createDirectMessage('user-1', 'session-1', {
+          recipientUserId: 'user-2',
+          message: {
+            ciphertext: 'placeholder-pending-mls-setup',
+            contentType: 'SYSTEM',
+          },
+        } as any);
+
+      beforeEach(() => {
+        repository.findUserById.mockResolvedValue({
+          id: 'user-2',
+          status: 'ACTIVE',
+        });
+        blocksService.isBlocked.mockResolvedValue(false);
+        repository.findMessageBySenderClientMessageId.mockResolvedValue(null);
+      });
+
+      it('opens the chat you can already see without adding another "started" marker', async () => {
+        repository.findDirectPair.mockResolvedValue(pair('ACTIVE'));
+
+        await expect(start()).resolves.toEqual({
+          conversationId: 'conversation-1',
+          message: null,
+          recipientState: 'PENDING',
+        });
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+      });
+
+      it('still sends it when your side of the chat was deleted, so the chat comes back', async () => {
+        repository.findDirectPair.mockResolvedValue(
+          pair('ACTIVE', new Date('2026-10-01')),
+        );
+
+        await start().catch(() => undefined);
+
+        expect(messageEncryption.preparePayload).toHaveBeenCalled();
+      });
+    });
+
     it('rejects when the existing clientMessageId belongs to a different recipient', async () => {
       repository.findUserById.mockResolvedValue({
         id: 'user-2',
