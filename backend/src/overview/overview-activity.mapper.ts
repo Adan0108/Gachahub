@@ -4,6 +4,7 @@ import type {
   CommentAuditMetadata,
   PostAuditMetadata,
   ReportAuditMetadata,
+  CaseAuditMetadata,
 } from '../audit-log/audit-log.types';
 import type { AuditLogQueryService } from '../audit-log/audit-log-query.service';
 
@@ -62,6 +63,12 @@ function resolveTargetName(
       const metadata = entry.metadata as ReportAuditMetadata | null;
       return metadata?.reportedTargetId
         ? `${metadata.reportedTargetType} ${metadata.reportedTargetId}`
+        : null;
+    }
+    case AuditTargetType.MODERATION_CASE: {
+      const metadata = entry.metadata as CaseAuditMetadata | null;
+      return metadata?.targetId
+        ? `${metadata.targetType} ${metadata.targetId}`
         : null;
     }
     case AuditTargetType.USER:

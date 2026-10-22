@@ -1,3 +1,5 @@
+import { isolatedCaseDatabase } from './support/isolated-case-database';
+import { PlatformCaseModerationController } from '../src/reports/platform-moderation/platform-case-moderation.controller';
 jest.mock('@thallesp/nestjs-better-auth', () => {
   const common =
     jest.requireActual<typeof import('@nestjs/common')>('@nestjs/common');
@@ -86,11 +88,10 @@ import { AdminAuditLogController } from '../src/audit-log/admin-audit-log.contro
 import { GameAuditLogController } from '../src/audit-log/game-audit-log.controller';
 import { AuditLogQueryService } from '../src/audit-log/audit-log-query.service';
 import { ReportsController } from '../src/reports/reports.controller';
-import { AdminReportsController } from '../src/reports/admin-reports.controller';
-import { ReportModerationController } from '../src/reports/report-moderation.controller';
+import { GameCaseModerationController } from '../src/reports/game-moderation/game-case-moderation.controller';
 import { ReportsService } from '../src/reports/reports.service';
-import { ReportModerationService } from '../src/reports/report-moderation.service';
-import { ReportRateLimiterService } from '../src/reports/report-rate-limiter.service';
+import { ReportModerationService } from '../src/reports/moderation/report-moderation.service';
+import { ReportRateLimiterService } from '../src/reports/infrastructure/report-rate-limiter.service';
 import type {
   Prisma,
   PostType,
@@ -101,7 +102,8 @@ import type {
 // DTO classification/title/visibility; create/media/tags/mentions; update and
 // category/type immutability; all four counter writers; retention and races;
 // detail/profile/search/latest/trending/For You; save/like/comment/reply;
-// interest deltas/ranking; admin/game permissions/audits; report null reads/501.
+// interest deltas/ranking; admin/game permissions/audits; report creation/null
+// reads and the restored case moderation transitions.
 // Sessions are injected, with a test auth gate matching OPTIONAL metadata.
 // Real outbox/mentions/media attachment/notification dispatch; no Kafka broker,
 // Cloudinary requests or Socket.IO delivery. Only Redis storage is in memory;
@@ -120,6 +122,7 @@ describe('Optional-game comprehensive API/integration verification', () => {
   const mentionHandle = `v${runId.replaceAll('-', '').slice(0, 18)}`;
   let app: INestApplication;
   let db: PrismaService;
+  let isolated: Awaited<ReturnType<typeof isolatedCaseDatabase>>;
   let gameId: string;
   let otherGameId: string;
   let categoryId: string;
@@ -192,6 +195,7 @@ describe('Optional-game comprehensive API/integration verification', () => {
   }
 
   beforeAll(async () => {
+    isolated = await isolatedCaseDatabase();
     const module = await Test.createTestingModule({
       controllers: [
         PostSaveController,
@@ -211,11 +215,11 @@ describe('Optional-game comprehensive API/integration verification', () => {
         AdminAuditLogController,
         GameAuditLogController,
         ReportsController,
-        AdminReportsController,
-        ReportModerationController,
+        GameCaseModerationController,
+        PlatformCaseModerationController,
       ],
       providers: [
-        PrismaService,
+        { provide: PrismaService, useValue: isolated.prisma },
         PostsService,
         PostsRepository,
         PostModerationService,
@@ -427,7 +431,11 @@ describe('Optional-game comprehensive API/integration verification', () => {
         await db.tag.deleteMany({ where: { slug: { startsWith: prefix } } });
       }
     } finally {
-      await app?.close();
+      try {
+        await app?.close();
+      } finally {
+        await isolated?.cleanup();
+      }
     }
   });
 
@@ -1616,7 +1624,7 @@ describe('Optional-game comprehensive API/integration verification', () => {
     });
 
     it.each([false, true])(
-      'keeps report null/game reads valid and deferred writes at 501: game=%s',
+      'creates null/game reports with game-scoped case moderation: game=%s',
       async (game) => {
         const post = await (game ? community() : create());
         const comment = await http()
@@ -1633,80 +1641,64 @@ describe('Optional-game comprehensive API/integration verification', () => {
             await reports.findTargetPostInfo(targetType, targetId),
           ).toMatchObject({ gameId: game ? gameId : null });
         }
-        await http()
+        const submitted = await http()
           .post('/reports')
           .set('x-test-user', viewer)
           .send({ targetType: 'POST', targetId: post.id, reasonCode: 'OTHER' })
-          .expect(501);
-        expect(await db.report.count({ where: { targetId: post.id } })).toBe(0);
-        const moderationCase = await db.moderationCase.create({
-          data: {
-            targetType: 'POST',
-            targetId: post.id,
-            gameId: game ? gameId : null,
-          },
+          .expect(201);
+        expect(await db.report.count({ where: { targetId: post.id } })).toBe(1);
+        const report = await db.report.findUniqueOrThrow({
+          where: { id: submitted.body.id },
         });
-        caseIds.push(moderationCase.id);
-        const report = await db.report.create({
-          data: {
-            caseId: moderationCase.id,
-            reporterId: viewer,
-            targetType: 'POST',
-            targetId: post.id,
-            reasonCode: 'OTHER',
-          },
-        });
+        caseIds.push(report.caseId);
         const listing = await http()
-          .get('/admin/reports?limit=100')
+          .get('/moderation/cases?limit=100')
           .set('x-test-user', admin)
           .expect(200);
         expect(listing.body.items).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
-              id: report.id,
+              id: report.caseId,
               gameId: game ? gameId : null,
               ...(game ? {} : { game: null }),
             }),
           ]),
         );
-        const projection = await reports.findById(report.id);
+        const projection = await reports.findModerationCaseById(report.caseId);
         expect(projection?.gameId).toBe(game ? gameId : null);
         if (game) {
-          for (const action of ['claim', 'resolve', 'dismiss']) {
+          for (const [action, status] of [
+            ['claim', 200],
+            ['resolve', 200],
+            ['dismiss', 409],
+          ] as const) {
             await http()
-              .patch(`/games/${slug}/reports/${report.id}/${action}`)
+              .patch(
+                `/games/${slug}/moderation/cases/${report.caseId}/${action}`,
+              )
               .set('x-test-user', moderator)
               .send({})
-              .expect(501);
+              .expect(status);
           }
         } else {
           await http()
-            .patch(`/games/${slug}/reports/${report.id}/claim`)
+            .patch(`/games/${slug}/moderation/cases/${report.caseId}/claim`)
             .set('x-test-user', admin)
             .expect(404);
         }
-        await expect(reports.claim(report.id, admin)).rejects.toMatchObject({
-          status: 501,
-        });
-        await expect(
-          reports.finalize({
-            id: report.id,
-            status: 'RESOLVED',
-            resolvedById: admin,
-          }),
-        ).rejects.toMatchObject({ status: 501 });
         const content = await http()
           .get('/admin/content?limit=100')
           .set('x-test-user', admin)
           .expect(200);
-        expect(content.body.items).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              id: post.id,
-              gameSlug: game ? slug : null,
-            }),
-          ]),
-        );
+        const flaggedItems = content.body.items as Array<{
+          id: string;
+          gameSlug: string | null;
+        }>;
+        expect(flaggedItems.some((item) => item.id === post.id)).toBe(!game);
+        if (!game)
+          expect(flaggedItems).toContainEqual(
+            expect.objectContaining({ id: String(post.id), gameSlug: null }),
+          );
       },
     );
   });
@@ -1940,7 +1932,7 @@ describe('Optional-game comprehensive API/integration verification', () => {
     });
 
     it.each([false, true])(
-      'lists reports in the correct Game scope: game=%s',
+      'lists cases in the correct Game scope: game=%s',
       async (game) => {
         const post = await (game ? community() : create());
         const moderationCase = await db.moderationCase.create({
@@ -1961,20 +1953,20 @@ describe('Optional-game comprehensive API/integration verification', () => {
           },
         });
         const listing = await http()
-          .get(`/games/${slug}/reports?limit=100`)
+          .get(`/games/${slug}/moderation/cases?limit=100`)
           .set('x-test-user', moderator)
           .expect(200);
         expect(
           listing.body.items.some(
-            (row: { id: string }) => row.id === report.id,
+            (row: { id: string }) => row.id === report.caseId,
           ),
         ).toBe(game);
         await http()
-          .get(`/games/${slug}/reports`)
+          .get(`/games/${slug}/moderation/cases`)
           .set('x-test-user', viewer)
           .expect(403);
         await http()
-          .get('/games/missing-final-gate/reports')
+          .get('/games/missing-final-gate/moderation/cases')
           .set('x-test-user', admin)
           .expect(404);
       },

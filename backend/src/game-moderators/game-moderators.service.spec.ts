@@ -35,11 +35,16 @@ describe('GameModeratorsService', () => {
 
   const auditLogService = { record: jest.fn(), recordOrThrow: jest.fn() };
 
-  const tx = { tx: true };
+  const tx = {
+    tx: true,
+    user: { findUnique: jest.fn() },
+    moderationCase: { updateMany: jest.fn() },
+  };
 
   const prisma = {
     user: {
       findUnique: jest.fn(),
+      findMany: jest.fn(),
     },
     $transaction: jest.fn(),
   };
@@ -60,22 +65,72 @@ describe('GameModeratorsService', () => {
     );
   });
 
-  describe('assertCanModerateGame', () => {
-    it('allows an admin without checking moderator assignment', async () => {
+  describe('moderator candidate identity search', () => {
+    it.each(['USER', 'PLATFORM_MODERATOR'])(
+      'does not let %s search role-grant candidates',
+      async (role) => {
+        prisma.user.findUnique.mockResolvedValue({
+          id: 'actor',
+          role,
+          status: 'ACTIVE',
+        });
+        await expect(
+          service.searchCandidates('game', 'actor', 'radium'),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+      },
+    );
+    it('lets ADMIN search active candidates outside existing assignments', async () => {
       prisma.user.findUnique.mockResolvedValue({
-        id: 'admin-1',
+        id: 'admin',
         role: 'ADMIN',
         status: 'ACTIVE',
       });
-
+      gameModeratorsRepository.findGameBySlug.mockResolvedValue({ id: 'game' });
+      prisma.user.findMany.mockResolvedValue([]);
       await expect(
-        service.assertCanModerateGame('game-1', 'admin-1'),
-      ).resolves.toBeUndefined();
-
-      expect(
-        gameModeratorsRepository.findByGameIdAndUserId,
-      ).not.toHaveBeenCalled();
+        service.searchCandidates('slug', 'admin', '@rad'),
+      ).resolves.toEqual({ items: [] });
+      expect(prisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [
+              {
+                status: 'ACTIVE',
+                moderatedGames: { none: { gameId: 'game' } },
+              },
+              { username: 'rad' },
+            ],
+          },
+          take: 1,
+        }),
+      );
     });
+  });
+
+  describe('assertCanModerateGame', () => {
+    it.each(['ADMIN', 'PLATFORM_MODERATOR'])(
+      'allows active %s without checking moderator assignment',
+      async (role) => {
+        prisma.user.findUnique.mockResolvedValue({
+          id: 'admin-1',
+          role,
+          status: 'ACTIVE',
+        });
+
+        await expect(
+          service.assertCanModerateGame('game-1', 'admin-1'),
+        ).resolves.toBeUndefined();
+
+        expect(
+          gameModeratorsRepository.findByGameIdAndUserId,
+        ).not.toHaveBeenCalled();
+        expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
+        expect(prisma.user.findUnique).toHaveBeenCalledWith({
+          where: { id: 'admin-1' },
+          select: { id: true, role: true, status: true },
+        });
+      },
+    );
 
     it('allows an assigned moderator of the game', async () => {
       prisma.user.findUnique.mockResolvedValue({
@@ -90,6 +145,12 @@ describe('GameModeratorsService', () => {
       await expect(
         service.assertCanModerateGame('game-1', 'mod-1'),
       ).resolves.toBeUndefined();
+      expect(
+        gameModeratorsRepository.findByGameIdAndUserId,
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        gameModeratorsRepository.findByGameIdAndUserId,
+      ).toHaveBeenCalledWith('game-1', 'mod-1');
     });
 
     it('rejects a regular user who is not a moderator of the game', async () => {
@@ -111,7 +172,18 @@ describe('GameModeratorsService', () => {
         role: 'USER',
         status: 'ACTIVE',
       });
-      gameModeratorsRepository.findByGameIdAndUserId.mockResolvedValue(null);
+      gameModeratorsRepository.findByGameIdAndUserId.mockImplementation(
+        (gameId: string, userId: string) =>
+          Promise.resolve(
+            gameId === 'game-1' && userId === 'mod-1'
+              ? { id: 'assignment-1' }
+              : null,
+          ),
+      );
+
+      await expect(
+        service.assertCanModerateGame('game-1', 'mod-1'),
+      ).resolves.toBeUndefined();
 
       await expect(
         service.assertCanModerateGame('other-game', 'mod-1'),
@@ -144,6 +216,9 @@ describe('GameModeratorsService', () => {
         role: 'USER',
         status: 'SUSPENDED',
       });
+      gameModeratorsRepository.findByGameIdAndUserId.mockResolvedValue({
+        id: 'assignment-1',
+      });
 
       await expect(
         service.assertCanModerateGame('game-1', 'mod-1'),
@@ -160,7 +235,37 @@ describe('GameModeratorsService', () => {
       await expect(
         service.assertCanModerateGame('game-1', 'deleted-user'),
       ).rejects.toThrow(UnauthorizedException);
+      expect(
+        gameModeratorsRepository.findByGameIdAndUserId,
+      ).not.toHaveBeenCalled();
     });
+
+    it('rejects a missing authenticated id before querying the database', async () => {
+      await expect(service.assertCanModerateGame('game-1', '')).rejects.toThrow(
+        new UnauthorizedException('Authentication required'),
+      );
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+      expect(
+        gameModeratorsRepository.findByGameIdAndUserId,
+      ).not.toHaveBeenCalled();
+    });
+
+    it.each(['SUSPENDED', 'BANNED', 'DELETED'])(
+      'rejects a %s platform moderator before assignment lookup',
+      async (status) => {
+        prisma.user.findUnique.mockResolvedValue({
+          id: 'platform-mod-1',
+          role: 'PLATFORM_MODERATOR',
+          status,
+        });
+        await expect(
+          service.assertCanModerateGame('game-1', 'platform-mod-1'),
+        ).rejects.toThrow(new ForbiddenException('User account is not active'));
+        expect(
+          gameModeratorsRepository.findByGameIdAndUserId,
+        ).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('resolveModeratableGameId', () => {
@@ -258,20 +363,49 @@ describe('GameModeratorsService', () => {
       await expect(callHelper()).rejects.toThrow(NotFoundException);
     });
 
-    it('lets an admin through without a moderator assignment', async () => {
-      prisma.user.findUnique.mockResolvedValue({
-        id: 'mod-1',
-        role: 'ADMIN',
-        status: 'ACTIVE',
-      });
-      load.mockResolvedValue({ id: 'thing-1', gameId: 'game-1' });
+    it.each(['ADMIN', 'PLATFORM_MODERATOR'])(
+      'lets active %s load a matching resource without an assignment',
+      async (role) => {
+        prisma.user.findUnique.mockResolvedValue({
+          id: 'mod-1',
+          role,
+          status: 'ACTIVE',
+        });
+        load.mockResolvedValue({ id: 'thing-1', gameId: 'game-1' });
 
-      await expect(callHelper()).resolves.toBeDefined();
+        await expect(callHelper()).resolves.toEqual({
+          gameId: 'game-1',
+          resource: { id: 'thing-1', gameId: 'game-1' },
+        });
+        expect(load).toHaveBeenCalledTimes(1);
+        expect(prisma.user.findUnique.mock.invocationCallOrder[0]).toBeLessThan(
+          load.mock.invocationCallOrder[0],
+        );
 
-      expect(
-        gameModeratorsRepository.findByGameIdAndUserId,
-      ).not.toHaveBeenCalled();
-    });
+        expect(
+          gameModeratorsRepository.findByGameIdAndUserId,
+        ).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['ADMIN', 'PLATFORM_MODERATOR'])(
+      'rejects a mismatching resource even for %s',
+      async (role) => {
+        prisma.user.findUnique.mockResolvedValue({
+          id: 'mod-1',
+          role,
+          status: 'ACTIVE',
+        });
+        load.mockResolvedValue({ id: 'thing-1', gameId: 'other-game' });
+        await expect(callHelper()).rejects.toThrow(
+          new NotFoundException('Thing not found'),
+        );
+        expect(load).toHaveBeenCalledTimes(1);
+        expect(
+          gameModeratorsRepository.findByGameIdAndUserId,
+        ).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('assignModerator', () => {
@@ -383,6 +517,35 @@ describe('GameModeratorsService', () => {
         },
         tx,
       );
+    });
+
+    it("hands the removed moderator's open cases in that game back to the queue", async () => {
+      gameModeratorsRepository.deleteByGameIdAndUserId.mockResolvedValue({
+        count: 1,
+      });
+      tx.user.findUnique.mockResolvedValue({ role: 'USER' });
+
+      await service.removeModerator('wuthering-waves', 'user-2', 'admin-1');
+
+      expect(tx.moderationCase.updateMany).toHaveBeenCalledWith({
+        where: {
+          gameId: 'game-1',
+          assignedModeratorId: 'user-2',
+          status: { in: ['OPEN', 'IN_REVIEW'] },
+        },
+        data: { assignedModeratorId: null, status: 'OPEN' },
+      });
+    });
+
+    it('keeps the cases of someone who can still moderate every game', async () => {
+      gameModeratorsRepository.deleteByGameIdAndUserId.mockResolvedValue({
+        count: 1,
+      });
+      tx.user.findUnique.mockResolvedValue({ role: 'PLATFORM_MODERATOR' });
+
+      await service.removeModerator('wuthering-waves', 'user-2', 'admin-1');
+
+      expect(tx.moderationCase.updateMany).not.toHaveBeenCalled();
     });
 
     it('answers 404, not a 500, when a concurrent removal already deleted the assignment', async () => {

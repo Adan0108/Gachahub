@@ -1,0 +1,66 @@
+.field-limit {
+  display: block;
+  flex: 0 0 auto;
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.field-limit.field-warning {
+  color: var(--pink);
+}
+
+.chat-message-limit {
+  padding: 4px 16px 8px;
+}
+
+.auth-form label > span {
+  flex-wrap: wrap;
+}
+
+.auth-form label > span > .field-limit {
+  flex-basis: 100%;
+}
+
+.auth-form label > span > input {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+}
+
+.chat-sidebar-search,
+.chat-search-box,
+.admin-search {
+  flex-wrap: wrap;
+}
+
+.chat-sidebar-search > .field-limit,
+.chat-search-box > .field-limit,
+.admin-search > .field-limit {
+  flex-basis: 100%;
+  order: 3;
+}
+
+.search > .field-limit {
+  max-width: 140px;
+  font-size: 10px;
+}
+
+.search input,
+.chat-sidebar-search input,
+.admin-search input {
+  min-width: 0;
+}
+
+.post-reply-form,
+.post-comment-form {
+  flex-wrap: wrap;
+}
+
+.post-reply-form > .field-limit,
+.post-comment-form > .field-limit {
+  flex-basis: 100%;
+  order: 3;
+}

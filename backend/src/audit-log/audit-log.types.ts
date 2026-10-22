@@ -1,9 +1,10 @@
 export type PostAuditAction = 'POST_HIDDEN' | 'POST_RESTORED';
 export type CommentAuditAction = 'COMMENT_HIDDEN' | 'COMMENT_RESTORED';
-export type ReportAuditAction =
-  | 'REPORT_CLAIMED'
-  | 'REPORT_RESOLVED'
-  | 'REPORT_DISMISSED';
+export type CaseAuditAction =
+  | 'CASE_ASSIGNED'
+  | 'CASE_CLAIMED'
+  | 'CASE_RESOLVED'
+  | 'CASE_DISMISSED';
 export type ModeratorAuditAction = 'MODERATOR_ASSIGNED' | 'MODERATOR_REMOVED';
 export type UserModerationAuditAction =
   | 'USER_BANNED'
@@ -44,10 +45,23 @@ export type PostAuditMetadata = { authorId: string; postTitle: string };
 /** Stored shape of `metadata` for comment entries. Rows are permanent - change by adding optional keys only. */
 export type CommentAuditMetadata = { authorId: string; postId: string };
 
-/** Stored shape of `metadata` for report entries. Rows are permanent - change by adding optional keys only. */
+/** Historical report audit metadata, read-only. New workflow writes use CaseAuditMetadata. */
 export type ReportAuditMetadata = {
+  /** Optional for historical entries created before case workflow. */
+  reportId?: string;
+  caseId?: string;
   reportedTargetType: string;
   reportedTargetId: string;
+  resolutionNote?: string;
+};
+
+export type CaseAuditMetadata = {
+  caseId: string;
+  targetType: string;
+  targetId: string;
+  gameId: string | null;
+  reportCount: number;
+  assignedModeratorId?: string | null;
   resolutionNote?: string;
 };
 
@@ -87,14 +101,18 @@ export type AuditEntry = AuditEntryBase &
         metadata: CommentAuditMetadata;
       }
     | {
-        action: ReportAuditAction;
-        targetType: 'REPORT';
-        metadata: ReportAuditMetadata;
+        action: CaseAuditAction;
+        targetType: 'MODERATION_CASE';
+        metadata: CaseAuditMetadata;
       }
     | {
         action: ModeratorAuditAction;
         targetType: 'USER';
-        metadata?: undefined;
+        metadata?: {
+          scope: 'platform';
+          previousRole: 'USER' | 'PLATFORM_MODERATOR';
+          newRole: 'USER' | 'PLATFORM_MODERATOR';
+        };
       }
     | {
         action: UserModerationAuditAction;

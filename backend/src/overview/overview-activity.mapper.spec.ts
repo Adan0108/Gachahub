@@ -122,4 +122,30 @@ describe('formatActivityEntries', () => {
 
     expect(result.targetName).toBeNull();
   });
+  it('renders native case audit target metadata without a Report lookup', () => {
+    const result = formatActivityEntries(
+      [
+        {
+          ...baseEntry,
+          action: 'CASE_RESOLVED',
+          targetType: 'MODERATION_CASE',
+          targetId: 'case',
+          metadata: {
+            caseId: 'case',
+            targetType: 'POST',
+            targetId: 'post',
+            gameId: null,
+            reportCount: 3,
+          },
+        },
+      ],
+      new Map(),
+    );
+    expect(result[0]).toMatchObject({
+      action: 'CASE_RESOLVED',
+      targetType: 'MODERATION_CASE',
+      targetId: 'case',
+      targetName: 'POST post',
+    });
+  });
 });

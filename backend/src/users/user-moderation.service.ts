@@ -12,6 +12,7 @@ import { UserRole, UserStatus } from '../generated/prisma/client';
 import { ADMIN_SETTABLE_USER_STATUSES } from './dto/update-user-status.dto';
 import { QueryUsersAdminDto } from './dto/query-users-admin.dto';
 import { UsersRepository } from './users.repository';
+import { releaseModeratorCases } from '../common/moderation/release-moderator-cases';
 import { resolvePagination, toPaginated } from '../common/utils/paginated';
 
 type AdminSettableUserStatus = (typeof ADMIN_SETTABLE_USER_STATUSES)[number];
@@ -101,6 +102,10 @@ export class UserModerationService {
         throw new ConflictException(
           'User status changed concurrently, try again',
         );
+      }
+
+      if (toStatus !== UserStatus.ACTIVE) {
+        await releaseModeratorCases(tx, userId);
       }
 
       await this.auditLogService.recordOrThrow(

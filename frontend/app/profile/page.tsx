@@ -1,0 +1,397 @@
+"use client";
+
+import { FieldLimit } from "../../components/FieldLimit";
+
+import { useEffect, useRef, useState } from "react";
+import type { FormEvent } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { FiCompass, FiEdit3, FiMessageCircle, FiShare2, FiX } from "react-icons/fi";
+import { Art } from "../../components/Art";
+import { AvatarFace } from "../../components/AvatarFace";
+import { BuildCard } from "../../components/BuildCard";
+import { PostList } from "../../components/PostList";
+import { AvatarEditor } from "../../components/profile/AvatarEditor";
+import { BannerPicker } from "../../components/profile/BannerPicker";
+import { QueryNotice } from "../../components/QueryNotice";
+import { SectionTitle } from "../../components/SectionTitle";
+import { builds, glyph } from "../../components/constants";
+import { useRequireAuth } from "../../hooks/useRequireAuth";
+import { useToast } from "../../hooks/useToast";
+import { bannerColor } from "../../lib/profileBanners";
+import { queries } from "../../lib/queries";
+
+const focusableSelector = [
+  "a[href]",
+  "button:not([disabled])",
+  "textarea:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+const profileTabs = {
+  Overview: { title: "Featured work", count: 4 },
+  Builds: { title: "Published Builds", count: builds.length },
+  Posts: { title: "Recent Posts", count: 3 },
+  Collections: { title: "Saved Collections", count: 0 },
+  Achievements: { title: "Achievements", count: 3 },
+};
+
+const achievements = [
+  ["Build Architect", "Published 10 community-rated builds"],
+  ["Lore Keeper", "Contributed to 25 verified lore discussions"],
+  ["Helpful Rover", "Received 100 helpful reactions"],
+];
+
+export default function ProfilePage() {
+  const router = useRouter();
+  const { user, isAuthenticated, isLoading: isSessionLoading, isError } = useRequireAuth();
+  const [tab, setTab] = useState<keyof typeof profileTabs>("Builds");
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState("");
+  const [bio, setBio] = useState("We ride the waves, chasing the unknown.");
+  const [draftName, setDraftName] = useState("");
+  const [draftBio, setDraftBio] = useState("");
+  const { notice, showNotice } = useToast();
+  const editButtonRef = useRef<HTMLButtonElement | null>(null);
+  const modalRef = useRef<HTMLFormElement | null>(null);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const wasEditingRef = useRef(false);
+  const myPosts = useQuery({ ...queries.myPosts(), enabled: isAuthenticated });
+  const displayName = name || user?.name || "";
+  const recentPosts = myPosts.data?.items || [];
+  const postCount = myPosts.data?.meta?.total ?? recentPosts.length;
+  const activeTab = tab === "Posts" ? { ...profileTabs.Posts, count: postCount } : profileTabs[tab];
+
+  const shareProfile = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      showNotice("Profile link copied");
+    } catch {
+      showNotice("Could not copy the profile link");
+    }
+  };
+
+  const copyUserId = async () => {
+    try {
+      await navigator.clipboard.writeText(user.id);
+      showNotice("User ID copied");
+    } catch {
+      showNotice("Could not copy your user ID");
+    }
+  };
+
+  const openEditor = () => {
+    setDraftName(displayName);
+    setDraftBio(bio);
+    setEditing(true);
+  };
+
+  const closeEditor = () => setEditing(false);
+
+  const saveProfile = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setName(draftName.trim());
+    setBio(draftBio.trim() || "We ride the waves, chasing the unknown.");
+    showNotice("Profile saved locally");
+    setEditing(false);
+  };
+
+  useEffect(() => {
+    if (!editing) return undefined;
+
+    nameInputRef.current?.focus();
+    const handleModalKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeEditor();
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+
+      const focusableItems = Array.from(
+        modalRef.current?.querySelectorAll<HTMLElement>(focusableSelector) || [],
+      ).filter((element) => element.offsetParent !== null);
+      const firstItem = focusableItems[0];
+      const lastItem = focusableItems.at(-1);
+
+      if (!firstItem || !lastItem) {
+        event.preventDefault();
+        return;
+      }
+
+      if (event.shiftKey && document.activeElement === firstItem) {
+        event.preventDefault();
+        lastItem.focus();
+      } else if (!event.shiftKey && document.activeElement === lastItem) {
+        event.preventDefault();
+        firstItem.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handleModalKeyDown);
+    return () => window.removeEventListener("keydown", handleModalKeyDown);
+  }, [editing]);
+
+  useEffect(() => {
+    if (editing) {
+      wasEditingRef.current = true;
+      return;
+    }
+
+    if (wasEditingRef.current) {
+      editButtonRef.current?.focus();
+      wasEditingRef.current = false;
+    }
+  }, [editing]);
+
+  if (!user) {
+    return (
+      <div className="page profile-page">
+        <QueryNotice isLoading={isSessionLoading} isError={isError} />
+        <div className="state-card profile-empty-state">
+          <b>{isSessionLoading ? "Loading your profile" : "Sign in required"}</b>
+          <span>
+            {isSessionLoading
+              ? "Checking your GachaHub session..."
+              : "Redirecting you to the login page..."}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const heroBannerColor = bannerColor(user.bannerPresetId);
+
+  return (
+    <div className="page profile-page">
+      <div className="toast-slot" aria-live="polite">
+        {notice}
+      </div>
+      <QueryNotice isLoading={isSessionLoading} isError={isError} />
+      <div aria-hidden={editing ? "true" : undefined}>
+        <section className={`profile-hero ${heroBannerColor ? "profile-hero-solid" : ""}`}>
+          {heroBannerColor ? (
+            <div className="profile-banner-solid" style={{ backgroundColor: heroBannerColor }} />
+          ) : (
+            <Art tone="indigo">{glyph.sparkle}</Art>
+          )}
+          <button ref={editButtonRef} className="edit-profile" onClick={openEditor} type="button">
+            <FiEdit3 /> Edit Profile
+          </button>
+          <div className="profile-main">
+            <div className="profile-avatar">
+              <AvatarFace
+                fallback={<Art tone="blue">{displayName.charAt(0).toUpperCase() || "R"}</Art>}
+                image={user.image}
+              />
+            </div>
+            <div>
+              <h1>
+                {displayName} <span className="verified">{glyph.check}</span>
+              </h1>
+              {user.username ? (
+                <p className="profile-handle">@{user.username}</p>
+              ) : (
+                <p className="profile-handle">
+                  <Link href="/onboarding">Claim your @handle</Link>
+                </p>
+              )}
+              <p>{user.email}</p>
+              <p className="profile-user-id">
+                User ID: <code>{user.id}</code>
+                <button onClick={copyUserId} type="button">
+                  Copy
+                </button>
+              </p>
+              <blockquote>&quot;{bio}&quot;</blockquote>
+              <div className="social" aria-label="Profile actions">
+                <button aria-label="Copy profile link" onClick={shareProfile} type="button">
+                  <FiShare2 aria-hidden="true" />
+                </button>
+                <button
+                  aria-label="Messaging coming soon"
+                  disabled
+                  title="Messaging coming soon"
+                  type="button"
+                >
+                  <FiMessageCircle aria-hidden="true" />
+                </button>
+                <button
+                  aria-label="Explore communities"
+                  onClick={() => router.push("/explore")}
+                  type="button"
+                >
+                  <FiCompass aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section className="profile-stats">
+          <div>
+            <b>{postCount}</b>
+            <span>Posts</span>
+          </div>
+          <div>
+            <b>24.7K</b>
+            <span>Reputation</span>
+          </div>
+          <div>
+            <b>412</b>
+            <span>Followers</span>
+          </div>
+          <div>
+            <b>89</b>
+            <span>Following</span>
+          </div>
+          <aside className="reputation">
+            <div>
+              <small>Reputation Level</small>
+              <strong>24</strong>
+              <b>Elder Voyager</b>
+              <div className="progress">
+                <i />
+              </div>
+              <small>8,250 / 12,000</small>
+            </div>
+            <div className="rank-gem">{glyph.sparkle}</div>
+          </aside>
+        </section>
+        <div aria-label="Profile sections" className="tabs wide" role="tablist">
+          {["Overview", "Builds", "Posts", "Collections", "Achievements"].map((item) => (
+            <button
+              onClick={() => setTab(item as keyof typeof profileTabs)}
+              className={tab === item ? "active" : ""}
+              key={item}
+              aria-selected={tab === item}
+              role="tab"
+              type="button"
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+        <div className="profile-body">
+          <section>
+            <SectionTitle>
+              {activeTab.title} ({activeTab.count})
+            </SectionTitle>
+            {(tab === "Overview" || tab === "Builds") && (
+              <div className="build-grid">
+                {(tab === "Overview" ? builds.slice(0, 2) : builds).map((build, index) => (
+                  <BuildCard build={build} index={index} key={build.name} />
+                ))}
+              </div>
+            )}
+            {tab === "Posts" && (
+              <div className="panel profile-posts">
+                <QueryNotice isLoading={myPosts.isLoading} isError={myPosts.isError} />
+                {!myPosts.isLoading && recentPosts.length > 0 && <PostList posts={recentPosts} />}
+                {!myPosts.isLoading && !myPosts.isError && recentPosts.length === 0 && (
+                  <div className="state-card profile-empty-state">
+                    <b>No posts yet</b>
+                    <span>Your published posts will appear here.</span>
+                  </div>
+                )}
+              </div>
+            )}
+            {tab === "Collections" && (
+              <div className="state-card profile-empty-state">
+                <b>No saved collections yet</b>
+                <span>Save builds and posts to organize them here.</span>
+              </div>
+            )}
+            {tab === "Achievements" && (
+              <div className="achievement-grid">
+                {achievements.map(([title, description]) => (
+                  <article className="panel achievement-card" key={title}>
+                    <span aria-hidden="true">{glyph.diamond}</span>
+                    <div>
+                      <b>{title}</b>
+                      <small>{description}</small>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+          <aside className="panel leaderboard">
+            <div className="panel-head">
+              <h3>Top Performing Builds</h3>
+              <span className="panel-pill">Top 3</span>
+            </div>
+            {builds.slice(0, 3).map((build, index) => (
+              <div className="leader" key={build.name}>
+                <span className={`art-${build.tone}`}>{index + 1}</span>
+                <div>
+                  <b>
+                    {build.name} {build.role}
+                  </b>
+                  <small>
+                    {glyph.dot} {build.views}
+                  </small>
+                </div>
+                <strong>#{index + 1}</strong>
+              </div>
+            ))}
+          </aside>
+        </div>
+      </div>
+      {editing && (
+        <div className="modal-backdrop" onClick={closeEditor}>
+          <form
+            aria-modal="true"
+            className="modal profile-edit-modal"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={saveProfile}
+            ref={modalRef}
+            role="dialog"
+          >
+            <div className="panel-head">
+              <h2>Edit profile</h2>
+              <button aria-label="Close edit profile" type="button" onClick={closeEditor}>
+                <FiX />
+              </button>
+            </div>
+            <AvatarEditor user={user} />
+            <small className="field-limit">
+              Display name and bio changes are saved locally on this device only.
+            </small>
+            <BannerPicker currentId={user.bannerPresetId} />
+            <label>
+              Display name
+              <>
+                <input
+                  aria-describedby="limit-frontendappprofilepagetsx-0"
+                  maxLength={50}
+                  ref={nameInputRef}
+                  value={draftName}
+                  onChange={(event) => setDraftName(event.target.value)}
+                />
+                <FieldLimit id="limit-frontendappprofilepagetsx-0" value={draftName} max={50} />
+              </>
+            </label>
+            <label>
+              Bio
+              <>
+                <textarea
+                  aria-describedby="limit-frontendappprofilepagetsx-1"
+                  maxLength={1000}
+                  value={draftBio}
+                  onChange={(event) => setDraftBio(event.target.value)}
+                />
+                <FieldLimit id="limit-frontendappprofilepagetsx-1" value={draftBio} max={1000} />
+              </>
+            </label>
+            <button className="primary" type="submit">
+              Save changes
+            </button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
