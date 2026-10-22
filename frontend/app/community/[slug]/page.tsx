@@ -11,6 +11,7 @@ import { useCursorFeed } from "../../../hooks/useCursorFeed";
 import { useCurrentUser } from "../../../hooks/useCurrentUser";
 import { Art } from "../../../components/Art";
 import { BuildCard } from "../../../components/BuildCard";
+import { CommunityChat } from "../../../components/community/CommunityChat";
 import { PostList } from "../../../components/PostList";
 import { QueryNotice } from "../../../components/QueryNotice";
 import { SectionTitle } from "../../../components/SectionTitle";
@@ -36,6 +37,9 @@ const teamComps = [
   },
 ];
 
+// Tabs the page owns; every other tab is one of the game's categories.
+const FIXED_TABS = ["Overview", "Chat", "Builds", "Teams"];
+
 function CommunityContent() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -50,6 +54,7 @@ function CommunityContent() {
     const items = categoriesQuery.data || (api.usingMocks ? fallbacks.categories() : []);
     return [
       "Overview",
+      "Chat",
       ...items
         .filter((category: CategoryRecord) => category.isActive !== false)
         .map((category: CategoryRecord) => category.name),
@@ -61,9 +66,7 @@ function CommunityContent() {
   const selectedCategory = (
     categoriesQuery.data || (api.usingMocks ? fallbacks.categories() : [])
   ).find((category: CategoryRecord) => category.name === activeTab);
-  const categorySlug = ["Overview", "Builds", "Teams"].includes(activeTab)
-    ? undefined
-    : selectedCategory?.slug;
+  const categorySlug = FIXED_TABS.includes(activeTab) ? undefined : selectedCategory?.slug;
   const shouldLoadFeed = activeTab === "Overview" || Boolean(categorySlug);
   const { user, isLoading: sessionLoading } = useCurrentUser();
   const membership = useCommunityMembership(slug ?? "", user?.id);
@@ -248,7 +251,20 @@ function CommunityContent() {
             </>
           )}
 
-          {!["Overview", "Builds", "Teams"].includes(activeTab) && (
+          {activeTab === "Chat" && (
+            <CommunityChat
+              canJoin={!sessionLoading && !membership.isLoading}
+              isCheckingMembership={sessionLoading || membership.isLoading}
+              communityName={community.name}
+              isJoined={joined}
+              isJoining={membership.isPending}
+              onJoin={membership.toggle}
+              slug={slug ?? ""}
+              focusMessageId={searchParams.get("message") || undefined}
+            />
+          )}
+
+          {!FIXED_TABS.includes(activeTab) && (
             <>
               <SectionTitle>{activeTab} discussions</SectionTitle>
               <QueryNotice

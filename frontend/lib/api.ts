@@ -37,13 +37,10 @@ export const backendRoutes = {
   gameRestore: (gameSlug: any) => `/games/${encodePathParam(gameSlug)}/restore`,
   gameFlag: (gameSlug: any) => `/games/${encodePathParam(gameSlug)}/flag`,
   adminOverview: "/admin/overview",
-  adminReports: "/admin/reports",
-  reportClaim: (gameSlug: any, reportId: any) =>
-    `/games/${encodePathParam(gameSlug)}/reports/${encodePathParam(reportId)}/claim`,
-  reportResolve: (gameSlug: any, reportId: any) =>
-    `/games/${encodePathParam(gameSlug)}/reports/${encodePathParam(reportId)}/resolve`,
-  reportDismiss: (gameSlug: any, reportId: any) =>
-    `/games/${encodePathParam(gameSlug)}/reports/${encodePathParam(reportId)}/dismiss`,
+  platformCases: "/moderation/cases",
+  platformCase: (caseId: any) => `/moderation/cases/${encodePathParam(caseId)}`,
+  gameCases: (gameSlug: any) => `/games/${encodePathParam(gameSlug)}/moderation/cases`,
+  gameCase: (gameSlug: any, caseId: any) => `/games/${encodePathParam(gameSlug)}/moderation/cases/${encodePathParam(caseId)}`,
   adminUsers: "/admin/users",
   adminUserStatus: (userId: any) => `/admin/users/${encodePathParam(userId)}/status`,
   adminContent: "/admin/content",
@@ -95,10 +92,22 @@ export const backendRoutes = {
   chatMessageEdits: (messageId: any) => `/chat/messages/${encodePathParam(messageId)}/edits`,
   chatMessageReactions: (messageId: any) =>
     `/chat/messages/${encodePathParam(messageId)}/reactions`,
-  chatAcceptRequest: (conversationId: any) =>
-    `/chat/requests/${encodePathParam(conversationId)}/accept`,
+  chatEmotes: '/chat/emotes',
+  communityChat: (gameSlug: any) => `/games/${encodePathParam(gameSlug)}/chat`,
+  communityChatMembers: (gameSlug: any) => `/games/${encodePathParam(gameSlug)}/chat/members`,
+  communityChatMessages: (gameSlug: any, channelId: any) =>
+    `/games/${encodePathParam(gameSlug)}/chat/channels/${encodePathParam(channelId)}/messages`,
+  communityChatRead: (gameSlug: any, channelId: any) =>
+    `/games/${encodePathParam(gameSlug)}/chat/channels/${encodePathParam(channelId)}/read`,
+  communityChatMessage: (gameSlug: any, messageId: any) =>
+    `/games/${encodePathParam(gameSlug)}/chat/messages/${encodePathParam(messageId)}`,
+  communityChatReactions: (gameSlug: any, messageId: any) =>
+    `/games/${encodePathParam(gameSlug)}/chat/messages/${encodePathParam(messageId)}/reactions`,
+  chatAcceptRequest: (conversationId: any) => `/chat/requests/${encodePathParam(conversationId)}/accept`,
   chatDeclineRequest: (conversationId: any) =>
     `/chat/requests/${encodePathParam(conversationId)}/decline`,
+  chatBlockedUsers: '/chat/users/blocked',
+  chatUserBlock: (userId: any) => `/chat/users/${encodePathParam(userId)}/block`,
   chatBlockConversation: (conversationId: any) =>
     `/chat/conversations/${encodePathParam(conversationId)}/block`,
   chatConversation: (conversationId: string) =>
@@ -107,8 +116,9 @@ export const backendRoutes = {
     `/chat/conversations/${encodePathParam(conversationId)}/archive`,
   chatNotificationLevel: (conversationId: string) =>
     `/chat/conversations/${encodePathParam(conversationId)}/notification-level`,
-  chatGroups: "/chat/groups",
+  chatGroups: '/chat/groups',
   chatGroup: (conversationId: any) => `/chat/groups/${encodePathParam(conversationId)}`,
+  chatGroupPhoto: (conversationId: any) => `/chat/groups/${encodePathParam(conversationId)}/photo`,
   chatGroupMembers: (conversationId: any) =>
     `/chat/groups/${encodePathParam(conversationId)}/members`,
   chatGroupTransferOwnership: (conversationId: any) =>
@@ -117,18 +127,18 @@ export const backendRoutes = {
     `/chat/groups/${encodePathParam(conversationId)}/members/${encodePathParam(userId)}/role`,
   chatGroupLeave: (conversationId: string) =>
     `/chat/groups/${encodePathParam(conversationId)}/leave`,
-  chatDelivered: "/chat/messages/delivered",
-  linkPreviews: "/link-previews",
-  chatRead: (conversationId: string) =>
-    `/chat/conversations/${encodePathParam(conversationId)}/read`,
-  chatBackup: "/chat-backup",
-  chatBackupBlobs: "/chat-backup/blobs",
-  chatBackupChallenge: "/chat-backup/challenge",
-  chatBackupSchedule: "/chat-backup/schedule",
-  chatDevices: "/chat-devices",
-  chatDeviceKeyPackages: (deviceId: string) =>
-    `/chat-devices/${encodePathParam(deviceId)}/key-packages`,
-  chatDeviceKeyPackageStatus: (deviceId: string) =>
+  chatDelivered: '/chat/messages/delivered',
+  linkPreviews: '/link-previews',
+  chatRead: (conversationId: any) => `/chat/conversations/${encodePathParam(conversationId)}/read`,
+  presence: '/presence',
+  presenceMe: '/presence/me',
+  chatBackup: '/chat-backup',
+  chatBackupBlobs: '/chat-backup/blobs',
+  chatBackupChallenge: '/chat-backup/challenge',
+  chatBackupSchedule: '/chat-backup/schedule',
+  chatDevices: '/chat-devices',
+  chatDeviceKeyPackages: (deviceId: any) => `/chat-devices/${encodePathParam(deviceId)}/key-packages`,
+  chatDeviceKeyPackageStatus: (deviceId: any) =>
     `/chat-devices/${encodePathParam(deviceId)}/key-packages/status`,
   chatDevice: (deviceId: any) => `/chat-devices/${encodePathParam(deviceId)}`,
   chatDeviceSignOut: (deviceId: any) => `/chat-devices/${encodePathParam(deviceId)}/sign-out`,
@@ -314,10 +324,14 @@ async function request(path: any, options: any = {}) {
     } catch {
       message = await response.text().catch(() => "");
     }
-    const error: ApiError = new Error(message || `API request failed: ${response.status}`);
+    const error: ApiError = new Error(
+      response.status >= 500
+        ? 'Something went wrong. Please try again.'
+        : message || `API request failed: ${response.status}`,
+    );
     error.status = response.status;
     // Machine-readable reason from the backend (e.g. MEMBERSHIP_CHANGE_PENDING), when it sent one.
-    error.code = code;
+    error.code = response.status >= 500 ? undefined : code;
     if (response.status === 429) {
       const retryAfterSeconds = Number.parseInt(response.headers.get("Retry-After") ?? "", 10);
       error.retryAfterSeconds = retryAfterSeconds > 0 ? retryAfterSeconds : undefined;
@@ -469,10 +483,14 @@ async function mockResponse(path: any, options: any = {}) {
       meta: { limit: Number(params.get("limit") || 20), hasMore: false, nextCursor: null },
     };
   }
-  if (pathname.startsWith("/games/")) {
-    const slug = decodePathParam(pathname.split("/")[2]);
+  // Moderation requires explicit fixtures; never let the generic game mock impersonate a case.
+  if (pathname.startsWith('/moderation/cases') || /^\/games\/[^/]+\/moderation\/cases/.test(pathname)) {
+    throw new Error('Case moderation requires a running backend. Disable NEXT_PUBLIC_USE_MOCKS.');
+  }
+  if (pathname.startsWith('/games/')) {
+    const slug = decodePathParam(pathname.split('/')[2]);
     const game = mockGames.find((item: any) => item.slug === slug || item.id === slug);
-    if (!game) throw new Error("Game not found");
+    if (!game) throw new Error('Game not found');
     return game;
   }
   if (/^\/chat-devices\/[^/]+\/key-packages\/status$/.test(pathname)) {
@@ -628,6 +646,7 @@ export const api = {
     mutation(`/game-categories/${encodePathParam(categoryId)}`, updates, { method: "PATCH" }),
   getGameModerators: (gameSlug: any, options: any = {}) =>
     request(backendRoutes.gameModerators(gameSlug), options),
+  searchGameModeratorCandidates: (gameSlug: any, q: any, options: any = {}) => request(withQuery(`${backendRoutes.gameModerators(gameSlug)}/candidates`, { q }), options),
   assignGameModerator: (gameSlug: any, target: any) =>
     mutation(backendRoutes.gameModerators(gameSlug), target),
   removeGameModerator: (gameSlug: any, userId: any) =>
@@ -811,22 +830,29 @@ export const api = {
     };
   },
   getAdminOverview: (options: any = {}) => request(backendRoutes.adminOverview, options),
-  listReports: (query: any = {}, options: any = {}) =>
-    request(withQuery(backendRoutes.adminReports, query), options),
-  claimReport: (gameSlug: any, reportId: any) =>
-    mutation(backendRoutes.reportClaim(gameSlug, reportId), undefined, { method: "PATCH" }),
-  resolveReport: (gameSlug: any, reportId: any, { resolutionNote }: any = {}) =>
-    mutation(
-      backendRoutes.reportResolve(gameSlug, reportId),
-      { resolutionNote },
-      { method: "PATCH" },
-    ),
-  dismissReport: (gameSlug: any, reportId: any, { resolutionNote }: any = {}) =>
-    mutation(
-      backendRoutes.reportDismiss(gameSlug, reportId),
-      { resolutionNote },
-      { method: "PATCH" },
-    ),
+  searchPlatformModeratorCandidates: (q: any, options: any = {}) => request(withQuery('/platform-moderators/candidates', { q }), options),
+  grantPlatformModerator: (userId: any) => mutation(`/platform-moderators/${encodeURIComponent(userId)}`, undefined),
+  revokePlatformModerator: (userId: any) => mutation(`/platform-moderators/${encodeURIComponent(userId)}`, undefined, { method: 'DELETE' }),
+  listPlatformCases: ({ cursor, limit, status, targetType, scope, gameSlug, view }: any = {}, options: any = {}) =>
+    request(withQuery(backendRoutes.platformCases, { cursor, limit, status, targetType, scope, gameSlug, view }), options),
+  getPlatformCase: (caseId: any, options: any = {}) => request(backendRoutes.platformCase(caseId), options),
+  listPlatformCaseReports: (caseId: any, { cursor, limit }: any = {}, options: any = {}) =>
+    request(withQuery(`${backendRoutes.platformCase(caseId)}/reports`, { cursor, limit }), options),
+  searchPlatformCaseAssignees: (caseId: any, q: any, options: any = {}) => request(withQuery(`${backendRoutes.platformCase(caseId)}/assignees`, { q }), options),
+  assignPlatformCase: (caseId: any, { assigneeId }: any) => mutation(`${backendRoutes.platformCase(caseId)}/assignee`, { assigneeId }, { method: "PATCH" }),
+  claimPlatformCase: (caseId: any) => mutation(`${backendRoutes.platformCase(caseId)}/claim`, undefined, { method: "PATCH" }),
+  resolvePlatformCase: (caseId: any, { resolutionNote }: any = {}) => mutation(`${backendRoutes.platformCase(caseId)}/resolve`, { resolutionNote }, { method: "PATCH" }),
+  dismissPlatformCase: (caseId: any, { resolutionNote }: any = {}) => mutation(`${backendRoutes.platformCase(caseId)}/dismiss`, { resolutionNote }, { method: "PATCH" }),
+  listGameCases: (gameSlug: any, { cursor, limit, status, targetType, view }: any = {}, options: any = {}) =>
+    request(withQuery(backendRoutes.gameCases(gameSlug), { cursor, limit, status, targetType, view }), options),
+  getGameCase: (gameSlug: any, caseId: any, options: any = {}) => request(backendRoutes.gameCase(gameSlug, caseId), options),
+  listGameCaseReports: (gameSlug: any, caseId: any, { cursor, limit }: any = {}, options: any = {}) =>
+    request(withQuery(`${backendRoutes.gameCase(gameSlug, caseId)}/reports`, { cursor, limit }), options),
+  searchGameCaseAssignees: (gameSlug: any, caseId: any, q: any, options: any = {}) => request(withQuery(`${backendRoutes.gameCase(gameSlug, caseId)}/assignees`, { q }), options),
+  assignGameCase: (gameSlug: any, caseId: any, { assigneeId }: any) => mutation(`${backendRoutes.gameCase(gameSlug, caseId)}/assignee`, { assigneeId }, { method: "PATCH" }),
+  claimGameCase: (gameSlug: any, caseId: any) => mutation(`${backendRoutes.gameCase(gameSlug, caseId)}/claim`, undefined, { method: "PATCH" }),
+  resolveGameCase: (gameSlug: any, caseId: any, { resolutionNote }: any = {}) => mutation(`${backendRoutes.gameCase(gameSlug, caseId)}/resolve`, { resolutionNote }, { method: "PATCH" }),
+  dismissGameCase: (gameSlug: any, caseId: any, { resolutionNote }: any = {}) => mutation(`${backendRoutes.gameCase(gameSlug, caseId)}/dismiss`, { resolutionNote }, { method: "PATCH" }),
   listAdminUsers: (query: any = {}, options: any = {}) =>
     request(withQuery(backendRoutes.adminUsers, query), options),
   setUserStatus: (userId: any, { status, reason }: any) =>
@@ -884,6 +910,9 @@ export const api = {
     mutation(backendRoutes.chatAcceptRequest(conversationId)),
   declineChatRequest: (conversationId: any) =>
     mutation(backendRoutes.chatDeclineRequest(conversationId)),
+  getBlockedChatUsers: (options: any = {}) => request(backendRoutes.chatBlockedUsers, options),
+  unblockChatUser: (userId: any) =>
+    mutation(backendRoutes.chatUserBlock(userId), undefined, { method: 'DELETE' }),
   blockChatConversation: (conversationId: any) =>
     mutation(backendRoutes.chatBlockConversation(conversationId)),
   archiveChatConversation: (conversationId: string) =>
@@ -902,10 +931,14 @@ export const api = {
       { notificationLevel, mutedUntil },
       { method: "PATCH" },
     ),
-  createGroupChat: ({ title, photoUrl, memberUserIds }: any) =>
-    mutation(backendRoutes.chatGroups, { title, photoUrl, memberUserIds }),
-  updateGroupChat: (conversationId: any, { title, photoUrl }: any) =>
-    mutation(backendRoutes.chatGroup(conversationId), { title, photoUrl }, { method: "PATCH" }),
+  createGroupChat: ({ title, memberUserIds }: any) =>
+    mutation(backendRoutes.chatGroups, { title, memberUserIds }),
+  updateGroupChat: (conversationId: any, { title }: any) =>
+    mutation(backendRoutes.chatGroup(conversationId), { title }, { method: 'PATCH' }),
+  setGroupPhoto: (conversationId: any, photoMediaUploadId: any) =>
+    mutation(backendRoutes.chatGroupPhoto(conversationId), { photoMediaUploadId }, { method: 'PATCH' }),
+  removeGroupPhoto: (conversationId: any) =>
+    mutation(backendRoutes.chatGroupPhoto(conversationId), undefined, { method: 'DELETE' }),
   addGroupMembers: (conversationId: any, userIds: any) =>
     mutation(backendRoutes.chatGroupMembers(conversationId), { userIds }),
   removeGroupMembers: (conversationId: any, userIds: any) =>
@@ -929,10 +962,52 @@ export const api = {
       lastReadMessageId ? { lastReadMessageId } : {},
     ),
   // Reactions are plaintext (not part of the encrypted envelope) - one reaction per user per message.
-  reactToMessage: (messageId: any, emoji: any) =>
-    mutation(backendRoutes.chatMessageReactions(messageId), { emoji }),
+  // `choice` is { kind: 'emoji', emoji } or { kind: 'emote', emote }; the server only needs the id.
+  reactToMessage: (messageId: any, choice: any) =>
+    mutation(
+      backendRoutes.chatMessageReactions(messageId),
+      choice.kind === 'emote' ? { emoteId: choice.emote.id } : { emoji: choice.emoji },
+    ),
+  getChatEmotes: () => request(backendRoutes.chatEmotes),
+  // Presence: who is online, and your own choice to appear offline for a while.
+  getMyPresence: () => request(backendRoutes.presenceMe),
+  /** `status` is ONLINE, or INVISIBLE (shown as Offline) with a `duration` of 15m, 1h, 8h, 24h, 3d or forever. */
+  setMyPresence: ({ status, duration }: any) =>
+    mutation(backendRoutes.presenceMe, { status, duration }, { method: 'PUT' }),
+  /** Online or offline for up to 100 people; anyone the viewer may not see reads as offline. */
+  getPresence: (userIds: any) =>
+    request(withQuery(backendRoutes.presence, { userIds: userIds.join(',') })),
+  // Community chat: public rooms of a game community, plaintext so moderators can read and remove messages.
+  getCommunityChannels: (gameSlug: any) => request(backendRoutes.communityChat(gameSlug)),
+  /** Members to suggest after an @: whose name or handle starts like `q`. */
+  searchCommunityMembers: (gameSlug: any, q: any, /** @type {{ signal?: AbortSignal }} */ options: any = {}) =>
+    request(withQuery(backendRoutes.communityChatMembers(gameSlug), { q }), { signal: options.signal }),
+  getCommunityMessages: (gameSlug: any, channelId: any, query: any = {}) =>
+    request(withQuery(backendRoutes.communityChatMessages(gameSlug, channelId), query)),
+  getCommunityMessage: (gameSlug: any, messageId: any) =>
+    request(backendRoutes.communityChatMessage(gameSlug, messageId)),
+  sendCommunityMessage: (gameSlug: any, channelId: any, message: any) =>
+    mutation(backendRoutes.communityChatMessages(gameSlug, channelId), message),
+  editCommunityMessage: (gameSlug: any, messageId: any, content: any) =>
+    mutation(backendRoutes.communityChatMessage(gameSlug, messageId), { content }, { method: 'PATCH' }),
+  removeCommunityMessage: (gameSlug: any, messageId: any, reason: any) =>
+    mutation(
+      backendRoutes.communityChatMessage(gameSlug, messageId),
+      reason ? { reason } : {},
+      { method: 'DELETE' },
+    ),
+  // `choice` is { kind: 'emoji', emoji } or { kind: 'emote', emote }, same as direct messages.
+  reactToCommunityMessage: (gameSlug: any, messageId: any, choice: any) =>
+    mutation(
+      backendRoutes.communityChatReactions(gameSlug, messageId),
+      choice.kind === 'emote' ? { emoteId: choice.emote.id } : { emoji: choice.emoji },
+    ),
+  unreactToCommunityMessage: (gameSlug: any, messageId: any) =>
+    mutation(backendRoutes.communityChatReactions(gameSlug, messageId), undefined, { method: 'DELETE' }),
+  markCommunityRead: (gameSlug: any, channelId: any, messageId: any) =>
+    mutation(backendRoutes.communityChatRead(gameSlug, channelId), messageId ? { messageId } : {}),
   removeReaction: (messageId: any) =>
-    mutation(backendRoutes.chatMessageReactions(messageId), undefined, { method: "DELETE" }),
+    mutation(backendRoutes.chatMessageReactions(messageId), undefined, { method: 'DELETE' }),
   // Own message only; soft delete (server clears the ciphertext, the row stays for history).
   /** Changes the signed-in user's settings (for now: sendReadReceipts, messageRequestSetting); answers with the /users/me shape. */
   updateProfile: (changes: any) =>

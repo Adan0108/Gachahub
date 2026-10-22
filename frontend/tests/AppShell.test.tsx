@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AdminShell } from "../components/admin/AdminShell";
 import { AppShell } from "../components/AppShell";
 import type { ComponentProps } from "react";
 import type { Topbar } from "../components/Topbar";
@@ -20,6 +21,7 @@ vi.mock("../hooks/chat/useDeviceIdentity", () => ({ useDeviceIdentity: vi.fn() }
 vi.mock("../hooks/chat/useChatSocket", () => ({ useChatSocket: vi.fn() }));
 vi.mock("../hooks/useAppSocket", () => ({ useAppSocket: vi.fn() }));
 vi.mock("../hooks/useNotificationSocket", () => ({ useNotificationSocket: vi.fn() }));
+vi.mock("../hooks/presence/usePresenceSocket", () => ({ usePresenceSocket: vi.fn() }));
 vi.mock("../components/DevToolsPanel", () => ({ DevToolsPanel: () => null }));
 vi.mock("../components/Topbar", () => ({
   Topbar: ({ onMenu, menuButtonRef }: ComponentProps<typeof Topbar>) => (
@@ -67,4 +69,16 @@ describe("AppShell navigation", () => {
       "open",
     );
   });
+});
+
+it("preserves the existing admin shell through queue, detail and back navigation", () => {
+  const content = () => <AppShell><AdminShell user={{ role: "ADMIN", name: "Admin" }}><p>Review</p></AdminShell></AppShell>;
+  mocks.pathname = "/admin/moderation";
+  const page = render(content());
+  for (const route of ["/moderation/cases", "/moderation/cases/case", "/admin/moderation"]) {
+    mocks.pathname = route; page.rerender(content());
+    expect(screen.getByRole("navigation", { name: "Admin navigation" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Primary navigation" })).not.toBeInTheDocument();
+    if (route.startsWith("/moderation/cases")) expect(screen.getByRole("link", { name: "Cases" })).toHaveAttribute("aria-current", "page");
+  }
 });

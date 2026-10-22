@@ -3,6 +3,8 @@
 import { FieldLimit } from "../../components/FieldLimit";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
+import { casePath } from "../../lib/moderation";
 import { useState } from "react";
 import type { GameRecord } from "../../lib/pageTypes";
 import { FiFlag } from "react-icons/fi";
@@ -64,6 +66,7 @@ export default function ModeratorPage() {
               <section className="admin-panel moderator-game-card" key={game.id}>
                 <div className="moderator-game-heading">
                   <h2>{game.name}</h2>
+                  <Link href={casePath(game.slug)}>Moderation cases</Link>
                   {archived ? (
                     <span className="admin-status admin-status-archived">ARCHIVED</span>
                   ) : null}

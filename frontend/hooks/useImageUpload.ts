@@ -11,15 +11,26 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 // Mirrors the policy MediaService enforces at confirm time (see backend .env.example for the
 // Cloudinary preset limits) - this is only for instant feedback.
-function assertAcceptableImage(file: File) {
-  // An empty type means the browser couldn't infer one, not that the file is wrong; the
-  // backend decides by the real format after upload.
-  if (file.type && !IMAGE_ACCEPT.split(",").includes(file.type)) {
-    throw new Error("Use a JPG, PNG, WebP or GIF image");
+const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "gif"];
+
+export function imageFileProblem(file: File) {
+  // With no type from the browser (Windows gives none for many files) the extension decides; no extension either is left to the backend.
+  const extension = /\.([A-Za-z0-9]+)$/.exec(file.name ?? "")?.[1]?.toLowerCase();
+  const isImage = file.type
+    ? IMAGE_ACCEPT.split(",").includes(file.type)
+    : !extension || IMAGE_EXTENSIONS.includes(extension);
+  if (!isImage) {
+    return "Use a JPG, PNG, WebP or GIF image";
   }
   if (file.size > MAX_IMAGE_BYTES) {
-    throw new Error("Image must be 10 MB or smaller");
+    return "Image must be 10 MB or smaller";
   }
+  return null;
+}
+
+function assertAcceptableImage(file: File) {
+  const problem = imageFileProblem(file);
+  if (problem) throw new Error(problem);
 }
 
 /**
@@ -65,17 +76,25 @@ export function useImageUpload({ purpose, currentUrl, save, getUrl, onSaved }: I
   // clears, so a failed save never leaves a not-actually-saved image on screen.
   const previewUrl = useLocalFileUrl(file, Boolean(file) && mutation.isPending);
 
-  // For an <input type="file" onChange>; resets the input so picking the same file twice still fires.
-  const pickFile = (event: ChangeEvent<HTMLInputElement>) => {
-    const selected = event.target.files?.[0];
-    event.target.value = "";
+  const start = (selected: File | null | undefined) => {
     if (!selected) return;
     setFile(selected);
     mutation.mutate(selected);
   };
 
+  // For an <input type="file" onChange>; resets the input so picking the same file twice still fires.
+  const pickFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = event.target.files?.[0];
+    event.target.value = "";
+    start(selected);
+  };
+
+  // For files dropped onto the slot: the first one is used.
+  const pickDropped = (files: FileList | File[] | null | undefined) => start(files?.[0]);
+
   return {
     pickFile,
+    pickDropped,
     displayUrl: previewUrl || resolvedOverride || currentUrl,
     isPending: mutation.isPending,
     error: mutation.isError ? mutation.error.message || "Upload failed" : null,

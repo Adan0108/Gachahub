@@ -63,8 +63,9 @@ export function useMessageEdit<Response>({
       return next;
     });
 
-  const leave = () => {
-    setDraft(target?.previousDraft ?? "");
+  /** Leaves edit mode; the borrowed draft goes back unless the caller restores it somewhere else (a switch to another conversation). */
+  const leave = ({ restoreDraft = true } = {}) => {
+    if (restoreDraft) setDraft(target?.previousDraft ?? "");
     setTarget(null);
     setError("");
   };

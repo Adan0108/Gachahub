@@ -26,11 +26,12 @@ describe('MediaRepository.findOrphanedSingleImageUploads', () => {
     expect(prisma.mediaUpload.findMany).toHaveBeenCalledWith({
       where: {
         status: 'ATTACHED',
-        purpose: { in: ['AVATAR', 'GAME_ICON', 'GAME_BANNER'] },
+        purpose: { in: ['AVATAR', 'GAME_ICON', 'GAME_BANNER', 'GROUP_PHOTO'] },
         updatedAt: { lt: cutoff },
         avatarFor: null,
         gameIconFor: null,
         gameBannerFor: null,
+        chatGroupPhotoFor: null,
       },
       orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
       take: 25,

@@ -33,6 +33,50 @@ export class BlocksRepository {
     });
   }
 
+  /** Of these people, the ones who have blocked this person. */
+  async findBlockersAmong(blockedId: string, candidateIds: string[]) {
+    if (candidateIds.length === 0) {
+      return [];
+    }
+
+    return this.prisma.chatUserBlock.findMany({
+      where: { blockedId, blockerId: { in: candidateIds } },
+      select: { blockerId: true },
+    });
+  }
+
+  /** The people this person has blocked, newest block first. */
+  findBlockedUsers(blockerId: string, limit: number) {
+    return this.prisma.chatUserBlock.findMany({
+      where: { blockerId, blocked: { status: 'ACTIVE' } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+      select: {
+        createdAt: true,
+        blocked: {
+          select: { id: true, name: true, username: true, image: true },
+        },
+      },
+    });
+  }
+
+  /** Blocks between this person and any of the candidates, whichever of them blocked. */
+  async findBlocksBetween(userId: string, candidateIds: string[]) {
+    if (candidateIds.length === 0) {
+      return [];
+    }
+
+    return this.prisma.chatUserBlock.findMany({
+      where: {
+        OR: [
+          { blockerId: userId, blockedId: { in: candidateIds } },
+          { blockedId: userId, blockerId: { in: candidateIds } },
+        ],
+      },
+      select: { blockerId: true, blockedId: true },
+    });
+  }
+
   // upsert keeps blocking idempotent
   create(blockerId: string, blockedId: string) {
     return this.prisma.chatUserBlock.upsert({

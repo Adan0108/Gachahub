@@ -43,21 +43,27 @@ model User {
   interests    UserInterest[]
   postSaves    PostSave[]
 
-  followers            UserFollow[]          @relation("UserFollowers")
-  following            UserFollow[]          @relation("UserFollowing")
-  moderatedGames       GameModerator[]       @relation("GameModeratorUser")
-  assignedModerators   GameModerator[]       @relation("GameModeratorAssigner")
-  createdChats         ChatConversation[]    @relation("ChatConversationCreator")
+  followers            UserFollow[]           @relation("UserFollowers")
+  following            UserFollow[]           @relation("UserFollowing")
+  moderatedGames       GameModerator[]        @relation("GameModeratorUser")
+  assignedModerators   GameModerator[]        @relation("GameModeratorAssigner")
+  createdChats         ChatConversation[]     @relation("ChatConversationCreator")
   gameMemberships      GameMember[]
   chatParticipants     ChatParticipant[]
-  sentChatMessages     ChatMessage[]         @relation("ChatMessageSender")
+  sentChatMessages     ChatMessage[]          @relation("ChatMessageSender")
   chatMessageReceipts  ChatMessageReceipt[]
-  directChatPairsAsA   ChatDirectPair[]      @relation("ChatDirectPairUserA")
-  directChatPairsAsB   ChatDirectPair[]      @relation("ChatDirectPairUserB")
+  directChatPairsAsA   ChatDirectPair[]       @relation("ChatDirectPairUserA")
+  directChatPairsAsB   ChatDirectPair[]       @relation("ChatDirectPairUserB")
   chatMessageReactions ChatMessageReaction[]
-  createdChatEmotes    ChatEmote[]           @relation("ChatEmoteCreator")
-  blockedUsers         ChatUserBlock[]       @relation("ChatUserBlockBlocker")
-  blockedBy            ChatUserBlock[]       @relation("ChatUserBlockBlocked")
+  createdChatEmotes    ChatEmote[]            @relation("ChatEmoteCreator")
+  gameChannelMessages  GameChannelMessage[]   @relation("GameChannelMessageAuthor")
+  gameChannelDeletions GameChannelMessage[]   @relation("GameChannelMessageDeleter")
+  gameChannelReactions GameChannelReaction[]
+  gameChannelReads     GameChannelReadState[]
+  chatTimeouts         GameChatTimeout[]      @relation("GameChatTimeoutMember")
+  chatTimeoutsGiven    GameChatTimeout[]      @relation("GameChatTimeoutIssuer")
+  blockedUsers         ChatUserBlock[]        @relation("ChatUserBlockBlocker")
+  blockedBy            ChatUserBlock[]        @relation("ChatUserBlockBlocked")
 
   reportsFiled            Report[]         @relation("ReportsFiled")
   moderationCasesAssigned ModerationCase[] @relation("ModerationCasesAssigned")
@@ -148,6 +154,7 @@ model UserFollow {
 
 enum UserRole {
   USER
+  PLATFORM_MODERATOR
   ADMIN
 }
 
@@ -205,6 +212,8 @@ model Game {
   posts           Post[]
   members         GameMember[]
   chatEmotes      ChatEmote[]
+  channels        GameChannel[]
+  chatTimeouts    GameChatTimeout[]
   moderationCases ModerationCase[]
   auditLogs       AuditLog[]
 
@@ -335,13 +344,15 @@ enum ChatEmoteScope {
 }
 
 model ChatConversation {
-  id            String                 @id @default(cuid())
-  type          ChatConversationType   @default(DIRECT)
-  status        ChatConversationStatus @default(ACTIVE)
-  title         String?
-  photoUrl      String?
-  createdBy     String?
-  lastMessageId String?
+  id                 String                 @id @default(cuid())
+  type               ChatConversationType   @default(DIRECT)
+  status             ChatConversationStatus @default(ACTIVE)
+  title              String?
+  photoUrl           String?
+  /// MediaUpload behind `photoUrl`, so replacing or removing the photo can release the old asset.
+  photoMediaUploadId String?                @unique
+  createdBy          String?
+  lastMessageId      String?
 
   /// MLS group epoch; advanced only by an atomic compare-and-set so one Commit wins each epoch.
   mlsEpoch Int @default(0)
@@ -353,15 +364,16 @@ model ChatConversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  creator         User?             @relation("ChatConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
-  participants    ChatParticipant[]
-  directPair      ChatDirectPair?
-  messages        ChatMessage[]
-  mlsHandshakes   MlsHandshake[]
-  mlsWelcomes     MlsWelcome[]
-  mlsMembers      MlsGroupMember[]
-  mlsCommitFaults MlsCommitFault[]
-  mlsGroupInfo    MlsGroupInfo?
+  creator          User?             @relation("ChatConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  photoMediaUpload MediaUpload?      @relation("ChatGroupPhotoUpload", fields: [photoMediaUploadId], references: [id], onDelete: SetNull)
+  participants     ChatParticipant[]
+  directPair       ChatDirectPair?
+  messages         ChatMessage[]
+  mlsHandshakes    MlsHandshake[]
+  mlsWelcomes      MlsWelcome[]
+  mlsMembers       MlsGroupMember[]
+  mlsCommitFaults  MlsCommitFault[]
+  mlsGroupInfo     MlsGroupInfo?
 
   @@index([type])
   @@index([status])
@@ -466,6 +478,158 @@ model ChatMessage {
   @@map("chat_messages")
 }
 
+enum GameChannelKind {
+  TEXT
+  ANNOUNCEMENT
+}
+
+/// A chat room inside one game community. Plaintext on purpose (unlike DMs): moderators must be able to read and remove messages.
+model GameChannel {
+  id     String @id @default(cuid())
+  gameId String
+
+  slug  String
+  name  String
+  topic String?
+  kind  GameChannelKind @default(TEXT)
+
+  sortOrder       Int       @default(0)
+  /// Minimum seconds between one member's messages; 0 is off, moderators are exempt.
+  slowmodeSeconds Int       @default(0)
+  /// Only moderators can post while locked.
+  isLocked        Boolean   @default(false)
+  archivedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  game       Game                   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  messages   GameChannelMessage[]
+  readStates GameChannelReadState[]
+
+  @@unique([gameId, slug])
+  @@index([gameId, sortOrder])
+  @@map("game_channels")
+}
+
+model GameChannelMessage {
+  id        String  @id @default(cuid())
+  channelId String
+  /// Null once the author's account is gone; shown as a deleted user.
+  authorId  String?
+
+  content         String
+  replyToId       String?
+  /// Lets a client retry a send without posting twice.
+  clientMessageId String?
+
+  editedAt     DateTime?
+  /// Soft delete: the text stays for moderation evidence and is never returned.
+  deletedAt    DateTime?
+  deletedById  String?
+  deleteReason String?
+
+  createdAt DateTime @default(now())
+
+  channel   GameChannel               @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author    User?                     @relation("GameChannelMessageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  deletedBy User?                     @relation("GameChannelMessageDeleter", fields: [deletedById], references: [id], onDelete: SetNull)
+  replyTo   GameChannelMessage?       @relation("GameChannelMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   GameChannelMessage[]      @relation("GameChannelMessageReplies")
+  reactions GameChannelReaction[]
+  media     GameChannelMessageMedia[]
+
+  @@unique([authorId, clientMessageId])
+  @@index([channelId, createdAt, id])
+  @@index([authorId])
+  @@index([replyToId])
+  @@map("game_channel_messages")
+}
+
+model GameChannelReaction {
+  id        String  @id @default(cuid())
+  messageId String
+  userId    String
+  emoteId   String?
+  emoji     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  message GameChannelMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Cascade: a reaction must carry exactly one of emoji/emoteId, so a hard-deleted emote takes its reactions.
+  emote   ChatEmote?         @relation(fields: [emoteId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
+  @@index([emoteId])
+  @@map("game_channel_reactions")
+}
+
+/// Where one member has read up to in one channel; unread is counted from here.
+/// A member barred from the community chat until a time, set by a moderator; one row per member, replaced on a new timeout.
+model GameChatTimeout {
+  id          String   @id @default(cuid())
+  gameId      String
+  userId      String
+  until       DateTime
+  reason      String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  game      Game  @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user      User  @relation("GameChatTimeoutMember", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("GameChatTimeoutIssuer", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([gameId, userId])
+  @@index([until])
+  @@map("game_chat_timeouts")
+}
+
+model GameChannelReadState {
+  userId    String
+  channelId String
+
+  lastReadAt        DateTime
+  lastReadMessageId String?
+
+  updatedAt DateTime @updatedAt
+
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel GameChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@id([userId, channelId])
+  @@index([channelId])
+  @@map("game_channel_read_states")
+}
+
+/// An image attached to a community chat message.
+model GameChannelMessageMedia {
+  id            String @id @default(cuid())
+  messageId     String
+  mediaUploadId String @unique
+
+  publicId String
+  url      String
+
+  sortOrder Int @default(0)
+
+  width  Int?
+  height Int?
+  bytes  Int?
+  format String?
+
+  createdAt DateTime @default(now())
+
+  message     GameChannelMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  mediaUpload MediaUpload        @relation(fields: [mediaUploadId], references: [id], onDelete: Restrict)
+
+  @@index([messageId, sortOrder])
+  @@map("game_channel_message_media")
+}
+
 model ChatMessageMedia {
   id            String @id @default(cuid())
   messageId     String
@@ -512,6 +676,7 @@ model ChatMessageReceipt {
   @@map("chat_message_receipts")
 }
 
+// DB CHECK chat_message_reactions_one_kind: exactly one of emoji/emoteId (hand-added, not in Prisma schema).
 model ChatMessageReaction {
   id        String  @id @default(cuid())
   messageId String
@@ -557,7 +722,8 @@ model ChatEmote {
   game      Game? @relation(fields: [gameId], references: [id], onDelete: Cascade)
   createdBy User? @relation("ChatEmoteCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
-  reactions ChatMessageReaction[]
+  reactions        ChatMessageReaction[]
+  channelReactions GameChannelReaction[]
 
   // Only game-scoped emotes; global shortcode uniqueness is a hand-added partial index in migration 20260805093000.
   @@unique([scope, gameId, shortcode])
@@ -744,6 +910,8 @@ enum MediaPurpose {
   BANNER
   GAME_ICON
   GAME_BANNER
+  GROUP_PHOTO
+  COMMUNITY
 }
 
 enum MediaResourceType {
@@ -803,12 +971,14 @@ model MediaUpload {
   attachedAt DateTime?
   deletedAt  DateTime?
 
-  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  postMedia        PostMedia?
-  chatMessageMedia ChatMessageMedia?
-  gameIconFor      Game?             @relation("GameIconUpload")
-  gameBannerFor    Game?             @relation("GameBannerUpload")
-  avatarFor        User?             @relation("UserAvatarUpload")
+  user                  User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postMedia             PostMedia?
+  chatMessageMedia      ChatMessageMedia?
+  gameIconFor           Game?                    @relation("GameIconUpload")
+  gameBannerFor         Game?                    @relation("GameBannerUpload")
+  avatarFor             User?                    @relation("UserAvatarUpload")
+  chatGroupPhotoFor     ChatConversation?        @relation("ChatGroupPhotoUpload")
+  communityMessageMedia GameChannelMessageMedia?
 
   @@index([userId, status, createdAt])
   @@index([status, createdAt])
@@ -895,23 +1065,22 @@ enum ModerationRiskLevel {
 model Report {
   id         String           @id @default(cuid())
   caseId     String
-  reporterId String
+  reporterId String?
   targetType ReportTargetType
   targetId   String
   reasonCode ReportReason
   details    String?
 
-  /// Immutable moderation evidence captured when this report is created; structure defined later.
+  /// Immutable moderation evidence; versioned shape in reports/domain/report-target-snapshot.ts.
   targetSnapshot Json?
 
   createdAt DateTime @default(now())
 
-  reporter User           @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  reporter User?          @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: SetNull)
   case     ModerationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
-  // TODO(manual migration): replace/remove the existing reports_open_target_key partial
-  // unique index from migration 20260918160000_add_reports: Report no longer owns status.
-  // Do not replace it with an unconditional reporter/target unique constraint.
+  // Reporter duplication is checked while holding the case row lock. Closed
+  // cases allow re-reporting; no unconditional reporter/target unique constraint.
   @@index([reporterId, createdAt])
   @@index([caseId, createdAt])
   @@index([targetType, targetId])
@@ -928,6 +1097,7 @@ model ModerationCase {
   status              ModerationCaseStatus @default(OPEN)
   reportCount         Int                  @default(0)
   uniqueReporterCount Int                  @default(0)
+  lastReportedAt      DateTime             @default(now())
   currentRiskScore    Float?
   currentRiskLevel    ModerationRiskLevel?
 
@@ -944,10 +1114,13 @@ model ModerationCase {
   assignedModerator User?    @relation("ModerationCasesAssigned", fields: [assignedModeratorId], references: [id], onDelete: SetNull)
   resolvedBy        User?    @relation("ModerationCasesResolved", fields: [resolvedById], references: [id], onDelete: SetNull)
 
-  // TODO(manual migration): create a partial unique index on (targetType, targetId)
-  // WHERE status IN ('OPEN', 'IN_REVIEW'). Prisma cannot express this constraint.
+  // Partial unique index moderation_cases_open_target_key in migration
+  // 20261015060000: (targetType, targetId) WHERE status IN ('OPEN', 'IN_REVIEW').
+  // Prisma cannot express this constraint; preserve the hand-written index.
   // Do not add an unconditional @@unique: closed cases must allow a new case for the target.
   @@index([gameId, status, createdAt])
+  @@index([lastReportedAt, id])
+  @@index([gameId, status, lastReportedAt, id])
   @@index([gameId, createdAt])
   @@index([status, currentRiskLevel, createdAt])
   @@index([targetType, targetId])
@@ -960,9 +1133,14 @@ enum AuditAction {
   POST_RESTORED
   COMMENT_HIDDEN
   COMMENT_RESTORED
+  // Historical audit labels; new workflow writes use CASE_* below.
   REPORT_CLAIMED
   REPORT_RESOLVED
   REPORT_DISMISSED
+  CASE_CLAIMED
+  CASE_ASSIGNED
+  CASE_RESOLVED
+  CASE_DISMISSED
   MODERATOR_ASSIGNED
   MODERATOR_REMOVED
   USER_BANNED
@@ -971,14 +1149,22 @@ enum AuditAction {
   GAME_ARCHIVED
   GAME_RESTORED
   GAME_FLAGGED
+  CHAT_USER_TIMED_OUT
+  CHAT_TIMEOUT_LIFTED
+  CHAT_CHANNEL_CREATED
+  CHAT_CHANNEL_UPDATED
+  CHAT_MESSAGE_REMOVED
 }
 
 enum AuditTargetType {
   POST
   COMMENT
-  REPORT
+  REPORT // Historical audit targets remain readable.
+  MODERATION_CASE
   USER
   GAME
+  CHANNEL
+  CHAT_MESSAGE
 }
 
 // Append-only record of moderator/admin actions. actorId and gameId are SetNull so the trail
@@ -1026,6 +1212,7 @@ enum NotificationEntityType {
   POST
   COMMENT
   MESSAGE
+  COMMUNITY_MESSAGE
   CONVERSATION
   USER
 }
@@ -1041,6 +1228,11 @@ model Notification {
   entityType NotificationEntityType
   entityId   String
 
+  /// The chat conversation a chat notification belongs to.
+  conversationId String?
+  /// How many messages a stacked chat notification stands for (one row per person and conversation while unread).
+  count          Int     @default(1)
+
   readAt DateTime?
 
   createdAt DateTime @default(now())
@@ -1053,6 +1245,7 @@ model Notification {
   @@index([recipientId, createdAt])
   @@index([recipientId, readAt])
   @@index([actorId])
+  @@index([recipientId, conversationId])
   @@map("notifications")
 }
 

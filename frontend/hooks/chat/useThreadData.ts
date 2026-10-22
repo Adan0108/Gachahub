@@ -9,7 +9,12 @@ import { useNewMessageAnnouncement } from "./useNewMessageAnnouncement";
 import { useNowTick } from "../useNowTick";
 import { useSafetyNumbers } from "./useSafetyNumbers";
 import { otherActiveMemberIds, participantUser } from "../../lib/chat/chatDisplay";
-import { buildThreadItems, eventsForDisplay, readableNeighbors } from "../../lib/chat/chatThread";
+import {
+  buildThreadItems,
+  eventsForDisplay,
+  newestUnreadableFromOthers,
+  readableNeighbors,
+} from "../../lib/chat/chatThread";
 import { applyEdits, isEditMessage } from "../../lib/chat/messageEdits";
 import type { RawReaction } from "../../lib/chat/chatReactions";
 import type { ReceiptLike } from "../../lib/chat/messageStatus";
@@ -117,6 +122,10 @@ export function useThreadData(
         .map((message) => message.id),
     [newestItems, userId, decrypted],
   );
+  const unreadableMessageId = useMemo(
+    () => newestUnreadableFromOthers(visibleMessages, decrypted, userId),
+    [visibleMessages, decrypted, userId],
+  );
   const lastMessage = newestPage ? (visibleMessages.at(-1) ?? null) : undefined;
   const announcement = useNewMessageAnnouncement(
     conversationId,
@@ -140,6 +149,7 @@ export function useThreadData(
     safetyPeerIds,
     threadItems,
     readableMessageIds,
+    unreadableMessageId,
     announcement,
     now,
   };

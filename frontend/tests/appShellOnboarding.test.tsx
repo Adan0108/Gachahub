@@ -30,6 +30,7 @@ vi.mock("../hooks/chat/useChatSocket", () => ({
 }));
 vi.mock("../hooks/useAppSocket", () => ({ useAppSocket: () => undefined }));
 vi.mock("../hooks/useNotificationSocket", () => ({ useNotificationSocket: () => undefined }));
+vi.mock("../hooks/presence/usePresenceSocket", () => ({ usePresenceSocket: () => undefined }));
 vi.mock("../components/Topbar", () => ({ Topbar: () => null }));
 vi.mock("../components/DevToolsPanel", () => ({ DevToolsPanel: () => null }));
 

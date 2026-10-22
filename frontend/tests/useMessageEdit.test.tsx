@@ -108,6 +108,16 @@ describe("useMessageEdit", () => {
     expect(view.result.current.draft).toBe("half typed");
   });
 
+  it("can leave without touching the draft, when the caller puts it back somewhere else", () => {
+    const { view } = setup();
+    startEditing(view);
+
+    act(() => view.result.current.edit.leave({ restoreDraft: false }));
+
+    expect(view.result.current.edit.target).toBeNull();
+    expect(view.result.current.draft).toBe("hello");
+  });
+
   it("still gives back the original draft after switching to another message", () => {
     const { view } = setup();
     startEditing(view, "first");

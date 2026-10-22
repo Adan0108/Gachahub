@@ -6,6 +6,7 @@ import { api } from "../../lib/api";
 import { applyReceiptsEvent } from "../../lib/chat/receiptEvents";
 import { queryKeys } from "../../lib/queries";
 import { useSharedSocket } from "../../lib/socket/sharedSocket";
+import { logTiming } from "../../lib/chat/chatTiming";
 import { typingSignal } from "../../lib/chat/chatTypingSignal";
 import type { ReceiptsEvent } from "../../lib/chat/receiptEvents";
 import type { StatusMessage } from "../../lib/chat/messageStatus";
@@ -91,6 +92,10 @@ export function useChatSocket() {
     removers.push(() => clearTimeout(deliveredTimer));
 
     on("message:created", (event: MessageCreatedEvent) => {
+      logTiming("push received", {
+        messageId: event.messageId,
+        sinceSavedMs: Date.now() - Date.parse(event.createdAt),
+      });
       acknowledgeDelivery(event.messageId);
       queryClient.setQueryData<CachedMessages>(
         queryKeys.chatMessages(event.conversationId),

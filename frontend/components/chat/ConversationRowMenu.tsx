@@ -22,7 +22,7 @@ import {
 } from "../../hooks/chat/useFloatingPosition";
 import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
 import { useToast } from "../../hooks/useToast";
-import { conversationDisplayName, conversationMute } from "../../lib/chat/chatDisplay";
+import { blockedPeerOf, conversationDisplayName, conversationMute } from "../../lib/chat/chatDisplay";
 import { CONFIRMATIONS } from "../../lib/chat/chatActionConfirmations";
 import { MUTE_OPTIONS, UNMUTE, muteChange } from "../../lib/chat/muteDurations";
 import { ConfirmChatActionDialog } from "./ConfirmChatActionDialog";
@@ -47,11 +47,12 @@ export function ConversationRowMenu({
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const position = useFloatingPosition(isOpen, buttonRef, menuRef, { align: "end" });
-  const actions = useConversationActions({ onGone });
-  const mute = useConversationMute(conversation.id);
   const { notice, showNotice } = useToast();
+  const actions = useConversationActions({ userId, onGone, notify: showNotice });
+  const mute = useConversationMute(conversation.id);
   const { isMuted } = conversationMute(conversation, userId);
   const isGroup = conversation.type === "GROUP";
+  const blockedPeer = blockedPeerOf(conversation, userId);
   const name = conversationDisplayName(conversation, userId);
 
   const close = useCallback(() => {
@@ -71,7 +72,7 @@ export function ConversationRowMenu({
   };
   const run = (mutation: ReturnType<typeof useConversationActions>["archive"]) => {
     close();
-    mutation.mutate(conversation.id, { onError: () => showNotice("Couldn't do that. Try again.") });
+    mutation.mutate(conversation.id);
   };
   const choose = (option: MuteOption) => {
     close();
@@ -127,16 +128,23 @@ export function ConversationRowMenu({
                   </button>
                 )}
                 <div className="chat-menu-divider" role="separator" />
-                {!isGroup && (
-                  <button
-                    className="danger"
-                    onClick={() => ask("block")}
-                    role="menuitem"
-                    type="button"
-                  >
-                    <FiUserX aria-hidden="true" /> Block
-                  </button>
-                )}
+                {!isGroup &&
+                  (blockedPeer ? (
+                    <button
+                      onClick={() => {
+                        close();
+                        actions.unblock.mutate(blockedPeer.userId);
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <FiUserX aria-hidden="true" /> Unblock
+                    </button>
+                  ) : (
+                    <button className="danger" onClick={() => ask("block")} role="menuitem" type="button">
+                      <FiUserX aria-hidden="true" /> Block
+                    </button>
+                  ))}
                 {view === "archived" && (
                   <button onClick={() => run(actions.unarchive)} role="menuitem" type="button">
                     <FiInbox aria-hidden="true" /> Unarchive chat
@@ -189,13 +197,13 @@ export function ConversationRowMenu({
         <ConfirmChatActionDialog
           body={confirmation.body}
           confirmLabel={confirmation.confirmLabel}
-          error={confirmMutation.isError ? confirmation.error : ""}
           isOpen
           isPending={confirmMutation.isPending}
           onClose={() => setConfirming(null)}
-          onConfirm={() =>
-            confirmMutation.mutate(conversation.id, { onSuccess: () => setConfirming(null) })
-          }
+          onConfirm={() => {
+            setConfirming(null);
+            confirmMutation.mutate(conversation.id);
+          }}
           title={confirmation.title(name)}
         />
       )}

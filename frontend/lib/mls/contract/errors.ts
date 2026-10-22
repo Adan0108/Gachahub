@@ -43,6 +43,16 @@ export class GroupStateUnavailableError extends Error {
   }
 }
 
+/** Thrown when this browser cannot guarantee that only one tab at a time changes a group's saved state. */
+export class CrossTabLockUnavailableError extends Error {
+  constructor() {
+    super(
+      'Secure messaging needs a browser feature (Web Locks) that is not available here. Use an up-to-date browser over HTTPS.',
+    );
+    this.name = 'CrossTabLockUnavailableError';
+  }
+}
+
 /** A Welcome that is not a later epoch than the group this device already has: nothing to join, and its key package is spent. */
 export class StaleWelcomeError extends Error {
   constructor() {

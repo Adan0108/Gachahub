@@ -99,6 +99,7 @@ describe('ChatMessagingService', () => {
     getBlockedIdsAmong: jest.fn(),
     block: jest.fn(),
     unblock: jest.fn(),
+    getBlockersAmong: jest.fn(),
   };
 
   const gameModeratorsService = {
@@ -153,6 +154,7 @@ describe('ChatMessagingService', () => {
     prisma.$transaction.mockImplementation(
       (callback: (tx: unknown) => Promise<unknown>) => callback('fake-tx'),
     );
+    blocksService.getBlockersAmong.mockResolvedValue(new Set());
     chatAccessService = new ChatAccessService(
       repository as any,
       followsService as any,
@@ -1470,6 +1472,100 @@ describe('ChatMessagingService', () => {
         expect.objectContaining({
           participantUserIds: ['user-1', 'user-2'],
         }),
+      );
+    });
+
+    describe('when the recipient has blocked the sender', () => {
+      const sendFromUserOne = () =>
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any);
+
+      beforeEach(() => {
+        blocksService.getBlockersAmong.mockResolvedValue(new Set(['user-2']));
+        repository.createMessage.mockResolvedValue({ id: 'message-1' });
+      });
+
+      it('keeps a conversation they deleted hidden', async () => {
+        repository.findConversationWithParticipants.mockResolvedValue(
+          directConversation([
+            { userId: 'user-1', state: 'ACTIVE' },
+            { userId: 'user-2', state: 'ACTIVE', deletedAt: new Date() },
+          ]),
+        );
+
+        await sendFromUserOne();
+
+        expect(repository.restoreDeletedParticipants).not.toHaveBeenCalled();
+      });
+
+      it('keeps an archived and then deleted conversation hidden too', async () => {
+        repository.findConversationWithParticipants.mockResolvedValue(
+          directConversation([
+            { userId: 'user-1', state: 'ACTIVE' },
+            { userId: 'user-2', state: 'ARCHIVED', deletedAt: new Date() },
+          ]),
+        );
+
+        await sendFromUserOne();
+
+        expect(repository.restoreDeletedParticipants).not.toHaveBeenCalled();
+      });
+
+      it('still sends the message, but it starts read for them so nothing lights up', async () => {
+        repository.findConversationWithParticipants.mockResolvedValue(
+          directConversation([
+            { userId: 'user-1', state: 'ACTIVE' },
+            { userId: 'user-2', state: 'ACTIVE' },
+          ]),
+        );
+
+        const result = await sendFromUserOne();
+
+        expect(result).toMatchObject({ duplicate: false });
+        expect(repository.createMessage).toHaveBeenCalledWith(
+          'fake-tx',
+          expect.objectContaining({
+            participantUserIds: ['user-1', 'user-2'],
+            alreadyReadUserIds: ['user-2'],
+          }),
+        );
+      });
+
+      it('still restores the sender, who may have deleted their own copy', async () => {
+        repository.findConversationWithParticipants.mockResolvedValue(
+          directConversation([
+            { userId: 'user-1', state: 'ACTIVE', deletedAt: new Date() },
+            { userId: 'user-2', state: 'ACTIVE', deletedAt: new Date() },
+          ]),
+        );
+
+        await sendFromUserOne();
+
+        expect(repository.restoreDeletedParticipants).toHaveBeenCalledWith(
+          'conversation-1',
+          ['user-1'],
+        );
+      });
+    });
+
+    it('brings a deleted conversation back once they have unblocked the sender', async () => {
+      blocksService.getBlockersAmong.mockResolvedValue(new Set());
+      repository.findConversationWithParticipants.mockResolvedValue(
+        directConversation([
+          { userId: 'user-1', state: 'ACTIVE' },
+          { userId: 'user-2', state: 'ACTIVE', deletedAt: new Date() },
+        ]),
+      );
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(repository.restoreDeletedParticipants).toHaveBeenCalledWith(
+        'conversation-1',
+        ['user-2'],
       );
     });
 

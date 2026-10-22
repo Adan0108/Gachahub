@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { FiDownload, FiFile } from "react-icons/fi";
+import { FiFile } from "react-icons/fi";
 import { formatBytes } from "../../lib/mls/media/attachmentView";
 import { saveAttachment } from "../../lib/mls/media/saveAttachment";
 import type { AttachmentSource } from "../../lib/mls/media/attachmentLoader";
@@ -25,30 +25,6 @@ function useSaveAttachment(source: AttachmentSource | null | undefined, name: st
   };
 
   return { state, save };
-}
-
-export function DownloadButton({
-  source,
-  name,
-}: {
-  source?: AttachmentSource | null;
-  name: string;
-}) {
-  const { state, save } = useSaveAttachment(source, name);
-
-  return (
-    <>
-      <button
-        className="chat-attachment-action"
-        disabled={!source || state === "busy"}
-        onClick={save}
-        type="button"
-      >
-        <FiDownload aria-hidden="true" /> {state === "busy" ? "Decrypting..." : "Download"}
-      </button>
-      {state === "error" && <span className="chat-attachment-error">File unavailable</span>}
-    </>
-  );
 }
 
 function fileExtension(name: string) {

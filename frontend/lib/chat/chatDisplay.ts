@@ -9,6 +9,7 @@ export type ChatParticipant = {
   notificationLevel?: string | null;
   mutedUntil?: string | null;
   isMuted?: boolean | null;
+  isBlockedByMe?: boolean;
 };
 export type ChatConversation = {
   id: string;
@@ -81,4 +82,15 @@ export function typingLabel(names: string[]): string {
   if (names.length === 1) return `${names[0]} is typing...`;
   if (names.length === 2) return `${names[0]} and ${names[1]} are typing...`;
   return `${names[0]} and ${names.length - 1} others are typing...`;
+}
+
+/** In a direct chat, the other person when you have blocked them; otherwise null. Groups are never blocked as a whole. */
+export function blockedPeerOf(conversation: unknown, userId?: string): ChatParticipant | null {
+  const current = asConversation(conversation);
+  if (!current || current.type === "GROUP") return null;
+  return (
+    current.participants.find(
+      (participant) => participant.userId !== userId && participant.isBlockedByMe,
+    ) ?? null
+  );
 }

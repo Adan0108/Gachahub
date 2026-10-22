@@ -9,6 +9,9 @@ describe('BlocksService', () => {
   const repository = {
     find: jest.fn(),
     findBlockedIdsAmong: jest.fn(),
+    findBlocksBetween: jest.fn(),
+    findBlockedUsers: jest.fn(),
+    findBlockersAmong: jest.fn(),
     create: jest.fn(),
     delete: jest.fn(),
   };
@@ -104,6 +107,75 @@ describe('BlocksService', () => {
       const result = await service.unblock('user-1', 'user-2');
 
       expect(result).toBe(0);
+    });
+  });
+
+  describe('getMutuallyBlockedIdsAmong', () => {
+    it('gives the other person of each block, whichever way it went', async () => {
+      repository.findBlocksBetween.mockResolvedValue([
+        { blockerId: 'me', blockedId: 'bo' },
+        { blockerId: 'cy', blockedId: 'me' },
+      ]);
+
+      const blocked = await service.getMutuallyBlockedIdsAmong('me', [
+        'bo',
+        'cy',
+        'di',
+      ]);
+
+      expect([...blocked].sort()).toEqual(['bo', 'cy']);
+      expect(repository.findBlocksBetween).toHaveBeenCalledWith('me', [
+        'bo',
+        'cy',
+        'di',
+      ]);
+    });
+
+    it('is empty when there are no blocks', async () => {
+      repository.findBlocksBetween.mockResolvedValue([]);
+
+      await expect(
+        service.getMutuallyBlockedIdsAmong('me', ['bo']),
+      ).resolves.toEqual(new Set());
+    });
+  });
+
+  describe('listBlockedUsers', () => {
+    it('gives each blocked person with when they were blocked', async () => {
+      const blockedAt = new Date('2026-10-01T00:00:00Z');
+      repository.findBlockedUsers.mockResolvedValue([
+        {
+          createdAt: blockedAt,
+          blocked: { id: 'bo', name: 'Bo', username: 'bo', image: null },
+        },
+      ]);
+
+      const list = await service.listBlockedUsers('me');
+
+      expect(list).toEqual([
+        { id: 'bo', name: 'Bo', username: 'bo', image: null, blockedAt },
+      ]);
+      expect(repository.findBlockedUsers).toHaveBeenCalledWith('me', 200);
+    });
+
+    it('is empty when nobody is blocked', async () => {
+      repository.findBlockedUsers.mockResolvedValue([]);
+
+      await expect(service.listBlockedUsers('me')).resolves.toEqual([]);
+    });
+  });
+
+  describe('getBlockersAmong', () => {
+    it('gives the people among the candidates who blocked this person', async () => {
+      repository.findBlockersAmong.mockResolvedValue([{ blockerId: 'bo' }]);
+
+      const blockers = await service.getBlockersAmong('me', ['bo', 'cy']);
+
+      expect([...blockers]).toEqual(['bo']);
+      expect(repository.findBlockersAmong).toHaveBeenCalledWith('me', [
+        'bo',
+        'cy',
+      ]);
     });
   });
 });

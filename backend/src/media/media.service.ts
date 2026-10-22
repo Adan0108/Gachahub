@@ -46,6 +46,7 @@ const SINGLE_IMAGE_PURPOSES = new Set([
   MediaPurposeDto.BANNER,
   MediaPurposeDto.GAME_ICON,
   MediaPurposeDto.GAME_BANNER,
+  MediaPurposeDto.GROUP_PHOTO,
 ]);
 
 @Injectable()
@@ -612,6 +613,14 @@ export class MediaService {
       if (videos > 0 && images > 0) {
         throw new BadRequestException(
           'A chat message cannot mix images and video',
+        );
+      }
+    }
+
+    if (dto.purpose === MediaPurposeDto.COMMUNITY) {
+      if (videos > 0 || images > 4) {
+        throw new BadRequestException(
+          'A community message supports up to four images',
         );
       }
     }

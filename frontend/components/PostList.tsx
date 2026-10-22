@@ -4,7 +4,7 @@ import { FieldLimit } from "./FieldLimit";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export interface PostMediaRecord {
   id?: string;
@@ -39,6 +39,8 @@ export interface PostRecord {
   commentCount?: number;
   isSpoiler?: boolean;
 }
+type ReportTarget = "POST" | "COMMENT";
+type OpenReport = (targetType?: ReportTarget, targetId?: string, label?: string) => void;
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -58,6 +60,7 @@ import {
   FiX,
 } from "react-icons/fi";
 import { useCurrentUser } from "../hooks/useCurrentUser";
+import { useToast } from "../hooks/useToast";
 import { useDismiss } from "../hooks/useDismiss";
 import { api } from "../lib/api";
 import { queries, queryKeys } from "../lib/queries";
@@ -67,6 +70,7 @@ import { AvatarFace } from "./AvatarFace";
 import { artTones, glyph } from "./constants";
 import { MentionInput } from "./MentionInput";
 import { MentionText } from "./MentionText";
+import { SharePostDialog } from "./SharePostDialog";
 
 function relativeTime(value?: string) {
   const date = value ? new Date(value) : null;
@@ -81,7 +85,7 @@ function videoMimeType(format?: string) {
   return normalizedFormat === "mov" ? "video/quicktime" : `video/${normalizedFormat}`;
 }
 
-function CommentItem({ comment }: { comment: CommentRecord }) {
+function CommentItem({ comment, onReport }: { comment: CommentRecord; onReport: OpenReport }) {
   const queryClient = useQueryClient();
   const { isAuthenticated } = useCurrentUser();
   const router = useRouter();
@@ -132,6 +136,14 @@ function CommentItem({ comment }: { comment: CommentRecord }) {
       <div className="post-comment-actions">
         <button onClick={startReply} type="button">
           <FiCornerUpLeft /> Reply
+        </button>
+        <button
+          onClick={() =>
+            onReport("COMMENT", comment.id, `comment by ${comment.author?.name || "user"}`)
+          }
+          type="button"
+        >
+          <FiFlag /> Report comment
         </button>
         {(comment.replyCount ?? 0) > 0 && (
           <button onClick={() => setRepliesOpen((open) => !open)} type="button">
@@ -191,6 +203,16 @@ function CommentItem({ comment }: { comment: CommentRecord }) {
               <p>
                 <MentionText content={item.content} usernames={item.mentions} />
               </p>
+              <div className="post-comment-actions">
+                <button
+                  onClick={() =>
+                    onReport("COMMENT", item.id, `reply by ${item.author?.name || "user"}`)
+                  }
+                  type="button"
+                >
+                  <FiFlag /> Report reply
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -261,22 +283,43 @@ export function PostItem({
   );
   const [spoilerRevealed, setSpoilerRevealed] = useState(false);
   const [expandedImage, setExpandedImage] = useState<PostMediaRecord | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleted, setDeleted] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
-  const [reportReason, setReportReason] = useState("UNMARKED_SPOILERS");
+  const [reportTarget, setReportTarget] = useState<{
+    targetType: ReportTarget;
+    targetId: string;
+    label: string;
+  } | null>(null);
+  const [reportReason, setReportReason] = useState("");
   const [reportDetails, setReportDetails] = useState("");
   const [actionNotice, setActionNotice] = useState("");
-  const menuRef = useRef(null);
-  const menuTriggerRef = useRef(null);
+  const { notice, showNotice } = useToast(3500);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
   useDismiss({
     isOpen: menuOpen,
     onDismiss: closeMenu,
     contentRef: menuRef,
     triggerRef: menuTriggerRef,
+    restoreFocus: !reportOpen,
   });
+  useLayoutEffect(() => {
+    if (!menuOpen || !menuRef.current || !menuTriggerRef.current) return;
+    const trigger = menuTriggerRef.current.getBoundingClientRect();
+    const menu = menuRef.current.getBoundingClientRect();
+    menuRef.current.style.top = `${Math.max(8, Math.min(trigger.bottom + 6, window.innerHeight - menu.height - 8))}px`;
+    menuRef.current.style.left = `${Math.max(8, Math.min(trigger.right - menu.width, window.innerWidth - menu.width - 8))}px`;
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [menuOpen, closeMenu]);
   const media = Array.isArray(post.media) ? post.media : [];
   const isFeed = variant === "feed";
   const liked = likeOverride?.liked ?? Boolean(post.likedByCurrentUser);
@@ -363,17 +406,27 @@ export function PostItem({
   const reportPost = useMutation({
     mutationFn: () =>
       api.createReport({
-        targetType: "POST",
-        targetId: post.id,
+        targetType: reportTarget?.targetType || "POST",
+        targetId: reportTarget?.targetId || post.id,
         reasonCode: reportReason,
         ...(reportDetails.trim() ? { details: reportDetails.trim() } : {}),
       }),
     onSuccess: () => {
       setReportOpen(false);
       setReportDetails("");
-      setActionNotice("Report submitted. Thank you for helping keep the community safe.");
+      showNotice("Report submitted. Thank you for helping keep the community safe.");
     },
   });
+
+  const openReport = (targetType: ReportTarget = "POST", targetId = post.id, label = post.title) => {
+    if (!requireAuth()) return;
+    reportPost.reset?.();
+    setActionNotice("");
+    setReportReason("");
+    setReportDetails("");
+    setReportTarget({ targetType, targetId, label });
+    setReportOpen(true);
+  };
 
   const postUrl = () => `${window.location.origin}/post/${encodeURIComponent(post.id)}`;
 
@@ -456,51 +509,53 @@ export function PostItem({
           >
             <FiMoreHorizontal />
           </button>
-          {menuOpen && (
-            <div className="post-options-menu" ref={menuRef} role="menu">
-              {canDelete && (
+          {menuOpen &&
+            createPortal(
+              <div className="post-options-menu" ref={menuRef} role="menu">
+                {canDelete && (
+                  <button
+                    className="danger"
+                    role="menuitem"
+                    type="button"
+                    onClick={() => {
+                      closeMenu();
+                      deletePost.reset();
+                      setDeleteOpen(true);
+                    }}
+                  >
+                    <FiTrash2 /> Delete
+                  </button>
+                )}
                 <button
-                  className="danger"
-                  role="menuitem"
-                  type="button"
                   onClick={() => {
                     closeMenu();
-                    deletePost.reset();
-                    setDeleteOpen(true);
+                    copyPostLink().catch(() => setActionNotice("Could not copy the post link."));
                   }}
+                  role="menuitem"
+                  type="button"
                 >
-                  <FiTrash2 /> Delete
+                  <FiLink /> Copy link
                 </button>
-              )}
-              <button
-                onClick={() => {
-                  closeMenu();
-                  copyPostLink().catch(() => setActionNotice("Could not copy the post link."));
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <FiLink /> Copy link
-              </button>
-              <button onClick={() => showUnavailable("Save posts")} role="menuitem" type="button">
-                <FiSave /> Save
-              </button>
-              <button onClick={() => showUnavailable("Hide posts")} role="menuitem" type="button">
-                <FiEyeOff /> Hide
-              </button>
-              <button
-                className="danger"
-                onClick={() => {
-                  closeMenu();
-                  if (requireAuth()) setReportOpen(true);
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <FiFlag /> Report
-              </button>
-            </div>
-          )}
+                <button onClick={() => showUnavailable("Save posts")} role="menuitem" type="button">
+                  <FiSave /> Save
+                </button>
+                <button onClick={() => showUnavailable("Hide posts")} role="menuitem" type="button">
+                  <FiEyeOff /> Hide
+                </button>
+                <button
+                  className="danger"
+                  onClick={() => {
+                    closeMenu();
+                    openReport();
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <FiFlag /> Report
+                </button>
+              </div>,
+              document.body,
+            )}
         </div>
       </div>
       {(detail || isFeed) && (post.content || media.length > 0) && (
@@ -544,13 +599,18 @@ export function PostItem({
           <FiHeart /> {likeCount}
         </button>
         <button
+          aria-label={`Comments on ${post.title}`}
           aria-expanded={threadOpen}
           onClick={() => setThreadOpen((open) => !open)}
           type="button"
         >
           <FiMessageCircle /> {post.commentCount || 0}
         </button>
-        <button onClick={sharePost} type="button">
+        <button
+          aria-haspopup="dialog"
+          onClick={() => (isAuthenticated ? setShareOpen(true) : sharePost())}
+          type="button"
+        >
           <FiShare2 /> Share
         </button>
         {detail && canFollow && (
@@ -568,6 +628,13 @@ export function PostItem({
       {(toggleLike.isError || toggleFollow.isError) && (
         <small className="post-action-error">Could not update this post. Try again.</small>
       )}
+      {notice &&
+        createPortal(
+          <div className="toast" role="status">
+            {notice}
+          </div>,
+          document.body,
+        )}
       {actionNotice && (
         <div className="post-action-notice" role="status">
           {actionNotice}
@@ -581,13 +648,17 @@ export function PostItem({
         </div>
       )}
       {threadOpen && (
-        <section className="post-thread" aria-label={`Comments on ${post.title}`}>
+        <section
+          id={detail ? "comments" : undefined}
+          className="post-thread"
+          aria-label={`Comments on ${post.title}`}
+        >
           {comments.isLoading && <small>Loading comments...</small>}
           {comments.isError && (
             <small className="post-action-error">Could not load comments.</small>
           )}
           {(comments.data?.items || []).map((item: CommentRecord) => (
-            <CommentItem comment={item} key={item.id} />
+            <CommentItem comment={item} key={item.id} onReport={openReport} />
           ))}
           {!comments.isLoading && !comments.isError && !comments.data?.items?.length && (
             <small>No comments yet.</small>
@@ -628,6 +699,16 @@ export function PostItem({
             <small className="post-action-error">{createComment.error.message}</small>
           )}
         </section>
+      )}
+      {shareOpen && (
+        <SharePostDialog
+          onClose={() => setShareOpen(false)}
+          onCopyLink={copyPostLink}
+          onNativeShare={
+            typeof navigator !== "undefined" && "share" in navigator ? sharePost : undefined
+          }
+          postId={post.id}
+        />
       )}
       {expandedImage &&
         createPortal(
@@ -677,16 +758,25 @@ export function PostItem({
         createPortal(
           <div className="post-report-backdrop" onMouseDown={() => setReportOpen(false)}>
             <section
-              aria-label={`Report ${post.title}`}
+              aria-label={`Report ${reportTarget?.label || post.title}`}
               aria-modal="true"
               className="post-report-dialog"
               onMouseDown={(event) => event.stopPropagation()}
               role="dialog"
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && !reportPost.isPending) {
+                  event.stopPropagation();
+                  setReportOpen(false);
+                }
+              }}
             >
               <div className="post-report-head">
                 <div>
-                  <small>REPORT POST</small>
-                  <h2>What’s wrong with this post?</h2>
+                  <small>REPORT {reportTarget?.targetType || "POST"}</small>
+                  <h2>
+                    What’s wrong with this{" "}
+                    {reportTarget?.targetType === "COMMENT" ? "comment" : "post"}?
+                  </h2>
                 </div>
                 <button
                   aria-label="Close report dialog"
@@ -699,9 +789,13 @@ export function PostItem({
               <label>
                 Reason
                 <select
+                  autoFocus
                   onChange={(event) => setReportReason(event.target.value)}
                   value={reportReason}
                 >
+                  <option value="" disabled>
+                    Choose a reason
+                  </option>
                   <option value="UNMARKED_SPOILERS">Unmarked spoilers</option>
                   <option value="HARASSMENT">Harassment</option>
                   <option value="COMMERCIAL_SPAM">Commercial spam</option>
@@ -729,15 +823,21 @@ export function PostItem({
                 </>
               </label>
               {reportPost.isError && (
-                <small className="post-action-error">{reportPost.error.message}</small>
+                <small className="post-action-error" role="alert">
+                  {(reportPost.error as Error & { status?: number })?.status === 409
+                    ? "You already reported this content. It is awaiting review."
+                    : "Report could not be submitted. Please try again."}
+                </small>
               )}
               <div className="post-report-actions">
                 <button onClick={() => setReportOpen(false)} type="button">
                   Cancel
                 </button>
                 <button
-                  disabled={reportPost.isPending}
-                  onClick={() => reportPost.mutate()}
+                  disabled={reportPost.isPending || !reportReason}
+                  onClick={() => {
+                    if (reportReason) reportPost.mutate();
+                  }}
                   type="button"
                 >
                   {reportPost.isPending ? "Submitting..." : "Submit report"}

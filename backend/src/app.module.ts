@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { auth } from './auth/auth';
 import { ChatDevicesModule } from './chat-devices/chat-devices.module';
 import { ChatModule } from './chat/chat.module';
+import { CommunityChatModule } from './community-chat/community-chat.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { CommonModule } from './common/common.module';
 import { env } from './config/env';
@@ -24,6 +25,7 @@ import { NotificationModule } from './notifications/notification.module';
 import { OverviewModule } from './overview/overview.module';
 import { PostsModule } from './posts/posts.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { PresenceModule } from './presence/presence.module';
 import { RedisModule } from './redis/redis.module';
 import { UsersModule } from './users/users.module';
 import { AuditLogQueryModule } from './audit-log/audit-log-query.module';
@@ -57,6 +59,8 @@ import { MlsRetentionModule } from './mls-retention/mls-retention.module';
     GameModeratorsModule,
 
     ChatModule,
+    CommunityChatModule,
+    PresenceModule,
     ChatDevicesModule,
     ChatBackupModule,
     MlsHandshakesModule,

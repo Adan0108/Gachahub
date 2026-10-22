@@ -9,16 +9,13 @@ import { normalizeText } from '../common/utils/normalize-text';
 import { PostVisibilityService } from '../post-visibility/post-visibility.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReportDto } from './dto/create-report.dto';
-import { ReportRateLimiterService } from './report-rate-limiter.service';
-import { ReportsRepository } from './reports.repository';
+import { ReportRateLimiterService } from './infrastructure/report-rate-limiter.service';
+import {
+  ReportsRepository,
+  type ReportableTargetInfo,
+} from './reports.repository';
 
-/**
- * Filing a report. Split from the moderation queue (ReportModerationService)
- * the same way PostsService/PostModerationService are - this only needs
- * PostVisibilityService, the rate limiter, and an active-user check, none of
- * which the moderation queue uses; the queue only needs
- * GameModeratorsService, which filing never touches.
- */
+/** Filing complaints/evidence; moderation workflow belongs to ModerationCase. */
 @Injectable()
 export class ReportsService {
   constructor(
@@ -41,7 +38,7 @@ export class ReportsService {
 
     await loadActiveUser(this.prisma, reporterId);
 
-    const gameId = await this.assertReportableTarget(
+    const target = await this.assertReportableTarget(
       dto.targetType,
       dto.targetId,
       reporterId,
@@ -60,7 +57,8 @@ export class ReportsService {
     }
 
     return this.reportsRepository.create({
-      gameId,
+      gameId: target.gameId,
+      snapshot: target.snapshot,
       reporterId,
       targetType: dto.targetType,
       targetId: dto.targetId,
@@ -78,7 +76,7 @@ export class ReportsService {
     targetType: ReportTargetType,
     targetId: string,
     reporterId: string,
-  ): Promise<string | null> {
+  ): Promise<ReportableTargetInfo> {
     const target = await this.reportsRepository.findTargetPostInfo(
       targetType,
       targetId,
@@ -88,6 +86,6 @@ export class ReportsService {
       throw new NotFoundException('Reported content not found');
     }
 
-    return target.gameId;
+    return target;
   }
 }

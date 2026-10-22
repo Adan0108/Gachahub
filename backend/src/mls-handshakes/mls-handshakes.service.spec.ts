@@ -18,7 +18,10 @@ import {
 import { decodeMlsMessage, encodeMlsMessage } from 'ts-mls';
 import * as groupInfoUtil from './mls-group-info.util';
 import { buildTestCommitWithWelcome } from './test-support/build-test-commit';
-import { buildTestExternalJoin } from './test-support/build-test-external-join';
+import {
+  buildTestExternalJoin,
+  buildTestExternalResync,
+} from './test-support/build-test-external-join';
 
 describe('MlsHandshakesService', () => {
   const participantStates = { findState: jest.fn() };
@@ -649,6 +652,111 @@ describe('MlsHandshakesService', () => {
       ).rejects.toThrow('boom');
       expect(repository.acceptExternalJoin).not.toHaveBeenCalled();
       spy.mockRestore();
+    });
+
+    describe('a device replacing its own old leaf (resync)', () => {
+      const accepted = (payload: Uint8Array, epoch: number) => ({
+        outcome: 'accepted',
+        handshake: {
+          id: 'hs-1',
+          conversationId: 'conv-1',
+          epoch,
+          senderDeviceId: 'device-1',
+          payload,
+          membershipDeclared: true,
+          addedDevices: [],
+          removedDevices: [],
+          createdAt: new Date(),
+        },
+      });
+
+      it('accepts a real resync whose Remove targets the callers own leaf in the stored snapshot, and tells the repository', async () => {
+        const resync = await buildTestExternalResync('conv-1', {
+          userId: 'user-1',
+          deviceId: 'device-1',
+        });
+        chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+          registeredKey(resync.joinerSignatureKey),
+        );
+        repository.getCurrentEpoch.mockResolvedValue(resync.epoch);
+        groupInfos.findCurrent.mockResolvedValue({
+          epoch: resync.epoch,
+          payload: resync.groupInfoPayload,
+        });
+        repository.acceptExternalJoin.mockResolvedValue(
+          accepted(resync.commitPayload, resync.epoch),
+        );
+
+        const result = await service.submitExternalJoin('user-1', 'conv-1', {
+          deviceId: 'device-1',
+          epoch: resync.epoch,
+          payload: b64(resync.commitPayload),
+          groupInfo: b64(resync.nextGroupInfoPayload),
+        });
+
+        expect(result.outcome).toBe('accepted');
+        expect(repository.acceptExternalJoin).toHaveBeenCalledWith(
+          expect.objectContaining({ deviceId: 'device-1', resync: true }),
+        );
+      });
+
+      it('does not mark a plain join as a resync', async () => {
+        const join = await buildTestExternalJoin('conv-1', {
+          userId: 'user-1',
+          deviceId: 'device-1',
+        });
+        chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+          registeredKey(join.joinerSignatureKey),
+        );
+        repository.getCurrentEpoch.mockResolvedValue(join.epoch);
+        groupInfos.findCurrent.mockResolvedValue({
+          epoch: join.epoch,
+          payload: join.groupInfoPayload,
+        });
+        repository.acceptExternalJoin.mockResolvedValue(
+          accepted(join.commitPayload, join.epoch),
+        );
+
+        await service.submitExternalJoin('user-1', 'conv-1', {
+          deviceId: 'device-1',
+          epoch: join.epoch,
+          payload: b64(join.commitPayload),
+          groupInfo: b64(join.nextGroupInfoPayload),
+        });
+
+        expect(repository.acceptExternalJoin).toHaveBeenCalledWith(
+          expect.objectContaining({ resync: false }),
+        );
+      });
+
+      it('refuses a resync checked against a snapshot where that leaf is someone else', async () => {
+        const resync = await buildTestExternalResync('conv-1', {
+          userId: 'user-1',
+          deviceId: 'device-1',
+        });
+        const other = await buildTestExternalResync('conv-1', {
+          userId: 'user-9',
+          deviceId: 'device-9',
+        });
+        chatDevicesService.assertOwnActiveDevice.mockResolvedValue(
+          registeredKey(resync.joinerSignatureKey),
+        );
+        repository.getCurrentEpoch.mockResolvedValue(resync.epoch);
+        groupInfos.findCurrent.mockResolvedValue({
+          epoch: resync.epoch,
+          payload: other.groupInfoPayload,
+        });
+
+        await expect(
+          service.submitExternalJoin('user-1', 'conv-1', {
+            deviceId: 'device-1',
+            epoch: resync.epoch,
+            payload: b64(resync.commitPayload),
+            groupInfo: b64(resync.nextGroupInfoPayload),
+          }),
+        ).rejects.toThrow(ForbiddenException);
+        expect(repository.acceptExternalJoin).not.toHaveBeenCalled();
+      });
     });
 
     it('refuses a join for a conversation that does not exist', async () => {

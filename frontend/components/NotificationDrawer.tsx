@@ -65,15 +65,15 @@ export function NotificationDrawer({
       )}
       <div className="notification-list">
         {items.map((notification) => {
-          const { actor, action, href } = describeNotification(notification);
+          const { title, image, action, href } = describeNotification(notification);
           const className = `notification-row ${notification.readAt ? "read" : "unread"}`;
           const body = (
             <>
               <span className="notification-avatar">
-                <AvatarFace image={notification.actor?.image} name={actor} />
+                <AvatarFace image={image} name={title} />
               </span>
               <div>
-                <b>{actor}</b>
+                <b>{title}</b>
                 <small>{action}</small>
               </div>
               <time dateTime={notification.createdAt}>{relativeTime(notification.createdAt)}</time>

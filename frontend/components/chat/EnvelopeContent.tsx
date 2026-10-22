@@ -12,6 +12,7 @@ import { readLinkPreviews } from "../../lib/mls/messaging/linkPreviewEnvelope";
 import { ChatAttachments } from "./ChatAttachments";
 import { DraftLinkPreviewCard, ReceivedLinkPreviewCard } from "./LinkPreviewCard";
 import { LinkifiedText } from "./LinkifiedText";
+import { SharedPostCard } from "./SharedPostCard";
 import "./ChatAttachments.css";
 import type { LinkPreviewData } from "../../lib/mls/media/prepareLinkPreview";
 
@@ -53,6 +54,17 @@ export function EnvelopeContent({
   }
   if (isAttachmentEnvelope(envelope)) {
     return <ChatAttachments envelope={envelope} media={media} messageId={messageId} />;
+  }
+  if (view?.kind === "post") {
+    if (!view.caption) return <SharedPostCard postId={view.postId} />;
+    return (
+      <div className="chat-text-with-preview">
+        <p>
+          <LinkifiedText text={view.caption} />
+        </p>
+        <SharedPostCard postId={view.postId} />
+      </div>
+    );
   }
   return <p className="chat-message-unsupported">This message type isn&apos;t supported yet.</p>;
 }

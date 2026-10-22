@@ -2,7 +2,7 @@
 export const CONFIRMATIONS = {
   block: {
     title: (name: string) => `Block ${name}?`,
-    body: "You won't be able to read or send messages in this chat anymore.",
+    body: "You won't be able to send them messages. The chat stays here, and you can unblock them whenever you like.",
     confirmLabel: "Block",
     error: "Couldn't block this chat. Try again.",
   },

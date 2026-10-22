@@ -1,29 +1,20 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import {
-  FiCopy,
-  FiCornerUpLeft,
-  FiEdit2,
-  FiMoreHorizontal,
-  FiPlus,
-  FiSmile,
-  FiTrash2,
-} from "react-icons/fi";
-import {
-  floatingPortal,
-  floatingStyle,
-  useFloatingPosition,
-} from "../../hooks/chat/useFloatingPosition";
+import { useRef, useState } from "react";
+import { FiCopy, FiCornerUpLeft, FiEdit2, FiMoreHorizontal, FiPlus, FiSmile, FiTrash2 } from "react-icons/fi";
+import { Emoji } from "./Emoji";
+import { EmojiPicker } from "./EmojiPicker";
+import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
 import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
+import type { ReactionChoice } from "../../lib/chat/chatReactions";
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
-const COMING_SOON_MS = 1800;
 
 /** Hover toolbar on a message: react, reply, and a "..." menu (copy, edit your own, remove). */
 export function MessageActions({
   canCopy,
   canEdit = false,
+  canRemove = true,
   onReact,
   onReply,
   onCopy,
@@ -32,7 +23,8 @@ export function MessageActions({
 }: {
   canCopy: boolean;
   canEdit?: boolean;
-  onReact: (emoji: string) => void;
+  canRemove?: boolean;
+  onReact: (choice: ReactionChoice) => void;
   onReply: () => void;
   onCopy: () => void;
   onEdit: () => void;
@@ -40,27 +32,29 @@ export function MessageActions({
 }) {
   const [isReactOpen, setIsReactOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
-  const [isComingSoonShown, setIsComingSoonShown] = useState(false);
-  const comingSoonTimerRef = useRef<number | undefined>(undefined);
+  const [isFullPickerOpen, setIsFullPickerOpen] = useState(false);
   const reactButtonRef = useRef<HTMLButtonElement>(null);
   const reactMenuRef = useRef<HTMLDivElement>(null);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
-  useMenuDismiss(isReactOpen, () => setIsReactOpen(false), reactButtonRef, reactMenuRef);
+  const closeReact = () => {
+    setIsReactOpen(false);
+    setIsFullPickerOpen(false);
+  };
+  useMenuDismiss(isReactOpen, closeReact, reactButtonRef, reactMenuRef);
   useMenuDismiss(isMoreOpen, () => setIsMoreOpen(false), moreButtonRef, moreMenuRef);
-  const reactStyle = useFloatingPosition(isReactOpen, reactButtonRef, reactMenuRef, {
+  // The quick row and the full picker are different sizes, so each gets its own placement against the same menu element.
+  const quickStyle = useFloatingPosition(isReactOpen && !isFullPickerOpen, reactButtonRef, reactMenuRef, {
     align: "center",
   });
+  const fullStyle = useFloatingPosition(isReactOpen && isFullPickerOpen, reactButtonRef, reactMenuRef, {
+    align: "center",
+  });
+  const reactStyle = isFullPickerOpen ? fullStyle : quickStyle;
 
-  useEffect(() => () => window.clearTimeout(comingSoonTimerRef.current), []);
-
-  const showComingSoon = () => {
-    window.clearTimeout(comingSoonTimerRef.current);
-    setIsComingSoonShown(true);
-    comingSoonTimerRef.current = window.setTimeout(
-      () => setIsComingSoonShown(false),
-      COMING_SOON_MS,
-    );
+  const pick = (choice: ReactionChoice) => {
+    onReact(choice);
+    closeReact();
   };
   const moreStyle = useFloatingPosition(isMoreOpen, moreButtonRef, moreMenuRef, { align: "end" });
 
@@ -69,7 +63,7 @@ export function MessageActions({
       <div className="message-actions-menu-wrap">
         <button
           aria-label="React"
-          onClick={() => setIsReactOpen((current) => !current)}
+          onClick={() => (isReactOpen ? closeReact() : setIsReactOpen(true))}
           ref={reactButtonRef}
           type="button"
         >
@@ -83,33 +77,24 @@ export function MessageActions({
               role="menu"
               style={floatingStyle(reactStyle)}
             >
-              <div className="message-actions-picker-row">
-                {QUICK_EMOJIS.map((emoji) => (
+              {isFullPickerOpen ? (
+                <EmojiPicker onPick={pick} />
+              ) : (
+                <div className="message-actions-picker-row">
+                  {QUICK_EMOJIS.map((emoji) => (
+                    <button key={emoji} onClick={() => pick({ kind: "emoji", emoji })} role="menuitem" type="button">
+                      <Emoji emoji={emoji} />
+                    </button>
+                  ))}
                   <button
-                    key={emoji}
-                    onClick={() => {
-                      onReact(emoji);
-                      setIsReactOpen(false);
-                    }}
+                    aria-label="More reactions"
+                    onClick={() => setIsFullPickerOpen(true)}
                     role="menuitem"
                     type="button"
                   >
-                    {emoji}
+                    <FiPlus />
                   </button>
-                ))}
-                <button
-                  aria-label="More reactions"
-                  onClick={showComingSoon}
-                  role="menuitem"
-                  type="button"
-                >
-                  <FiPlus />
-                </button>
-              </div>
-              {isComingSoonShown && (
-                <small className="message-actions-picker-note" role="status">
-                  More reactions are coming soon.
-                </small>
+                </div>
               )}
             </div>,
           )}
@@ -158,16 +143,18 @@ export function MessageActions({
                   <FiEdit2 /> Edit
                 </button>
               )}
-              <button
-                onClick={() => {
-                  onRemove();
-                  setIsMoreOpen(false);
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <FiTrash2 /> Remove
-              </button>
+              {canRemove && (
+                <button
+                  onClick={() => {
+                    onRemove();
+                    setIsMoreOpen(false);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <FiTrash2 /> Remove
+                </button>
+              )}
             </div>,
           )}
       </div>

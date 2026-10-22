@@ -4,6 +4,7 @@ import { FieldLimit } from "../../../components/FieldLimit";
 
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
+import Link from "next/link";
 import type { UserRecord } from "../../../lib/pageTypes";
 import { FiRotateCcw, FiSearch, FiSlash } from "react-icons/fi";
 import { AdminActionDialog } from "../../../components/admin/AdminActionDialog";
@@ -158,13 +159,17 @@ export default function AdminUsersPage() {
                         <span>{user.name?.charAt(0)?.toUpperCase() || "U"}</span>
                         <div>
                           <b>{user.name}</b>
-                          <small>{user.id}</small>
+                          {user.username && <small>@{user.username}</small>}
                         </div>
                       </div>
                     </td>
                     <td>{user.email}</td>
                     <td>
-                      <span className="admin-type-badge">{user.role}</span>
+                      <span className="admin-type-badge">
+                        {{ ADMIN: "Admin", PLATFORM_MODERATOR: "Platform moderator", USER: "User" }[
+                          user.role
+                        ] || "User"}
+                      </span>
                     </td>
                     <td>
                       <span className={`admin-status ${USER_STATUS_CLASS[user.status] || ""}`}>
@@ -177,6 +182,14 @@ export default function AdminUsersPage() {
                       )}
                     </td>
                     <td>
+                      {user.status === "ACTIVE" && user.role !== "ADMIN" && (
+                        <Link
+                          className="admin-button admin-button-secondary"
+                          href={`/admin/moderators?search=${encodeURIComponent(user.username ? "@" + user.username : user.name)}`}
+                        >
+                          Manage moderation access
+                        </Link>
+                      )}
                       {user.status === "ACTIVE" ? (
                         <button
                           aria-label={`Restrict ${user.name}`}

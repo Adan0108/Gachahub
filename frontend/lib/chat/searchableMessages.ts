@@ -37,6 +37,8 @@ export function searchableText(envelope: unknown): string | null {
       return view.text;
     case 'attachment':
       return [view.caption, ...view.files.map((file) => file.name)].filter(Boolean).join(' ');
+    case 'post':
+      return view.caption;
     default: {
       const unhandled: never = view;
       return unhandled;

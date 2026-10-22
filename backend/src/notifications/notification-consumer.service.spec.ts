@@ -29,7 +29,7 @@ describe('NotificationConsumerService', () => {
   let service: NotificationConsumerService;
 
   let createNotificationMock: jest.Mock;
-  let createManyNotificationsMock: jest.Mock;
+  let stackMessageNotificationsMock: jest.Mock;
   let claimMock: jest.Mock;
   let transactionMock: Prisma.TransactionClient;
   let findReceiptsMock: jest.Mock;
@@ -63,8 +63,8 @@ describe('NotificationConsumerService', () => {
 
     createNotificationMock = jest.fn();
     // Default double for the MESSAGE_RECEIVED fan-out: every requested recipient becomes a
-    // notification, mirroring createManyNotifications with no muted/deleted/banned exclusions.
-    createManyNotificationsMock = jest.fn(
+    // notification, mirroring stackMessageNotifications with no muted/deleted/banned exclusions.
+    stackMessageNotificationsMock = jest.fn(
       (input: { recipientIds: readonly string[] }) =>
         Promise.resolve(
           input.recipientIds.map((recipientId) => ({
@@ -88,7 +88,7 @@ describe('NotificationConsumerService', () => {
 
     const notificationService = {
       createNotification: createNotificationMock,
-      createManyNotifications: createManyNotificationsMock,
+      stackMessageNotifications: stackMessageNotificationsMock,
     } as unknown as NotificationService;
 
     const processedEventRepository = {
@@ -234,7 +234,7 @@ describe('NotificationConsumerService', () => {
         id: 'notification-user-b',
         recipientId: 'user-b',
       };
-      createManyNotificationsMock.mockResolvedValue([notification]);
+      stackMessageNotificationsMock.mockResolvedValue([notification]);
 
       const event: TestKafkaDomainEvent = {
         eventId: 'chat-event-duplicate',
@@ -256,7 +256,7 @@ describe('NotificationConsumerService', () => {
       await handleEvent(service, event);
 
       expect(claimMock).toHaveBeenCalledTimes(2);
-      expect(createManyNotificationsMock).toHaveBeenCalledTimes(1);
+      expect(stackMessageNotificationsMock).toHaveBeenCalledTimes(1);
       expect(publishNotificationMock).toHaveBeenCalledTimes(1);
       expect(publishNotificationMock).toHaveBeenCalledWith(notification);
     });
@@ -296,7 +296,7 @@ describe('NotificationConsumerService', () => {
 
     it('does not emit a chat notification when processing fails', async () => {
       claimMock.mockResolvedValue(true);
-      createManyNotificationsMock.mockRejectedValue(
+      stackMessageNotificationsMock.mockRejectedValue(
         new Error('chat notification failed'),
       );
 
@@ -321,7 +321,7 @@ describe('NotificationConsumerService', () => {
       );
 
       expect(claimMock).toHaveBeenCalledTimes(1);
-      expect(createManyNotificationsMock).toHaveBeenCalledTimes(1);
+      expect(stackMessageNotificationsMock).toHaveBeenCalledTimes(1);
       expect(publishNotificationMock).not.toHaveBeenCalled();
     });
 
@@ -530,13 +530,12 @@ describe('NotificationConsumerService', () => {
 
       await handleEvent(service, event);
 
-      expect(createManyNotificationsMock).toHaveBeenCalledWith(
+      expect(stackMessageNotificationsMock).toHaveBeenCalledWith(
         {
           recipientIds: ['user-b', 'user-c'],
           actorId: 'user-a',
-          type: 'MESSAGE_RECEIVED',
-          entityType: 'MESSAGE',
-          entityId: 'message-1',
+          messageId: 'message-1',
+          conversationId: 'conversation-1',
         },
         transactionMock,
       );
@@ -571,7 +570,7 @@ describe('NotificationConsumerService', () => {
         },
         select: { userId: true },
       });
-      expect(createManyNotificationsMock).toHaveBeenCalledWith(
+      expect(stackMessageNotificationsMock).toHaveBeenCalledWith(
         expect.objectContaining({ recipientIds: ['user-c'] }),
         transactionMock,
       );
@@ -598,7 +597,7 @@ describe('NotificationConsumerService', () => {
       });
 
       expect(createNotificationMock).not.toHaveBeenCalled();
-      expect(createManyNotificationsMock).toHaveBeenCalledWith(
+      expect(stackMessageNotificationsMock).toHaveBeenCalledWith(
         expect.objectContaining({ recipientIds: [] }),
         transactionMock,
       );
@@ -631,7 +630,7 @@ describe('NotificationConsumerService', () => {
 
       await handleEvent(service, event);
 
-      expect(createManyNotificationsMock).toHaveBeenCalledWith(
+      expect(stackMessageNotificationsMock).toHaveBeenCalledWith(
         expect.objectContaining({ recipientIds: ['user-b'] }),
         transactionMock,
       );
@@ -672,16 +671,16 @@ describe('NotificationConsumerService', () => {
           type: 'MESSAGE_REPLIED',
           entityType: 'MESSAGE',
           entityId: 'message-2',
+          conversationId: 'conversation-1',
         },
         transactionMock,
       );
-      expect(createManyNotificationsMock).toHaveBeenCalledWith(
+      expect(stackMessageNotificationsMock).toHaveBeenCalledWith(
         {
           recipientIds: ['user-c'],
           actorId: 'user-a',
-          type: 'MESSAGE_RECEIVED',
-          entityType: 'MESSAGE',
-          entityId: 'message-2',
+          messageId: 'message-2',
+          conversationId: 'conversation-1',
         },
         transactionMock,
       );
@@ -714,13 +713,12 @@ describe('NotificationConsumerService', () => {
       await handleEvent(service, event);
 
       expect(createNotificationMock).not.toHaveBeenCalled();
-      expect(createManyNotificationsMock).toHaveBeenCalledWith(
+      expect(stackMessageNotificationsMock).toHaveBeenCalledWith(
         {
           recipientIds: ['user-c'],
           actorId: 'user-a',
-          type: 'MESSAGE_RECEIVED',
-          entityType: 'MESSAGE',
-          entityId: 'message-2',
+          messageId: 'message-2',
+          conversationId: 'conversation-1',
         },
         transactionMock,
       );
@@ -754,13 +752,12 @@ describe('NotificationConsumerService', () => {
       await handleEvent(service, event);
 
       expect(createNotificationMock).not.toHaveBeenCalled();
-      expect(createManyNotificationsMock).toHaveBeenCalledWith(
+      expect(stackMessageNotificationsMock).toHaveBeenCalledWith(
         {
           recipientIds: ['user-c'],
           actorId: 'user-a',
-          type: 'MESSAGE_RECEIVED',
-          entityType: 'MESSAGE',
-          entityId: 'message-2',
+          messageId: 'message-2',
+          conversationId: 'conversation-1',
         },
         transactionMock,
       );
@@ -793,7 +790,7 @@ describe('NotificationConsumerService', () => {
         /Malformed chat\.message\.sent payload/,
       );
       expect(createNotificationMock).not.toHaveBeenCalled();
-      expect(createManyNotificationsMock).not.toHaveBeenCalled();
+      expect(stackMessageNotificationsMock).not.toHaveBeenCalled();
     });
 
     /**
@@ -823,7 +820,7 @@ describe('NotificationConsumerService', () => {
       await expect(handleEvent(service, event)).rejects.toThrow(
         /recipientUserIds is not an array of strings/,
       );
-      expect(createManyNotificationsMock).not.toHaveBeenCalled();
+      expect(stackMessageNotificationsMock).not.toHaveBeenCalled();
     });
 
     /**
@@ -855,7 +852,7 @@ describe('NotificationConsumerService', () => {
       await expect(handleEvent(service, event)).rejects.toThrow(
         /recipientUserIds has 101 entries/,
       );
-      expect(createManyNotificationsMock).not.toHaveBeenCalled();
+      expect(stackMessageNotificationsMock).not.toHaveBeenCalled();
     });
 
     /**

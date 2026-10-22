@@ -955,7 +955,7 @@
   letter-spacing: 0.04em;
 }
 
-.admin-status-pending,
+.admin-status-open,
 .admin-status-in-review,
 .admin-status-suspended {
   border-color: #6c4e2c;
@@ -1495,4 +1495,3 @@
   font-size: 9px;
   display: block;
 }
-

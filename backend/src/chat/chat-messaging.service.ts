@@ -320,11 +320,23 @@ export class ChatMessagingService {
         ),
     );
 
-    const deletedParticipantIds = stateEligibleParticipants
-      .filter((participant) => participant.deletedAt)
-      .map((participant) => participant.userId);
-
     const deliverableParticipants = stateEligibleParticipants;
+
+    // People who blocked the sender keep their chat as they left it: a deleted or archived chat
+    // stays hidden, and the message never counts as unread for them. The sender is not told.
+    const blockerIds = await this.chatAccessService.findRecipientsWhoBlocked(
+      senderId,
+      deliverableParticipants
+        .map((participant) => participant.userId)
+        .filter((userId) => userId !== senderId),
+    );
+
+    const deletedParticipantIds = stateEligibleParticipants
+      .filter(
+        (participant) =>
+          participant.deletedAt && !blockerIds.has(participant.userId),
+      )
+      .map((participant) => participant.userId);
 
     const payload =
       preparedPayload ??
@@ -391,6 +403,7 @@ export class ChatMessagingService {
           participantUserIds: deliverableParticipants.map(
             (participant) => participant.userId,
           ),
+          alreadyReadUserIds: [...blockerIds],
           ciphertext: payload.ciphertext,
           encryptionMeta: payload.encryptionMeta as
             | Prisma.InputJsonValue

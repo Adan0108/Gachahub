@@ -49,7 +49,7 @@ describe('ensureDeviceProvisioned', () => {
     expect(api.registerChatDevice).not.toHaveBeenCalled();
   });
 
-  it('re-provisions with a fresh device identity when a different user signs in', async () => {
+  it('makes a fresh device identity when the one found belongs to someone else', async () => {
     const { api } = await import('../../api');
     const store = new TsMlsDeviceIdentityStore();
     const first = await ensureDeviceProvisioned(store, 'user-1');
@@ -60,9 +60,8 @@ describe('ensureDeviceProvisioned', () => {
     expect(second.userId).toBe('user-2');
     expect(second.deviceId).not.toBe(first.deviceId);
     expect(api.registerChatDevice).toHaveBeenCalledTimes(1);
-    // regression: this used to wipe the old device's local state without
-    // ever revoking it on the backend, leaving it permanently ACTIVE there
-    expect(api.revokeChatDevice).toHaveBeenCalledWith(first.deviceId);
+    // The other account's device is theirs: signing in here never retires it on the server
+    expect(api.revokeChatDevice).not.toHaveBeenCalled();
   });
 
   // regression: this used to throw and permanently block provisioning for
@@ -172,7 +171,7 @@ describe('linking the login to the device', () => {
     await expect(store.getOwnCredential()).resolves.toEqual(fresh);
   });
 
-  it('wipes everything when a different user signs into this browser', async () => {
+  it('clears the local data when the identity found belongs to someone else', async () => {
     const store = new TsMlsDeviceIdentityStore();
     await ensureDeviceProvisioned(store, 'user-1');
 

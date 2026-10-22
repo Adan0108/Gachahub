@@ -1,0 +1,117 @@
+.chat-video {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+}
+
+.chat-video:focus-visible {
+  outline: 2px solid var(--purple, #8b6cff);
+  outline-offset: -2px;
+}
+
+.chat-video-screen {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  background: #000;
+  cursor: pointer;
+}
+
+.chat-video:fullscreen .chat-video-screen {
+  max-height: none;
+  height: 100%;
+}
+
+.chat-video-big-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(15, 17, 26, 0.72);
+  color: #fff;
+  font-size: 24px;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+
+.chat-video-big-play:hover {
+  background: rgba(139, 108, 255, 0.9);
+  transform: translate(-50%, -50%) scale(1.06);
+}
+
+/* The bar shows while the pointer or focus is on the player, and stays up while it is paused. */
+.chat-video-bar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 10px 8px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.chat-video:hover .chat-video-bar,
+.chat-video:focus-within .chat-video-bar,
+.chat-video:has(.chat-video-big-play) .chat-video-bar {
+  opacity: 1;
+}
+
+.chat-video-bar button {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+.chat-video-bar button:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.chat-video-seek {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--purple, #8b6cff);
+}
+
+.chat-video-volume {
+  width: 56px;
+  accent-color: var(--purple, #8b6cff);
+}
+
+.chat-video-time {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 420px) {
+  .chat-video-volume {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-video-bar,
+  .chat-video-big-play {
+    transition: none;
+  }
+}

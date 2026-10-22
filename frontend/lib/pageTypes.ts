@@ -29,6 +29,7 @@ export interface UserRecord {
   role: string;
   status: "ACTIVE" | "SUSPENDED" | "BANNED" | "DELETED";
   createdAt: string;
+  username?: string | null;
 }
 export interface ContentRecord {
   id: string;
@@ -51,7 +52,14 @@ export interface ReportRecord {
 }
 export interface ModeratorAssignment {
   id?: string;
-  user: { id: string; name?: string; email?: string; status?: string };
+  user: {
+    id: string;
+    name?: string;
+    email?: string;
+    status?: string;
+    image?: string | null;
+    username?: string | null;
+  };
   assigner?: { name?: string; email?: string };
   createdAt?: string;
 }
