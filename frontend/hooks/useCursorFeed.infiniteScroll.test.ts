@@ -108,7 +108,10 @@ describe("automatic cursor infinite scrolling", () => {
       expect(params(1).cursor).toBe(cursor);
       await act(async () => finish(page("second", null)));
       await flush();
-      expect(hook.value.items?.map((item: { id: string }) => item.id)).toEqual(["first", "second"]);
+      expect(hook.value.items?.map((item) => (item as { id: string }).id)).toEqual([
+        "first",
+        "second",
+      ]);
       expect(hook.value.canLoadMore).toBe(false);
       await intersect();
       expect(fetch).toHaveBeenCalledTimes(2);
