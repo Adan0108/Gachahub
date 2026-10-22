@@ -1,6 +1,7 @@
 import type { DomainEventType } from '../domain-events/domain-event.types';
 
 export const KAFKA_TOPICS = {
+  MODERATION_RESULTS: 'gachahub.moderation.results',
   MODERATION_REQUESTS: 'gachahub.moderation.requests',
   POSTS: 'gachahub.posts',
   SOCIAL: 'gachahub.social',

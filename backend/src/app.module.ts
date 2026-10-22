@@ -33,6 +33,7 @@ import { LinkPreviewsModule } from './link-previews/link-previews.module';
 import { ReportsModule } from './reports/reports.module';
 import { ChatBackupModule } from './chat-backup/chat-backup.module';
 import { MlsRetentionModule } from './mls-retention/mls-retention.module';
+import { ModerationResultsModule } from './moderation-analysis/moderation-results.module';
 /**
  * Root application module.
  *
@@ -72,6 +73,7 @@ import { MlsRetentionModule } from './mls-retention/mls-retention.module';
     FollowsModule,
     FeedModule,
     ReportsModule,
+    ModerationResultsModule,
     LinkPreviewsModule,
     ContentModerationModule,
     AuditLogQueryModule,

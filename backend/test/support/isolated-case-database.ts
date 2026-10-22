@@ -110,6 +110,15 @@ export async function isolatedCaseDatabase() {
         'utf8',
       ),
     );
+    await admin.query(
+      readFileSync(
+        resolve(
+          root,
+          'prisma/migrations/20261022042915_moderation_analysis_results/migration.sql',
+        ),
+        'utf8',
+      ),
+    );
     await admin.query('COMMIT');
   } catch (error) {
     await admin.query('ROLLBACK');
