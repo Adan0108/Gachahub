@@ -9,6 +9,8 @@ function asItemsList(data: any) {
   const items = Array.isArray(data) ? data : data?.items || [];
   return { items, meta: { total: items.length } };
 }
+// Unpinned conversations per inbox page; every pinned one comes with the first.
+export const INBOX_PAGE_SIZE = 50;
 export const queryKeys = {
   health: ["health"],
   home: (search: any) => ["home", { search }],
@@ -262,7 +264,7 @@ export const queries = {
   // retry/queue if a socket was briefly disconnected.
   chatConversations: () => ({
     queryKey: queryKeys.chatConversations,
-    queryFn: api.getChatConversations,
+    queryFn: () => api.getChatConversations({ limit: INBOX_PAGE_SIZE }),
     retry: 1,
     staleTime: 10000,
     refetchInterval: 15000,
@@ -290,6 +292,26 @@ export const queries = {
     queryFn: ({ signal }: any) => api.getBlockedChatUsers({ signal }),
     retry: 1,
     staleTime: 15_000,
+  }),
+  // The inbox past its first page. Keyed by where it starts, so a first page that moved never
+  // leaves a gap; under chatConversations, so anything that refreshes the inbox refreshes these too.
+  chatOlderConversations: (start: { updatedAt: string; id: string } | null) => ({
+    queryKey: [...queryKeys.chatConversations, "older", start?.id ?? null],
+    queryFn: ({ pageParam }: any) =>
+      api.getChatConversations({
+        limit: INBOX_PAGE_SIZE,
+        beforeUpdatedAt: pageParam.updatedAt,
+        beforeId: pageParam.id,
+      }),
+    initialPageParam: start as { updatedAt: string; id: string },
+    getNextPageParam: (lastPage: any[]) => {
+      const last = lastPage.at(-1);
+      return lastPage.length >= INBOX_PAGE_SIZE && last
+        ? { updatedAt: last.updatedAt, id: last.id }
+        : undefined;
+    },
+    retry: 1,
+    staleTime: 10000,
   }),
   chatArchivedConversations: () => ({
     queryKey: queryKeys.chatArchivedConversations,

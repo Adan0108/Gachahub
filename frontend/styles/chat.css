@@ -2215,6 +2215,17 @@
   margin: 8px 16px 0;
 }
 
+.chat-load-older-conversations {
+  justify-self: center;
+  margin: 8px 16px;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--chat-radius);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
 .chat-search-more button {
   padding: 5px 12px;
   border: 1px solid var(--line);
@@ -3145,6 +3156,14 @@
   color: rgba(255, 255, 255, 0.92);
 }
 
+/* Purple disappears on the blue bubble */
+.chat-message.mine .mention {
+  padding: 0 3px;
+  color: #fff;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.22);
+}
+
 .chat-message.mine small {
   color: rgba(255, 255, 255, 0.7);
 }
@@ -3907,6 +3926,8 @@
 }
 
 .chat-composer {
+  /* the @ suggestion list opens above it */
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;

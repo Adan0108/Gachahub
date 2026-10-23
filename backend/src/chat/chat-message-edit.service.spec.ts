@@ -153,6 +153,29 @@ describe('ChatMessageEditService', () => {
       });
     });
 
+    // #93: user-2 removed and user-3 added between the first read and the lock
+    it('stores and delivers the edit to the locked roster, not the first read', async () => {
+      repository.findMessageWithParticipants.mockResolvedValue(
+        target({
+          conversation: { type: 'GROUP', participants: participants() },
+        }),
+      );
+      repository.lockAndFindParticipants.mockResolvedValue([
+        ...participants({ 'user-2': 'DECLINED' }),
+        { userId: 'user-3', state: 'ACTIVE', deletedAt: null },
+      ]);
+
+      await edit();
+
+      expect(repository.createEditMessage).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ participantUserIds: ['user-1', 'user-3'] }),
+      );
+      expect(chatDelivery.publishMessageEdited).toHaveBeenCalledWith(
+        expect.objectContaining({ recipientUserIds: ['user-3'] }),
+      );
+    });
+
     it('checks the linked device and the send rate limit first', async () => {
       chatDevicesService.assertSessionLinkedToActiveDevice.mockRejectedValue(
         new ForbiddenException('no device'),

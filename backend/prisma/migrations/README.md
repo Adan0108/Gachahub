@@ -52,6 +52,8 @@ Apply with `prisma migrate deploy` only. Never rename, edit or squash an applied
 - `20260922140000_add_mls_group_infos`: published GroupInfo for external joins
 - `20260925120000_mls_welcomes_conversation_idx`, `20260925120100_mls_group_members_device_removed_idx`, `20260925120200_drop_mls_group_members_device_idx`: index changes
 - `20260925140000_chat_participants_pending_since`, `20260925140100_chat_participants_pending_since_idx`: invite age for expiry
+- `20261023100000_participant_invited_joined_at`: when a member was last invited and last joined, so the thread can say "invited" and then "joined the group"
+- `20261023120000_chat_membership_rounds`: replaces those two columns with one row per invite or direct add, so earlier rounds still show after someone is invited again
 
 ## Encrypted history backup
 - `20260925130000_chat_history_backup`: backup key and blobs

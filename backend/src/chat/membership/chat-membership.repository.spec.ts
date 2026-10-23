@@ -17,6 +17,11 @@ describe('ChatMembershipRepository', () => {
       updateMany: jest.fn(),
       createMany: jest.fn(),
     },
+    chatMembershipRound: {
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
   };
   const prisma = {
     $transaction: jest.fn(),

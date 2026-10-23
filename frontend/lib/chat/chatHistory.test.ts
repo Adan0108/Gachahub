@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { messagesFallenOutOfWindow } from "./chatHistory";
+import { compareMessages, messagesFallenOutOfWindow } from "./chatHistory";
 
 const message = (n: number) => ({
   id: `m${n}`,
@@ -22,11 +22,20 @@ describe("messagesFallenOutOfWindow", () => {
     expect(messagesFallenOutOfWindow(range(1, 30), latest)).toEqual([]);
   });
 
-  it("does not rescue the deleted oldest message of a conversation shorter than a full window", () => {
-    const previous = range(1, 10);
-    const latest = range(2, 10);
+  // #101: live pushes grow the window past a page; the next poll brings it back to one page.
+  it("keeps what a shrinking window dropped off its end", () => {
+    expect(messagesFallenOutOfWindow(range(1, 60), range(11, 60)).map((m) => m.id)).toEqual(
+      range(1, 10).map((m) => m.id),
+    );
+  });
 
-    expect(messagesFallenOutOfWindow(previous, latest)).toEqual([]);
+  it("tells messages sent in the same millisecond apart by id", () => {
+    const at = "2026-09-01T00:00:05.000Z";
+    const a = { id: "a", createdAt: at };
+    const b = { id: "b", createdAt: at };
+
+    expect(messagesFallenOutOfWindow([a, b], [b])).toEqual([a]);
+    expect(messagesFallenOutOfWindow([a, b], [a])).toEqual([]);
   });
 
   it("does not rescue anything when the window is empty", () => {
@@ -35,5 +44,27 @@ describe("messagesFallenOutOfWindow", () => {
 
   it("returns nothing when nothing changed", () => {
     expect(messagesFallenOutOfWindow(range(1, 5), range(1, 5))).toEqual([]);
+  });
+});
+
+describe("compareMessages", () => {
+  it("orders by time, then by id, the same however the messages arrived", () => {
+    const at = "2026-09-01T00:00:05.000Z";
+    const messages = [
+      { id: "m9", createdAt: "2026-09-01T00:00:06.000Z" },
+      { id: "b", createdAt: at },
+      { id: "a", createdAt: at },
+    ];
+
+    expect([...messages].sort(compareMessages).map((m) => m.id)).toEqual(["a", "b", "m9"]);
+    expect([...messages].reverse().sort(compareMessages).map((m) => m.id)).toEqual([
+      "a",
+      "b",
+      "m9",
+    ]);
+  });
+
+  it("finds a message equal to itself", () => {
+    expect(compareMessages(message(1), message(1))).toBe(0);
   });
 });

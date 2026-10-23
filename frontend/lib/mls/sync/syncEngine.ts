@@ -1,7 +1,7 @@
 import { api } from '../../api';
 import { bytesToBase64, base64ToBytes } from '../storage/base64';
 import type { GroupSession, GroupSessionFactory } from '../contract/client';
-import { CommitApplier, handshakeTime, type Handshake } from './commitApplier';
+import { CommitApplier, handshakeTime, type ApplicationResult, type Handshake } from './commitApplier';
 import { CommitVerifier } from './commitVerifier';
 import { publishableGroupInfo } from './groupInfoPublishing';
 import { RecoveryCooldown } from './recoveryCooldown';
@@ -322,11 +322,12 @@ export class SyncEngine {
   async processIncoming(
     conversationId: ConversationId,
     wireBytes: Uint8Array,
+    keep?: (message: ApplicationResult) => Promise<void>,
   ): Promise<ProcessResult> {
     return this.cache.runExclusive(conversationId, async () => {
       // Reading at the current epoch does not need a pending Commit settled, so an unreachable server must not block it
       const session = await this.openSession(conversationId, 'best-effort');
-      return this.applier.applyIncoming(conversationId, session, wireBytes);
+      return this.applier.applyIncoming(conversationId, session, wireBytes, keep);
     });
   }
 

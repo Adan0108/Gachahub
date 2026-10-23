@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import { claimUploadsForAttachment } from '../media/media.repository';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  GROUP_MANAGER_ROLES,
+  inTransactionAsRole,
+} from './membership/lock-conversation';
 
 // Thrown inside the transaction on a CAS miss so Prisma rolls the upload claim back too; the service maps it to a 409.
 export class GroupPhotoConflictError extends Error {}
@@ -21,27 +25,38 @@ export class ChatGroupPhotoRepository {
     userId: string,
     upload: { id: string; secureUrl: string },
   ) {
-    return this.prisma.$transaction(async (tx) => {
-      await claimUploadsForAttachment(tx, {
-        ids: [upload.id],
-        userId,
-        purpose: 'GROUP_PHOTO',
-      });
+    return inTransactionAsRole(
+      this.prisma,
+      conversationId,
+      userId,
+      GROUP_MANAGER_ROLES,
+      async (tx) => {
+        await claimUploadsForAttachment(tx, {
+          ids: [upload.id],
+          userId,
+          purpose: 'GROUP_PHOTO',
+        });
 
-      return this.swap(tx, conversationId, {
-        photoUrl: upload.secureUrl,
-        photoMediaUploadId: upload.id,
-      });
-    });
+        return this.swap(tx, conversationId, {
+          photoUrl: upload.secureUrl,
+          photoMediaUploadId: upload.id,
+        });
+      },
+    );
   }
 
   // Also clears a legacy `photoUrl` that has no backing upload.
-  clear(conversationId: string) {
-    return this.prisma.$transaction((tx) =>
-      this.swap(tx, conversationId, {
-        photoUrl: null,
-        photoMediaUploadId: null,
-      }),
+  clear(conversationId: string, userId: string) {
+    return inTransactionAsRole(
+      this.prisma,
+      conversationId,
+      userId,
+      GROUP_MANAGER_ROLES,
+      (tx) =>
+        this.swap(tx, conversationId, {
+          photoUrl: null,
+          photoMediaUploadId: null,
+        }),
     );
   }
 

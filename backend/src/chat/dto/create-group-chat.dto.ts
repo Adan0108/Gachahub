@@ -7,6 +7,7 @@ import {
   Matches,
   MaxLength,
 } from 'class-validator';
+import { MAX_MEMBERS_PER_REQUEST } from '../group-size-policy';
 
 export class CreateGroupChatDto {
   @ApiProperty({
@@ -23,7 +24,7 @@ export class CreateGroupChatDto {
   })
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(99)
+  @ArrayMaxSize(MAX_MEMBERS_PER_REQUEST)
   @IsString({ each: true })
   @MaxLength(120, { each: true })
   memberUserIds!: string[];

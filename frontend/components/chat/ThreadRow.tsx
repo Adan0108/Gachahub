@@ -237,6 +237,9 @@ function MessageBubble({
     .filter(Boolean)
     .join(" ");
 
+  const mentions = (conversation?.participants ?? [])
+    .map((participant) => participant.user?.username)
+    .filter((handle): handle is string => Boolean(handle));
   const pendingClass = pendingEdit ? `pending ${pendingEdit.failed ? "failed" : ""}` : "";
   const body =
     decrypted.status === "ok" ? (
@@ -244,6 +247,7 @@ function MessageBubble({
         <EnvelopeContent
           envelope={decrypted.envelope}
           media={message.media}
+          mentions={mentions}
           messageId={message.id}
         />
       ) : (
@@ -251,6 +255,7 @@ function MessageBubble({
           <EnvelopeContent
             envelope={decrypted.envelope}
             media={message.media}
+            mentions={mentions}
             messageId={message.id}
           />
         </article>

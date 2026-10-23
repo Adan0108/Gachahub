@@ -7,7 +7,8 @@ describe('PresenceGateway', () => {
   const socket = (
     userId?: string,
     authReady: Promise<void> = Promise.resolve(),
-  ) => ({ id: 's1', data: { userId, authReady } }) as never;
+    sessionExpiresAt = Number.MAX_SAFE_INTEGER,
+  ) => ({ id: 's1', data: { userId, authReady, sessionExpiresAt } }) as never;
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -25,10 +26,15 @@ describe('PresenceGateway', () => {
   });
 
   it('waits for authentication to finish before reading who the socket is', async () => {
-    const data: { userId?: string; authReady?: Promise<void> } = {};
+    const data: {
+      userId?: string;
+      authReady?: Promise<void>;
+      sessionExpiresAt?: number;
+    } = {};
     data.authReady = new Promise<void>((resolve) =>
       setTimeout(() => {
         data.userId = 'late';
+        data.sessionExpiresAt = Number.MAX_SAFE_INTEGER;
         resolve();
       }, 5),
     );
@@ -36,6 +42,13 @@ describe('PresenceGateway', () => {
     await gateway.handleConnection({ id: 's1', data } as never);
 
     expect(presence.socketAlive).toHaveBeenCalledWith('late', 's1');
+  });
+
+  // #100: an expired login's ping must not keep the person looking online.
+  it('does not mark a socket alive once its login has expired', async () => {
+    await gateway.handlePing(socket('me', Promise.resolve(), Date.now() - 1));
+
+    expect(presence.socketAlive).not.toHaveBeenCalled();
   });
 
   it('ignores a socket that never authenticated', async () => {

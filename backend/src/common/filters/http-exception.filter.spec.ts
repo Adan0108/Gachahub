@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   HttpException,
   Logger,
   type ArgumentsHost,
 } from '@nestjs/common';
+import { MlsCommitConflictException } from '../exceptions/mls-commit-conflict.exception';
 import { MembershipChangePendingException } from '../exceptions/membership-change-pending.exception';
 import { HttpExceptionFilter } from './http-exception.filter';
 
@@ -114,5 +116,49 @@ describe('HttpExceptionFilter', () => {
     filter.catch(new BadRequestException({ message: 'nope', code: 42 }), host);
 
     expect(sentBody()).not.toHaveProperty('code');
+  });
+
+  // #97: the client restores, applies the winner and retries only if the 409 carries it
+  it('sends the winning handshake of a lost MLS commit race', () => {
+    const handshake = { id: 'h-7', epoch: 7, payload: 'AAEC' };
+
+    filter.catch(new MlsCommitConflictException(handshake), host);
+
+    expect(response.status).toHaveBeenCalledWith(409);
+    expect(sentBody()).toMatchObject({
+      statusCode: 409,
+      outcome: 'conflict',
+      handshake,
+    });
+  });
+
+  it('never passes other fields of an ordinary conflict through', () => {
+    filter.catch(
+      new ConflictException({
+        message: 'x',
+        outcome: 'conflict',
+        handshake: {},
+      }),
+      host,
+    );
+
+    expect(sentBody()).not.toHaveProperty('outcome');
+    expect(sentBody()).not.toHaveProperty('handshake');
+  });
+
+  // Any exception can add its own vetted fields; the filter itself never names one.
+  it('adds the fields any exception chooses to share, on a client error only', () => {
+    class WithExtras extends HttpException {
+      responseExtras() {
+        return { retryWith: 'smaller-batch' };
+      }
+    }
+
+    filter.catch(new WithExtras('Too big', 413), host);
+    expect(sentBody()).toMatchObject({ retryWith: 'smaller-batch' });
+
+    response.json.mockClear();
+    filter.catch(new WithExtras('Broke', 503), host);
+    expect(sentBody()).not.toHaveProperty('retryWith');
   });
 });

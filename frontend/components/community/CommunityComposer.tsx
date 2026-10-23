@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from "react";
 import { FiCornerUpLeft, FiImage, FiSend, FiSmile, FiX } from "react-icons/fi";
 import { EmojiPicker } from "../chat/EmojiPicker";
@@ -11,13 +11,12 @@ import {
   COMMUNITY_MESSAGE_MAX_CHARS,
 } from "../../lib/community/communityChat";
 import { useCommunityMemberSuggestions } from "../../hooks/community/useCommunityMemberSuggestions";
-import { typingMention } from "../../lib/mentions";
+import { useMentionPicker } from "../../hooks/useMentionPicker";
 import { dragVerdict } from "../../lib/community/dragVerdict";
 import type { DragVerdict } from "../../lib/community/dragVerdict";
 import type { CommunityMessage } from "../../lib/community/communityChat";
 import type { ReactionChoice } from "../../lib/chat/chatReactions";
-import type { UserSearchResult } from "../../hooks/chat/useUserSearch";
-import { AvatarFace } from "../AvatarFace";
+import { MentionMenu } from "../MentionMenu";
 import { LocalImage } from "./LocalImage";
 
 /** Writes to the room: Enter sends, Shift+Enter adds a line, a reply shows what it answers, and up to four pictures can be picked, pasted or dropped in. */
@@ -28,6 +27,7 @@ export function CommunityComposer({
   onCancelReply,
   onSend,
   disabledReason,
+  cooldownSeconds = 0,
 }: {
   slug: string;
   channel: { name: string; slowmodeSeconds: number };
@@ -35,63 +35,23 @@ export function CommunityComposer({
   onCancelReply: () => void;
   onSend: (text: string, files: File[]) => void;
   disabledReason?: string | null;
+  /** Seconds until sending is allowed again after sending too fast; 0 when it is. */
+  cooldownSeconds?: number;
 }) {
   const [draft, setDraft] = useState("");
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
   const [dragging, setDragging] = useState<DragVerdict | null>(null);
-  const [caret, setCaret] = useState(0);
-  const [highlighted, setHighlighted] = useState(0);
-  // Where the @ being typed started, once the person closed its list with Escape
-  const [dismissedAt, setDismissedAt] = useState<number | null>(null);
-  const pendingCaret = useRef<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const trimmed = draft.trim();
-  const canSend = Boolean(trimmed) || files.length > 0;
-  const typing = typingMention(draft, caret);
-  const isSuggesting = Boolean(typing) && dismissedAt !== typing?.start;
-  const suggestions = useCommunityMemberSuggestions(slug, isSuggesting ? typing?.query : undefined);
-  const showSuggestions = isSuggesting && suggestions.items.length > 0;
-
-  // After picking, the caret goes back behind the inserted handle
-  useLayoutEffect(() => {
-    if (pendingCaret.current === null) return;
-    inputRef.current?.setSelectionRange(pendingCaret.current, pendingCaret.current);
-    pendingCaret.current = null;
-  });
-
-  const pickMember = (member: UserSearchResult) => {
-    if (!typing) return;
-    const inserted = `@${member.username} `;
-    const position = typing.start + inserted.length;
-    setDraft(`${draft.slice(0, typing.start)}${inserted}${draft.slice(typing.end)}`);
-    setCaret(position);
-    pendingCaret.current = position;
-    setHighlighted(0);
-    inputRef.current?.focus();
-  };
+  const canSend = (Boolean(trimmed) || files.length > 0) && cooldownSeconds === 0;
+  const mention = useMentionPicker(draft, setDraft, inputRef);
+  const suggestions = useCommunityMemberSuggestions(slug, mention.query);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (showSuggestions && !event.nativeEvent.isComposing) {
-      const count = suggestions.items.length;
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-        event.preventDefault();
-        setHighlighted((current) => (current + (event.key === "ArrowDown" ? 1 : count - 1)) % count);
-        return;
-      }
-      if (event.key === "Enter" || event.key === "Tab") {
-        event.preventDefault();
-        pickMember(suggestions.items[Math.min(highlighted, count - 1)]);
-        return;
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setDismissedAt(typing?.start ?? null);
-        return;
-      }
-    }
+    if (mention.handleKey(event, suggestions.items)) return;
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       submit();
@@ -249,12 +209,11 @@ export function CommunityComposer({
           maxLength={COMMUNITY_MESSAGE_MAX_CHARS}
           onChange={(event) => {
             setDraft(event.target.value);
-            setCaret(event.target.selectionStart ?? event.target.value.length);
-            setHighlighted(0);
+            mention.onInput(event);
           }}
           onKeyDown={handleKeyDown}
           onPaste={pasteFiles}
-          onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
+          onSelect={mention.onSelect}
           placeholder={`Message #${channel.name}`}
           ref={inputRef}
           rows={1}
@@ -301,35 +260,18 @@ export function CommunityComposer({
             <FiSend />
           </button>
         </div>
-        {showSuggestions && (
-          <ul aria-label="Suggested members" className="community-mention-menu" role="listbox">
-            {suggestions.items.map((member: UserSearchResult, index: number) => (
-              <li
-                aria-selected={index === highlighted}
-                className={index === highlighted ? "active" : ""}
-                key={member.id}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  pickMember(member);
-                }}
-                onMouseEnter={() => setHighlighted(index)}
-                role="option"
-              >
-                <span className="chat-avatar small">
-                  <AvatarFace image={member.image} name={member.name} />
-                </span>
-                <span className="community-mention-name">{member.name}</span>
-                <span className="community-mention-handle">@{member.username}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <MentionMenu items={suggestions.items} picker={mention} />
         {isPickerOpen && (
           <div className="community-emoji-popover">
             <EmojiPicker emojiOnly onPick={insertEmoji} />
           </div>
         )}
       </div>
+      {cooldownSeconds > 0 && (
+        <small className="community-error" role="status">
+          You&apos;re sending messages too fast. You can send again in {cooldownSeconds}s.
+        </small>
+      )}
       {channel.slowmodeSeconds > 0 && (
         <small className="community-hint">
           Slow mode: one message every {channel.slowmodeSeconds}s

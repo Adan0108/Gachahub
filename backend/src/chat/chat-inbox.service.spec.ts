@@ -61,6 +61,7 @@ describe('ChatInboxService', () => {
     findMessageBySenderClientMessageId: jest.fn(),
     findParticipants: jest.fn(),
     findSentMessageInConversation: jest.fn(),
+    findMessagePosition: jest.fn(),
     createMessage: jest.fn(),
     updateParticipantArchivedState: jest.fn(),
     createGameChatEmote: jest.fn(),
@@ -77,6 +78,8 @@ describe('ChatInboxService', () => {
     updateMessage: jest.fn(),
     softDeleteMessage: jest.fn(),
     findInboxConversations: jest.fn(),
+    findPinnedInboxConversations: jest.fn(),
+    findUnpinnedInboxPage: jest.fn(),
     findConversationType: jest.fn(),
     countUnreadMessagesForConversations: jest.fn(),
     countUnreadMessagesForUser: jest.fn(),
@@ -655,6 +658,78 @@ describe('ChatInboxService', () => {
       );
     });
 
+    // #105: the inbox comes in pages instead of every conversation at once.
+    describe('in pages', () => {
+      it('gives every pinned conversation and the newest unpinned ones first', async () => {
+        repository.findPinnedInboxConversations.mockResolvedValue([
+          buildConversation(
+            'conv-pinned',
+            new Date('2024-01-01'),
+            new Date('2024-01-01'),
+          ),
+        ]);
+        repository.findUnpinnedInboxPage.mockResolvedValue([
+          buildConversation('conv-newest', new Date('2024-01-05'), null),
+        ]);
+
+        const result = await service.listConversations('user-1', {
+          limit: 50,
+        });
+
+        expect(repository.findPinnedInboxConversations).toHaveBeenCalledWith(
+          'user-1',
+          'ACTIVE',
+        );
+        expect(repository.findUnpinnedInboxPage).toHaveBeenCalledWith(
+          'user-1',
+          'ACTIVE',
+          { limit: 50, before: undefined },
+        );
+        expect(result.map((conversation) => conversation.id)).toEqual([
+          'conv-pinned',
+          'conv-newest',
+        ]);
+      });
+
+      it('continues after the last unpinned conversation, without the pinned ones again', async () => {
+        repository.findUnpinnedInboxPage.mockResolvedValue([]);
+
+        await service.listConversations('user-1', {
+          limit: 50,
+          beforeUpdatedAt: '2024-01-05T00:00:00.000Z',
+          beforeId: 'conv-newest',
+        });
+
+        expect(repository.findPinnedInboxConversations).not.toHaveBeenCalled();
+        expect(repository.findUnpinnedInboxPage).toHaveBeenCalledWith(
+          'user-1',
+          'ACTIVE',
+          {
+            limit: 50,
+            before: {
+              updatedAt: new Date('2024-01-05T00:00:00.000Z'),
+              id: 'conv-newest',
+            },
+          },
+        );
+      });
+
+      it('orders conversations active at the same moment by id, as the pages do', async () => {
+        const at = new Date('2024-01-05');
+        repository.findInboxConversations.mockResolvedValue([
+          buildConversation('conv-a', at, null),
+          buildConversation('conv-b', at, null),
+        ]);
+
+        const result = await service.listConversations('user-1');
+
+        expect(result.map((conversation) => conversation.id)).toEqual([
+          'conv-b',
+          'conv-a',
+        ]);
+      });
+    });
+
     it("masks another participant's BLOCKED state as ACTIVE so it isn't leaked to the viewer", async () => {
       repository.findInboxConversations.mockResolvedValue([
         {
@@ -1085,8 +1160,10 @@ describe('ChatInboxService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
-      repository.findSentMessageInConversation.mockResolvedValue({
+      const createdAt = new Date('2026-10-20T10:00:00.000Z');
+      repository.findMessagePosition.mockResolvedValue({
         id: 'message-5',
+        createdAt,
       });
       repository.findMessages.mockResolvedValue([]);
 
@@ -1095,9 +1172,13 @@ describe('ChatInboxService', () => {
         limit: 30,
       });
 
+      expect(repository.findMessagePosition).toHaveBeenCalledWith(
+        'message-5',
+        'conversation-1',
+      );
       expect(repository.findMessages).toHaveBeenCalledWith({
         conversationId: 'conversation-1',
-        beforeMessageId: 'message-5',
+        before: { id: 'message-5', createdAt },
         limit: 30,
       });
     });
@@ -1138,7 +1219,7 @@ describe('ChatInboxService', () => {
         'user-1',
         'conversation-1',
       );
-      expect(repository.findSentMessageInConversation).not.toHaveBeenCalled();
+      expect(repository.findMessagePosition).not.toHaveBeenCalled();
       expect(repository.findMessages).not.toHaveBeenCalled();
     });
 
@@ -1147,7 +1228,7 @@ describe('ChatInboxService', () => {
         userId: 'user-1',
         state: 'ACTIVE',
       });
-      repository.findSentMessageInConversation.mockResolvedValue(null);
+      repository.findMessagePosition.mockResolvedValue(null);
 
       await expect(
         service.findMessages('user-1', 'conversation-1', {

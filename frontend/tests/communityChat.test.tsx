@@ -353,6 +353,21 @@ describe("CommunityChat", () => {
       expect(composer()).toHaveValue("");
     });
 
+    it("sends nothing while cooling down after sending too fast, keeps the draft and says how long", () => {
+      const chat = chatState({ sendCooldownSeconds: 3 });
+      mocks.chat = chat;
+      renderChat();
+
+      type("hello again");
+      enter();
+      fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+      expect(chat.send).not.toHaveBeenCalled();
+      expect(composer()).toHaveValue("hello again");
+      expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+      expect(screen.getByText(/sending messages too fast/)).toHaveTextContent("again in 3s");
+    });
+
     it("adds a line on Shift+Enter instead of sending", () => {
       const chat = chatState();
       mocks.chat = chat;

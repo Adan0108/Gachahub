@@ -78,6 +78,8 @@ export interface DomainEventPayloadMap {
     replyToMessageId: string | null;
     replyToSenderId: string | null;
     recipientUserIds: string[];
+    /** Members the text @mentions, muted or not; missing on events queued before mentions existed. */
+    mentionedUserIds?: string[];
   };
 
   /**

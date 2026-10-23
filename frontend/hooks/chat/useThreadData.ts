@@ -93,10 +93,10 @@ export function useThreadData(
   const safetyPeerIds: string[] = otherActiveMemberIds(conversation, userId);
   const safety = useSafetyNumbers(conversationId, userId, safetyPeerIds);
   const rawMembershipEvents = useMembershipEvents(conversationId);
-  const isGroup = (conversation as { type?: string } | undefined)?.type === "GROUP";
   const membershipEvents = useMemo(
-    () => eventsForDisplay(rawMembershipEvents, isGroup),
-    [isGroup, rawMembershipEvents],
+    () =>
+      eventsForDisplay(rawMembershipEvents, conversation as Parameters<typeof eventsForDisplay>[1]),
+    [conversation, rawMembershipEvents],
   );
   const threadItems = useMemo(
     () =>
@@ -105,8 +105,17 @@ export function useThreadData(
         decrypted,
         events: membershipEvents,
         collapseLeading: !groupProblem,
+        loaded: Boolean(newestPage),
+        hasOlderHistory: history.hasMoreHistory,
       }),
-    [visibleMessages, decrypted, membershipEvents, groupProblem],
+    [
+      visibleMessages,
+      decrypted,
+      membershipEvents,
+      groupProblem,
+      newestPage,
+      history.hasMoreHistory,
+    ],
   );
   // Only what this device actually read is acknowledged: an undecryptable message was not delivered.
   const newestItems = newestPage?.items;

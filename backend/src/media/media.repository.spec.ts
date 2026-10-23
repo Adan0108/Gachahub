@@ -95,3 +95,45 @@ describe('MediaRepository.findOrphanedSingleImageUploads', () => {
     expect(result.map((item) => item.id)).toEqual(['a']);
   });
 });
+
+// #104: a confirmation only moves INITIATED to UPLOADED, so it cannot undo a cleanup claim.
+describe('MediaRepository.markUploaded', () => {
+  const prisma = {
+    mediaUpload: { updateMany: jest.fn(), findUnique: jest.fn() },
+  };
+  const repository = new MediaRepository(prisma as unknown as PrismaService);
+  const params = {
+    id: 'up-1',
+    assetId: 'asset-1',
+    secureUrl: 'https://res.cloudinary.com/demo/raw/upload/v1/a',
+    version: 1,
+    format: 'bin',
+    bytes: 10,
+    responseSignature: 'sig',
+  };
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('writes only while the upload is still INITIATED, and returns it', async () => {
+    prisma.mediaUpload.updateMany.mockResolvedValue({ count: 1 });
+    prisma.mediaUpload.findUnique.mockResolvedValue({
+      id: 'up-1',
+      status: 'UPLOADED',
+    });
+
+    await expect(repository.markUploaded(params)).resolves.toEqual({
+      id: 'up-1',
+      status: 'UPLOADED',
+    });
+    expect(prisma.mediaUpload.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'up-1', status: 'INITIATED' } }),
+    );
+  });
+
+  it('returns null when the upload already left INITIATED', async () => {
+    prisma.mediaUpload.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(repository.markUploaded(params)).resolves.toBeNull();
+    expect(prisma.mediaUpload.findUnique).not.toHaveBeenCalled();
+  });
+});

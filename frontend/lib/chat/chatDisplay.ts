@@ -1,6 +1,11 @@
 /** Shared, pure helpers for rendering a conversation/participant - used by the chat page and the group settings modal alike. */
 
-export type ChatUser = { id?: string; name?: string | null; image?: string | null };
+export type ChatUser = {
+  id?: string;
+  name?: string | null;
+  username?: string | null;
+  image?: string | null;
+};
 export type ChatParticipant = {
   userId: string;
   state?: string;
@@ -10,6 +15,8 @@ export type ChatParticipant = {
   mutedUntil?: string | null;
   isMuted?: boolean | null;
   isBlockedByMe?: boolean;
+  /** Every time they were invited (invitedAt) or added, oldest first; joinedAt is when they became a member. */
+  rounds?: Array<{ invitedAt: string | null; joinedAt: string | null }>;
 };
 export type ChatConversation = {
   id: string;

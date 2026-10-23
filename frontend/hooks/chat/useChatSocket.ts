@@ -3,7 +3,10 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
+import { addMessageToCache } from "../../lib/chat/messageCache";
 import { applyReceiptsEvent } from "../../lib/chat/receiptEvents";
+import { withOptimisticDelete } from "../../lib/chat/chatThread";
+import { messageDeletedSignal } from "../../lib/chat/messageDeletedSignal";
 import { queryKeys } from "../../lib/queries";
 import { useSharedSocket } from "../../lib/socket/sharedSocket";
 import { logTiming } from "../../lib/chat/chatTiming";
@@ -97,32 +100,18 @@ export function useChatSocket() {
         sinceSavedMs: Date.now() - Date.parse(event.createdAt),
       });
       acknowledgeDelivery(event.messageId);
-      queryClient.setQueryData<CachedMessages>(
-        queryKeys.chatMessages(event.conversationId),
-        (old) => {
-          if (!old || old.items.some((item) => item.id === event.messageId)) {
-            return old;
-          }
-          return {
-            ...old,
-            items: [
-              ...old.items,
-              {
-                id: event.messageId,
-                conversationId: event.conversationId,
-                senderId: event.senderId,
-                ciphertext: event.ciphertext,
-                encryptionMeta: event.encryptionMeta,
-                contentType: event.contentType,
-                createdAt: event.createdAt,
-                clientMessageId: event.clientMessageId,
-                replyToId: event.replyToId,
-                media: event.media,
-              },
-            ],
-          };
-        },
-      );
+      void addMessageToCache(queryClient, event.conversationId, {
+        id: event.messageId,
+        conversationId: event.conversationId,
+        senderId: event.senderId,
+        ciphertext: event.ciphertext,
+        encryptionMeta: event.encryptionMeta,
+        contentType: event.contentType,
+        createdAt: event.createdAt,
+        clientMessageId: event.clientMessageId,
+        replyToId: event.replyToId,
+        media: event.media,
+      });
       // Sidebar preview text/unread badge and the requests list aren't
       // worth hand-merging - both are cheap GETs, just refetch them.
       queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
@@ -137,8 +126,18 @@ export function useChatSocket() {
     };
     on("reaction:added", refetchConversationMessages);
     on("reaction:removed", refetchConversationMessages);
-    on("message:deleted", refetchConversationMessages);
     on("message:edited", refetchConversationMessages);
+    // Marked at once as well: a message the refetch pushes out of the newest window moves to older
+    // history as the copy cached here, so that copy must already say it was deleted. Older history
+    // lives outside the cache, so it hears about the delete through messageDeletedSignal.
+    on("message:deleted", (event: ConversationEvent & { messageId: string }) => {
+      queryClient.setQueryData<CachedMessages>(
+        queryKeys.chatMessages(event.conversationId),
+        (old) => (old ? { ...old, items: withOptimisticDelete(old.items, event.messageId) } : old),
+      );
+      messageDeletedSignal.emit(event.conversationId, event.messageId);
+      refetchConversationMessages(event);
+    });
 
     // Someone's device got, or read up to, messages in a thread: put it straight on the cached messages.
     on("receipts:updated", (event: ReceiptsEvent) => {
