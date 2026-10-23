@@ -1,7 +1,10 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sendEncryptedChatMessage, sendEncryptedEdit } from "./sendEncryptedMessage";
-import { EncryptedIndexedDbMessagePlaintextStore } from "../storage/messagePlaintextStore";
+import {
+  EncryptedIndexedDbMessagePlaintextStore,
+  OutgoingMessageStore,
+} from "../storage/messagePlaintextStore";
 import { GroupStateUnavailableError } from "../contract/errors";
 
 // Pacing and queueing have their own tests (sendScheduler.test.ts); here every send goes at once.
@@ -129,6 +132,62 @@ describe("sendEncryptedChatMessage", () => {
       }),
     ).resolves.toMatchObject({ message: { id: "msg-9" } });
     expect(save).toHaveBeenCalled();
+  });
+
+  // #98: the text is kept before the server can have it, so a tab closing mid-send cannot lose it
+  it("keeps the text by client id before sending, and drops that copy once saved under the id", async () => {
+    const { api } = await import("../../api");
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockResolvedValue(2);
+    engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
+    const outgoing = new OutgoingMessageStore();
+    let keptAtSend: unknown;
+    vi.mocked(api.sendChatMessage).mockImplementation(async () => {
+      keptAtSend = await outgoing.get("client-k");
+      return { message: { id: "msg-k" } };
+    });
+
+    await sendEncryptedChatMessage({
+      syncEngine: engine as any,
+      deviceId: "device-1",
+      conversationId: "conv-k",
+      recipientUserId: "user-bob",
+      text: "hi",
+      clientMessageId: "client-k",
+    });
+
+    expect(keptAtSend).toMatchObject({ conversationId: "conv-k", envelope: { body: "hi" } });
+    expect(await outgoing.get("client-k")).toBeUndefined();
+  });
+
+  it("keeps the early copy when saving under the id fails, and drops it when the server refuses", async () => {
+    const { api } = await import("../../api");
+    const engine = fakeSyncEngine();
+    engine.getCurrentEpoch.mockResolvedValue(2);
+    engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(EncryptedIndexedDbMessagePlaintextStore.prototype, "save").mockRejectedValueOnce(
+      new Error("disk full"),
+    );
+    vi.mocked(api.sendChatMessage)
+      .mockResolvedValueOnce({ message: { id: "msg-s" } })
+      .mockRejectedValueOnce(Object.assign(new Error("Slow down"), { status: 429 }));
+    const send = (clientMessageId: string) =>
+      sendEncryptedChatMessage({
+        syncEngine: engine as any,
+        deviceId: "device-1",
+        conversationId: "conv-s",
+        recipientUserId: "user-bob",
+        text: "hi",
+        clientMessageId,
+      });
+    const outgoing = new OutgoingMessageStore();
+
+    await send("client-saved-late");
+    await expect(send("client-refused")).rejects.toThrow("Slow down");
+
+    expect(await outgoing.get("client-saved-late")).toMatchObject({ envelope: { body: "hi" } });
+    expect(await outgoing.get("client-refused")).toBeUndefined();
   });
 
   it("sends the same ciphertext again after a timeout, and keeps the text of the message the server stored", async () => {

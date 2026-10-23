@@ -18,12 +18,14 @@ import {
 } from '../../lib/mls/messaging/decryptRetry';
 import {
   EncryptedIndexedDbMessagePlaintextStore,
+  OutgoingMessageStore,
   onMessageSaved,
 } from '../../lib/mls/storage/messagePlaintextStore';
 import type { SyncEngine } from '../../lib/mls/sync/syncEngine';
 import type { ConversationId, PlaintextEnvelope } from '../../lib/mls/contract/types';
 
 const plaintextStore = new EncryptedIndexedDbMessagePlaintextStore();
+const outgoingStore = new OutgoingMessageStore();
 
 /** syncCommits with one recovery attempt when there is no local group state yet. */
 async function syncCommitsRecoveringMissingWelcome(
@@ -63,6 +65,7 @@ interface ChatMessageRow {
   senderId: string;
   ciphertext: string;
   encryptionMeta?: unknown;
+  clientMessageId?: string | null;
 }
 
 /** Decrypts each message once and caches the plaintext locally; own sent messages come from the send-time cache. */
@@ -195,9 +198,24 @@ export function useDecryptedMessages(
             ownDeviceId !== undefined &&
             wasSentByDevice(message.encryptionMeta, ownDeviceId)
           ) {
-            // Sent from this device with no local copy: its key is gone, so it cannot be decrypted.
+            // Sent from this device but never saved under its id (the tab closed, or the save
+            // failed): the copy kept before sending is the only one, as its key is gone.
+            const kept = message.clientMessageId
+              ? await outgoingStore.get(message.clientMessageId).catch(() => undefined)
+              : undefined;
+            if (kept) {
+              await plaintextStore
+                .save({ ...kept, messageId: message.id })
+                .then(() => outgoingStore.drop(message.clientMessageId!))
+                .catch((error: unknown) =>
+                  console.warn(`Sent message ${message.id} could not be kept on this device`, error),
+                );
+            }
             letGo(message.id);
-            setDecrypted((prev) => ({ ...prev, [message.id]: { status: 'unavailable' } }));
+            setDecrypted((prev) => ({
+              ...prev,
+              [message.id]: kept ? { status: 'ok', envelope: kept.envelope } : { status: 'unavailable' },
+            }));
             return;
           }
 

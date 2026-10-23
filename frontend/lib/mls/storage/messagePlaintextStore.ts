@@ -81,6 +81,29 @@ export class InMemoryMessagePlaintextStore implements MessagePlaintextStore {
 }
 
 const MESSAGE_PLAINTEXT_STORE = 'decryptedMessages';
+const OUTGOING_STORE = 'outgoingMessages';
+
+/** A sent message's plaintext before the server has given it an id. */
+export type OutgoingMessage = Omit<DecryptedMessage, 'messageId'>;
+
+/**
+ * Keeps a message's plaintext by its clientMessageId from just before it is sent until it is saved
+ * under the server's id. The sender can never decrypt its own message, so if the tab dies or the
+ * save fails after the server accepted it, this copy is the only way to show the text again.
+ */
+export class OutgoingMessageStore {
+  async keep(clientMessageId: string, message: OutgoingMessage): Promise<void> {
+    await encryptAndStore(await openMlsDatabase(), OUTGOING_STORE, clientMessageId, message);
+  }
+
+  async get(clientMessageId: string): Promise<OutgoingMessage | undefined> {
+    return loadAndDecryptOrMissing<OutgoingMessage>(await openMlsDatabase(), OUTGOING_STORE, clientMessageId);
+  }
+
+  async drop(clientMessageId: string): Promise<void> {
+    await deleteRecord(await openMlsDatabase(), OUTGOING_STORE, clientMessageId);
+  }
+}
 
 export class EncryptedIndexedDbMessagePlaintextStore implements MessagePlaintextStore {
   async get(messageId: string): Promise<DecryptedMessage | undefined> {

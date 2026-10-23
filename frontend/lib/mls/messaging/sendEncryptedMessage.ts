@@ -7,7 +7,10 @@ import { buildTextEnvelope, previewBlobIds } from "./linkPreviewEnvelope";
 import { senderMeta } from "./messageOrigin";
 import { sendScheduler } from "./sendScheduler";
 import type { SyncEngine } from "../sync/syncEngine";
-import { EncryptedIndexedDbMessagePlaintextStore } from "../storage/messagePlaintextStore";
+import {
+  EncryptedIndexedDbMessagePlaintextStore,
+  OutgoingMessageStore,
+} from "../storage/messagePlaintextStore";
 import type {
   ConversationId,
   DeviceId,
@@ -17,6 +20,7 @@ import type {
 } from "../contract/types";
 
 const plaintextStore = new EncryptedIndexedDbMessagePlaintextStore();
+const outgoingStore = new OutgoingMessageStore();
 
 /** A timeout or a dropped connection: the server may have stored the message anyway. */
 function mightHaveLanded(error: unknown): boolean {
@@ -82,6 +86,7 @@ export function sendEncryptedEnvelope(
     conversationId,
     recipientUserId,
     envelope,
+    clientMessageId,
     (wire) =>
       api.sendChatMessage(conversationId, {
         ...wire,
@@ -116,6 +121,7 @@ export function sendEncryptedEdit(
     conversationId,
     recipientUserId,
     buildEditEnvelope(edit),
+    clientMessageId,
     (wire) => api.editChatMessage(edit.targetMessageId, { ...wire, clientMessageId }),
   );
 }
@@ -127,6 +133,7 @@ async function encryptSubmitAndCache<Response extends SendResult>(
   conversationId: ConversationId,
   recipientUserId: UserId | UserId[],
   envelope: PlaintextEnvelope,
+  clientMessageId: string,
   submit: Submit<Response>,
 ) {
   assertMessageSize(envelope);
@@ -138,6 +145,7 @@ async function encryptSubmitAndCache<Response extends SendResult>(
         conversationId,
         recipientUserId,
         envelope,
+        clientMessageId,
         submit,
       );
     } catch (error) {
@@ -151,6 +159,7 @@ async function encryptSubmitAndCache<Response extends SendResult>(
         conversationId,
         recipientUserId,
         envelope,
+        clientMessageId,
         submit,
       );
     }
@@ -171,6 +180,7 @@ async function encryptAndSend<Response extends SendResult>(
   conversationId: ConversationId,
   recipientUserId: UserId | UserId[],
   envelope: PlaintextEnvelope,
+  clientMessageId: string,
   submit: Submit<Response>,
 ) {
   await ensureConversationGroup(syncEngine, conversationId, recipientUserId);
@@ -183,11 +193,22 @@ async function encryptAndSend<Response extends SendResult>(
   }
 
   const wire = { ciphertext, encryptionMeta: senderMeta(deviceId) };
+  // Kept before the server can have it: if this tab dies before the save below, the text is
+  // recovered by clientMessageId once the message comes back (useDecryptedMessages).
+  await outgoingStore
+    .keep(clientMessageId, { conversationId, senderDeviceId: deviceId, epoch, envelope })
+    .catch((error: unknown) => console.warn("A message being sent could not be kept first", error));
+  const forget = () => outgoingStore.drop(clientMessageId).catch(() => {});
+
   // The same ciphertext again: the server answers with the message it already stored for this
   // clientMessageId, so its text is still kept here instead of the send showing as failed.
   await sendScheduler.waitForSlot();
   const response = await submit(wire).catch(async (error: unknown) => {
-    if (!mightHaveLanded(error)) throw error;
+    if (!mightHaveLanded(error)) {
+      // Refused, so it never reached the server; a retry keeps it again.
+      await forget();
+      throw error;
+    }
     await sendScheduler.waitForSlot();
     return submit(wire);
   });
@@ -201,6 +222,8 @@ async function encryptAndSend<Response extends SendResult>(
       epoch,
       envelope,
     })
+    // Saved: the early copy is no longer needed. Not saved: it stays, to be recovered later.
+    .then(forget)
     .catch((error: unknown) =>
       console.warn(`Sent message ${response.message.id} could not be kept on this device`, error),
     );

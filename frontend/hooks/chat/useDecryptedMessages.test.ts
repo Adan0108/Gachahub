@@ -7,15 +7,20 @@ import { claimDecrypt } from '../../lib/mls/messaging/decryptClaims';
 import { MAX_RETRY_ATTEMPTS, nextRetryDelayMs } from '../../lib/mls/messaging/decryptRetry';
 import { useDecryptedMessages } from './useDecryptedMessages';
 
-const { plaintextGet, plaintextSave, plaintextRemove } = vi.hoisted(() => ({
+const { plaintextGet, plaintextSave, plaintextRemove, outgoingGet, outgoingDrop } = vi.hoisted(() => ({
   plaintextGet: vi.fn(),
   plaintextSave: vi.fn(),
   plaintextRemove: vi.fn(),
+  outgoingGet: vi.fn(),
+  outgoingDrop: vi.fn(),
 }));
 
 vi.mock('../../lib/mls/storage/messagePlaintextStore', () => ({
   EncryptedIndexedDbMessagePlaintextStore: vi.fn().mockImplementation(function FakeStore() {
     return { get: plaintextGet, save: plaintextSave, remove: plaintextRemove };
+  }),
+  OutgoingMessageStore: vi.fn().mockImplementation(function FakeOutgoing() {
+    return { get: outgoingGet, drop: outgoingDrop };
   }),
   onMessageSaved: vi.fn().mockReturnValue(() => undefined),
 }));
@@ -109,6 +114,8 @@ describe('useDecryptedMessages', () => {
     plaintextGet.mockResolvedValue(undefined);
     plaintextSave.mockResolvedValue(undefined);
     plaintextRemove.mockResolvedValue(undefined);
+    outgoingGet.mockResolvedValue(undefined);
+    outgoingDrop.mockResolvedValue(undefined);
     vi.mocked(useDeviceIdentity).mockReturnValue({
       credential: { deviceId: 'device-1' },
       isReady: true,
@@ -223,6 +230,42 @@ describe('useDecryptedMessages', () => {
     expect(hook.value).toMatchObject({ m1: { status: 'ok', envelope: { body: 'opened it myself' } } });
 
     hook.unmount();
+  });
+
+  // #98: the tab closed after the server took the message but before its text was saved under the id
+  describe('a message this device sent but never saved under its id', () => {
+    const mine = {
+      id: 'm1',
+      senderId: 'me',
+      ciphertext: btoa('x'),
+      encryptionMeta: { senderDeviceId: 'device-1' },
+      clientMessageId: 'client-1',
+    };
+    const envelope = { v: 1, type: 'text', body: 'hi' };
+
+    it('shows the text kept before sending, and saves it under the id', async () => {
+      vi.mocked(useSyncEngine).mockReturnValue(keeping(fakeEngine()) as never);
+      outgoingGet.mockResolvedValue({ conversationId: 'c1', senderDeviceId: 'device-1', epoch: 2, envelope });
+      const hook = renderHook();
+
+      await hook.render({ conversationId: 'c1', messages: [mine], currentUserId: 'me' });
+
+      expect(hook.value.m1).toEqual({ status: 'ok', envelope });
+      expect(outgoingGet).toHaveBeenCalledWith('client-1');
+      expect(plaintextSave).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'm1', envelope }));
+      expect(outgoingDrop).toHaveBeenCalledWith('client-1');
+      hook.unmount();
+    });
+
+    it('is unavailable when no copy was kept either', async () => {
+      vi.mocked(useSyncEngine).mockReturnValue(keeping(fakeEngine()) as never);
+      const hook = renderHook();
+
+      await hook.render({ conversationId: 'c1', messages: [mine], currentUserId: 'me' });
+
+      expect(hook.value.m1).toEqual({ status: 'unavailable' });
+      hook.unmount();
+    });
   });
 
   // regression: the decrypted map is pruned when switching conversations.
