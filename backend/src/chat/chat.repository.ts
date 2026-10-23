@@ -8,7 +8,10 @@ import {
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
-import { pendingSinceChange } from './membership/apply-participant-transitions';
+import {
+  firstRound,
+  pendingSinceChange,
+} from './membership/apply-participant-transitions';
 import {
   inTransactionAsRole,
   lockConversation,
@@ -284,13 +287,14 @@ export class ChatRepository {
               userId: params.creatorId,
               role: 'OWNER',
               state: 'ACTIVE',
-              ...pendingSinceChange(null, 'ACTIVE', now),
+              ...firstRound('ACTIVE', now),
             },
             ...params.members.map((member) => ({
               userId: member.userId,
               role: 'MEMBER' as const,
               state: member.state,
               ...pendingSinceChange(null, member.state, now),
+              ...firstRound(member.state, now),
             })),
           ],
         },
@@ -578,6 +582,10 @@ export class ChatRepository {
                 username: true,
                 image: true,
               },
+            },
+            rounds: {
+              select: { invitedAt: true, joinedAt: true },
+              orderBy: { createdAt: 'asc' },
             },
           },
         },

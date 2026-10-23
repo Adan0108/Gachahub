@@ -15,10 +15,8 @@ export type ChatParticipant = {
   mutedUntil?: string | null;
   isMuted?: boolean | null;
   isBlockedByMe?: boolean;
-  /** When they were last invited; null if added directly. */
-  invitedAt?: string | null;
-  /** When they last became a member (accepted, or added directly); null while invited or after declining. */
-  joinedAt?: string | null;
+  /** Every time they were invited (invitedAt) or added, oldest first; joinedAt is when they became a member. */
+  rounds?: Array<{ invitedAt: string | null; joinedAt: string | null }>;
 };
 export type ChatConversation = {
   id: string;

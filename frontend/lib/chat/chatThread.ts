@@ -1,15 +1,23 @@
-import type { MembershipEvent } from '../mls/sync/membershipEvents';
+import type { MembershipEvent } from "../mls/sync/membershipEvents";
 
 /**
  * A membership line in the thread: a join or leave this device verified itself, reworded as an
  * invite for someone who was invited, or an accept, which only the server knows about (it adds no
  * device, so there is no commit to verify).
  */
-export type ThreadEvent = Pick<MembershipEvent, 'id' | 'userId' | 'at'> & {
-  kind: MembershipEvent['kind'] | 'invited' | 'accepted';
+export type ThreadEvent = Pick<MembershipEvent, "id" | "userId" | "at"> & {
+  kind: MembershipEvent["kind"] | "invited" | "accepted";
 };
 
-type EventParticipant = { userId: string; invitedAt?: string | null; joinedAt?: string | null };
+type EventParticipant = { userId: string; rounds?: MembershipRound[] };
+type MembershipRound = { invitedAt: string | null; joinedAt: string | null };
+
+const roundStart = (round: MembershipRound) => Date.parse((round.invitedAt ?? round.joinedAt)!);
+
+/** The round an event belongs to: the last one started by then, or the first if none had yet. */
+function roundAt(rounds: MembershipRound[], at: number): MembershipRound | undefined {
+  return rounds.filter((round) => roundStart(round) <= at).at(-1) ?? rounds[0];
+}
 
 interface ThreadMessage {
   id: string;
@@ -19,13 +27,13 @@ interface ThreadMessage {
   status?: string;
 }
 
-type DecryptState = { status: 'pending' | 'ok' | 'unavailable' } | undefined;
+type DecryptState = { status: "pending" | "ok" | "unavailable" } | undefined;
 
 export type ThreadItem<M extends ThreadMessage = ThreadMessage> =
-  | { kind: 'history-banner' }
-  | { kind: 'timestamp'; at: number }
+  | { kind: "history-banner" }
+  | { kind: "timestamp"; at: number }
   | {
-      kind: 'message';
+      kind: "message";
       message: M;
       index: number;
       gapBefore: boolean;
@@ -34,13 +42,16 @@ export type ThreadItem<M extends ThreadMessage = ThreadMessage> =
       /** Another bubble from the same sender follows immediately, so this one keeps the avatar/name hidden. */
       groupedWithNext: boolean;
     }
-  | { kind: 'event'; event: ThreadEvent };
+  | { kind: "event"; event: ThreadEvent };
 
 /** A message the thread draws nothing for yet: still being decrypted, so it must not leave a divider or a gap behind. */
-function isStillDecrypting(message: ThreadMessage, decrypted: Record<string, DecryptState>): boolean {
-  if (message.contentType === 'SYSTEM' || message.status === 'DELETED') return false;
+function isStillDecrypting(
+  message: ThreadMessage,
+  decrypted: Record<string, DecryptState>,
+): boolean {
+  if (message.contentType === "SYSTEM" || message.status === "DELETED") return false;
   const state = decrypted[message.id];
-  return state === undefined || state.status === 'pending';
+  return state === undefined || state.status === "pending";
 }
 
 /** A gap this long gets its own timestamp divider. */
@@ -55,10 +66,10 @@ function leadingUnreadableIds(
 ): Set<string> {
   const hidden = new Set<string>();
   for (const message of messages) {
-    if (message.contentType === 'SYSTEM') continue;
+    if (message.contentType === "SYSTEM") continue;
     const status = decrypted[message.id]?.status;
-    if (status === 'ok') break;
-    if (status === 'unavailable') hidden.add(message.id);
+    if (status === "ok") break;
+    if (status === "unavailable") hidden.add(message.id);
   }
   return hidden;
 }
@@ -73,7 +84,7 @@ export function newestUnreadableFromOthers(
     const message = messages[index]!;
     if (
       message.senderId !== userId &&
-      (message.contentType === 'SYSTEM' || decrypted[message.id]?.status === 'unavailable')
+      (message.contentType === "SYSTEM" || decrypted[message.id]?.status === "unavailable")
     ) {
       return message.id;
     }
@@ -97,35 +108,43 @@ export function buildThreadItems<M extends ThreadMessage>(input: {
   /** There is older history not loaded yet. */
   hasOlderHistory?: boolean;
 }): ThreadItem<M>[] {
-  const { messages, decrypted, events, collapseLeading, loaded = true, hasOlderHistory = false } =
-    input;
+  const {
+    messages,
+    decrypted,
+    events,
+    collapseLeading,
+    loaded = true,
+    hasOlderHistory = false,
+  } = input;
   const hidden = collapseLeading ? leadingUnreadableIds(messages, decrypted) : new Set<string>();
   const settled = loaded && !messages.some((message) => isStillDecrypting(message, decrypted));
   const oldestLoaded = messages[0]?.createdAt ? Date.parse(messages[0].createdAt) : Number.NaN;
   const pendingEvents = settled
     ? events
-        .filter((event) => !hasOlderHistory || Number.isNaN(oldestLoaded) || event.at >= oldestLoaded)
+        .filter(
+          (event) => !hasOlderHistory || Number.isNaN(oldestLoaded) || event.at >= oldestLoaded,
+        )
         .sort((a, b) => a.at - b.at)
     : [];
 
-  const items: ThreadItem<M>[] = hidden.size > 0 ? [{ kind: 'history-banner' }] : [];
+  const items: ThreadItem<M>[] = hidden.size > 0 ? [{ kind: "history-banner" }] : [];
   // "Conversation started" only fills an empty chat: it goes as soon as anyone has written, and has no time of its own.
   const hasWrittenMessage = messages.some(
-    (message) => message.contentType !== 'SYSTEM' && !hidden.has(message.id),
+    (message) => message.contentType !== "SYSTEM" && !hidden.has(message.id),
   );
   let prevAt: number | undefined;
   messages.forEach((message, index) => {
     if (hidden.has(message.id) || isStillDecrypting(message, decrypted)) return;
-    if (message.contentType === 'SYSTEM' && hasWrittenMessage) return;
+    if (message.contentType === "SYSTEM" && hasWrittenMessage) return;
     const sentAt = message.createdAt ? Date.parse(message.createdAt) : Number.NaN;
     while (pendingEvents[0] && !Number.isNaN(sentAt) && pendingEvents[0].at <= sentAt) {
-      items.push({ kind: 'event', event: pendingEvents.shift()! });
+      items.push({ kind: "event", event: pendingEvents.shift()! });
     }
-    const gap = Number.isNaN(sentAt) ? 0 : (prevAt === undefined ? Infinity : sentAt - prevAt);
-    const showDivider = gap >= TIMESTAMP_DIVIDER_GAP_MS && message.contentType !== 'SYSTEM';
-    if (showDivider) items.push({ kind: 'timestamp', at: sentAt });
+    const gap = Number.isNaN(sentAt) ? 0 : prevAt === undefined ? Infinity : sentAt - prevAt;
+    const showDivider = gap >= TIMESTAMP_DIVIDER_GAP_MS && message.contentType !== "SYSTEM";
+    if (showDivider) items.push({ kind: "timestamp", at: sentAt });
     items.push({
-      kind: 'message',
+      kind: "message",
       message,
       index,
       gapBefore: !showDivider && gap >= MESSAGE_GROUP_GAP_MS,
@@ -134,26 +153,29 @@ export function buildThreadItems<M extends ThreadMessage>(input: {
     });
     if (!Number.isNaN(sentAt)) prevAt = sentAt;
   });
-  return withGrouping([...items, ...pendingEvents.map((event) => ({ kind: 'event' as const, event }))]);
+  return withGrouping([
+    ...items,
+    ...pendingEvents.map((event) => ({ kind: "event" as const, event })),
+  ]);
 }
 
 /** Two consecutive bubbles from the same sender, close enough in time and with nothing else between them, stack tight with one shared avatar/name. */
 function withGrouping<M extends ThreadMessage>(rawItems: ThreadItem<M>[]): ThreadItem<M>[] {
   const withPrevious = rawItems.map((item, i) => {
-    if (item.kind !== 'message') return item;
+    if (item.kind !== "message") return item;
     const prev = rawItems[i - 1];
     const groupedWithPrevious =
-      prev?.kind === 'message' &&
+      prev?.kind === "message" &&
       prev.message.senderId === item.message.senderId &&
-      item.message.contentType !== 'SYSTEM' &&
-      prev.message.contentType !== 'SYSTEM' &&
+      item.message.contentType !== "SYSTEM" &&
+      prev.message.contentType !== "SYSTEM" &&
       !item.gapBefore;
     return { ...item, groupedWithPrevious };
   });
   return withPrevious.map((item, i) => {
-    if (item.kind !== 'message') return item;
+    if (item.kind !== "message") return item;
     const next = withPrevious[i + 1];
-    const groupedWithNext = next?.kind === 'message' && next.groupedWithPrevious;
+    const groupedWithNext = next?.kind === "message" && next.groupedWithPrevious;
     return { ...item, groupedWithNext };
   });
 }
@@ -167,36 +189,39 @@ export function eventsForDisplay(
   events: MembershipEvent[],
   conversation: { type?: string; participants?: EventParticipant[] } | undefined,
 ): ThreadEvent[] {
-  if (conversation?.type !== 'GROUP') return [];
+  if (conversation?.type !== "GROUP") return [];
   const participants = conversation.participants ?? [];
-  const byUser = new Map(participants.map((participant) => [participant.userId, participant]));
+  const roundsByUser = new Map(
+    participants.map((participant) => [participant.userId, participant.rounds ?? []]),
+  );
 
-  // shortcut: invitedAt and joinedAt are the latest round only, so after someone leaves and is
-  // invited again, their earlier leave is hidden too; keep a per-round history if that matters.
   const verified = events.flatMap((event): ThreadEvent[] => {
-    const person = byUser.get(event.userId);
-    const wasInvited = Boolean(person?.invitedAt);
-    if (event.kind === 'joined') return [{ ...event, kind: wasInvited ? 'invited' : 'joined' }];
-    if (event.kind === 'left') return wasInvited && !person?.joinedAt ? [] : [event];
+    const round = roundAt(roundsByUser.get(event.userId) ?? [], event.at);
+    const wasInvited = Boolean(round?.invitedAt);
+    if (event.kind === "joined") return [{ ...event, kind: wasInvited ? "invited" : "joined" }];
+    // Invited and never joined: that leave was a decline or an expired invite.
+    if (event.kind === "left") return wasInvited && !round?.joinedAt ? [] : [event];
     // Older builds also stored "signed in on a new device" events; they are no longer shown.
     return [];
   });
-  const accepted = participants.flatMap((person): ThreadEvent[] =>
-    person.invitedAt && person.joinedAt
-      ? [
-          {
-            id: `accepted:${person.userId}:${person.joinedAt}`,
-            kind: 'accepted',
-            userId: person.userId,
-            at: Date.parse(person.joinedAt),
-          },
-        ]
-      : [],
+  const accepted = participants.flatMap((person) =>
+    (person.rounds ?? []).flatMap((round): ThreadEvent[] =>
+      round.invitedAt && round.joinedAt
+        ? [
+            {
+              id: `accepted:${person.userId}:${round.joinedAt}`,
+              kind: "accepted",
+              userId: person.userId,
+              at: Date.parse(round.joinedAt),
+            },
+          ]
+        : [],
+    ),
   );
   return [...verified, ...accepted];
 }
 
-const pad2 = (value: number): string => String(value).padStart(2, '0');
+const pad2 = (value: number): string => String(value).padStart(2, "0");
 const timeLabel = (date: Date): string => `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 const startOfDay = (ms: number): number => {
   const date = new Date(ms);
@@ -210,14 +235,14 @@ export function messageDividerLabel(at: number, now: number, locale?: string): s
   const diffDays = Math.max(0, Math.round((startOfDay(now) - startOfDay(at)) / 86_400_000));
   const time = timeLabel(date);
   if (diffDays === 0) return time;
-  if (diffDays <= 6) return `${date.toLocaleDateString(locale, { weekday: 'short' })} ${time}`;
-  return `${date.getDate()} ${date.toLocaleDateString(locale, { month: 'short' })} ${date.getFullYear()}, ${time}`;
+  if (diffDays <= 6) return `${date.toLocaleDateString(locale, { weekday: "short" })} ${time}`;
+  return `${date.getDate()} ${date.toLocaleDateString(locale, { month: "short" })} ${date.getFullYear()}, ${time}`;
 }
 
 /** Full, unambiguous timestamp for a hover tooltip. */
 export function messageFullTimestamp(at: number, locale?: string): string {
   const date = new Date(at);
-  return `${date.getDate()} ${date.toLocaleDateString(locale, { month: 'long' })} ${date.getFullYear()}, ${timeLabel(date)}`;
+  return `${date.getDate()} ${date.toLocaleDateString(locale, { month: "long" })} ${date.getFullYear()}, ${timeLabel(date)}`;
 }
 
 /**
@@ -229,18 +254,18 @@ export function membershipEventText(
   name: string | undefined,
   isSelf: boolean,
 ): string {
-  const who = isSelf ? 'You' : name || 'Deleted user';
-  if (event.kind === 'invited') return `${who} ${isSelf ? 'were' : 'was'} invited to the group`;
-  if (event.kind === 'accepted') return `${who} joined the group`;
-  if (event.kind === 'joined') return `${who} ${isSelf ? 'were added to' : 'joined'} the group`;
-  return `${who} left or ${isSelf ? 'were' : 'was'} removed from the group`;
+  const who = isSelf ? "You" : name || "Deleted user";
+  if (event.kind === "invited") return `${who} ${isSelf ? "were" : "was"} invited to the group`;
+  if (event.kind === "accepted") return `${who} joined the group`;
+  if (event.kind === "joined") return `${who} ${isSelf ? "were added to" : "joined"} the group`;
+  return `${who} left or ${isSelf ? "were" : "was"} removed from the group`;
 }
 
 /** Stable React key for a thread row. */
 export function threadItemKey(item: ThreadItem): string {
-  if (item.kind === 'history-banner') return 'history-banner';
-  if (item.kind === 'timestamp') return `timestamp-${item.at}`;
-  return item.kind === 'event' ? item.event.id : item.message.id;
+  if (item.kind === "history-banner") return "history-banner";
+  if (item.kind === "timestamp") return `timestamp-${item.at}`;
+  return item.kind === "event" ? item.event.id : item.message.id;
 }
 
 /** Marks a message deleted in a cached list, so unsending shows at once instead of waiting on a refetch. */
@@ -249,7 +274,7 @@ export function withOptimisticDelete<M extends { id: string; status?: string }>(
   messageId: string,
 ): M[] {
   return messages.map((message) =>
-    message.id === messageId ? { ...message, status: 'DELETED' } : message,
+    message.id === messageId ? { ...message, status: "DELETED" } : message,
   );
 }
 
@@ -260,10 +285,11 @@ export function replyOriginalSenderLabel(
   viewerId: string | undefined,
   originalSenderName: string | undefined,
 ): string {
-  if (!originalSenderId) return 'a message';
-  if (originalSenderId === replierSenderId) return replierSenderId === viewerId ? 'yourself' : 'themself';
-  if (originalSenderId === viewerId) return 'You';
-  return originalSenderName || 'a message';
+  if (!originalSenderId) return "a message";
+  if (originalSenderId === replierSenderId)
+    return replierSenderId === viewerId ? "yourself" : "themself";
+  if (originalSenderId === viewerId) return "You";
+  return originalSenderName || "a message";
 }
 
 export interface ReadableNeighbors {
@@ -281,12 +307,12 @@ export function readableNeighbors(
   let seen = false;
   for (let i = 0; i < messages.length; i += 1) {
     before[i] = seen;
-    if (decrypted[messages[i]!.id]?.status === 'ok') seen = true;
+    if (decrypted[messages[i]!.id]?.status === "ok") seen = true;
   }
   seen = false;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     after[i] = seen;
-    if (decrypted[messages[i]!.id]?.status === 'ok') seen = true;
+    if (decrypted[messages[i]!.id]?.status === "ok") seen = true;
   }
   return { before, after };
 }

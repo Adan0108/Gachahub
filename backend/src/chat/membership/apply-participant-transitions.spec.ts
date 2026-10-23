@@ -2,7 +2,7 @@ import { ConflictException } from '@nestjs/common';
 import type { Prisma } from '../../generated/prisma/client';
 import {
   applyParticipantTransitions,
-  pendingSinceChange,
+  roundChange,
 } from './apply-participant-transitions';
 
 describe('applyParticipantTransitions', () => {
@@ -10,6 +10,11 @@ describe('applyParticipantTransitions', () => {
     chatParticipant: {
       createMany: jest.fn(),
       updateMany: jest.fn(),
+    },
+    chatMembershipRound: {
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
     },
   };
 
@@ -24,6 +29,7 @@ describe('applyParticipantTransitions', () => {
     jest.clearAllMocks();
     tx.chatParticipant.createMany.mockResolvedValue({ count: 1 });
     tx.chatParticipant.updateMany.mockResolvedValue({ count: 1 });
+    tx.chatMembershipRound.findFirst.mockResolvedValue(null);
   });
 
   it('updates a member only if they are still in the state the caller read', async () => {
@@ -45,8 +51,6 @@ describe('applyParticipantTransitions', () => {
           userId: 'u2',
           role: 'MEMBER',
           state: 'JOINING',
-          invitedAt: null,
-          joinedAt: expect.any(Date) as Date,
         },
       ],
       skipDuplicates: true,
@@ -60,8 +64,6 @@ describe('applyParticipantTransitions', () => {
       where: { conversationId: 'conv-1', userId: 'u2', state: 'DECLINED' },
       data: {
         state: 'JOINING',
-        invitedAt: null,
-        joinedAt: expect.any(Date) as Date,
         role: 'MEMBER',
         deletedAt: null,
         archivedAt: null,
@@ -137,6 +139,43 @@ describe('applyParticipantTransitions', () => {
     ).rejects.toThrow(ConflictException);
   });
 
+  it('starts a round for an invite, and finishes it when they accept', async () => {
+    await apply([{ userId: 'u2', from: null, to: 'PENDING' }]);
+    expect(tx.chatMembershipRound.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        conversationId: 'conv-1',
+        userId: 'u2',
+        invitedAt: expect.any(Date) as Date,
+      }) as object,
+    });
+
+    tx.chatMembershipRound.findFirst.mockResolvedValue({
+      id: 'round-1',
+      invitedAt: new Date(),
+      joinedAt: null,
+    });
+    await apply([{ userId: 'u2', from: 'PENDING', to: 'JOINING' }]);
+    expect(tx.chatMembershipRound.update).toHaveBeenCalledWith({
+      where: { id: 'round-1' },
+      data: { joinedAt: expect.any(Date) as Date },
+    });
+  });
+
+  it('starts a joined round for a direct add, and none for a leave', async () => {
+    await apply([
+      { userId: 'u2', from: 'DECLINED', to: 'JOINING' },
+      { userId: 'u3', from: 'ACTIVE', to: 'LEAVING' },
+    ]);
+
+    expect(tx.chatMembershipRound.create).toHaveBeenCalledTimes(1);
+    expect(tx.chatMembershipRound.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: 'u2',
+        joinedAt: expect.any(Date) as Date,
+      }) as object,
+    });
+  });
+
   it('does nothing for an empty change list', async () => {
     await expect(apply([])).resolves.toBe(0);
 
@@ -146,43 +185,20 @@ describe('applyParticipantTransitions', () => {
 });
 
 // What a chat says about someone: "invited" at the invite, "joined" at the accept, nothing for a decline.
-describe('pendingSinceChange: invitedAt and joinedAt', () => {
-  const now = new Date('2026-10-23T10:00:00.000Z');
-
-  it('stamps the invite and starts over when someone is invited', () => {
-    expect(pendingSinceChange(null, 'PENDING', now)).toEqual({
-      pendingSince: now,
-      invitedAt: now,
-      joinedAt: null,
-    });
-  });
-
-  it('stamps joinedAt when an invite is accepted, keeping the invite', () => {
-    expect(pendingSinceChange('PENDING', 'JOINING', now)).toEqual({
-      pendingSince: null,
-      joinedAt: now,
-    });
-  });
-
-  it('leaves joinedAt empty when an invite is declined or expires', () => {
-    expect(pendingSinceChange('PENDING', 'LEAVING', now)).toEqual({
-      pendingSince: null,
-    });
-    expect(pendingSinceChange('PENDING', 'DECLINED', now)).toEqual({
-      pendingSince: null,
-    });
-  });
-
-  it('marks a direct add as joined and never invited', () => {
-    expect(pendingSinceChange(null, 'ACTIVE', now)).toEqual({
-      invitedAt: null,
-      joinedAt: now,
-    });
-  });
-
-  it('changes nothing for someone who was already a member', () => {
-    expect(pendingSinceChange('JOINING', 'ACTIVE', now)).toEqual({});
-    expect(pendingSinceChange('LEAVING', 'ACTIVE', now)).toEqual({});
-    expect(pendingSinceChange('ARCHIVED', 'ACTIVE', now)).toEqual({});
+describe('roundChange', () => {
+  it.each([
+    [null, 'PENDING', 'invite'],
+    ['DECLINED', 'PENDING', 'invite'],
+    ['PENDING', 'JOINING', 'accept'],
+    [null, 'ACTIVE', 'join'],
+    ['DECLINED', 'JOINING', 'join'],
+    ['PENDING', 'PENDING', null],
+    ['PENDING', 'LEAVING', null],
+    ['PENDING', 'DECLINED', null],
+    ['JOINING', 'ACTIVE', null],
+    ['LEAVING', 'ACTIVE', null],
+    ['ARCHIVED', 'ACTIVE', null],
+  ] as const)('%s to %s is %s', (from, to, expected) => {
+    expect(roundChange(from, to)).toBe(expected);
   });
 });

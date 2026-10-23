@@ -11,33 +11,73 @@ export interface ParticipantTransition {
   to: ChatParticipantState;
 }
 
-/**
- * The timestamps to write for a state change. pendingSince is stamped on entering PENDING and
- * cleared on leaving it. invitedAt and joinedAt tell a chat what to say: an invite stamps
- * invitedAt and starts over, becoming a member stamps joinedAt (an accept keeps the invite; a
- * direct add was never invited), and a decline or expiry leaves joinedAt empty.
- */
+/** pendingSince to write for a state change: stamped on entering PENDING, cleared on leaving it. */
 export function pendingSinceChange(
   from: ChatParticipantState | null,
   to: ChatParticipantState,
   now: Date,
-): {
-  pendingSince?: Date | null;
-  invitedAt?: Date | null;
-  joinedAt?: Date | null;
-} {
-  if (to === 'PENDING') {
-    return from === 'PENDING'
-      ? {}
-      : { pendingSince: now, invitedAt: now, joinedAt: null };
+): { pendingSince?: Date | null } {
+  if (to === 'PENDING') return from === 'PENDING' ? {} : { pendingSince: now };
+  return from === 'PENDING' ? { pendingSince: null } : {};
+}
+
+/**
+ * What a state change means for the membership rounds a chat shows: an invite starts a round, an
+ * accept finishes the invite's round, and a direct add starts a round already joined. Anything
+ * else was already a member (JOINING to ACTIVE, a cancelled removal, back from ARCHIVED or
+ * BLOCKED) or is a decline, expiry or leave, which the round needs no stamp for.
+ */
+export function roundChange(
+  from: ChatParticipantState | null,
+  to: ChatParticipantState,
+): 'invite' | 'accept' | 'join' | null {
+  if (to === 'PENDING') return from === 'PENDING' ? null : 'invite';
+  if (to !== 'ACTIVE' && to !== 'JOINING') return null;
+  if (from === 'PENDING') return 'accept';
+  return from === null || from === 'DECLINED' ? 'join' : null;
+}
+
+/** The round a new participant row starts with, as a nested create. */
+export function firstRound(state: ChatParticipantState, now: Date) {
+  const change = roundChange(null, state);
+  if (!change) return {};
+  return {
+    rounds: {
+      create: change === 'invite' ? { invitedAt: now } : { joinedAt: now },
+    },
+  };
+}
+
+async function recordRound(
+  tx: Prisma.TransactionClient,
+  conversationId: string,
+  userId: string,
+  change: ReturnType<typeof roundChange>,
+  now: Date,
+) {
+  if (!change) return;
+  if (change === 'accept') {
+    const latest = await tx.chatMembershipRound.findFirst({
+      where: { conversationId, userId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, invitedAt: true, joinedAt: true },
+    });
+    if (latest?.invitedAt && !latest.joinedAt) {
+      await tx.chatMembershipRound.update({
+        where: { id: latest.id },
+        data: { joinedAt: now },
+      });
+      return;
+    }
   }
-  const left = from === 'PENDING' ? { pendingSince: null } : {};
-  if (to !== 'ACTIVE' && to !== 'JOINING') return left;
-  if (from === 'PENDING') return { ...left, joinedAt: now };
-  // Added directly: someone with no row, or back after leaving. Anything else was already a member
-  // (JOINING to ACTIVE, a cancelled removal, back from ARCHIVED or BLOCKED), so nothing new happened.
-  if (from !== null && from !== 'DECLINED') return left;
-  return { ...left, invitedAt: null, joinedAt: now };
+  await tx.chatMembershipRound.create({
+    data: {
+      conversationId,
+      userId,
+      createdAt: now,
+      ...(change === 'invite' ? { invitedAt: now } : { joinedAt: now }),
+    },
+  });
 }
 
 /** Applies state-machine membership changes in the caller's transaction, each conditional on the state read (a stale read throws Conflict). */
@@ -88,6 +128,14 @@ export async function applyParticipantTransitions(
         'Membership changed while this request was running - please retry',
       );
     }
+
+    await recordRound(
+      tx,
+      conversationId,
+      change.userId,
+      roundChange(change.from, change.to),
+      now,
+    );
   }
 
   return changes.length;
