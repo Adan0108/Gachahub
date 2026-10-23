@@ -30,4 +30,18 @@ describe("UserPicker", () => {
       expect.objectContaining({ id: "u1", name: "Rover", image: "https://cdn/rover.png" }),
     ]);
   });
+
+  // Typing "@test1 @test2" looked like it would add both.
+  it("says people are added one at a time when the search looks like several", () => {
+    mocks.items = [];
+    render(<UserPicker multiple onChange={vi.fn()} value={[]} />);
+    const box = screen.getByRole("combobox");
+
+    expect(box).toHaveAttribute("placeholder", expect.stringContaining("one person at a time"));
+    fireEvent.change(box, { target: { value: "Mai Duc" } });
+    expect(screen.queryByText(/pick them from the list/)).not.toBeInTheDocument();
+
+    fireEvent.change(box, { target: { value: "@test1 @test2" } });
+    expect(screen.getByText(/Add one person at a time/)).toBeInTheDocument();
+  });
 });
