@@ -271,6 +271,7 @@ export class ChatRepository {
               userId: params.creatorId,
               role: 'OWNER',
               state: 'ACTIVE',
+              ...pendingSinceChange(null, 'ACTIVE', now),
             },
             ...params.members.map((member) => ({
               userId: member.userId,

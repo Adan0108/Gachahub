@@ -1,5 +1,16 @@
 import type { MembershipEvent } from '../mls/sync/membershipEvents';
 
+/**
+ * A membership line in the thread: a join or leave this device verified itself, reworded as an
+ * invite for someone who was invited, or an accept, which only the server knows about (it adds no
+ * device, so there is no commit to verify).
+ */
+export type ThreadEvent = Pick<MembershipEvent, 'id' | 'userId' | 'at'> & {
+  kind: MembershipEvent['kind'] | 'invited' | 'accepted';
+};
+
+type EventParticipant = { userId: string; invitedAt?: string | null; joinedAt?: string | null };
+
 interface ThreadMessage {
   id: string;
   senderId?: string;
@@ -23,7 +34,7 @@ export type ThreadItem<M extends ThreadMessage = ThreadMessage> =
       /** Another bubble from the same sender follows immediately, so this one keeps the avatar/name hidden. */
       groupedWithNext: boolean;
     }
-  | { kind: 'event'; event: MembershipEvent };
+  | { kind: 'event'; event: ThreadEvent };
 
 /** A message the thread draws nothing for yet: still being decrypted, so it must not leave a divider or a gap behind. */
 function isStillDecrypting(message: ThreadMessage, decrypted: Record<string, DecryptState>): boolean {
@@ -79,7 +90,7 @@ export function newestUnreadableFromOthers(
 export function buildThreadItems<M extends ThreadMessage>(input: {
   messages: M[];
   decrypted: Record<string, DecryptState>;
-  events: MembershipEvent[];
+  events: ThreadEvent[];
   collapseLeading: boolean;
   /** The newest page has arrived. */
   loaded?: boolean;
@@ -147,10 +158,42 @@ function withGrouping<M extends ThreadMessage>(rawItems: ThreadItem<M>[]): Threa
   });
 }
 
-/** Only a group chat shows who joined or left; a DM's own devices coming and going is no news. */
-export function eventsForDisplay(events: MembershipEvent[], isGroup: boolean): MembershipEvent[] {
-  // Older builds also stored "signed in on a new device" events; they are no longer shown.
-  return isGroup ? events.filter((event) => event.kind === 'joined' || event.kind === 'left') : [];
+/**
+ * The membership lines a group shows, Messenger style: someone invited is "invited" when their
+ * devices joined, and "joined" only when they accept; a declined or expired invite shows nothing
+ * more. A DM shows none: its own devices coming and going is no news.
+ */
+export function eventsForDisplay(
+  events: MembershipEvent[],
+  conversation: { type?: string; participants?: EventParticipant[] } | undefined,
+): ThreadEvent[] {
+  if (conversation?.type !== 'GROUP') return [];
+  const participants = conversation.participants ?? [];
+  const byUser = new Map(participants.map((participant) => [participant.userId, participant]));
+
+  // shortcut: invitedAt and joinedAt are the latest round only, so after someone leaves and is
+  // invited again, their earlier leave is hidden too; keep a per-round history if that matters.
+  const verified = events.flatMap((event): ThreadEvent[] => {
+    const person = byUser.get(event.userId);
+    const wasInvited = Boolean(person?.invitedAt);
+    if (event.kind === 'joined') return [{ ...event, kind: wasInvited ? 'invited' : 'joined' }];
+    if (event.kind === 'left') return wasInvited && !person?.joinedAt ? [] : [event];
+    // Older builds also stored "signed in on a new device" events; they are no longer shown.
+    return [];
+  });
+  const accepted = participants.flatMap((person): ThreadEvent[] =>
+    person.invitedAt && person.joinedAt
+      ? [
+          {
+            id: `accepted:${person.userId}:${person.joinedAt}`,
+            kind: 'accepted',
+            userId: person.userId,
+            at: Date.parse(person.joinedAt),
+          },
+        ]
+      : [],
+  );
+  return [...verified, ...accepted];
 }
 
 const pad2 = (value: number): string => String(value).padStart(2, '0');
@@ -182,11 +225,13 @@ export function messageFullTimestamp(at: number, locale?: string): string {
  * The chat keeps everyone who ever took part, so an unknown name means the account was deleted.
  */
 export function membershipEventText(
-  event: MembershipEvent,
+  event: ThreadEvent,
   name: string | undefined,
   isSelf: boolean,
 ): string {
   const who = isSelf ? 'You' : name || 'Deleted user';
+  if (event.kind === 'invited') return `${who} ${isSelf ? 'were' : 'was'} invited to the group`;
+  if (event.kind === 'accepted') return `${who} joined the group`;
   if (event.kind === 'joined') return `${who} ${isSelf ? 'were added to' : 'joined'} the group`;
   return `${who} left or ${isSelf ? 'were' : 'was'} removed from the group`;
 }

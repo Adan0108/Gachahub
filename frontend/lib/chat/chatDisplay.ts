@@ -15,6 +15,10 @@ export type ChatParticipant = {
   mutedUntil?: string | null;
   isMuted?: boolean | null;
   isBlockedByMe?: boolean;
+  /** When they were last invited; null if added directly. */
+  invitedAt?: string | null;
+  /** When they last became a member (accepted, or added directly); null while invited or after declining. */
+  joinedAt?: string | null;
 };
 export type ChatConversation = {
   id: string;

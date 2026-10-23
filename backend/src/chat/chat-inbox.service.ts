@@ -612,6 +612,9 @@ export class ChatInboxService {
       // Branch on this, not notificationLevel: an expired mute keeps NOTHING in the row forever.
       isMuted: isViewer ? isNotificationMuted(participant) : null,
       user: participant.user,
+      // What the chat says about them: "invited" at the invite, "joined" at the accept.
+      invitedAt: participant.invitedAt,
+      joinedAt: participant.joinedAt,
       isBlockedByMe: blockedUserIds.has(participant.userId),
     };
   }

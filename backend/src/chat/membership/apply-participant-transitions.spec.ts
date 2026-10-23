@@ -1,6 +1,9 @@
 import { ConflictException } from '@nestjs/common';
 import type { Prisma } from '../../generated/prisma/client';
-import { applyParticipantTransitions } from './apply-participant-transitions';
+import {
+  applyParticipantTransitions,
+  pendingSinceChange,
+} from './apply-participant-transitions';
 
 describe('applyParticipantTransitions', () => {
   const tx = {
@@ -42,6 +45,8 @@ describe('applyParticipantTransitions', () => {
           userId: 'u2',
           role: 'MEMBER',
           state: 'JOINING',
+          invitedAt: null,
+          joinedAt: expect.any(Date) as Date,
         },
       ],
       skipDuplicates: true,
@@ -55,6 +60,8 @@ describe('applyParticipantTransitions', () => {
       where: { conversationId: 'conv-1', userId: 'u2', state: 'DECLINED' },
       data: {
         state: 'JOINING',
+        invitedAt: null,
+        joinedAt: expect.any(Date) as Date,
         role: 'MEMBER',
         deletedAt: null,
         archivedAt: null,
@@ -135,5 +142,47 @@ describe('applyParticipantTransitions', () => {
 
     expect(tx.chatParticipant.updateMany).not.toHaveBeenCalled();
     expect(tx.chatParticipant.createMany).not.toHaveBeenCalled();
+  });
+});
+
+// What a chat says about someone: "invited" at the invite, "joined" at the accept, nothing for a decline.
+describe('pendingSinceChange: invitedAt and joinedAt', () => {
+  const now = new Date('2026-10-23T10:00:00.000Z');
+
+  it('stamps the invite and starts over when someone is invited', () => {
+    expect(pendingSinceChange(null, 'PENDING', now)).toEqual({
+      pendingSince: now,
+      invitedAt: now,
+      joinedAt: null,
+    });
+  });
+
+  it('stamps joinedAt when an invite is accepted, keeping the invite', () => {
+    expect(pendingSinceChange('PENDING', 'JOINING', now)).toEqual({
+      pendingSince: null,
+      joinedAt: now,
+    });
+  });
+
+  it('leaves joinedAt empty when an invite is declined or expires', () => {
+    expect(pendingSinceChange('PENDING', 'LEAVING', now)).toEqual({
+      pendingSince: null,
+    });
+    expect(pendingSinceChange('PENDING', 'DECLINED', now)).toEqual({
+      pendingSince: null,
+    });
+  });
+
+  it('marks a direct add as joined and never invited', () => {
+    expect(pendingSinceChange(null, 'ACTIVE', now)).toEqual({
+      invitedAt: null,
+      joinedAt: now,
+    });
+  });
+
+  it('changes nothing for someone who was already a member', () => {
+    expect(pendingSinceChange('JOINING', 'ACTIVE', now)).toEqual({});
+    expect(pendingSinceChange('LEAVING', 'ACTIVE', now)).toEqual({});
+    expect(pendingSinceChange('ARCHIVED', 'ACTIVE', now)).toEqual({});
   });
 });
