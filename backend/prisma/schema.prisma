@@ -410,6 +410,11 @@ model ChatParticipant {
   deletedAt         DateTime?
   /// When the row last entered PENDING; null otherwise. Invite expiry keys off this, not updatedAt.
   pendingSince      DateTime?
+  /// When this person was last invited (kept after they answer); null if they were added directly.
+  invitedAt         DateTime?
+  /// When this person last became a member: accepted an invite, or was added directly. Null while
+  /// invited, and stays null when an invite is declined or expires.
+  joinedAt          DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
