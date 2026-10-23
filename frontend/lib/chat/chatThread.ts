@@ -70,16 +70,32 @@ export function newestUnreadableFromOthers(
   return undefined;
 }
 
-/** The thread's rows in order: history banner, then messages with membership events sorted by server time (events first on ties). */
+/**
+ * The thread's rows in order: history banner, then messages with membership events sorted by
+ * server time (events first on ties). Events only go in once the thread has settled: none while it
+ * is loading or still decrypting (they would all pile up at the bottom), and none from before the
+ * oldest loaded message while older history is still unloaded.
+ */
 export function buildThreadItems<M extends ThreadMessage>(input: {
   messages: M[];
   decrypted: Record<string, DecryptState>;
   events: MembershipEvent[];
   collapseLeading: boolean;
+  /** The newest page has arrived. */
+  loaded?: boolean;
+  /** There is older history not loaded yet. */
+  hasOlderHistory?: boolean;
 }): ThreadItem<M>[] {
-  const { messages, decrypted, events, collapseLeading } = input;
+  const { messages, decrypted, events, collapseLeading, loaded = true, hasOlderHistory = false } =
+    input;
   const hidden = collapseLeading ? leadingUnreadableIds(messages, decrypted) : new Set<string>();
-  const pendingEvents = [...events].sort((a, b) => a.at - b.at);
+  const settled = loaded && !messages.some((message) => isStillDecrypting(message, decrypted));
+  const oldestLoaded = messages[0]?.createdAt ? Date.parse(messages[0].createdAt) : Number.NaN;
+  const pendingEvents = settled
+    ? events
+        .filter((event) => !hasOlderHistory || Number.isNaN(oldestLoaded) || event.at >= oldestLoaded)
+        .sort((a, b) => a.at - b.at)
+    : [];
 
   const items: ThreadItem<M>[] = hidden.size > 0 ? [{ kind: 'history-banner' }] : [];
   // "Conversation started" only fills an empty chat: it goes as soon as anyone has written, and has no time of its own.
@@ -131,9 +147,10 @@ function withGrouping<M extends ThreadMessage>(rawItems: ThreadItem<M>[]): Threa
   });
 }
 
-/** A DM's own leaf being added/removed isn't "joining a group" for either side; only a group chat shows those. */
+/** Only a group chat shows who joined or left; a DM's own devices coming and going is no news. */
 export function eventsForDisplay(events: MembershipEvent[], isGroup: boolean): MembershipEvent[] {
-  return isGroup ? events : events.filter((event) => event.kind === 'device-added');
+  // Older builds also stored "signed in on a new device" events; they are no longer shown.
+  return isGroup ? events.filter((event) => event.kind === 'joined' || event.kind === 'left') : [];
 }
 
 const pad2 = (value: number): string => String(value).padStart(2, '0');
@@ -160,16 +177,18 @@ export function messageFullTimestamp(at: number, locale?: string): string {
   return `${date.getDate()} ${date.toLocaleDateString(locale, { month: 'long' })} ${date.getFullYear()}, ${timeLabel(date)}`;
 }
 
-/** One system line for an event; `name` is the person's display name, or undefined when unknown. */
+/**
+ * One system line for an event; `name` is the person's display name, or undefined when unknown.
+ * The chat keeps everyone who ever took part, so an unknown name means the account was deleted.
+ */
 export function membershipEventText(
   event: MembershipEvent,
   name: string | undefined,
   isSelf: boolean,
 ): string {
-  const who = isSelf ? 'You' : name || 'A member';
+  const who = isSelf ? 'You' : name || 'Deleted user';
   if (event.kind === 'joined') return `${who} ${isSelf ? 'were added to' : 'joined'} the group`;
-  if (event.kind === 'left') return `${who} left or ${isSelf ? 'were' : 'was'} removed from the group`;
-  return `${who} signed in on a new device`;
+  return `${who} left or ${isSelf ? 'were' : 'was'} removed from the group`;
 }
 
 /** Stable React key for a thread row. */

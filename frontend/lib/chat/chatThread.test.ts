@@ -39,18 +39,16 @@ const shape = (items: ReturnType<typeof buildThreadItems>) =>
   );
 
 describe('eventsForDisplay', () => {
-  it('keeps every event kind for a group', () => {
-    const events = [event('e1', 0), { ...event('e2', 1), kind: 'device-added' as const }];
-
-    expect(eventsForDisplay(events, true)).toEqual(events);
-  });
-
-  it('drops joined/left for a DM, keeping only new-device notices', () => {
+  it('shows who joined or left a group, and drops the new-device notices older builds stored', () => {
     const joined = event('e1', 0);
     const left = { ...event('e2', 1), kind: 'left' as const };
-    const deviceAdded = { ...event('e3', 2), kind: 'device-added' as const };
+    const stored = { ...event('e3', 2), kind: 'device-added' } as unknown as typeof joined;
 
-    expect(eventsForDisplay([joined, left, deviceAdded], false)).toEqual([deviceAdded]);
+    expect(eventsForDisplay([joined, left, stored], true)).toEqual([joined, left]);
+  });
+
+  it('shows nothing in a DM', () => {
+    expect(eventsForDisplay([event('e1', 0), { ...event('e2', 1), kind: 'left' as const }], false)).toEqual([]);
   });
 });
 
@@ -146,6 +144,39 @@ describe('buildThreadItems', () => {
       collapseLeading: true,
     });
     expect(shape(items)).toEqual(['timestamp', 'a', 'mid', 'tie', 'b', 'c', 'late']);
+  });
+
+  // They used to pile up at the bottom, under the loading spinner.
+  it('shows no membership events while the thread is loading or still decrypting', () => {
+    const events = [event('joined', 3)];
+    const loading = buildThreadItems({
+      messages: [],
+      decrypted: {},
+      events,
+      collapseLeading: true,
+      loaded: false,
+    });
+    const decrypting = buildThreadItems({
+      messages: [message('a', 1), message('b', 5)],
+      decrypted: decrypted({ a: 'ok', b: 'pending' }),
+      events,
+      collapseLeading: true,
+    });
+
+    expect(loading).toEqual([]);
+    expect(shape(decrypting)).toEqual(['timestamp', 'a']);
+  });
+
+  it('leaves out events from before the oldest loaded message while older history is unloaded', () => {
+    const items = buildThreadItems({
+      messages: [message('a', 5), message('b', 9)],
+      decrypted: decrypted({ a: 'ok', b: 'ok' }),
+      events: [event('long-ago', 1), event('between', 7)],
+      collapseLeading: true,
+      hasOlderHistory: true,
+    });
+
+    expect(shape(items)).toEqual(['timestamp', 'a', 'between', 'b']);
   });
 
   it('records each message index in the original list', () => {
@@ -280,10 +311,7 @@ describe('membershipEventText', () => {
   it('words each kind, falling back for an unknown name', () => {
     expect(membershipEventText(base, 'Bob', false)).toBe('Bob joined the group');
     expect(membershipEventText({ ...base, kind: 'left' }, undefined, false)).toBe(
-      'A member left or was removed from the group',
-    );
-    expect(membershipEventText({ ...base, kind: 'device-added' }, undefined, true)).toBe(
-      'You signed in on a new device',
+      'Deleted user left or was removed from the group',
     );
   });
 });

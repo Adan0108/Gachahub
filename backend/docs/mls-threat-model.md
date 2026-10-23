@@ -34,9 +34,11 @@ dated note to the history.
 - Verification is stored per pair of users, encrypted on this device only.
   If a verified peer adds a device, the chat shows "New device"; if a
   verified device's key changes, it shows a red alert.
-- Each device derives "X joined", "X left" and "X signed in on a new device"
-  notices itself from the Commits it verified (`membershipEvents.ts`), so
-  they do not depend on the server telling the truth.
+- In groups, each device derives "X joined" and "X left" notices itself from
+  the Commits it verified (`membershipEvents.ts`), so they do not depend on
+  the server telling the truth. Someone adding a device gets no notice in the
+  chat (removed 23 October 2026, as too device-level for a chat); only a
+  verified peer's new device shows, through the safety-number badge above.
 
 ### Membership
 

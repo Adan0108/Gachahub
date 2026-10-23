@@ -105,8 +105,17 @@ export function useThreadData(
         decrypted,
         events: membershipEvents,
         collapseLeading: !groupProblem,
+        loaded: Boolean(newestPage),
+        hasOlderHistory: history.hasMoreHistory,
       }),
-    [visibleMessages, decrypted, membershipEvents, groupProblem],
+    [
+      visibleMessages,
+      decrypted,
+      membershipEvents,
+      groupProblem,
+      newestPage,
+      history.hasMoreHistory,
+    ],
   );
   // Only what this device actually read is acknowledged: an undecryptable message was not delivered.
   const newestItems = newestPage?.items;
