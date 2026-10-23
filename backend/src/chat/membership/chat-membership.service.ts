@@ -5,10 +5,7 @@ import type { ChatParticipantAddedState } from '../../domain-events/domain-event
 import { PrismaService } from '../../prisma/prisma.service';
 import { ChatMembershipRepository } from './chat-membership.repository';
 import { MAX_GROUP_MEMBERS } from '../group-size-policy';
-import {
-  GROUP_MANAGER_ROLES,
-  lockAndAssertActorRole,
-} from './lock-conversation';
+import { GROUP_MANAGER_ROLES, inTransactionAsRole } from './lock-conversation';
 import type {
   MembershipRequest,
   OnIllegalMembershipChange,
@@ -59,53 +56,53 @@ export class ChatMembershipService {
       })),
     );
 
-    const count = await this.prisma.$transaction(async (tx) => {
-      // Only managers add members; the role checked before this transaction can be gone by now
-      await lockAndAssertActorRole(
-        tx,
-        conversationId,
-        actorId,
-        GROUP_MANAGER_ROLES,
-      );
-      const changes =
-        await this.chatMembershipRepository.changeMembershipInTransaction(
-          tx,
-          conversationId,
-          requests,
-        );
+    // Only managers add members; the role checked before this transaction can be gone by now
+    const count = await inTransactionAsRole(
+      this.prisma,
+      conversationId,
+      actorId,
+      GROUP_MANAGER_ROLES,
+      async (tx) => {
+        const changes =
+          await this.chatMembershipRepository.changeMembershipInTransaction(
+            tx,
+            conversationId,
+            requests,
+          );
 
-      // Counted after the write, under the same lock: two adds at once cannot both pass the cap.
-      // Throwing rolls the whole add back.
-      if (
-        changes.length > 0 &&
-        (await this.chatMembershipRepository.countGroupMembers(
-          tx,
-          conversationId,
-        )) > MAX_GROUP_MEMBERS
-      ) {
-        throw new BadRequestException(
-          `A group can have at most ${MAX_GROUP_MEMBERS} members`,
-        );
-      }
+        // Counted after the write, under the same lock: two adds at once cannot both pass the cap.
+        // Throwing rolls the whole add back.
+        if (
+          changes.length > 0 &&
+          (await this.chatMembershipRepository.countGroupMembers(
+            tx,
+            conversationId,
+          )) > MAX_GROUP_MEMBERS
+        ) {
+          throw new BadRequestException(
+            `A group can have at most ${MAX_GROUP_MEMBERS} members`,
+          );
+        }
 
-      if (changes.length > 0) {
-        await this.eventPublisher.publishMany(
-          changes.map((change) => ({
-            type: 'chat.participant.added' as const,
-            aggregateId: conversationId,
-            payload: {
-              conversationId,
-              addedUserId: change.userId,
-              actorId,
-              state: toAddedParticipantState(change.to),
-            },
-          })),
-          tx,
-        );
-      }
+        if (changes.length > 0) {
+          await this.eventPublisher.publishMany(
+            changes.map((change) => ({
+              type: 'chat.participant.added' as const,
+              aggregateId: conversationId,
+              payload: {
+                conversationId,
+                addedUserId: change.userId,
+                actorId,
+                state: toAddedParticipantState(change.to),
+              },
+            })),
+            tx,
+          );
+        }
 
-      return changes.length;
-    });
+        return changes.length;
+      },
+    );
 
     return { count };
   }
@@ -126,19 +123,18 @@ export class ChatMembershipService {
       return this.change(conversationId, requests);
     }
 
-    const changes = await this.prisma.$transaction(async (tx) => {
-      await lockAndAssertActorRole(
-        tx,
-        conversationId,
-        actorId,
-        GROUP_MANAGER_ROLES,
-      );
-      return this.chatMembershipRepository.changeMembershipInTransaction(
-        tx,
-        conversationId,
-        requests,
-      );
-    });
+    const changes = await inTransactionAsRole(
+      this.prisma,
+      conversationId,
+      actorId,
+      GROUP_MANAGER_ROLES,
+      (tx) =>
+        this.chatMembershipRepository.changeMembershipInTransaction(
+          tx,
+          conversationId,
+          requests,
+        ),
+    );
 
     return { count: changes.length };
   }

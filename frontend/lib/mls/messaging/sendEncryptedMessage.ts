@@ -26,17 +26,27 @@ function mightHaveLanded(error: unknown): boolean {
 }
 
 /** Encrypts `text` for `conversationId`, sends it, and saves the plaintext locally under the server-assigned message id - the sender never decrypts its own message later (that generation's key is already gone by the time encryptMessage returns), so this is the only chance to ever cache it. `clientMessageId` must stay the same across retries of one message: the backend returns the message it already stored for that id, so a retry after a lost response is not delivered twice */
-export function sendEncryptedChatMessage(
-  syncEngine: SyncEngine,
-  deviceId: DeviceId,
-  conversationId: ConversationId,
-  recipientUserId: UserId | UserId[],
-  text: string,
-  clientMessageId: string,
-  replyToId?: string,
-  preview?: LinkPreviewRef,
-  mentionUserIds: UserId[] = [],
-) {
+export function sendEncryptedChatMessage({
+  syncEngine,
+  deviceId,
+  conversationId,
+  recipientUserId,
+  text,
+  clientMessageId,
+  replyToId,
+  preview,
+  mentionUserIds = [],
+}: {
+  syncEngine: SyncEngine;
+  deviceId: DeviceId;
+  conversationId: ConversationId;
+  recipientUserId: UserId | UserId[];
+  text: string;
+  clientMessageId: string;
+  replyToId?: string;
+  preview?: LinkPreviewRef;
+  mentionUserIds?: UserId[];
+}) {
   return sendEncryptedEnvelope(
     syncEngine,
     deviceId,

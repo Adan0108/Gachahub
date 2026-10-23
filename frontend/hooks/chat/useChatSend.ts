@@ -82,17 +82,17 @@ export function useChatSend({
           clientMessageId: clientId,
           prepared: preparedPreviewsRef.current,
         });
-        return sendEncryptedChatMessage(
-          syncEngine!,
-          deviceId!,
+        return sendEncryptedChatMessage({
+          syncEngine: syncEngine!,
+          deviceId: deviceId!,
           conversationId,
-          recipientIds(),
+          recipientUserId: recipientIds(),
           text,
-          clientId,
+          clientMessageId: clientId,
           replyToId,
-          card,
+          preview: card,
           mentionUserIds,
-        ) as Promise<SendResponse>;
+        }) as Promise<SendResponse>;
       }),
     onSuccess: (response, variables) => {
       uploadedAttachmentsRef.current.delete(variables.clientId);
@@ -101,7 +101,11 @@ export function useChatSend({
         prev.filter((pending) => pending.clientId !== variables.clientId),
       );
       // Merged into the cache instead of refetching.
-      void addMessageToCache(queryClient, response.conversationId ?? conversationId, response.message);
+      void addMessageToCache(
+        queryClient,
+        response.conversationId ?? conversationId,
+        response.message,
+      );
       queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
     },
     onError: (error, variables) => {
@@ -130,12 +134,15 @@ export function useChatSend({
     retry: (pending: PendingMessage) => {
       if (!cooldown.tryConsume()) return;
       setPendingMessages((prev) =>
-        prev.map((item) => (item.clientId === pending.clientId ? { ...item, failed: false } : item)),
+        prev.map((item) =>
+          item.clientId === pending.clientId ? { ...item, failed: false } : item,
+        ),
       );
       sendMessage.mutate({
         text: pending.text,
         clientId: pending.clientId,
         files: pending.files,
+        replyToId: pending.replyToId,
         preview: pending.preview,
         mentionUserIds: pending.mentionUserIds,
       });

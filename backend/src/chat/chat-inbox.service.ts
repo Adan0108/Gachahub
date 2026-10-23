@@ -66,16 +66,9 @@ export class ChatInboxService {
    * unpinned only, after the given conversation.
    */
   private async findInboxPage(userId: string, page: QueryChatConversationsDto) {
+    // QueryChatConversationsDto guarantees a whole cursor, and a limit with it.
     const { limit, beforeUpdatedAt, beforeId } = page;
-    if ((beforeUpdatedAt === undefined) !== (beforeId === undefined)) {
-      throw new BadRequestException(
-        'beforeUpdatedAt and beforeId must be sent together',
-      );
-    }
     if (!limit) {
-      if (beforeId) {
-        throw new BadRequestException('A cursor needs a limit');
-      }
       return this.chatRepository.findInboxConversations(userId, 'ACTIVE');
     }
 

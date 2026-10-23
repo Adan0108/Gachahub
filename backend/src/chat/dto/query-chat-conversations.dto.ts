@@ -1,13 +1,24 @@
 import { Type } from 'class-transformer';
 import {
+  IsDefined,
   IsISO8601,
   IsInt,
-  IsOptional,
   IsString,
   Max,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+
+type InboxQuery = {
+  limit?: number;
+  beforeUpdatedAt?: string;
+  beforeId?: string;
+};
+
+const hasCursor = (query: InboxQuery) =>
+  query.beforeUpdatedAt !== undefined || query.beforeId !== undefined;
+const CURSOR_PAIR = 'beforeUpdatedAt and beforeId must be sent together';
 
 /**
  * Query params for one page of the inbox.
@@ -18,7 +29,10 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
  */
 export class QueryChatConversationsDto {
   @ApiPropertyOptional({ example: 50, minimum: 1, maximum: 100 })
-  @IsOptional()
+  @ValidateIf(
+    (query: InboxQuery) => query.limit !== undefined || hasCursor(query),
+  )
+  @IsDefined({ message: 'A cursor needs a limit' })
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -30,7 +44,8 @@ export class QueryChatConversationsDto {
     description:
       'updatedAt of the last unpinned conversation already loaded; send with beforeId.',
   })
-  @IsOptional()
+  @ValidateIf(hasCursor)
+  @IsDefined({ message: CURSOR_PAIR })
   @IsISO8601()
   beforeUpdatedAt?: string;
 
@@ -38,7 +53,8 @@ export class QueryChatConversationsDto {
     example: 'cm123conversation456',
     description: 'id of that same conversation, breaking ties on updatedAt.',
   })
-  @IsOptional()
+  @ValidateIf(hasCursor)
+  @IsDefined({ message: CURSOR_PAIR })
   @IsString()
   beforeId?: string;
 }

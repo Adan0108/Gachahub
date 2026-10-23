@@ -3,6 +3,7 @@ import type {
   ChatParticipantRole,
   Prisma,
 } from '../../generated/prisma/client';
+import type { PrismaService } from '../../prisma/prisma.service';
 
 export const GROUP_MANAGER_ROLES: ChatParticipantRole[] = ['OWNER', 'ADMIN'];
 
@@ -40,4 +41,18 @@ export async function lockAndAssertActorRole(
   if (!actor || actor.state !== 'ACTIVE' || !roles.includes(actor.role)) {
     throw new ForbiddenException('Your role in this group changed');
   }
+}
+
+/** Runs `work` in a transaction that first takes the lock and rechecks the actor's role (see above). */
+export function inTransactionAsRole<T>(
+  prisma: PrismaService,
+  conversationId: string,
+  actorId: string,
+  roles: ChatParticipantRole[],
+  work: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    await lockAndAssertActorRole(tx, conversationId, actorId, roles);
+    return work(tx);
+  });
 }

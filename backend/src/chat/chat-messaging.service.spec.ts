@@ -1184,6 +1184,38 @@ describe('ChatMessagingService', () => {
       );
     });
 
+    it('does not bring a deleted chat back for someone removed after the first read', async () => {
+      const member = (
+        userId: string,
+        state: string,
+        deletedAt: Date | null,
+      ) => ({
+        userId,
+        role: 'MEMBER',
+        state,
+        deletedAt,
+        notificationLevel: 'ALL' as const,
+        mutedUntil: null,
+      });
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          { userId: 'user-1', role: 'OWNER', state: 'ACTIVE' },
+          member('user-2', 'ACTIVE', new Date()),
+        ]),
+      );
+      repository.lockAndFindParticipants.mockResolvedValue([
+        { ...member('user-1', 'ACTIVE', null), role: 'OWNER' },
+        member('user-2', 'DECLINED', new Date()),
+      ]);
+      repository.createMessage.mockResolvedValue({ id: 'message-1' });
+
+      await service.sendMessage('user-1', 'session-1', 'conversation-1', {
+        message: { clientMessageId: 'client-1' },
+      } as any);
+
+      expect(repository.restoreDeletedParticipants).not.toHaveBeenCalled();
+    });
+
     it('does not tell an outsider a removal is pending - access is checked first', async () => {
       repository.findConversationWithParticipants.mockResolvedValue(
         groupConversation([
@@ -1619,6 +1651,7 @@ describe('ChatMessagingService', () => {
       } as any);
 
       expect(repository.restoreDeletedParticipants).toHaveBeenCalledWith(
+        'fake-tx',
         'conversation-1',
         ['user-1'],
       );
@@ -1638,6 +1671,7 @@ describe('ChatMessagingService', () => {
       } as any);
 
       expect(repository.restoreDeletedParticipants).toHaveBeenCalledWith(
+        'fake-tx',
         'conversation-1',
         ['user-2'],
       );
@@ -1717,6 +1751,7 @@ describe('ChatMessagingService', () => {
         await sendFromUserOne();
 
         expect(repository.restoreDeletedParticipants).toHaveBeenCalledWith(
+          'fake-tx',
           'conversation-1',
           ['user-1'],
         );
@@ -1738,6 +1773,7 @@ describe('ChatMessagingService', () => {
       } as any);
 
       expect(repository.restoreDeletedParticipants).toHaveBeenCalledWith(
+        'fake-tx',
         'conversation-1',
         ['user-2'],
       );

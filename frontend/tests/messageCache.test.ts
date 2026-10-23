@@ -21,12 +21,14 @@ function setup() {
   const pending: Array<(value: unknown) => void> = [];
   const observer = new QueryObserver(client, {
     queryKey: key,
-    queryFn: () => new Promise((resolve) => {
-      pending.push(resolve);
-    }),
+    queryFn: () =>
+      new Promise((resolve) => {
+        pending.push(resolve);
+      }),
   });
   const unsubscribe = observer.subscribe(() => {});
-  const ids = () => client.getQueryData<{ items: { id: string }[] }>(key)?.items.map((item) => item.id);
+  const ids = () =>
+    client.getQueryData<{ items: { id: string }[] }>(key)?.items.map((item) => item.id);
   return { client, pending, unsubscribe, ids };
 }
 
@@ -36,7 +38,7 @@ describe("addMessageToCache (#95)", () => {
   let cleanup = () => {};
   afterEach(() => cleanup());
 
-  it("keeps a pushed message when an older page fetch finishes after it", async () => {
+  it("keeps a pushed message when an older page fetch finishes after it, then fetches again", async () => {
     const { client, pending, unsubscribe, ids } = setup();
     cleanup = unsubscribe;
     pending.shift()!(page("old"));
@@ -46,10 +48,15 @@ describe("addMessageToCache (#95)", () => {
     await settle();
     const staleFetch = pending.shift()!;
     await addMessageToCache(client, "c1", message("new"));
-    staleFetch(page("old"));
+    staleFetch(page("old", "mid"));
     await settle();
 
     expect(ids()).toEqual(["old", "new"]);
+
+    // The cancelled fetch would have brought "mid"; the one started after the push still does.
+    pending.shift()!(page("old", "mid", "new"));
+    await settle();
+    expect(ids()).toEqual(["old", "mid", "new"]);
   });
 
   it("fetches the page again when the push lands before the first page arrived", async () => {

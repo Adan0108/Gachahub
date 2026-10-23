@@ -6,7 +6,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ChatMessageContentType, Prisma } from '../generated/prisma/client';
+import {
+  ChatConversationType,
+  ChatMessageContentType,
+  ChatParticipantState,
+  Prisma,
+} from '../generated/prisma/client';
 import { EventPublisherPort } from '../domain-events/event-publisher.port';
 import { PrismaService } from '../prisma/prisma.service';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
@@ -27,7 +32,7 @@ import type { ChatDeliveryPort } from './ports/chat-delivery.port';
 
 type RecipientCandidate = {
   userId: string;
-  state: string;
+  state: ChatParticipantState;
   notificationLevel: 'ALL' | 'NOTHING';
   mutedUntil: Date | null;
 };
@@ -355,15 +360,6 @@ export class ChatMessagingService {
       dto.message.mentionUserIds,
     );
 
-    const deletedParticipantIds = participants
-      .filter(
-        (participant) =>
-          participant.deletedAt &&
-          recipients.deliverableIds.includes(participant.userId) &&
-          !recipients.blockerIds.has(participant.userId),
-      )
-      .map((participant) => participant.userId);
-
     const payload =
       preparedPayload ??
       (await this.messageEncryption.preparePayload(
@@ -376,15 +372,7 @@ export class ChatMessagingService {
       dto.message.media,
     );
 
-    // Deferred until every step that can still throw has succeeded.
-    if (deletedParticipantIds.length > 0) {
-      await this.chatRepository.restoreDeletedParticipants(
-        conversationId,
-        deletedParticipantIds,
-      );
-    }
-
-    let message: Awaited<ReturnType<typeof this.chatRepository.createMessage>>;
+    let message: Awaited<ReturnType<ChatRepository['createMessage']>>;
     try {
       message = await this.prisma.$transaction(async (tx) => {
         // Authoritative re-check under the same lock a membership change takes:
@@ -414,6 +402,23 @@ export class ChatMessagingService {
             senderId,
             freshParticipants,
             dto.message.mentionUserIds,
+          );
+        }
+
+        // A message brings a deleted chat back for its recipients, except people who blocked the sender.
+        const deletedParticipantIds = freshParticipants
+          .filter(
+            (participant) =>
+              participant.deletedAt &&
+              recipients.deliverableIds.includes(participant.userId) &&
+              !recipients.blockerIds.has(participant.userId),
+          )
+          .map((participant) => participant.userId);
+        if (deletedParticipantIds.length > 0) {
+          await this.chatRepository.restoreDeletedParticipants(
+            tx,
+            conversationId,
+            deletedParticipantIds,
           );
         }
 
@@ -505,7 +510,7 @@ export class ChatMessagingService {
    * mutes are read on their own connection - see the caller for when that happens under the lock.
    */
   private async resolveRecipients(
-    conversationType: string,
+    conversationType: ChatConversationType,
     senderId: string,
     participants: RecipientCandidate[],
     mentionUserIds: string[] = [],

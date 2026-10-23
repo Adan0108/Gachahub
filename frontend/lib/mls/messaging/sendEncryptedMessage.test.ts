@@ -32,14 +32,16 @@ describe("sendEncryptedChatMessage", () => {
     const { api } = await import("../../api");
     const engine = fakeSyncEngine();
     await expect(
-      sendEncryptedChatMessage(
-        engine as unknown as Parameters<typeof sendEncryptedChatMessage>[0],
-        "device-1",
-        "conv-1",
-        "user-bob",
-        "😀".repeat(4000),
-        "too-long",
-      ),
+      sendEncryptedChatMessage({
+        syncEngine: engine as unknown as Parameters<
+          typeof sendEncryptedChatMessage
+        >[0]["syncEngine"],
+        deviceId: "device-1",
+        conversationId: "conv-1",
+        recipientUserId: "user-bob",
+        text: "😀".repeat(4000),
+        clientMessageId: "too-long",
+      }),
     ).rejects.toThrow(/too long/);
     expect(engine.encryptMessage).not.toHaveBeenCalled();
     expect(api.sendChatMessage).not.toHaveBeenCalled();
@@ -51,14 +53,16 @@ describe("sendEncryptedChatMessage", () => {
     engine.getCurrentEpoch.mockResolvedValue(2);
     engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array(15001), epoch: 2 });
     await expect(
-      sendEncryptedChatMessage(
-        engine as unknown as Parameters<typeof sendEncryptedChatMessage>[0],
-        "device-1",
-        "conv-1",
-        "user-bob",
-        "hello",
-        "large-wire",
-      ),
+      sendEncryptedChatMessage({
+        syncEngine: engine as unknown as Parameters<
+          typeof sendEncryptedChatMessage
+        >[0]["syncEngine"],
+        deviceId: "device-1",
+        conversationId: "conv-1",
+        recipientUserId: "user-bob",
+        text: "hello",
+        clientMessageId: "large-wire",
+      }),
     ).rejects.toThrow(/Encrypted message is too large/);
     expect(api.sendChatMessage).not.toHaveBeenCalled();
   });
@@ -76,14 +80,14 @@ describe("sendEncryptedChatMessage", () => {
       message: { id: "msg-1" },
     });
 
-    const result = await sendEncryptedChatMessage(
-      engine as any,
-      "device-1",
-      "conv-1",
-      "user-bob",
-      "hello",
-      "client-1",
-    );
+    const result = await sendEncryptedChatMessage({
+      syncEngine: engine as any,
+      deviceId: "device-1",
+      conversationId: "conv-1",
+      recipientUserId: "user-bob",
+      text: "hello",
+      clientMessageId: "client-1",
+    });
 
     expect(engine.createGroup).not.toHaveBeenCalled();
     expect(engine.encryptMessage).toHaveBeenCalledWith("conv-1", {
@@ -115,7 +119,14 @@ describe("sendEncryptedChatMessage", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await expect(
-      sendEncryptedChatMessage(engine as any, "device-1", "conv-1", "user-bob", "hi", "client-9"),
+      sendEncryptedChatMessage({
+        syncEngine: engine as any,
+        deviceId: "device-1",
+        conversationId: "conv-1",
+        recipientUserId: "user-bob",
+        text: "hi",
+        clientMessageId: "client-9",
+      }),
     ).resolves.toMatchObject({ message: { id: "msg-9" } });
     expect(save).toHaveBeenCalled();
   });
@@ -130,10 +141,19 @@ describe("sendEncryptedChatMessage", () => {
       .mockResolvedValueOnce({ message: { id: "msg-stored" } });
 
     await expect(
-      sendEncryptedChatMessage(engine as any, "device-1", "conv-t", "user-bob", "hi", "client-t"),
+      sendEncryptedChatMessage({
+        syncEngine: engine as any,
+        deviceId: "device-1",
+        conversationId: "conv-t",
+        recipientUserId: "user-bob",
+        text: "hi",
+        clientMessageId: "client-t",
+      }),
     ).resolves.toMatchObject({ message: { id: "msg-stored" } });
 
-    const [firstTry, secondTry] = vi.mocked(api.sendChatMessage).mock.calls.map(([, payload]) => payload);
+    const [firstTry, secondTry] = vi
+      .mocked(api.sendChatMessage)
+      .mock.calls.map(([, payload]) => payload);
     expect(secondTry).toEqual(firstTry);
     expect(engine.encryptMessage).toHaveBeenCalledTimes(1);
     const kept = await new EncryptedIndexedDbMessagePlaintextStore().get("msg-stored");
@@ -150,7 +170,14 @@ describe("sendEncryptedChatMessage", () => {
     );
 
     await expect(
-      sendEncryptedChatMessage(engine as any, "device-1", "conv-r", "user-bob", "hi", "client-r"),
+      sendEncryptedChatMessage({
+        syncEngine: engine as any,
+        deviceId: "device-1",
+        conversationId: "conv-r",
+        recipientUserId: "user-bob",
+        text: "hi",
+        clientMessageId: "client-r",
+      }),
     ).rejects.toThrow("Slow down");
     expect(api.sendChatMessage).toHaveBeenCalledTimes(1);
   });
@@ -167,16 +194,15 @@ describe("sendEncryptedChatMessage", () => {
       thumb: { blob: "upload-9", key: "k", iv: "i", sha256: "s", width: 320, height: 180 },
     };
 
-    await sendEncryptedChatMessage(
-      engine as any,
-      "device-1",
-      "conv-1",
-      "user-bob",
-      "look https://example.com/post",
-      "client-1",
-      undefined,
-      preview,
-    );
+    await sendEncryptedChatMessage({
+      syncEngine: engine as any,
+      deviceId: "device-1",
+      conversationId: "conv-1",
+      recipientUserId: "user-bob",
+      text: "look https://example.com/post",
+      clientMessageId: "client-1",
+      preview: preview,
+    });
 
     expect(engine.encryptMessage).toHaveBeenCalledWith("conv-1", {
       v: 1,
@@ -197,16 +223,15 @@ describe("sendEncryptedChatMessage", () => {
     engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
     vi.mocked(api.sendChatMessage).mockResolvedValue({ message: { id: "msg-4" } });
 
-    await sendEncryptedChatMessage(
-      engine as any,
-      "device-1",
-      "conv-1",
-      "user-bob",
-      "look https://example.com/post",
-      "client-1",
-      undefined,
-      { url: "https://example.com/post", title: "A post" },
-    );
+    await sendEncryptedChatMessage({
+      syncEngine: engine as any,
+      deviceId: "device-1",
+      conversationId: "conv-1",
+      recipientUserId: "user-bob",
+      text: "look https://example.com/post",
+      clientMessageId: "client-1",
+      preview: { url: "https://example.com/post", title: "A post" },
+    });
 
     const [, body] = vi.mocked(api.sendChatMessage).mock.calls[0]!;
     expect(body).not.toHaveProperty("media");
@@ -219,11 +244,30 @@ describe("sendEncryptedChatMessage", () => {
     engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 2 });
     vi.mocked(api.sendChatMessage).mockResolvedValue({ message: { id: "msg-5" } });
 
-    await sendEncryptedChatMessage(engine as any, "device-1", "conv-1", "user-bob", "hi @bob", "client-1", undefined, undefined, ["user-bob"]);
-    await sendEncryptedChatMessage(engine as any, "device-1", "conv-1", "user-bob", "hi", "client-2");
+    await sendEncryptedChatMessage({
+      syncEngine: engine as any,
+      deviceId: "device-1",
+      conversationId: "conv-1",
+      recipientUserId: "user-bob",
+      text: "hi @bob",
+      clientMessageId: "client-1",
+      mentionUserIds: ["user-bob"],
+    });
+    await sendEncryptedChatMessage({
+      syncEngine: engine as any,
+      deviceId: "device-1",
+      conversationId: "conv-1",
+      recipientUserId: "user-bob",
+      text: "hi",
+      clientMessageId: "client-2",
+    });
 
-    expect(vi.mocked(api.sendChatMessage).mock.calls.at(-2)![1]).toMatchObject({ mentionUserIds: ["user-bob"] });
-    expect(vi.mocked(api.sendChatMessage).mock.calls.at(-1)![1]).not.toHaveProperty("mentionUserIds");
+    expect(vi.mocked(api.sendChatMessage).mock.calls.at(-2)![1]).toMatchObject({
+      mentionUserIds: ["user-bob"],
+    });
+    expect(vi.mocked(api.sendChatMessage).mock.calls.at(-1)![1]).not.toHaveProperty(
+      "mentionUserIds",
+    );
   });
 
   it("sets up the group first when this device has never established one", async () => {
@@ -235,14 +279,14 @@ describe("sendEncryptedChatMessage", () => {
     engine.encryptMessage.mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 0 });
     vi.mocked(api.sendChatMessage).mockResolvedValue({ message: { id: "msg-2" } });
 
-    await sendEncryptedChatMessage(
-      engine as any,
-      "device-1",
-      "conv-1",
-      "user-bob",
-      "hi",
-      "client-1",
-    );
+    await sendEncryptedChatMessage({
+      syncEngine: engine as any,
+      deviceId: "device-1",
+      conversationId: "conv-1",
+      recipientUserId: "user-bob",
+      text: "hi",
+      clientMessageId: "client-1",
+    });
 
     expect(engine.createGroup).toHaveBeenCalledWith("conv-1");
     expect(engine.seedNewGroupWithMembers).toHaveBeenCalledWith("conv-1", ["user-bob"]);
@@ -266,14 +310,14 @@ describe("sendEncryptedChatMessage", () => {
         .mockRejectedValueOnce(pendingError())
         .mockResolvedValueOnce({ message: { id: "msg-9" } });
 
-      const result = await sendEncryptedChatMessage(
-        engine as any,
-        "device-1",
-        "conv-1",
-        "user-bob",
-        "hello",
-        "client-1",
-      );
+      const result = await sendEncryptedChatMessage({
+        syncEngine: engine as any,
+        deviceId: "device-1",
+        conversationId: "conv-1",
+        recipientUserId: "user-bob",
+        text: "hello",
+        clientMessageId: "client-1",
+      });
 
       expect(engine.reconcileMembership).toHaveBeenCalledWith({ conversationId: "conv-1" });
       expect(engine.encryptMessage).toHaveBeenCalledTimes(2);
@@ -293,14 +337,14 @@ describe("sendEncryptedChatMessage", () => {
       vi.mocked(api.sendChatMessage).mockRejectedValue(pendingError());
 
       await expect(
-        sendEncryptedChatMessage(
-          engine as any,
-          "device-1",
-          "conv-1",
-          "user-bob",
-          "hello",
-          "client-1",
-        ),
+        sendEncryptedChatMessage({
+          syncEngine: engine as any,
+          deviceId: "device-1",
+          conversationId: "conv-1",
+          recipientUserId: "user-bob",
+          text: "hello",
+          clientMessageId: "client-1",
+        }),
       ).rejects.toMatchObject({ code: "MEMBERSHIP_CHANGE_PENDING" });
 
       expect(engine.reconcileMembership).toHaveBeenCalledTimes(1);
@@ -317,14 +361,14 @@ describe("sendEncryptedChatMessage", () => {
       );
 
       await expect(
-        sendEncryptedChatMessage(
-          engine as any,
-          "device-1",
-          "conv-1",
-          "user-bob",
-          "hello",
-          "client-1",
-        ),
+        sendEncryptedChatMessage({
+          syncEngine: engine as any,
+          deviceId: "device-1",
+          conversationId: "conv-1",
+          recipientUserId: "user-bob",
+          text: "hello",
+          clientMessageId: "client-1",
+        }),
       ).rejects.toThrow("duplicate");
 
       expect(engine.reconcileMembership).not.toHaveBeenCalled();

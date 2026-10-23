@@ -21,7 +21,11 @@ function setup() {
         recipientIds: () => "bob",
         withDeviceRecovery: (action) => action(),
       }),
-    { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> },
+    {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    },
   );
 }
 
@@ -63,18 +67,22 @@ describe("useChatSend", () => {
     await waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(SEND_LIMIT));
   });
 
-  it("marks a failed send, and a retry sends it again with the same client id", async () => {
-    mocks.send.mockRejectedValueOnce(new Error("down")).mockResolvedValue({ message: { id: "m1" } });
+  it("marks a failed send, and a retry sends it again with the same client id and reply", async () => {
+    mocks.send
+      .mockRejectedValueOnce(new Error("down"))
+      .mockResolvedValue({ message: { id: "m1" } });
     const { result } = setup();
 
     act(() => {
-      result.current.send(draft("hi"));
+      result.current.send({ ...draft("hi"), replyToId: "r1" });
     });
     await waitFor(() => expect(result.current.pendingMessages[0]?.failed).toBe(true));
 
     act(() => result.current.retry(result.current.pendingMessages[0]!));
 
     await waitFor(() => expect(result.current.pendingMessages).toEqual([]));
-    expect(mocks.send.mock.calls[1]![5]).toBe(mocks.send.mock.calls[0]![5]);
+    const [first, retried] = mocks.send.mock.calls.map(([params]) => params);
+    expect(retried.clientMessageId).toBe(first.clientMessageId);
+    expect(retried.replyToId).toBe("r1");
   });
 });

@@ -728,16 +728,6 @@ describe('ChatInboxService', () => {
           'conv-a',
         ]);
       });
-
-      it.each([
-        [{ limit: 50, beforeId: 'conv-1' }],
-        [{ limit: 50, beforeUpdatedAt: '2024-01-05T00:00:00.000Z' }],
-        [{ beforeUpdatedAt: '2024-01-05T00:00:00.000Z', beforeId: 'conv-1' }],
-      ])('refuses a half or limitless cursor %j', async (query) => {
-        await expect(
-          service.listConversations('user-1', query),
-        ).rejects.toBeInstanceOf(BadRequestException);
-      });
     });
 
     it("masks another participant's BLOCKED state as ACTIVE so it isn't leaked to the viewer", async () => {

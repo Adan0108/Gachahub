@@ -1,7 +1,8 @@
 "use client";
 
 import { AvatarFace } from "./AvatarFace";
-import type { MentionMember, useMentionPicker } from "../hooks/useMentionPicker";
+import type { useMentionPicker } from "../hooks/useMentionPicker";
+import type { MentionMember } from "../lib/mentions";
 import "./MentionMenu.css";
 
 /** Members suggested while typing an @; `picker` comes from useMentionPicker. Renders nothing without members. */

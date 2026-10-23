@@ -2,15 +2,9 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent, RefObject, SyntheticEvent } from "react";
-import { typingMention } from "../lib/mentions";
+import { typingMention, type MentionMember } from "../lib/mentions";
 
 type MentionInput = HTMLInputElement | HTMLTextAreaElement;
-export type MentionMember = {
-  id: string;
-  name?: string | null;
-  username?: string | null;
-  image?: string | null;
-};
 
 /**
  * The @ being typed in a composer: what to search for, and picking a member from the list.

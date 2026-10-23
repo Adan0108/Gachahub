@@ -10,7 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
 import { pendingSinceChange } from './membership/apply-participant-transitions';
 import {
-  lockAndAssertActorRole,
+  inTransactionAsRole,
   lockConversation,
 } from './membership/lock-conversation';
 import { notMutedParticipantWhere } from './notification-mute';
@@ -28,6 +28,19 @@ const NEWEST_MESSAGE_FIRST: Prisma.ChatMessageOrderByWithRelationInput[] = [
   { createdAt: 'desc' },
   { id: 'desc' },
 ];
+
+/** Rows strictly before `before` in a newest-first (field, id) order: older, or as old with a smaller id. */
+function olderThan<Field extends 'createdAt' | 'updatedAt'>(
+  field: Field,
+  before: { id: string } & Record<Field, Date>,
+) {
+  return {
+    OR: [
+      { [field]: { lt: before[field] } },
+      { [field]: before[field], id: { lt: before.id } },
+    ],
+  };
+}
 
 /** An upload already validated by ChatService, ready to be claimed and attached to a message. */
 export type ChatMessageMediaInput = {
@@ -536,19 +549,10 @@ export class ChatRepository {
     state: ChatParticipantState,
     page: { limit: number; before?: { updatedAt: Date; id: string } },
   ) {
-    const { before } = page;
     return this.inboxQuery(
       userId,
       { userId, state, deletedAt: null, pinnedAt: null },
-      {
-        take: page.limit,
-        ...(before && {
-          OR: [
-            { updatedAt: { lt: before.updatedAt } },
-            { updatedAt: before.updatedAt, id: { lt: before.id } },
-          ],
-        }),
-      },
+      page,
     );
   }
 
@@ -556,14 +560,14 @@ export class ChatRepository {
   private inboxQuery(
     userId: string,
     viewer: Prisma.ChatParticipantWhereInput,
-    page: { take?: number; OR?: Prisma.ChatConversationWhereInput[] } = {},
+    page: { limit?: number; before?: { updatedAt: Date; id: string } } = {},
   ) {
     return this.prisma.chatConversation.findMany({
       where: {
         participants: { some: viewer },
-        ...(page.OR && { OR: page.OR }),
+        ...(page.before && olderThan('updatedAt', page.before)),
       },
-      ...(page.take && { take: page.take }),
+      ...(page.limit && { take: page.limit }),
       include: {
         participants: {
           include: {
@@ -680,9 +684,8 @@ export class ChatRepository {
     });
   }
 
-  /** Finds encrypted messages newest-first with cursor pagination. */
   /**
-   * Messages strictly older than `before`. An explicit (createdAt, id) boundary rather than
+   * One page of encrypted messages, newest first: those strictly older than `before`. An explicit (createdAt, id) boundary rather than
    * Prisma's cursor + skip: the boundary message may since have been deleted, and then it is
    * not among the filtered rows that skip would drop.
    * Deleted messages come back as tombstones (no ciphertext), so every client that loaded one
@@ -696,17 +699,7 @@ export class ChatRepository {
     return this.prisma.chatMessage.findMany({
       where: {
         conversationId: params.conversationId,
-        ...(params.before
-          ? {
-              OR: [
-                { createdAt: { lt: params.before.createdAt } },
-                {
-                  createdAt: params.before.createdAt,
-                  id: { lt: params.before.id },
-                },
-              ],
-            }
-          : {}),
+        ...(params.before && olderThan('createdAt', params.before)),
       },
       take: params.limit,
       orderBy: NEWEST_MESSAGE_FIRST,
@@ -775,41 +768,47 @@ export class ChatRepository {
     userId: string,
     currentEpoch: number,
   ) {
-    return this.prisma.$transaction(async (tx) => {
-      await lockAndAssertActorRole(tx, conversationId, userId, ['OWNER']);
-      // Someone may have joined since the caller saw the owner alone; they would be left in a closed group
-      const othersActive = await tx.chatParticipant.count({
-        where: { conversationId, userId: { not: userId }, state: 'ACTIVE' },
-      });
-      if (othersActive > 0) {
-        throw new ConflictException(
-          'Owner cannot leave before transferring ownership',
+    return inTransactionAsRole(
+      this.prisma,
+      conversationId,
+      userId,
+      ['OWNER'],
+      async (tx) => {
+        // Someone may have joined since the caller saw the owner alone; they would be left in a closed group
+        const othersActive = await tx.chatParticipant.count({
+          where: { conversationId, userId: { not: userId }, state: 'ACTIVE' },
+        });
+        if (othersActive > 0) {
+          throw new ConflictException(
+            'Owner cannot leave before transferring ownership',
+          );
+        }
+
+        const participant = await tx.chatParticipant.update({
+          where: {
+            conversationId_userId: { conversationId, userId },
+          },
+          data: { state: 'DECLINED' },
+        });
+
+        const activeLeaves =
+          await this.mlsGroupRosterRepository.findActiveLeaves(
+            conversationId,
+            tx,
+          );
+        const ownDeviceIds = activeLeaves
+          .filter((leaf) => leaf.userId === userId)
+          .map((leaf) => leaf.deviceId);
+        await this.mlsGroupRosterRepository.removeLeaves(
+          conversationId,
+          ownDeviceIds,
+          currentEpoch,
+          tx,
         );
-      }
 
-      const participant = await tx.chatParticipant.update({
-        where: {
-          conversationId_userId: { conversationId, userId },
-        },
-        data: { state: 'DECLINED' },
-      });
-
-      const activeLeaves = await this.mlsGroupRosterRepository.findActiveLeaves(
-        conversationId,
-        tx,
-      );
-      const ownDeviceIds = activeLeaves
-        .filter((leaf) => leaf.userId === userId)
-        .map((leaf) => leaf.deviceId);
-      await this.mlsGroupRosterRepository.removeLeaves(
-        conversationId,
-        ownDeviceIds,
-        currentEpoch,
-        tx,
-      );
-
-      return participant;
-    });
+        return participant;
+      },
+    );
   }
 
   /** Marks selected receipts delivered for a user; only empty deliveredAt is updated. */
@@ -1242,8 +1241,12 @@ export class ChatRepository {
   }
 
   /** Clears deletedAt for the given participants when a new message reaches them. */
-  restoreDeletedParticipants(conversationId: string, userIds: string[]) {
-    return this.prisma.chatParticipant.updateMany({
+  restoreDeletedParticipants(
+    tx: PrismaTransaction,
+    conversationId: string,
+    userIds: string[],
+  ) {
+    return tx.chatParticipant.updateMany({
       where: {
         conversationId,
         userId: { in: userIds },
