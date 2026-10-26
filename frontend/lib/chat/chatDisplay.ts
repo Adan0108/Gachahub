@@ -43,6 +43,13 @@ export function activeMembers(conversation: unknown): ChatParticipant[] {
   );
 }
 
+/** Everyone still in the group or waiting to be: people who left, were removed or declined (`DECLINED`) are not, and can be added again. */
+export function idsInGroup(conversation: unknown): string[] {
+  return (asConversation(conversation)?.participants || [])
+    .filter((participant) => participant.state !== "DECLINED")
+    .map((participant) => participant.userId);
+}
+
 /** Active members other than `userId` - who this device's MLS group needs to include. */
 export function otherActiveMemberIds(conversation: unknown, userId?: string): string[] {
   return activeMembers(conversation)

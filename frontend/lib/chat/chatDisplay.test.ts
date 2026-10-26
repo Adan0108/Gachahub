@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conversationImage, conversationMute } from "./chatDisplay";
+import { conversationImage, conversationMute, idsInGroup } from "./chatDisplay";
 
 const direct = {
   type: "DIRECT",
@@ -29,6 +29,30 @@ describe("conversationImage", () => {
 
   it("is null for a missing conversation", () => {
     expect(conversationImage(undefined, "me")).toBeNull();
+  });
+});
+
+describe("idsInGroup", () => {
+  const person = (userId: string, state: string) => ({ userId, state });
+
+  it("lists everyone in the group or waiting to be, and leaves out people who left, were removed or declined", () => {
+    const conversation = {
+      id: "g1",
+      participants: [
+        person("active", "ACTIVE"),
+        person("pending", "PENDING"),
+        person("joining", "JOINING"),
+        person("leaving", "LEAVING"),
+        person("archived", "ARCHIVED"),
+        person("gone", "DECLINED"),
+      ],
+    };
+
+    expect(idsInGroup(conversation)).toEqual(["active", "pending", "joining", "leaving", "archived"]);
+  });
+
+  it("is empty for something that is not a conversation", () => {
+    expect(idsInGroup(undefined)).toEqual([]);
   });
 });
 

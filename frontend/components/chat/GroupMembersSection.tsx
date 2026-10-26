@@ -16,7 +16,7 @@ import {
 import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
 import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
 import { api } from "../../lib/api";
-import { activeMembers, myParticipant } from "../../lib/chat/chatDisplay";
+import { activeMembers, idsInGroup, myParticipant } from "../../lib/chat/chatDisplay";
 import type { ChatConversation, ChatParticipant } from "../../lib/chat/chatDisplay";
 import type { UserSearchResult } from "../../hooks/chat/useUserSearch";
 import { AddPeopleDialog } from "./AddPeopleDialog";
@@ -269,7 +269,7 @@ export function GroupMembersSection({
       {isAdding && canManage && (
         <AddPeopleDialog
           error={addMembers.error as Error | null}
-          excludeIds={conversation.participants.map((participant: ChatParticipant) => participant.userId)}
+          excludeIds={idsInGroup(conversation)}
           isPending={addMembers.isPending}
           onAdd={(people) => addMembers.mutate(people)}
           onClose={() => {

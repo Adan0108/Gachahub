@@ -243,6 +243,13 @@ describe("GroupMembersSection", () => {
     expect(screen.getByRole("dialog", { name: "Add people" })).toBeInTheDocument();
   });
 
+  // Reproduces #117: someone invited and not yet answered has no menu, so nobody can cancel the invite.
+  it.fails("lets the owner cancel an invite nobody has answered yet", () => {
+    setup(group("OWNER", { participants: [person("me", "Me", "OWNER"), person("cy", "Cy", "MEMBER", "PENDING")] }));
+
+    expect(screen.getByRole("button", { name: "Options for Cy" })).toBeInTheDocument();
+  });
+
   it("shows who is still invited or leaving", () => {
     setup(group("OWNER", { participants: [person("me", "Me", "OWNER"), person("cy", "Cy", "MEMBER", "PENDING")] }));
 
@@ -373,6 +380,26 @@ describe("GroupMembersSection", () => {
       expect(screen.getByRole("checkbox", { name: "Newbie" })).toBeInTheDocument();
       expect(screen.getByText("@newbie")).toBeInTheDocument();
       expect(screen.queryByRole("checkbox", { name: "Bo" })).not.toBeInTheDocument();
+    });
+
+    it("offers someone who left or declined again, but still hides members, invitees and people being removed", () => {
+      const conversation = group("OWNER", {
+        participants: [
+          person("me", "Me", "OWNER"),
+          person("ann", "Ann", "ADMIN"),
+          person("gone", "Gone", "MEMBER", "DECLINED"),
+          person("wait", "Wait", "MEMBER", "PENDING"),
+          person("out", "Out", "MEMBER", "LEAVING"),
+        ],
+      });
+      search.state.items = ["gone", "wait", "out", "ann", "fresh"].map((id) => ({ id, name: id, username: id, image: null }));
+      setup(conversation);
+      fireEvent.click(screen.getByRole("button", { name: /^Add people/ }));
+      fireEvent.change(screen.getByRole("searchbox", { name: "Search people to add" }), { target: { value: "xx" } });
+
+      const listed = screen.getAllByRole("checkbox").map((box) => box.getAttribute("aria-label"));
+
+      expect(listed).toEqual(["gone", "fresh"]);
     });
 
     it("ticks people, shows them as chips with a count on the button, and lets one be taken back", () => {
