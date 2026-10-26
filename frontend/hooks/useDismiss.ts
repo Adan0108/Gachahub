@@ -30,6 +30,8 @@ export function useDismiss({
         !contentRef.current?.contains(event.target as Node) &&
         !triggerRef.current?.contains(event.target as Node);
 
+      // A handled Escape: page-wide Escape shortcuts leave this press alone.
+      if (isEscape) event.preventDefault();
       if (isEscape || isOutsideClick) onDismiss();
     };
 

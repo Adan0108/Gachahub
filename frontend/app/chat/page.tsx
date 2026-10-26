@@ -28,7 +28,7 @@ interface RollbackContext {
   previousOlder: ThreadMessage[];
 }
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -94,6 +94,9 @@ import { useConversationDrafts } from "../../hooks/chat/useConversationDrafts";
 import { usePresenceOf } from "../../hooks/presence/usePresenceOf";
 import { useMarkChatRead } from "../../hooks/chat/useMarkChatRead";
 import { useReadWhenSeen } from "../../hooks/chat/useReadWhenSeen";
+import { useUnreadLine } from "../../hooks/chat/useUnreadLine";
+import { useChatEscape } from "../../hooks/chat/useChatEscape";
+import { useOpenAtLine } from "../../hooks/chat/useOpenAtLine";
 import { useReceiptDisplay } from "../../hooks/chat/useReceiptDisplay";
 import { useStickToBottom } from "../../hooks/chat/useStickToBottom";
 import { useTypingNames } from "../../hooks/chat/useTypingNames";
@@ -132,7 +135,9 @@ import {
   participantUser,
   typingLabel,
 } from "../../lib/chat/chatDisplay";
-import { threadItemKey, withOptimisticDelete } from "../../lib/chat/chatThread";
+import { messageDividerLabel, threadItemKey, withOptimisticDelete } from "../../lib/chat/chatThread";
+import { UNREAD_BAR_CLEARANCE_PX, UnreadBar } from "../../components/chat/UnreadBar";
+import { newLineElementId } from "../../lib/chat/unreadMarker";
 import { withOptimisticReaction, type ReactionChoice } from "../../lib/chat/chatReactions";
 import {
   getHiddenMessageIds,
@@ -289,6 +294,7 @@ function ChatPageContent() {
     onScroll: trackMessagesScroll,
     scrollToBottom,
     followIfNearBottom,
+    revealAtTop,
     showJumpToBottom,
   } = useStickToBottom(messagesContainerRef);
   // { id, senderName, preview } of the message being replied to, or null.
@@ -649,6 +655,34 @@ function ChatPageContent() {
     if (activePendingCount > previousPendingCount.current) scrollToBottom();
     previousPendingCount.current = activePendingCount;
   }, [activePendingCount, scrollToBottom]);
+  const unreadLine = useUnreadLine({
+    conversationId: activeId,
+    messages: displayMessages,
+    newestPageItems: messages.data?.items,
+    unreadCount: activeConversation?.unreadCount,
+    userId: user?.id,
+    atBottom: !showJumpToBottom,
+    markRead: (messageId) => void markChatRead(activeId, messageId, { isNewest: true }),
+    sentCount: activePendingCount,
+  });
+  const newLineId = unreadLine.line?.id;
+  useOpenAtLine({
+    conversationId: activeId,
+    lineId: newLineId,
+    rendered: threadItems,
+    revealAtTop,
+    gapPx: UNREAD_BAR_CLEARANCE_PX,
+  });
+  useChatEscape({
+    enabled: Boolean(activeId),
+    atBottom: !showJumpToBottom,
+    scrollToBottom: () => scrollToBottom("smooth"),
+    markAllRead: unreadLine.markAllRead,
+  });
+  const jumpToNewLine = () => {
+    const line = newLineId && document.getElementById(newLineElementId(newLineId));
+    if (line) revealAtTop(line, { gapPx: UNREAD_BAR_CLEARANCE_PX, behavior: "smooth" });
+  };
 
   const refreshChat = async () => {
     await Promise.all([
@@ -1243,6 +1277,14 @@ function ChatPageContent() {
                 <p key={announcement.seq}>{announcement.text}</p>
               </div>
               <div className="chat-messages-wrap">
+              {unreadLine.bar && (
+                <UnreadBar
+                  count={unreadLine.bar.count}
+                  since={messageDividerLabel(unreadLine.bar.since, threadNow)}
+                  onJump={jumpToNewLine}
+                  onMarkRead={unreadLine.markAllRead}
+                />
+              )}
               <div
                 className={`chat-messages${isFreshChat ? " fresh" : ""}`}
                 ref={messagesContainerRef}
@@ -1285,6 +1327,12 @@ function ChatPageContent() {
                 {threadItems
                   .filter((item) => item.kind !== "message" || !hiddenMessageIds.has(item.message.id))
                   .map((item) => (
+                    <Fragment key={threadItemKey(item)}>
+                    {item.kind === "message" && item.message.id === newLineId && (
+                      <div className="chat-new-line" id={newLineElementId(newLineId)} role="separator">
+                        <span>New</span>
+                      </div>
+                    )}
                     <ThreadRow
                       conversation={activeConversation}
                       decryptedById={decryptedMessages}
@@ -1294,7 +1342,6 @@ function ChatPageContent() {
                       onRetryEdit={messageEdit.retry}
                       pendingEdits={messageEdit.pending}
                       receiptInfo={receiptInfo}
-                      key={threadItemKey(item)}
                       messagesById={messagesById}
                       neighbors={neighbors}
                       now={threadNow}
@@ -1306,6 +1353,7 @@ function ChatPageContent() {
                       onReply={setReplyTarget}
                       userId={user?.id}
                     />
+                    </Fragment>
                   ))}
                 {pendingMessages
                   .filter((pending) => pending.conversationId === activeId)
@@ -1564,7 +1612,10 @@ function ChatPageContent() {
                     }}
                     onKeyDown={(event) => {
                       if (mention.handleKey(event, mentionSuggestions)) return;
-                      if (event.key === "Escape" && messageEdit.target) messageEdit.leave();
+                      if (event.key === "Escape" && messageEdit.target) {
+                        event.preventDefault();
+                        messageEdit.leave();
+                      }
                     }}
                     onPaste={handleDraftPaste}
                     onSelect={mention.onSelect}

@@ -19,6 +19,8 @@ export function useMenuDismiss(
     if (!isOpen) return undefined;
     const handle = (event: KeyboardEvent | MouseEvent) => {
       if (event.type === "keydown" && (event as KeyboardEvent).key === "Escape") {
+        // Handled: the chat's own Escape (mark read) leaves this press alone.
+        event.preventDefault();
         onCloseRef.current();
         return;
       }

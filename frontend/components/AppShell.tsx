@@ -146,7 +146,9 @@ export function AppShell({
       document.body.style.overflow = "hidden";
       menuCloseButtonRef.current?.focus();
       const closeOnEscape = (event: KeyboardEvent) => {
-        if (event.key === "Escape") setMenu(false);
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        setMenu(false);
       };
       window.addEventListener("keydown", closeOnEscape);
       return () => {

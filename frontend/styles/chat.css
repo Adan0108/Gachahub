@@ -2069,6 +2069,12 @@
   background: color-mix(in srgb, var(--purple), transparent 88%);
 }
 
+/* A key press after clicking a row (Escape, say) shows focus: a purple border like the row's own, not the browser's white box. */
+.chat-conversation-open:focus-visible {
+  outline: none;
+  border-color: var(--purple);
+}
+
 /* The three-dot button takes the place of the unread count and mute icon while the row is hovered or focused. */
 .chat-row-more {
   position: absolute;
@@ -3076,6 +3082,68 @@
   padding: 4px 12px;
   color: var(--muted);
   font-size: 11px;
+}
+
+/* Above the first message you had not read when the chat opened. */
+.chat-new-line {
+  position: relative;
+  align-self: stretch;
+  flex: none;
+  margin: 8px 0;
+  border-top: 1px solid var(--danger, #e5484d);
+}
+
+.chat-new-line span {
+  position: absolute;
+  top: -8px;
+  right: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--danger, #e5484d);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.chat-unread-bar {
+  position: absolute;
+  top: 0;
+  right: 12px;
+  left: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 0 0 8px 8px;
+  background: var(--purple);
+  box-shadow: 0 6px 18px #00000040;
+}
+
+.chat-unread-bar button {
+  border: 0;
+  padding: 6px 12px;
+  background: transparent;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chat-unread-bar-jump {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-unread-bar button:hover,
+.chat-unread-bar button:focus-visible {
+  text-decoration: underline;
 }
 
 .chat-message-time-wrap {

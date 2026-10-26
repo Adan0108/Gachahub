@@ -107,7 +107,10 @@ export function GroupIdentity({
                 event.preventDefault();
                 saveName();
               }
-              if (event.key === "Escape") setIsRenaming(false);
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setIsRenaming(false);
+              }
             }}
             value={draft}
           />
