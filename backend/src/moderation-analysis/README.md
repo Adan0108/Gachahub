@@ -44,7 +44,7 @@ unclaimed while the producer's initial connection is unavailable; normal existin
 publication retries apply after connection. Shutdown cancels scheduled retries.
 Notification event processing and transactional deduplication are unchanged.
 
-Deferred: worker/API, leases, risk/policy, content revisions, media,
+Stage 2A originally deferred worker/API (now supplied by Stage 2C), leases, risk/policy, content revisions, media,
 automated actions, and retention automation. Review text retention and chosen
 prefix limits before production rollout. No cleanup job is introduced here.
 
@@ -52,7 +52,7 @@ prefix limits before production rollout. No cleanup job is introduced here.
 
 `ModerationResultsModule` consumes `gachahub.moderation.results` with the existing
 background startup/shutdown helper. `KAFKA_MODERATION_RESULTS_GROUP_ID` defaults
-to `gachahub-moderation-results`. No worker or inference service is included.
+to `gachahub-moderation-results`. Stage 2C adds the separate fixture worker described below.
 
 The version 1 `moderation.result` envelope requires a UUID eventId and
 aggregateId equal to payload.caseId. The strict contract rejects unknown keys at
@@ -92,3 +92,32 @@ additive result migration. Kafka tests publish bounded synthetic fixtures to the
 real results topic using a temporary consumer group, which is removed afterward.
 The results topic is retained. No shared database reset or deployed fake service
 is needed.
+
+## Stage 2C: authenticated immutable input and Python worker
+
+`ModerationResultsModule` registers `ModerationAnalysisInternalController`,
+`ModerationServiceAuthGuard` and `ModerationAnalysisInputService`.
+`AllowAnonymous` bypasses the global user-session requirement only; the service
+guard remains mandatory. Missing/invalid worker tokens fail closed, and a missing
+or malformed configured token fails backend startup. Tokens must have 32?512
+printable ASCII characters. HTTP responses use no-store middleware, including
+errors. The internal controller is omitted from Swagger.
+
+The API selects the persisted analysis snapshot and verifies schema/profile,
+target type, text bounds and the Stage 2A hash before returning it. Its additive
+targetType/targetId identity fields let Python compare every request identity field.
+No current post/comment read, report details, reporter identity or email is used.
+`hashTextInput` extracts the existing fingerprint algorithm without changing it;
+shared vectors are under moderation-worker/tests/fixtures.
+
+Python independently validates contracts and recomputes the canonical hash. Result
+publication must receive a successful delivery callback before per-message offset
+commit. Invalid/exhausted jobs use a confirmed metadata-only quarantine topic;
+authentication and Kafka failures stop uncommitted. Duplicate publication is expected
+and remains safe under Stage 2B idempotency. There is no policy or case-risk change.
+
+See [worker operations and verification](../../../moderation-worker/README.md) for
+configuration, PowerShell setup, topic provisioning, retry/quarantine schema,
+network/TLS boundaries, secret rotation, live tests and Stage 2E limitations.
+Backend Kafka SASL/TLS environment support is still a deployment follow-up; local
+verification uses the repository's existing plaintext Kafka configuration.
