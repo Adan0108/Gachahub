@@ -19,26 +19,6 @@ export function uploadEncryptedAttachments(
   return prepareAttachments(files, (blobs) => api.uploadChatBlobs(blobs), onStage, done);
 }
 
-/** Sends already-uploaded attachments as one MLS message; the file keys travel only inside the envelope. */
-export function sendEncryptedAttachmentMessage(
-  syncEngine: SyncEngine,
-  deviceId: DeviceId,
-  conversationId: ConversationId,
-  recipientUserId: UserId | UserId[],
-  attachment: { files: AttachmentFile[]; caption: string },
-  clientMessageId: string,
-) {
-  return sendEncryptedEnvelope(
-    syncEngine,
-    deviceId,
-    conversationId,
-    recipientUserId,
-    buildAttachmentEnvelope(attachment.files, attachment.caption),
-    clientMessageId,
-    envelopeBlobIds(attachment.files),
-  );
-}
-
 /** Outgoing attachment send with a per-message cache, so a retry re-sends without re-uploading finished files. */
 export async function sendAttachmentsWithCache(params: {
   syncEngine: SyncEngine;
@@ -48,6 +28,8 @@ export async function sendAttachmentsWithCache(params: {
   files: File[];
   caption: string;
   clientMessageId: string;
+  replyToId?: string;
+  mentionUserIds?: UserId[];
   uploaded: Map<string, PreparedFiles>;
   onStage?: (stage: AttachmentStage) => void;
 }) {
@@ -58,13 +40,17 @@ export async function sendAttachmentsWithCache(params: {
   const prepared = await uploadEncryptedAttachments(params.files, params.onStage, done);
   stopUpload();
 
-  const sent = sendEncryptedAttachmentMessage(
+  // One MLS message; the file keys travel only inside the envelope.
+  const sent = sendEncryptedEnvelope(
     params.syncEngine,
     params.deviceId,
     params.conversationId,
     params.recipientUserId,
-    { files: prepared, caption: params.caption },
+    buildAttachmentEnvelope(prepared, params.caption),
     params.clientMessageId,
+    envelopeBlobIds(prepared),
+    params.replyToId,
+    params.mentionUserIds,
   );
   return sent.finally(() => stopAll());
 }

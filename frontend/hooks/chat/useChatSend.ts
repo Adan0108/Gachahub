@@ -70,6 +70,8 @@ export function useChatSend({
             files,
             caption: text,
             clientMessageId: clientId,
+            replyToId,
+            mentionUserIds,
             uploaded: uploadedAttachmentsRef.current,
             onStage: (stage) =>
               setPendingMessages((prev) =>
