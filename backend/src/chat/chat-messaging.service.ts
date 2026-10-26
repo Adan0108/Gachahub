@@ -20,6 +20,7 @@ import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
 import { ChatDevicesService } from '../chat-devices/chat-devices.service';
 import { ChatMessageRateLimiterService } from './chat-message-rate-limiter.service';
+import { ChatMembershipService } from './membership/chat-membership.service';
 import { isUniqueViolationOn } from './prisma-unique-violation';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
 import { SendMessageDto } from './dto/send-message.dto';
@@ -63,6 +64,7 @@ export class ChatMessagingService {
     private readonly chatDevicesService: ChatDevicesService,
     private readonly eventPublisher: EventPublisherPort,
     private readonly prisma: PrismaService,
+    private readonly chatMembershipService: ChatMembershipService,
   ) {}
 
   /** Creates or reuses a direct convo and sends a first encrypted message; clientMessageId dedupes retries, needs an active linked device. New convos start PENDING unless the users mutually follow (then ACTIVE). */
@@ -127,6 +129,23 @@ export class ChatMessagingService {
         (participant) => participant.userId === senderId,
       );
       if (mine?.state === 'ACTIVE' && !mine.deletedAt) {
+        const theirs = existingPair.conversation.participants.find(
+          (participant) => participant.userId === dto.recipientUserId,
+        );
+        return {
+          conversationId: existingPair.conversation.id,
+          message: null,
+          recipientState: theirs?.state ?? null,
+        };
+      }
+
+      // Starting the chat yourself after declining (or while the decline is still being applied)
+      // is a change of mind: they are let back in, and rejoin like anyone who accepts.
+      if (mine?.state === 'DECLINED' || mine?.state === 'LEAVING') {
+        await this.chatMembershipService.reopenDirect(
+          existingPair.conversation.id,
+          senderId,
+        );
         const theirs = existingPair.conversation.participants.find(
           (participant) => participant.userId === dto.recipientUserId,
         );

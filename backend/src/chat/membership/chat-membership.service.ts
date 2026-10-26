@@ -147,6 +147,11 @@ export class ChatMembershipService {
     await this.change(conversationId, [{ userId, event: 'DECLINE_INVITE' }]);
   }
 
+  /** Someone who declined a direct chat starts it again: they come back as if added directly, with no invite to answer. */
+  async reopenDirect(conversationId: string, userId: string): Promise<void> {
+    await this.change(conversationId, [{ userId, event: 'ADD_DIRECT' }]);
+  }
+
   /** Expires invites nobody answered; anyone no longer PENDING is skipped, not offboarded. */
   async expireInvites(
     conversationId: string,

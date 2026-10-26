@@ -140,6 +140,7 @@ describe('ChatMessagingService', () => {
     publishMany: jest.fn(),
   };
 
+  const chatMembershipService = { reopenDirect: jest.fn() };
   const prisma = {
     $transaction: jest.fn((callback: (tx: unknown) => Promise<unknown>) =>
       callback('fake-tx'),
@@ -171,6 +172,7 @@ describe('ChatMessagingService', () => {
       chatDevicesService as any,
       eventPublisher,
       prisma as any,
+      chatMembershipService as any,
     );
     blocksService.getBlockedIdsAmong.mockResolvedValue(new Set());
     blocksService.isBlocked.mockResolvedValue(false);
@@ -383,6 +385,46 @@ describe('ChatMessagingService', () => {
           recipientState: 'PENDING',
         });
         expect(prisma.$transaction).not.toHaveBeenCalled();
+      });
+
+      it.each(['DECLINED', 'LEAVING'])(
+        'lets you back in when you start the chat after declining it (%s)',
+        async (state) => {
+          repository.findDirectPair.mockResolvedValue(pair(state));
+
+          await expect(start()).resolves.toEqual({
+            conversationId: 'conversation-1',
+            message: null,
+            recipientState: 'PENDING',
+          });
+
+          expect(chatMembershipService.reopenDirect).toHaveBeenCalledWith(
+            'conversation-1',
+            'user-1',
+          );
+          expect(prisma.$transaction).not.toHaveBeenCalled();
+        },
+      );
+
+      it('does not reopen anything for a chat you are already in', async () => {
+        repository.findDirectPair.mockResolvedValue(pair('ACTIVE'));
+
+        await start();
+
+        expect(chatMembershipService.reopenDirect).not.toHaveBeenCalled();
+      });
+
+      it('does not let a real message reopen a chat you declined', async () => {
+        repository.findDirectPair.mockResolvedValue(pair('DECLINED'));
+
+        await service
+          .createDirectMessage('user-1', 'session-1', {
+            recipientUserId: 'user-2',
+            message: { clientMessageId: 'c1', contentType: 'TEXT' },
+          } as any)
+          .catch(() => undefined);
+
+        expect(chatMembershipService.reopenDirect).not.toHaveBeenCalled();
       });
 
       it('still sends it when your side of the chat was deleted, so the chat comes back', async () => {

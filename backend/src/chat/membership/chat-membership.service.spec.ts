@@ -317,6 +317,16 @@ describe('ChatMembershipService', () => {
     );
   });
 
+  it('lets someone who declined a direct chat back in as a direct add, with no invite to answer', async () => {
+    await service.reopenDirect('conv-1', 'u2');
+
+    expect(repository.changeMembership).toHaveBeenCalledWith(
+      'conv-1',
+      [{ userId: 'u2', event: 'ADD_DIRECT' }],
+      undefined,
+    );
+  });
+
   it('turns an expiry into an EXPIRE_INVITE event per person', async () => {
     await service.expireInvites('conv-1', ['u2', 'u3']);
 
