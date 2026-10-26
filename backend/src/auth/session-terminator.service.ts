@@ -21,7 +21,7 @@ export class SessionTerminator implements OnModuleInit, OnApplicationShutdown {
   private subscriber?: RedisClientType;
 
   constructor(
-    private readonly sockets: Pick<SocketRegistry, 'endSessions'>,
+    private readonly sockets: SocketRegistry,
     private readonly prisma: PrismaService,
     @Inject(REDIS_CLIENT) private readonly redis: RedisClientType,
   ) {}

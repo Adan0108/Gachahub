@@ -20,7 +20,7 @@ describe('SessionTerminator', () => {
     jest.clearAllMocks();
     redis.publish.mockResolvedValue(1);
     terminator = new SessionTerminator(
-      sockets,
+      sockets as never,
       prisma as unknown as PrismaService,
       redis as never,
     );
@@ -61,7 +61,7 @@ describe('SessionTerminator', () => {
       }),
     };
     const withChannel = new SessionTerminator(
-      sockets,
+      sockets as never,
       prisma as unknown as PrismaService,
       {
         ...redis,
