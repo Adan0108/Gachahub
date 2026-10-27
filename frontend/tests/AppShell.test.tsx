@@ -55,16 +55,17 @@ describe("AppShell navigation", () => {
   });
 
   it("shows a dot on Messages while chats or requests are waiting, and none when nothing is", () => {
-    const shell = (
+    // A fresh element each time: re-rendering the very same one would not re-run the shell.
+    const shell = () => (
       <AppShell>
         <p>Page content</p>
       </AppShell>
     );
-    const { rerender } = render(shell);
+    const { rerender } = render(shell());
     expect(screen.queryByRole("img", { name: "Unread chats waiting" })).not.toBeInTheDocument();
 
     mocks.waiting = 3;
-    rerender(shell);
+    rerender(shell());
     expect(screen.getByRole("link", { name: /Messages/ })).toContainElement(
       screen.getByRole("img", { name: "Unread chats waiting" }),
     );
