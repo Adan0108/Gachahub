@@ -925,7 +925,6 @@ function ChatPageContent() {
                         type="button"
                       >
                         <FiShield /> Requests
-                        {hasRequests && <span aria-hidden="true" className="chat-dot inline" />}
                         {hasRequests && <b>{requests.data.length}</b>}
                       </button>
                       <button

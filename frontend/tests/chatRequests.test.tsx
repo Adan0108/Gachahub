@@ -69,13 +69,13 @@ describe("chat requests", () => {
   });
 
   // #121
-  it("puts a red dot on the More button while a request is waiting, and says so", async () => {
+  it("puts a red dot on the More button while a request is waiting, with the count in the menu", async () => {
     renderChat();
 
     const more = await screen.findByRole("button", { name: "More, message requests waiting" });
     expect(more.querySelector(".chat-dot")).not.toBeNull();
     fireEvent.click(more);
-    expect(screen.getByRole("menuitem", { name: /requests/i }).querySelector(".chat-dot")).not.toBeNull();
+    expect(screen.getByRole("menuitem", { name: /requests/i })).toHaveTextContent("1");
   });
 
   it("shows no dot when there are no requests", async () => {

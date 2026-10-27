@@ -1653,12 +1653,6 @@
   background: #ef4444;
 }
 
-.chat-dot.inline {
-  position: static;
-  margin-left: 6px;
-  flex: none;
-}
-
 .chat-icon-button:hover {
   border-color: var(--purple);
   color: var(--text);
