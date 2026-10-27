@@ -22,6 +22,7 @@ vi.mock("../hooks/useCurrentUser", () => ({
 vi.mock("../hooks/useTheme", () => ({
   useTheme: () => ({ theme: "dark", toggleTheme: vi.fn() }),
 }));
+vi.mock("../hooks/chat/useWaitingChats", () => ({ useWaitingChats: () => 0 }));
 vi.mock("../hooks/chat/useDeviceIdentity", () => ({
   useDeviceIdentity: () => undefined,
 }));

@@ -12,6 +12,7 @@ import { mustOnboard } from "../lib/username";
 import { useDeviceIdentity } from "../hooks/chat/useDeviceIdentity";
 import { useAppSocket } from "../hooks/useAppSocket";
 import { useChatSocket } from "../hooks/chat/useChatSocket";
+import { useWaitingChats } from "../hooks/chat/useWaitingChats";
 import { useNotificationSocket } from "../hooks/useNotificationSocket";
 import { usePresenceSocket } from "../hooks/presence/usePresenceSocket";
 import { BrandMark } from "./BrandMark";
@@ -39,6 +40,7 @@ function Sidebar({
   closeButtonRef: Ref<HTMLButtonElement>;
 }) {
   const pathname = usePathname();
+  const waitingChats = useWaitingChats();
 
   return (
     <>
@@ -70,6 +72,11 @@ function Sidebar({
                 {active && <span className="sr-only">Current page:</span>}
                 <Icon />
                 <span>{label}</span>
+                {href === "/chat" && waitingChats > 0 && (
+                  <b aria-label={`${waitingChats} waiting`} className="side-nav-badge">
+                    {waitingChats > 9 ? "9+" : waitingChats}
+                  </b>
+                )}
               </Link>
             );
           })}

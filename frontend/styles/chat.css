@@ -1628,6 +1628,19 @@
   position: relative;
 }
 
+.side-nav-badge {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
 /* A small red dot: on the corner of a button, or beside a menu item with .inline. */
 .chat-dot {
   position: absolute;
