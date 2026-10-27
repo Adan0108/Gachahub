@@ -1644,6 +1644,9 @@
   line-height: 1;
   /* the nav's negative tracking leaves a trailing gap that pushes the digit left */
   letter-spacing: 0;
+  /* the display font's "1" carries a wide left bearing, so the digit looks pushed right */
+  font-family: system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
 }
 
 /* A small red dot: on the corner of a button, or beside a menu item with .inline. */
