@@ -70,7 +70,10 @@ async function serveFirstCommitWins(devices: Device[]) {
       signaturePublicKey: bytesToBase64(device.signatureKey),
     })),
   }) as never);
-  vi.mocked(api.getMlsHandshakesSince).mockImplementation(async () => ({ items: handshakes, hasMore: false }) as never);
+  vi.mocked(api.getMlsHandshakesSince).mockImplementation(
+    async (_conversation: string, sinceEpoch = 0) =>
+      ({ items: handshakes.filter((entry) => entry.epoch >= sinceEpoch), hasMore: false }) as never,
+  );
   vi.mocked(api.submitMlsHandshake).mockImplementation(async (_conversationId, request) => {
     const shaped = (entry: (typeof handshakes)[number]) => ({
       ...entry,
@@ -199,5 +202,65 @@ describe('a message sent before the other person opens the chat (real MLS)', () 
     }
 
     expect(read).toEqual(['what up my guy', 'second', 'third']);
+  });
+});
+
+describe('messages sent back to back (real MLS)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const bodyOf = (result: { kind: string; envelope?: unknown }) =>
+    result.kind === 'application' && result.envelope && 'body' in (result.envelope as object)
+      ? (result.envelope as { body: string }).body
+      : result.kind;
+
+  // #118: every one of them has to be readable, whatever order or overlap they are decrypted in.
+  it.each([
+    ['in order', (list: unknown[]) => list],
+    ['in reverse order', (list: unknown[]) => [...list].reverse()],
+  ])('are all read by the receiver when sent at once and decrypted at once, %s', async (_name, arrange) => {
+    const alice = await setUpDevice('user-alice');
+    const bob = await setUpDevice('user-bob');
+    await serveFirstCommitWins([alice, bob]);
+    await ensureConversationGroup(alice.engine, CONVERSATION, 'user-bob');
+    await bob.engine.processPendingWelcomes();
+
+    const bodies = ['one', 'two', 'three', 'four', 'five'];
+    const sent = await Promise.all(
+      bodies.map((body) => alice.engine.encryptMessage(CONVERSATION, { v: 1, type: 'text', body })),
+    );
+    const read = await Promise.all(
+      (arrange(sent) as typeof sent).map((message) => bob.engine.processIncoming(CONVERSATION, message.wireBytes)),
+    );
+
+    expect(read.map(bodyOf).sort()).toEqual([...bodies].sort());
+  });
+});
+
+describe('the receiver of a brand-new chat gets two messages while still joining (real MLS)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // Same steps as useDecryptedMessages: catch up (fetching the Welcome when there is no group), then decrypt.
+  async function readOne(receiver: Device, wireBytes: Uint8Array) {
+    try {
+      await receiver.engine.syncCommits(CONVERSATION);
+    } catch {
+      await receiver.engine.processPendingWelcomes();
+      await receiver.engine.syncCommits(CONVERSATION);
+    }
+    const result = await receiver.engine.processIncoming(CONVERSATION, wireBytes);
+    return result.kind === 'application' && 'body' in result.envelope ? result.envelope.body : result.kind;
+  }
+
+  it('reads both when two decrypt runs start before the group exists', async () => {
+    const alice = await setUpDevice('user-alice');
+    const bob = await setUpDevice('user-bob');
+    await serveFirstCommitWins([alice, bob]);
+    await ensureConversationGroup(alice.engine, CONVERSATION, 'user-bob');
+    const first = await alice.engine.encryptMessage(CONVERSATION, { v: 1, type: 'text', body: 'Yo my friend' });
+    const second = await alice.engine.encryptMessage(CONVERSATION, { v: 1, type: 'text', body: 'second' });
+
+    const settled = await Promise.allSettled([readOne(bob, first.wireBytes), readOne(bob, second.wireBytes)]);
+
+    expect(settled.map((s) => (s.status === 'fulfilled' ? s.value : String(s.reason)))).toEqual(['Yo my friend', 'second']);
   });
 });
