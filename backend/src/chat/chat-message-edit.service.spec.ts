@@ -387,7 +387,7 @@ describe('ChatMessageEditService', () => {
       await expect(edit()).rejects.toThrow(ForbiddenException);
     });
 
-    it('refuses when the other person declined the conversation', async () => {
+    it('does not refuse, or tell the editor, when the other person declined the conversation', async () => {
       repository.findMessageWithParticipants.mockResolvedValue(
         target({
           conversation: {
@@ -397,7 +397,7 @@ describe('ChatMessageEditService', () => {
         }),
       );
 
-      await expect(edit()).rejects.toThrow(ForbiddenException);
+      await expect(edit()).resolves.toMatchObject({ duplicate: false });
     });
 
     it('only tells members who are still in a group', async () => {

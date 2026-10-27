@@ -259,11 +259,11 @@ describe("GroupMembersSection", () => {
     expect(screen.getByText(/Invited/)).toBeInTheDocument();
   });
 
-  it("gives a plain member no member menus and no Add people, but they can leave", () => {
+  it("gives a plain member Add people but no member menus, and they can leave", () => {
     setup(group("MEMBER"));
 
     expect(screen.queryByRole("button", { name: /Options for/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Add people/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Add people/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Leave group/ })).toBeEnabled();
   });
 

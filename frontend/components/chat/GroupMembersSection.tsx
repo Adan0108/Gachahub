@@ -128,6 +128,7 @@ export function GroupMembersSection({
   const me = myParticipant(conversation, currentUserId);
   const isOwner = me?.role === "OWNER";
   const canManage = isOwner || me?.role === "ADMIN";
+  const canAdd = Boolean(me);
   const canLeave = !isOwner || members.length <= 1;
 
   const addMembers = useMutation({
@@ -261,7 +262,7 @@ export function GroupMembersSection({
         onToggle={onToggleOpen}
       />
 
-      {isOpen && canManage && (
+      {isOpen && canAdd && (
         <button
           aria-haspopup="dialog"
           className="chat-info-row"
@@ -272,7 +273,7 @@ export function GroupMembersSection({
         </button>
       )}
 
-      {isAdding && canManage && (
+      {isAdding && canAdd && (
         <AddPeopleDialog
           error={addMembers.error as Error | null}
           excludeIds={idsInGroup(conversation)}

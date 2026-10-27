@@ -265,9 +265,9 @@ describe('ChatMembershipService', () => {
   // #94: the manager's role is checked again under the lock, after the caller's earlier check
   describe('when the acting manager loses their role before the write', () => {
     it.each([
-      ['demoted', { state: 'ACTIVE', role: 'MEMBER' }],
-      ['removed', { state: 'DECLINED', role: 'ADMIN' }],
-    ])('refuses an add by a %s admin and changes nothing', async (_, row) => {
+      ['removed', { state: 'DECLINED', role: 'MEMBER' }],
+      ['gone', null],
+    ])('refuses an add by a %s member and changes nothing', async (_, row) => {
       actorRow = row;
 
       await expect(

@@ -381,26 +381,14 @@ describe('ChatGroupService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('throws ForbiddenException when the caller is a plain member', async () => {
+    // #94: removed between the member check and the write
+    it('refuses a rename when the member was removed before the write', async () => {
       repository.findConversationWithParticipants.mockResolvedValue(
         groupConversation([
           { userId: 'user-1', role: 'MEMBER', state: 'ACTIVE' },
         ]),
       );
-
-      await expect(
-        service.updateGroupChat('user-1', 'conversation-1', {} as any),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    // #94: demoted between the admin check and the write
-    it('refuses a rename when the admin was demoted before the write', async () => {
-      repository.findConversationWithParticipants.mockResolvedValue(
-        groupConversation([
-          { userId: 'user-1', role: 'ADMIN', state: 'ACTIVE' },
-        ]),
-      );
-      actorRow = { state: 'ACTIVE', role: 'MEMBER' };
+      actorRow = { state: 'DECLINED', role: 'MEMBER' };
 
       await expect(
         service.updateGroupChat('user-1', 'conversation-1', {
@@ -410,7 +398,7 @@ describe('ChatGroupService', () => {
       expect(repository.updateGroupConversation).not.toHaveBeenCalled();
     });
 
-    it.each(['OWNER', 'ADMIN'])(
+    it.each(['OWNER', 'ADMIN', 'MEMBER'])(
       'allows an active %s participant to update group details',
       async (role) => {
         repository.findConversationWithParticipants.mockResolvedValue(
@@ -441,10 +429,10 @@ describe('ChatGroupService', () => {
       );
     });
 
-    it('rejects a non-manager caller', async () => {
+    it('rejects a caller who is not in the group', async () => {
       repository.findConversationWithParticipants.mockResolvedValue(
         groupConversation([
-          { userId: 'user-1', role: 'MEMBER', state: 'ACTIVE' },
+          { userId: 'user-2', role: 'OWNER', state: 'ACTIVE' },
         ]),
       );
 

@@ -220,11 +220,11 @@ describe("ConversationInfoPanel blocking", () => {
       expect(screen.getByRole("button", { name: /^Files/ })).toBeInTheDocument();
     });
 
-    it("puts Media where Profile was for someone who cannot add people", () => {
+    it("offers Add people to a plain member too", () => {
       renderPanel({ conversation: group });
 
       expect(screen.getAllByRole("button", { name: /^Media/ }).length).toBeGreaterThan(0);
-      expect(screen.queryByRole("button", { name: "Add people" })).not.toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: /Add people/ }).length).toBeGreaterThan(0);
     });
 
     it("puts Add people there for a group owner, and it opens the members and the picker", () => {

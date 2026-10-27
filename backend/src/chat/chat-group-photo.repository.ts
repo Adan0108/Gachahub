@@ -3,7 +3,7 @@ import type { Prisma } from '../generated/prisma/client';
 import { claimUploadsForAttachment } from '../media/media.repository';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  GROUP_MANAGER_ROLES,
+  GROUP_MEMBER_ROLES,
   inTransactionAsRole,
 } from './membership/lock-conversation';
 
@@ -29,7 +29,7 @@ export class ChatGroupPhotoRepository {
       this.prisma,
       conversationId,
       userId,
-      GROUP_MANAGER_ROLES,
+      GROUP_MEMBER_ROLES,
       async (tx) => {
         await claimUploadsForAttachment(tx, {
           ids: [upload.id],
@@ -51,7 +51,7 @@ export class ChatGroupPhotoRepository {
       this.prisma,
       conversationId,
       userId,
-      GROUP_MANAGER_ROLES,
+      GROUP_MEMBER_ROLES,
       (tx) =>
         this.swap(tx, conversationId, {
           photoUrl: null,

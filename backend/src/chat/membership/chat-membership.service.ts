@@ -5,7 +5,11 @@ import type { ChatParticipantAddedState } from '../../domain-events/domain-event
 import { PrismaService } from '../../prisma/prisma.service';
 import { ChatMembershipRepository } from './chat-membership.repository';
 import { MAX_GROUP_MEMBERS } from '../group-size-policy';
-import { GROUP_MANAGER_ROLES, inTransactionAsRole } from './lock-conversation';
+import {
+  GROUP_MANAGER_ROLES,
+  GROUP_MEMBER_ROLES,
+  inTransactionAsRole,
+} from './lock-conversation';
 import type {
   MembershipRequest,
   OnIllegalMembershipChange,
@@ -61,7 +65,7 @@ export class ChatMembershipService {
       this.prisma,
       conversationId,
       actorId,
-      GROUP_MANAGER_ROLES,
+      GROUP_MEMBER_ROLES,
       async (tx) => {
         const changes =
           await this.chatMembershipRepository.changeMembershipInTransaction(

@@ -22,7 +22,7 @@ export class ChatGroupPhotoService {
     conversationId: string,
     dto: UpdateGroupPhotoDto,
   ) {
-    await this.chatAccessService.assertCanManageGroup(userId, conversationId);
+    await this.chatAccessService.assertIsGroupMember(userId, conversationId);
     const upload = await this.mediaService.resolveSingleImage({
       id: dto.photoMediaUploadId,
       userId,
@@ -36,7 +36,7 @@ export class ChatGroupPhotoService {
   }
 
   async remove(userId: string, conversationId: string) {
-    await this.chatAccessService.assertCanManageGroup(userId, conversationId);
+    await this.chatAccessService.assertIsGroupMember(userId, conversationId);
 
     return this.finish(() => this.repository.clear(conversationId, userId));
   }

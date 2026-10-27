@@ -6,6 +6,11 @@ import type {
 import type { PrismaService } from '../../prisma/prisma.service';
 
 export const GROUP_MANAGER_ROLES: ChatParticipantRole[] = ['OWNER', 'ADMIN'];
+export const GROUP_MEMBER_ROLES: ChatParticipantRole[] = [
+  'OWNER',
+  'ADMIN',
+  'MEMBER',
+];
 
 /**
  * Takes the conversation's row lock for the rest of the transaction. Accepting

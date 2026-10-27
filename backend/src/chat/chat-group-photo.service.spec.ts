@@ -3,7 +3,7 @@ import { GroupPhotoConflictError } from './chat-group-photo.repository';
 import { ChatGroupPhotoService } from './chat-group-photo.service';
 
 describe('ChatGroupPhotoService', () => {
-  const access = { assertCanManageGroup: jest.fn() };
+  const access = { assertIsGroupMember: jest.fn() };
   const repository = { replace: jest.fn(), clear: jest.fn() };
   const media = {
     resolveSingleImage: jest.fn(),
@@ -13,7 +13,7 @@ describe('ChatGroupPhotoService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
-    access.assertCanManageGroup.mockResolvedValue({});
+    access.assertIsGroupMember.mockResolvedValue({});
     media.resolveSingleImage.mockResolvedValue({
       id: 'upload-new',
       secureUrl: 'https://res.cloudinary.com/x/new.png',
@@ -37,7 +37,7 @@ describe('ChatGroupPhotoService', () => {
         photoMediaUploadId: 'upload-new',
       });
 
-      expect(access.assertCanManageGroup).toHaveBeenCalledWith('me', 'g1');
+      expect(access.assertIsGroupMember).toHaveBeenCalledWith('me', 'g1');
       expect(media.resolveSingleImage).toHaveBeenCalledWith({
         id: 'upload-new',
         userId: 'me',
@@ -62,8 +62,8 @@ describe('ChatGroupPhotoService', () => {
       expect(media.releaseReplacedUpload).toHaveBeenCalledWith('upload-old');
     });
 
-    it('does nothing for someone who cannot manage the group', async () => {
-      access.assertCanManageGroup.mockRejectedValue(new ForbiddenException());
+    it('does nothing for someone outside the group', async () => {
+      access.assertIsGroupMember.mockRejectedValue(new ForbiddenException());
 
       await expect(
         service.update('me', 'g1', { photoMediaUploadId: 'upload-new' }),
@@ -91,7 +91,7 @@ describe('ChatGroupPhotoService', () => {
 
       const result = await service.remove('me', 'g1');
 
-      expect(access.assertCanManageGroup).toHaveBeenCalledWith('me', 'g1');
+      expect(access.assertIsGroupMember).toHaveBeenCalledWith('me', 'g1');
       expect(media.releaseReplacedUpload).toHaveBeenCalledWith('upload-old');
       expect(result).toEqual({ id: 'g1', photoUrl: null });
     });

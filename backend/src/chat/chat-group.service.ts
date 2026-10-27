@@ -11,7 +11,7 @@ import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
 import { ChatMembershipService } from './membership/chat-membership.service';
 import {
-  GROUP_MANAGER_ROLES,
+  GROUP_MEMBER_ROLES,
   inTransactionAsRole,
 } from './membership/lock-conversation';
 import { CreateGroupChatDto } from './dto/create-group-chat.dto';
@@ -92,20 +92,20 @@ export class ChatGroupService {
   /**
    * Updates a group chat's title and/or photo.
    *
-   * Only OWNER and ADMIN participants can make this change.
+   * Any active member can make this change.
    */
   async updateGroupChat(
     userId: string,
     conversationId: string,
     dto: UpdateGroupChatDto,
   ) {
-    await this.chatAccessService.assertCanManageGroup(userId, conversationId);
+    await this.chatAccessService.assertIsGroupMember(userId, conversationId);
 
     return inTransactionAsRole(
       this.prisma,
       conversationId,
       userId,
-      GROUP_MANAGER_ROLES,
+      GROUP_MEMBER_ROLES,
       (tx) =>
         this.chatRepository.updateGroupConversation(
           { conversationId, title: dto.title },
@@ -117,7 +117,7 @@ export class ChatGroupService {
   /**
    * Adds members to a group chat.
    *
-   * Only OWNER and ADMIN participants can add members. A member who mutually
+   * Any active member can add members. A member who mutually
    * follows the adder joins ACTIVE immediately; everyone else start PENDING
    * and must accept the invite via the existing request accept/decline flow.
    */
@@ -126,7 +126,7 @@ export class ChatGroupService {
     conversationId: string,
     dto: UpdateGroupMembersDto,
   ) {
-    await this.chatAccessService.assertCanManageGroup(userId, conversationId);
+    await this.chatAccessService.assertIsGroupMember(userId, conversationId);
 
     const memberIds = Array.from(new Set(dto.userIds)).filter(
       (memberId) => memberId !== userId,
