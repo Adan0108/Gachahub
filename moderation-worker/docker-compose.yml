@@ -1,0 +1,25 @@
+name: gachahub-moderation-worker
+
+services:
+  moderation-worker:
+    image: gachahub-moderation-worker:dev
+    build:
+      context: .
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      WORKER_ENV: local
+      BACKEND_BASE_URL: http://host.docker.internal:3000
+      MODERATION_WORKER_TOKEN: ${MODERATION_WORKER_TOKEN:?Set MODERATION_WORKER_TOKEN in moderation-worker/.env to match the backend}
+      KAFKA_BROKERS: host.docker.internal:29092
+      KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+      KAFKA_MODERATION_REQUEST_TOPIC: ${KAFKA_MODERATION_REQUEST_TOPIC:-gachahub.moderation.requests}
+      KAFKA_MODERATION_RESULT_TOPIC: ${KAFKA_MODERATION_RESULT_TOPIC:-gachahub.moderation.results}
+      KAFKA_MODERATION_QUARANTINE_TOPIC: ${KAFKA_MODERATION_QUARANTINE_TOPIC:-gachahub.moderation.requests.quarantine}
+      KAFKA_MODERATION_WORKER_GROUP_ID: ${KAFKA_MODERATION_WORKER_GROUP_ID:-gachahub-moderation-worker}
+      CLASSIFIER_BACKEND: huggingface
+      CLASSIFIER_MODEL_NAME: Horizon-Labs/multilingual-toxicity-small
+      CLASSIFIER_MODEL_REVISION: 01adcc628a33848569816d4851a38544c321b92c
+      CLASSIFIER_MAX_LENGTH: "256"
+      HF_HUB_OFFLINE: "1"

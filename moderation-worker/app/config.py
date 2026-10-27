@@ -45,7 +45,7 @@ class Settings(BaseModel):
         if (url.scheme not in {"http", "https"} or not url.hostname or url.username or
                 url.password or url.query or url.fragment or url.path not in {"", "/"}):
             raise ValueError("Backend URL must be an HTTP(S) origin without credentials")
-        if url.scheme == "http" and not (self.environment == "local" and url.hostname in {"localhost", "127.0.0.1", "::1"}):
+        if url.scheme == "http" and not (self.environment == "local" and url.hostname in {"localhost", "127.0.0.1", "::1", "host.docker.internal"}):
             raise ValueError("Backend URL requires HTTPS outside local loopback")
         token = self.moderation_worker_token.get_secret_value()
         if not 32 <= len(token) <= 512 or any(not 33 <= ord(c) <= 126 for c in token):

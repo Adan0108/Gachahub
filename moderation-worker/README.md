@@ -36,6 +36,9 @@ Run `python -m app.main`, not the old `src.worker` entry point.
 
 ## Windows PowerShell setup
 
+For the independently containerized worker, see [Separate worker Compose](#separate-worker-compose).
+The setup below remains available for running Python directly on the host.
+
 From the repository root:
 
 ```powershell
@@ -82,8 +85,8 @@ Authentication failures require operator intervention before restart.
 
 | Variable | Default / requirement |
 |---|---|
-| `WORKER_ENV` | `production`; `local` permits loopback HTTP and plaintext Kafka |
-| `BACKEND_BASE_URL` | Required HTTP(S) origin, no path, query or credentials; HTTPS outside local loopback |
+| `WORKER_ENV` | `production`; `local` permits loopback / exact `host.docker.internal` HTTP and plaintext Kafka |
+| `BACKEND_BASE_URL` | Required HTTP(S) origin, no path, query or credentials; production always requires HTTPS |
 | `MODERATION_WORKER_TOKEN` | Required shared secret, hidden in settings representations |
 | `KAFKA_BROKERS` | Required comma-separated bootstrap brokers |
 | `KAFKA_MODERATION_WORKER_GROUP_ID` | `gachahub-moderation-worker`; same value across replicas |
@@ -217,7 +220,7 @@ cleanup and pending-job reconciliation are deferred.
 Restrict `/internal/moderation/*` to the worker network using private ingress,
 firewall/network policy or a service mesh. Route exclusion and the token are not
 network isolation. Terminate HTTPS on trusted ingress (or use an equivalent encrypted
-service network); this worker intentionally requires an HTTPS URL outside loopback.
+service network); outside local mode this worker always requires an HTTPS URL.
 Do not forward bearer headers or private response bodies into access logs. Disable
 caching, including ingress overrides. Restrict worker egress to backend HTTPS,
 Kafka and required DNS. The Hugging Face backend additionally needs Hub/download
@@ -281,6 +284,76 @@ broker restart or production TLS/ACL path is claimed. Cleanup terminates child
 processes, deletes only test topics, removes inactive test groups where possible,
 and drops the generated schema. A group still active after forced termination
 expires by broker group retention.
+
+## Separate worker Compose
+
+`backend/docker-compose.yml` continues to own Kafka and Redis. This directory's
+`docker-compose.yml` owns only the worker, on its own default Compose network;
+it does not join the backend network. Backend npm scripts are unchanged.
+
+One-time setup: copy `.env.example` to `.env` if absent, and set
+`MODERATION_WORKER_TOKEN` to the same secret as `backend/.env`. Set the backend's
+`MODERATION_CLASSIFIER_PROFILE=toxicity-mmbert-small-v1` before starting NestJS.
+Finish any pending fixture-profile requests before switching (see Stage 2E below).
+Neither Compose file embeds a real token; worker Compose reads its local `.env`
+for interpolation and passes only the listed environment variables to the container.
+
+Terminal 1:
+
+```powershell
+cd backend
+npm run docker:up
+npm run start:dev
+```
+
+Terminal 2:
+
+```powershell
+cd moderation-worker
+docker compose up -d
+docker compose logs -f moderation-worker
+```
+
+The first worker `up` builds the missing image automatically. No manual `docker
+build` or `docker run` is needed. After editing image inputs, use
+`docker compose up -d --build`; restart with `docker compose restart`, and stop
+the worker independently with `docker compose down`. Start the backend broker
+before the worker. Existing topic provisioning requirements still apply.
+
+Host NestJS retains `KAFKA_BROKERS=localhost:9092`. The worker uses
+`host.docker.internal:29092`, the second PLAINTEXT listener on the same Kafka
+broker. Kafka advertises that hostname on this listener so metadata remains
+reachable from the worker's independent network. Backend HTTP is
+`http://host.docker.internal:3000`. `extra_hosts: host.docker.internal:host-gateway`
+provides the host gateway mapping on Linux as well as Docker Desktop setups.
+The host backend must listen on a container-reachable interface (the existing
+Nest `app.listen(port)` does so); host firewall rules must permit the connection.
+Port 3000 is the current Compose dev contract. Direct host-run Python settings
+in `.env.example` remain loopback defaults; Compose overrides the two addresses.
+
+The Python 3.13 slim image installs the existing requirements with CPU-only Torch
+from the PyTorch CPU wheel index. It copies only application/download-script
+sources. `.env`, `.venv`, tests, host caches and model weights are excluded from
+the build context. `python -m scripts.download_model` imports the immutable model
+identity from `app.model_profile` and downloads only Transformers inference files
+from `Horizon-Labs/multilingual-toxicity-small` at
+`01adcc628a33848569816d4851a38544c321b92c` during the build.
+
+Actual weights/tokenizer files live in the image under
+`/opt/huggingface/hub/models--Horizon-Labs--multilingual-toxicity-small/`, with the
+pinned SHA under `snapshots/` and bytes under `blobs/`. There is no host-cache bind
+mount or cache volume. Both Dockerfile and Compose set `HF_HUB_OFFLINE=1` for
+runtime. Normal restart loads the baked files and does not contact Hugging Face.
+Runtime still needs Kafka and backend connectivity. Model name/revision/length
+are fixed to the existing immutable bundle, not taken from mutable branch names.
+`MODERATION_CLASSIFIER_PROFILE` belongs to backend scheduling; the Python worker
+derives its matching profile from `CLASSIFIER_BACKEND=huggingface`.
+
+An already-built image remains usable without the upstream repository. Preserve
+that image for long-term availability: keep the local image, optionally export
+with `docker save -o worker-image.tar gachahub-moderation-worker:dev`, or arrange
+a private registry copy later. Rebuilding still needs the upstream dependencies
+and model. No image export or registry publication is performed by this setup.
 
 ## Stage 2E local text model
 
