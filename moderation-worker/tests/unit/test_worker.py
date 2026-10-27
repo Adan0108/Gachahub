@@ -8,15 +8,15 @@ from unittest.mock import Mock
 import httpx
 from pydantic import ValidationError
 
-from app.backend_client import ModerationInputClient
-from app.classifier import FixtureClassifier
-from app.config import Settings
-from app.contracts import (AnalysisRequestedEvent, CommentInput, ModerationInputResponse, PostInput,
+from app.infrastructure.http.backend_client import ModerationInputClient
+from app.classifiers.fixture import FixtureClassifier
+from app.core.config import Settings
+from app.contracts.moderation import (AnalysisRequestedEvent, CommentInput, ModerationInputResponse, PostInput,
                            MAX_INPUT_BYTES, normalize_text, parse_request, snapshot_hash)
-from app.errors import Cancelled, DeliveryFailure, QuarantineRequired, SecurityFailure
-from app.kafka_consumer import Worker
-from app.kafka_producer import ConfirmedPublisher
-from app.processing import JobProcessor, verify_identity
+from app.core.errors import Cancelled, DeliveryFailure, QuarantineRequired, SecurityFailure
+from app.infrastructure.kafka.consumer import Worker
+from app.infrastructure.kafka.producer import ConfirmedPublisher
+from app.processing.job_processor import JobProcessor, verify_identity
 
 
 def settings(**changes):
@@ -46,7 +46,7 @@ def processor(classifier=None):
 
 class ContractsTests(unittest.TestCase):
     def test_shared_hash_vectors(self):
-        vectors = json.loads((Path(__file__).parent / "fixtures/canonical-text-v1.json").read_text(encoding="utf-8"))
+        vectors = json.loads((Path(__file__).parents[1] / "fixtures/canonical-text-v1.json").read_text(encoding="utf-8"))
         for vector in vectors:
             with self.subTest(vector["name"]):
                 source = vector["source"]
@@ -232,7 +232,7 @@ class KafkaTests(unittest.TestCase):
                 if mode == "success":
                     publisher.result(processor().process(FakeMessage().value(), Event()))
                 else:
-                    with patch("app.kafka_producer.time.monotonic", side_effect=[0, 0, 999]):
+                    with patch("app.infrastructure.kafka.producer.time.monotonic", side_effect=[0, 0, 999]):
                         with self.assertRaises(DeliveryFailure):
                             publisher.result(processor().process(FakeMessage().value(), Event()))
 

@@ -1,8 +1,8 @@
-"""Standalone observation only: python -m app.evaluate_classifier (no backend/Kafka)."""
+"""Standalone observation only: python -m app.evaluation.evaluate_classifier (no backend/Kafka)."""
 import json
 import time
 
-from .huggingface_classifier import HuggingFaceClassifier
+from app.classifiers.huggingface import HuggingFaceClassifier
 
 SAMPLES = (
     ("en", "benign praise", "Thanks for sharing, this guide was really helpful!"),

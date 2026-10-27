@@ -6,9 +6,9 @@ from threading import Event
 import httpx
 from pydantic import ValidationError
 
-from .config import Settings
-from .contracts import MAX_INPUT_BYTES, ModerationInputResponse
-from .errors import Cancelled, QuarantineRequired, SecurityFailure
+from app.core.config import Settings
+from app.contracts.moderation import MAX_INPUT_BYTES, ModerationInputResponse
+from app.core.errors import Cancelled, QuarantineRequired, SecurityFailure
 
 
 class ModerationInputClient:

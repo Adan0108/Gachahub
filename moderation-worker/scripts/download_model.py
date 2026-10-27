@@ -1,6 +1,6 @@
 from huggingface_hub import snapshot_download
 
-from app.model_profile import MODEL_NAME, MODEL_REVISION
+from app.classifiers.model_profile import MODEL_NAME, MODEL_REVISION
 
 
 def main() -> None:

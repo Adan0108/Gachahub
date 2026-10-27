@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
-from .model_profile import FIXTURE_PROFILE, HUGGINGFACE_PROFILE, MODEL_MAX_LENGTH, MODEL_NAME, MODEL_REVISION
+from app.classifiers.model_profile import FIXTURE_PROFILE, HUGGINGFACE_PROFILE, MODEL_MAX_LENGTH, MODEL_NAME, MODEL_REVISION
 
 
 class Settings(BaseModel):

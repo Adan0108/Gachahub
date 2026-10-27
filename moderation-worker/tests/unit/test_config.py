@@ -2,7 +2,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from app.config import Settings
+from app.core.config import Settings
 
 
 class BackendURLSecurityTests(unittest.TestCase):

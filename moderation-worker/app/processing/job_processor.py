@@ -2,12 +2,12 @@ from datetime import datetime, timezone
 from threading import Event
 from uuid import NAMESPACE_URL, uuid5
 
-from .backend_client import ModerationInputClient
-from .classifier import Classifier
-from .contracts import (AnalysisRequestedPayload, ClassifierOutput, FailedResult, ModerationInputResponse,
+from app.infrastructure.http.backend_client import ModerationInputClient
+from app.classifiers.base import Classifier
+from app.contracts.moderation import (AnalysisRequestedPayload, ClassifierOutput, FailedResult, ModerationInputResponse,
                         ModerationResultEvent, PostInput, SuccessResult, parse_request, snapshot_hash)
-from .errors import Cancelled, QuarantineRequired
-from .model_profile import FIXTURE_PROFILE, HUGGINGFACE_PROFILE
+from app.core.errors import Cancelled, QuarantineRequired
+from app.classifiers.model_profile import FIXTURE_PROFILE, HUGGINGFACE_PROFILE
 
 
 def verify_identity(request: AnalysisRequestedPayload, resolved: ModerationInputResponse):

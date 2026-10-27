@@ -18,20 +18,26 @@ Report HTTP -> transaction(case, analysis PENDING, outbox) -> Kafka requests
 ## Layout
 
 - `app/main.py`: configuration, composition, signals and exit status.
-- `app/config.py`: validated configuration; no import-time environment singleton.
-- `app/contracts.py`: strict request/input/result contracts and canonical hashing.
-- `app/backend_client.py`: `ModerationInputClient`, pooled bounded HTTP retrieval.
-- `app/classifier.py`: replaceable `Classifier` protocol and `FixtureClassifier`.
-- `app/huggingface_classifier.py`: pinned local CPU inference behind that protocol.
-- `app/model_profile.py`: immutable model identity, profile and token limit.
-- `app/evaluate_classifier.py`: standalone English/Vietnamese observations.
-- `app/processing.py`: identity verification, text projection and result assembly.
-- `app/kafka_consumer.py`: polling, assignment cancellation and offset ownership.
-- `app/kafka_producer.py`: confirmed result/quarantine delivery.
-- `app/errors.py`: bounded failure categories, without private exception text.
+- `app/core/config.py`: validated configuration; no import-time environment singleton.
+- `app/contracts/moderation.py`: strict request/input/result contracts and canonical hashing.
+- `app/infrastructure/http/backend_client.py`: `ModerationInputClient`, pooled bounded HTTP retrieval.
+- `app/classifiers/base.py`: `Classifier` protocol and factory.
+- `app/classifiers/fixture.py`: deterministic `FixtureClassifier`.
+- `app/classifiers/huggingface.py`: pinned local CPU inference behind that protocol.
+- `app/classifiers/model_profile.py`: immutable model identity, profile and token limit.
+- `app/evaluation/evaluate_classifier.py`: standalone English/Vietnamese observations.
+- `app/processing/job_processor.py`: identity verification, text projection and result assembly.
+- `app/infrastructure/kafka/consumer.py`: polling, assignment cancellation and offset ownership.
+- `app/infrastructure/kafka/producer.py`: confirmed result/quarantine delivery.
+- `app/core/errors.py`: bounded failure categories, without private exception text.
 - `tests/`: unit/fault tests and shared TypeScript/Python fingerprint vectors.
 
-The incomplete duplicate `src/` package was consolidated into `app/`.
+Runtime modules are grouped into core, contracts, processing, infrastructure,
+classifiers, and evaluation packages. Unit tests live under `tests/unit/`;
+real-model/fault harnesses live under `tests/integration/`.
+`tests/live_fault_worker.py` preserves the external live-harness entry point.
+The `app.contracts` and `app.processing` packages retain their public imports for
+external harnesses; implementations live in their named submodules.
 Run `python -m app.main`, not the old `src.worker` entry point.
 
 ## Windows PowerShell setup
@@ -243,6 +249,7 @@ Unit and native HTTP checks:
 ```powershell
 # moderation-worker/
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m unittest tests.unit.test_config tests.unit.test_classifier -v
 .\.venv\Scripts\python.exe -m pip check
 # backend/
 npm.cmd test -- --runInBand moderation-analysis reports.repository.spec.ts kafka-background-start.spec.ts kafka-lifecycle.spec.ts
@@ -335,7 +342,7 @@ The Python 3.13 slim image installs the existing requirements with CPU-only Torc
 from the PyTorch CPU wheel index. It copies only application/download-script
 sources. `.env`, `.venv`, tests, host caches and model weights are excluded from
 the build context. `python -m scripts.download_model` imports the immutable model
-identity from `app.model_profile` and downloads only Transformers inference files
+identity from `app.classifiers.model_profile` and downloads only Transformers inference files
 from `Horizon-Labs/multilingual-toxicity-small` at
 `01adcc628a33848569816d4851a38544c321b92c` during the build.
 
@@ -407,12 +414,12 @@ Run standalone evaluation **before** enabling the real worker (no HTTP/Kafka/DB)
 
 ```powershell
 # moderation-worker/
-.\.venv\Scripts\python.exe -m app.evaluate_classifier
+.\.venv\Scripts\python.exe -m app.evaluation.evaluate_classifier
 # Prints every label for four English and five Vietnamese synthetic examples.
 # Optional: after the first successful download, use cached files only.
 $env:HF_HUB_OFFLINE='1'
 $env:RUN_REAL_MODEL_TESTS='1'
-.\.venv\Scripts\python.exe -m unittest tests.test_classifier.RealModelTests -v
+.\.venv\Scripts\python.exe -m unittest tests.integration.test_real_classifier.RealModelTests -v
 Remove-Item Env:RUN_REAL_MODEL_TESTS
 Remove-Item Env:HF_HUB_OFFLINE
 ```

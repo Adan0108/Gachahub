@@ -3,13 +3,13 @@ import signal
 
 from pydantic import ValidationError
 
-from .backend_client import ModerationInputClient
-from .classifier import create_classifier
-from .config import Settings
-from .errors import SecurityFailure
-from .kafka_consumer import Worker, create_consumer, log_event
-from .kafka_producer import ConfirmedPublisher, create_producer
-from .processing import JobProcessor
+from app.infrastructure.http.backend_client import ModerationInputClient
+from app.classifiers.base import create_classifier
+from app.core.config import Settings
+from app.core.errors import SecurityFailure
+from app.infrastructure.kafka.consumer import Worker, create_consumer, log_event
+from app.infrastructure.kafka.producer import ConfirmedPublisher, create_producer
+from app.processing.job_processor import JobProcessor
 
 
 def main() -> int:

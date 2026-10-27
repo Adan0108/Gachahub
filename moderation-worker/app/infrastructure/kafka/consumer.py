@@ -6,10 +6,10 @@ from threading import Event
 
 from confluent_kafka import Consumer
 
-from .config import Settings
-from .errors import Cancelled, QuarantineRequired
-from .kafka_producer import ConfirmedPublisher
-from .processing import JobProcessor
+from app.core.config import Settings
+from app.core.errors import Cancelled, QuarantineRequired
+from app.infrastructure.kafka.producer import ConfirmedPublisher
+from app.processing.job_processor import JobProcessor
 
 logger = logging.getLogger("moderation_worker")
 

@@ -1,18 +1,4 @@
-"""Test-only fault injection around real transports; never use as the worker entry point."""
-import os
-import app.main as entry
+"""Compatibility entry point for the external live harness."""
+import runpy
 
-if os.environ.get("LIVE_TEST_PUBLISH_BROKERS"):
-    original_producer = entry.create_producer
-    entry.create_producer = lambda settings: original_producer(settings.model_copy(update={"kafka_brokers": os.environ["LIVE_TEST_PUBLISH_BROKERS"]}))
-if os.environ.get("LIVE_TEST_FAIL_COMMIT"):
-    original_consumer = entry.create_consumer
-    class FailBeforeCommit:
-        def __init__(self, settings):
-            self.consumer = original_consumer(settings)
-        def __getattr__(self, name):
-            return getattr(self.consumer, name)
-        def commit(self, **_kwargs):
-            raise RuntimeError("Test fault after acknowledged publication")
-    entry.create_consumer = FailBeforeCommit
-raise SystemExit(entry.main())
+runpy.run_module("tests.integration.live_fault_worker", run_name="__main__")

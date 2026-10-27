@@ -5,9 +5,9 @@ from uuid import NAMESPACE_URL, uuid5
 
 from confluent_kafka import Producer
 
-from .config import Settings
-from .contracts import MAX_EVENT_BYTES, ModerationResultEvent
-from .errors import Cancelled, DeliveryFailure
+from app.core.config import Settings
+from app.contracts.moderation import MAX_EVENT_BYTES, ModerationResultEvent
+from app.core.errors import Cancelled, DeliveryFailure
 
 
 def create_producer(settings: Settings):

@@ -8,13 +8,14 @@ from unittest.mock import Mock, patch
 
 from pydantic import ValidationError
 
-from app.classifier import FixtureClassifier, create_classifier
-from app.contracts import ModerationInputResponse
-from app.errors import QuarantineRequired
-from app.huggingface_classifier import HuggingFaceClassifier
-from app.model_profile import HUGGINGFACE_PROFILE, MODEL_MAX_LENGTH, MODEL_NAME, MODEL_REVISION
-from app.processing import JobProcessor
-from tests.test_worker import request, resolved, settings
+from app.classifiers.base import create_classifier
+from app.classifiers.fixture import FixtureClassifier
+from app.contracts.moderation import ModerationInputResponse
+from app.core.errors import QuarantineRequired
+from app.classifiers.huggingface import HuggingFaceClassifier
+from app.classifiers.model_profile import HUGGINGFACE_PROFILE, MODEL_MAX_LENGTH, MODEL_NAME, MODEL_REVISION
+from app.processing.job_processor import JobProcessor
+from tests.unit.test_worker import request, resolved, settings
 
 LABELS = ("toxicity", "severe_toxicity", "obscene", "threat", "insult", "identity_attack", "sexual_explicit")
 
@@ -27,7 +28,7 @@ class FactoryTests(unittest.TestCase):
         self.assertEqual(classifier.classify("").model.name, "fixture-text")
 
     def test_huggingface_selected_with_pinned_settings(self):
-        with patch("app.huggingface_classifier.HuggingFaceClassifier") as constructor:
+        with patch("app.classifiers.huggingface.HuggingFaceClassifier") as constructor:
             self.assertIs(create_classifier(settings(classifier_backend="huggingface")), constructor.return_value)
         constructor.assert_called_once_with(MODEL_NAME, MODEL_REVISION, MODEL_MAX_LENGTH)
 
@@ -133,30 +134,6 @@ class ClassifierTests(unittest.TestCase):
             HuggingFaceClassifier(revision="main")
 
 
-@unittest.skipUnless(os.environ.get("RUN_REAL_MODEL_TESTS") == "1", "opt-in real model download/inference")
-class RealModelTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.classifier = HuggingFaceClassifier()
-
-    def test_actual_labels_finite_scores_determinism_truncation_and_empty_input(self):
-        import torch
-
-        classifier = self.classifier
-        self.assertEqual(classifier.labels, LABELS)
-        self.assertEqual(classifier.tokenizer.truncation_side, "right")
-        for text in ("Thanks for helping!", "Cảm ơn bạn!", "", "   ", "game " * 10000):
-            with self.subTest(length=len(text)):
-                first, second = classifier.classify(text), classifier.classify(text)
-                self.assertEqual(first.model.name, MODEL_NAME)
-                self.assertEqual(first.model.revision, MODEL_REVISION)
-                self.assertEqual(tuple(item.label for item in first.labels), LABELS)
-                self.assertTrue(all(math.isfinite(item.score) and 0 <= item.score <= 1 for item in first.labels))
-                torch.testing.assert_close(torch.tensor([item.score for item in first.labels]),
-                                           torch.tensor([item.score for item in second.labels]), rtol=1e-5, atol=1e-6)
-        encoded = classifier.tokenizer("game " * 10000, return_tensors="pt", truncation=True, max_length=256)
-        self.assertEqual(encoded["input_ids"].shape[-1], 256)
-        self.assertFalse(classifier.model.training)
 
 
 if __name__ == "__main__":

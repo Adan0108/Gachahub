@@ -1,5 +1,5 @@
-from .contracts import ClassifierOutput, ModelIdentity, ModerationLabel
-from .model_profile import MODEL_MAX_LENGTH, MODEL_NAME, MODEL_REVISION
+from app.contracts.moderation import ClassifierOutput, ModelIdentity, ModerationLabel
+from app.classifiers.model_profile import MODEL_MAX_LENGTH, MODEL_NAME, MODEL_REVISION
 
 
 class HuggingFaceClassifier:
