@@ -62,13 +62,16 @@ describe("AppShell navigation", () => {
       </AppShell>
     );
     const { rerender } = render(shell());
-    expect(screen.queryByRole("img", { name: "Unread chats waiting" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Messages/ })).not.toHaveClass("has-waiting");
 
     mocks.waiting = 3;
     rerender(shell());
-    expect(screen.getByRole("link", { name: /Messages/ })).toContainElement(
-      screen.getByRole("img", { name: "Unread chats waiting" }),
-    );
+    expect(screen.getByRole("link", { name: /Messages/ })).toHaveClass("has-waiting");
+    expect(screen.getByRole("link", { name: /Messages/ })).toHaveTextContent("unread chats waiting");
+
+    mocks.waiting = 0;
+    rerender(shell());
+    expect(screen.getByRole("link", { name: /Messages/ })).not.toHaveClass("has-waiting");
   });
 
   it("locks background scrolling and closes the menu with Escape", () => {

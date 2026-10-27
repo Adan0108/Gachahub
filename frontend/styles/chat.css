@@ -1628,14 +1628,18 @@
   position: relative;
 }
 
-.side-nav-dot {
-  align-self: center;
+/* Messages with something waiting: a red dot where the active page's dot sits, replacing it. */
+.side-nav a.has-waiting:after,
+.side-nav a.active.has-waiting:after {
+  content: "";
   flex: none;
-  width: 7px;
-  height: 7px;
+  align-self: center;
+  width: 6px;
+  height: 6px;
   margin-left: auto;
   border-radius: 50%;
-  background: #ef4444;
+  background: #ef4444 !important;
+  box-shadow: none;
 }
 
 /* A small red dot: on the corner of a button, or beside a menu item with .inline. */

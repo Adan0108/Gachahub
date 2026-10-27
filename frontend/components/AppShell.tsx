@@ -61,20 +61,19 @@ function Sidebar({
             const active = exact
               ? pathname === href
               : pathname === href || pathname.startsWith(match || href);
+            const hasWaiting = href === "/chat" && waitingChats > 0;
             return (
               <Link
                 aria-current={active ? "page" : undefined}
                 key={href}
                 href={href}
                 onClick={close}
-                className={active ? "active" : ""}
+                className={`${active ? "active" : ""} ${hasWaiting ? "has-waiting" : ""}`.trim()}
               >
                 {active && <span className="sr-only">Current page:</span>}
                 <Icon />
                 <span>{label}</span>
-                {href === "/chat" && waitingChats > 0 && (
-                  <span aria-label="Unread chats waiting" className="side-nav-dot" role="img" />
-                )}
+                {hasWaiting && <span className="sr-only">, unread chats waiting</span>}
               </Link>
             );
           })}
