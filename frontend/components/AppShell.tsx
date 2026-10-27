@@ -73,9 +73,7 @@ function Sidebar({
                 <Icon />
                 <span>{label}</span>
                 {href === "/chat" && waitingChats > 0 && (
-                  <b aria-label={`${waitingChats} waiting`} className="side-nav-badge">
-                    {waitingChats > 9 ? "9+" : waitingChats}
-                  </b>
+                  <span aria-label="Unread chats waiting" className="side-nav-dot" role="img" />
                 )}
               </Link>
             );

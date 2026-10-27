@@ -1628,25 +1628,14 @@
   position: relative;
 }
 
-.side-nav-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.side-nav-dot {
+  align-self: center;
+  flex: none;
+  width: 7px;
+  height: 7px;
   margin-left: auto;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 4px;
-  border-radius: 8px;
+  border-radius: 50%;
   background: #ef4444;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-  /* the nav's negative tracking leaves a trailing gap that pushes the digit left */
-  letter-spacing: 0;
-  /* the display font's "1" carries a wide left bearing, so the digit looks pushed right */
-  font-family: system-ui, sans-serif;
-  font-variant-numeric: tabular-nums;
 }
 
 /* A small red dot: on the corner of a button, or beside a menu item with .inline. */

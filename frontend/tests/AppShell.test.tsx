@@ -54,29 +54,20 @@ describe("AppShell navigation", () => {
     expect(screen.getByRole("link", { name: /Explore/ })).toHaveAttribute("aria-current", "page");
   });
 
-  it("shows how many chats and requests are waiting on Messages, and nothing when none are", () => {
-    const { rerender } = render(
+  it("shows a dot on Messages while chats or requests are waiting, and none when nothing is", () => {
+    const shell = (
       <AppShell>
         <p>Page content</p>
-      </AppShell>,
+      </AppShell>
     );
-    expect(screen.queryByLabelText(/waiting/)).not.toBeInTheDocument();
+    const { rerender } = render(shell);
+    expect(screen.queryByRole("img", { name: "Unread chats waiting" })).not.toBeInTheDocument();
 
     mocks.waiting = 3;
-    rerender(
-      <AppShell>
-        <p>Page content</p>
-      </AppShell>,
+    rerender(shell);
+    expect(screen.getByRole("link", { name: /Messages/ })).toContainElement(
+      screen.getByRole("img", { name: "Unread chats waiting" }),
     );
-    expect(screen.getByRole("link", { name: /Messages/ })).toContainElement(screen.getByLabelText("3 waiting"));
-
-    mocks.waiting = 12;
-    rerender(
-      <AppShell>
-        <p>Page content</p>
-      </AppShell>,
-    );
-    expect(screen.getByLabelText("12 waiting")).toHaveTextContent("9+");
   });
 
   it("locks background scrolling and closes the menu with Escape", () => {
