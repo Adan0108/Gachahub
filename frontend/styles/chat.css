@@ -1624,6 +1624,27 @@
   font-size: 15px;
 }
 
+.chat-icon-button {
+  position: relative;
+}
+
+/* A small red dot: on the corner of a button, or beside a menu item with .inline. */
+.chat-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+}
+
+.chat-dot.inline {
+  position: static;
+  margin-left: 6px;
+  flex: none;
+}
+
 .chat-icon-button:hover {
   border-color: var(--purple);
   color: var(--text);

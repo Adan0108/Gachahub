@@ -222,6 +222,7 @@ function ChatPageContent() {
   }
   const listsReady = (conversations.data || conversations.isError) && (requests.data || requests.isError);
   if (pendingOpenId && listsReady) {
+  const hasRequests = requests.data?.length > 0;
     setPendingOpenId("");
     setSelectedId(pendingOpenId);
     setView(requests.data?.some((conversation: ChatListConversation) => conversation.id === pendingOpenId) ? "requests" : "inbox");
@@ -877,12 +878,13 @@ function ChatPageContent() {
                 <button
                   aria-expanded={isMoreMenuOpen}
                   aria-haspopup="menu"
-                  aria-label="More"
+                  aria-label={hasRequests ? "More, message requests waiting" : "More"}
                   className="chat-icon-button"
                   onClick={() => setIsMoreMenuOpen((current) => !current)}
                   ref={moreMenuButtonRef}
                   title="More"
                   type="button"
+                  {hasRequests && <span aria-hidden="true" className="chat-dot" />}
                 >
                   <FiMoreHorizontal />
                 </button>
@@ -925,7 +927,8 @@ function ChatPageContent() {
                         type="button"
                       >
                         <FiShield /> Requests
-                        {requests.data?.length > 0 && <b>{requests.data.length}</b>}
+                        {hasRequests && <span aria-hidden="true" className="chat-dot inline" />}
+                        {hasRequests && <b>{requests.data.length}</b>}
                       </button>
                       <button
                         onClick={() => {

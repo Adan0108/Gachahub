@@ -68,6 +68,30 @@ describe("chat requests", () => {
     mocks.search = "";
   });
 
+  // #121
+  it("puts a red dot on the More button while a request is waiting, and says so", async () => {
+    renderChat();
+
+    const more = await screen.findByRole("button", { name: "More, message requests waiting" });
+    expect(more.querySelector(".chat-dot")).not.toBeNull();
+    fireEvent.click(more);
+    expect(screen.getByRole("menuitem", { name: /requests/i }).querySelector(".chat-dot")).not.toBeNull();
+  });
+
+  it("shows no dot when there are no requests", async () => {
+    const { api } = await import("../lib/api");
+    vi.mocked(api.getChatRequests).mockImplementation(() => Promise.resolve([]));
+    try {
+      renderChat();
+
+      const more = await screen.findByRole("button", { name: "More" });
+      await waitFor(() => expect(api.getChatRequests).toHaveBeenCalled());
+      expect(more.querySelector(".chat-dot")).toBeNull();
+    } finally {
+      vi.mocked(api.getChatRequests).mockImplementation(() => Promise.resolve([request]));
+    }
+  });
+
   it("accepts a pending request", async () => {
     renderChat();
     fireEvent.click(await screen.findByRole("button", { name: /more/i }));
