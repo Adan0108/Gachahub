@@ -212,11 +212,9 @@ function MessageBubble({
   const copyText = copyTextOf(view);
   const versions = edited?.get(message.id)?.versions;
   const receiptStatus = mine ? receiptInfo?.statusFor.get(message.id) : undefined;
-  const receiptReaders = mine
-    ? (receiptInfo?.readersAt.get(message.id) ?? [])
-        .map((id) => participantUser(conversation, id))
-        .filter((reader): reader is ChatUser => Boolean(reader))
-    : [];
+  const receiptReaders = (receiptInfo?.readersAt.get(message.id) ?? [])
+    .map((id) => participantUser(conversation, id))
+    .filter((reader): reader is ChatUser => Boolean(reader));
   const canEdit = canEditMessage({
     mine,
     isText: view?.kind === "text",
