@@ -55,7 +55,26 @@ export function useChatLists(view: ChatListView, isAuthenticated: boolean, userI
       ),
   );
 
+  // People you already chat with, most recent first: what a people picker offers before anything is typed.
+  const suggestedPeople = useMemo(
+    () =>
+      inboxList
+        .filter((conversation) => conversation.type === "DIRECT")
+        .flatMap((conversation) =>
+          conversation.participants
+            .filter((participant) => participant.userId !== userId && participant.user)
+            .map((participant) => ({
+              id: participant.userId,
+              name: participant.user?.name ?? "GachaHub member",
+              username: participant.user?.username ?? null,
+              image: participant.user?.image ?? null,
+            })),
+        ),
+    [inboxList, userId],
+  );
+
   return {
+    suggestedPeople,
     conversations,
     requests,
     archived,

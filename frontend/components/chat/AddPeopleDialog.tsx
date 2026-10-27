@@ -10,36 +10,67 @@ import { AvatarFace } from "../AvatarFace";
 import "../SharePostDialog.css";
 import "./AddPeopleDialog.css";
 
-/** A sheet to pick people for a group: search, tick them, and add them all in one go. */
+/** A sheet to pick people: search, tick them, and confirm in one go. Add people, New chat and New group all use it. */
 export function AddPeopleDialog({
+  title = "Add people",
+  searchLabel = "Search people to add",
+  submitLabel = (picked) => (picked.length > 1 ? `Add ${picked.length} people` : "Add people"),
+  pendingLabel = "Adding...",
+  maxPick,
+  slots,
+  suggested = [],
+  nameField,
   excludeIds = [],
   isPending,
   error,
+  onSelectionChange,
   onAdd,
   onClose,
 }: {
+  title?: string;
+  searchLabel?: string;
+  submitLabel?: (picked: UserSearchResult[]) => string;
+  pendingLabel?: string;
+  /** 1 makes it a single choice: picking someone else replaces the pick. */
+  maxPick?: number;
+  /** How many more people may still be added; shown as a count, and no one beyond it can be ticked. */
+  slots?: number;
+  /** Shown while the search box is empty, so the list never starts blank. */
+  suggested?: UserSearchResult[];
+  /** Asks for a name too (a new group's); the button waits for it. */
+  nameField?: { label: string; placeholder: string; maxLength: number };
   excludeIds?: string[];
   isPending?: boolean;
   error?: Error | null;
-  onAdd: (users: UserSearchResult[]) => void;
+  onSelectionChange?: (picked: UserSearchResult[]) => void;
+  onAdd: (users: UserSearchResult[], name: string) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const [name, setName] = useState("");
   const [picked, setPicked] = useState<UserSearchResult[]>([]);
   const openerRef = useRef(document.activeElement as HTMLElement | null);
   const modalRef = useModalFocusTrap(true, onClose, openerRef);
   const search = useUserSearch(query);
   const pickedIds = new Set(picked.map((user) => user.id));
   const skipped = new Set(excludeIds);
-  const options = search.items.filter((user) => !skipped.has(user.id));
+  const showingSuggestions = !query.trim() && suggested.length > 0;
+  const options = (showingSuggestions ? suggested : search.items).filter((user) => !skipped.has(user.id));
   const typedTooShort = query.trim().length > 0 && !search.isActive;
+  const single = maxPick === 1;
+  const room = slots === undefined ? undefined : Math.max(0, slots - picked.length);
+  const roleOfRow = single ? "radio" : "checkbox";
 
-  const toggle = (user: UserSearchResult) =>
-    setPicked((list) =>
-      list.some((item) => item.id === user.id)
-        ? list.filter((item) => item.id !== user.id)
-        : [...list, { id: user.id, name: user.name, image: user.image, username: user.username }],
-    );
+  const toggle = (user: UserSearchResult) => {
+    const chosen = { id: user.id, name: user.name, image: user.image, username: user.username };
+    const next = picked.some((item) => item.id === user.id)
+      ? picked.filter((item) => item.id !== user.id)
+      : single
+        ? [chosen]
+        : [...picked, chosen];
+    setPicked(next);
+    onSelectionChange?.(next);
+  };
 
   return floatingPortal(
     <div className="modal-backdrop" onClick={onClose}>
@@ -53,7 +84,7 @@ export function AddPeopleDialog({
       >
         <div className="share-post-head">
           <span aria-hidden="true" />
-          <h2 id="add-people-title">Add people</h2>
+          <h2 id="add-people-title">{title}</h2>
           <button aria-label="Close" onClick={onClose} type="button">
             <FiX />
           </button>
@@ -62,7 +93,7 @@ export function AddPeopleDialog({
         <div className="share-post-search">
           <FiSearch aria-hidden="true" />
           <input
-            aria-label="Search people to add"
+            aria-label={searchLabel}
             autoComplete="off"
             autoFocus
             onChange={(event) => setQuery(event.target.value)}
@@ -71,6 +102,19 @@ export function AddPeopleDialog({
             value={query}
           />
         </div>
+
+        {nameField && (
+          <input
+            aria-label={nameField.label}
+            className="add-people-name-input"
+            disabled={isPending}
+            maxLength={nameField.maxLength}
+            onChange={(event) => setName(event.target.value)}
+            placeholder={nameField.placeholder}
+            type="text"
+            value={name}
+          />
+        )}
 
         <div className="add-people-picked">
           {picked.length === 0 ? (
@@ -92,7 +136,14 @@ export function AddPeopleDialog({
           )}
         </div>
 
-        <div aria-label="Search results" className="add-people-results" role="group">
+        {room !== undefined && (
+          <small className="add-people-room">
+            You can add {room} more {room === 1 ? "person" : "people"}
+          </small>
+        )}
+
+        <div aria-label="Search results" className="add-people-results" role={single ? "radiogroup" : "group"}>
+          {showingSuggestions && <small className="add-people-heading">Suggested</small>}
           {options.map((user) => {
             const isPicked = pickedIds.has(user.id);
             return (
@@ -100,10 +151,10 @@ export function AddPeopleDialog({
                 aria-checked={isPicked}
                 aria-label={user.name}
                 className={`add-people-row ${isPicked ? "selected" : ""}`}
-                disabled={isPending}
+                disabled={isPending || (!isPicked && room === 0 && !single)}
                 key={user.id}
                 onClick={() => toggle(user)}
-                role="checkbox"
+                role={roleOfRow}
                 type="button"
               >
                 <span className="chat-avatar small">
@@ -119,7 +170,7 @@ export function AddPeopleDialog({
               </button>
             );
           })}
-          {!query.trim() && <p className="share-post-empty">Search by name or @handle to find people.</p>}
+          {!query.trim() && !showingSuggestions && <p className="share-post-empty">Search by name or @handle to find people.</p>}
           {typedTooShort && (
             <p className="share-post-empty">Type at least {USER_SEARCH_MIN_CHARS} characters to find people.</p>
           )}
@@ -148,11 +199,11 @@ export function AddPeopleDialog({
         )}
         <button
           className="share-post-send add-people-submit"
-          disabled={picked.length === 0 || isPending}
-          onClick={() => onAdd(picked)}
+          disabled={picked.length === 0 || isPending || Boolean(nameField && !name.trim())}
+          onClick={() => onAdd(picked, name.trim())}
           type="button"
         >
-          {isPending ? "Adding..." : picked.length > 1 ? `Add ${picked.length} people` : "Add people"}
+          {isPending ? pendingLabel : submitLabel(picked)}
         </button>
       </div>
     </div>,

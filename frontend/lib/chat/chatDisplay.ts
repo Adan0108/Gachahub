@@ -43,6 +43,9 @@ export function activeMembers(conversation: unknown): ChatParticipant[] {
   );
 }
 
+/** The most people one group can hold, you included; the backend refuses more. */
+export const MAX_GROUP_MEMBERS = 100;
+
 /** Everyone still in the group or waiting to be: people who left, were removed or declined (`DECLINED`, or `LEAVING` until it lands) are not, and can be added again. */
 export function idsInGroup(conversation: unknown): string[] {
   return (asConversation(conversation)?.participants || [])

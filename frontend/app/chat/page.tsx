@@ -58,7 +58,7 @@ import { ConversationInfoPanel } from "../../components/chat/ConversationInfoPan
 import { BlockedPeopleList } from "../../components/chat/BlockedPeopleList";
 import { SafetyNumberModal } from "../../components/chat/SafetyNumberModal";
 import { SafetyChangedBanner } from "../../components/chat/SafetyStatus";
-import { UserPicker } from "../../components/chat/UserPicker";
+import { AddPeopleDialog } from "../../components/chat/AddPeopleDialog";
 import { DevicesModal } from "../../components/chat/DevicesModal";
 import { ChatBackupModal } from "../../components/chat/ChatBackupModal";
 import { RemoveMessageDialog } from "../../components/chat/RemoveMessageDialog";
@@ -130,6 +130,7 @@ import {
   conversationDisplayName,
   conversationImage,
   conversationPeer,
+  MAX_GROUP_MEMBERS,
   myParticipant,
   otherActiveMemberIds,
   participantUser,
@@ -213,6 +214,7 @@ function ChatPageContent() {
     listQuery,
     listData,
     directChatByUserId,
+    suggestedPeople,
   } = useChatLists(view, isAuthenticated, user?.id);
   // The conversation can be an inbox chat or a request, so it is opened once both lists are in.
   const [pendingOpenId, setPendingOpenId] = useState("");
@@ -220,9 +222,9 @@ function ChatPageContent() {
     setHandledRequestId(requestedId);
     if (requestedId) setPendingOpenId(requestedId);
   }
+  const hasRequests = requests.data?.length > 0;
   const listsReady = (conversations.data || conversations.isError) && (requests.data || requests.isError);
   if (pendingOpenId && listsReady) {
-  const hasRequests = requests.data?.length > 0;
     setPendingOpenId("");
     setSelectedId(pendingOpenId);
     setView(requests.data?.some((conversation: ChatListConversation) => conversation.id === pendingOpenId) ? "requests" : "inbox");
@@ -719,19 +721,15 @@ function ChatPageContent() {
   });
 
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
-  const [groupTitle, setGroupTitle] = useState("");
-  const [groupMembers, setGroupMembers] = useState<PickerUser[]>([]);
   const createGroup = useMutation({
-    mutationFn: () =>
+    mutationFn: ({ title, members }: { title: string; members: PickerUser[] }) =>
       api.createGroupChat({
-        title: groupTitle.trim(),
-        memberUserIds: groupMembers.map((member) => member.id),
+        title,
+        memberUserIds: members.map((member) => member.id),
       }),
     onSuccess: async (result) => {
       await refreshChat();
       setIsCreatingGroup(false);
-      setGroupTitle("");
-      setGroupMembers([]);
       setView("inbox");
       setSelectedId(result.id);
     },
@@ -884,9 +882,9 @@ function ChatPageContent() {
                   ref={moreMenuButtonRef}
                   title="More"
                   type="button"
-                  {hasRequests && <span aria-hidden="true" className="chat-dot" />}
                 >
                   <FiMoreHorizontal />
+                  {hasRequests && <span aria-hidden="true" className="chat-dot" />}
                 </button>
                 {isMoreMenuOpen &&
                   floatingPortal(
@@ -1011,91 +1009,41 @@ function ChatPageContent() {
             </div>
           )}
           {isComposingNewChat && (
-            <form
-              className="chat-new-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (!newChatRecipients.length || startNewChat.isPending) return;
-                startNewChat.mutate();
+            <AddPeopleDialog
+              error={startNewChat.error as Error | null}
+              isPending={startNewChat.isPending}
+              maxPick={1}
+              onAdd={() => startNewChat.mutate()}
+              onClose={() => {
+                startNewChat.reset();
+                setNewChatRecipients([]);
+                setIsComposingNewChat(false);
               }}
-            >
-              <div className="chat-new-form-head">
-                <b>New Chat</b>
-                <button
-                  aria-label="Cancel"
-                  onClick={() => setIsComposingNewChat(false)}
-                  type="button"
-                >
-                  <FiX />
-                </button>
-              </div>
-              <label htmlFor="new-chat-recipient">Recipient</label>
-              <UserPicker
-                currentUser={user}
-                disabled={startNewChat.isPending}
-                id="new-chat-recipient"
-                onChange={setNewChatRecipients}
-                value={newChatRecipients}
-              />
-              <button disabled={!newChatRecipients.length || startNewChat.isPending} type="submit">
-                {startNewChat.isPending
-                  ? "Sending..."
-                  : newChatWillBeRequest
-                    ? "Send Message Request"
-                    : "Start Chat"}
-              </button>
-              {startNewChat.error && <small>{startNewChat.error.message}</small>}
-            </form>
+              onSelectionChange={setNewChatRecipients}
+              pendingLabel="Sending..."
+              searchLabel="Search people"
+              submitLabel={() => (newChatWillBeRequest ? "Send message request" : "Open chat")}
+              suggested={suggestedPeople}
+              title="New chat"
+            />
           )}
           {isCreatingGroup && (
-            <form
-              className="chat-new-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (!groupTitle.trim() || !groupMembers.length || createGroup.isPending) {
-                  return;
-                }
-                createGroup.mutate();
+            <AddPeopleDialog
+              error={createGroup.error as Error | null}
+              isPending={createGroup.isPending}
+              nameField={{ label: "Group name", placeholder: "Team Build Chat", maxLength: 120 }}
+              onAdd={(people, title) => createGroup.mutate({ title, members: people })}
+              onClose={() => {
+                createGroup.reset();
+                setIsCreatingGroup(false);
               }}
-            >
-              <div className="chat-new-form-head">
-                <b>New Group</b>
-                <button aria-label="Cancel" onClick={() => setIsCreatingGroup(false)} type="button">
-                  <FiX />
-                </button>
-              </div>
-              <label htmlFor="new-group-title">Group name</label>
-              <>
-                <input
-                  aria-describedby="limit-frontendappchatpagetsx-0"
-                  maxLength={120}
-                  autoFocus
-                  disabled={createGroup.isPending}
-                  id="new-group-title"
-                  onChange={(event) => setGroupTitle(event.target.value)}
-                  placeholder="Team Build Chat"
-                  type="text"
-                  value={groupTitle}
-                />
-                <FieldLimit id="limit-frontendappchatpagetsx-0" value={groupTitle} max={120} />
-              </>
-              <label htmlFor="new-group-members">Members</label>
-              <UserPicker
-                currentUser={user}
-                disabled={createGroup.isPending}
-                id="new-group-members"
-                multiple
-                onChange={setGroupMembers}
-                value={groupMembers}
-              />
-              <button
-                disabled={!groupTitle.trim() || !groupMembers.length || createGroup.isPending}
-                type="submit"
-              >
-                {createGroup.isPending ? "Creating..." : "Create Group"}
-              </button>
-              {createGroup.error && <small>{createGroup.error.message}</small>}
-            </form>
+              pendingLabel="Creating..."
+              searchLabel="Search people"
+              slots={MAX_GROUP_MEMBERS - 1}
+              submitLabel={() => "Create group"}
+              suggested={suggestedPeople}
+              title="New group"
+            />
           )}
           <div className="chat-sidebar-search">
             <FiSearch aria-hidden="true" />
