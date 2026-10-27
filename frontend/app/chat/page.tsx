@@ -535,6 +535,8 @@ function ChatPageContent() {
             }
           : null,
       );
+      if (result.recipientState === "PENDING") showActionNotice("Message request sent");
+      else if (result.selfState === "JOINING") showActionNotice("Chat opened, setting up encryption");
       setNewChatRecipients([]);
       setView("inbox");
       setSelectedId(result.conversationId);
@@ -1020,7 +1022,7 @@ function ChatPageContent() {
             <AddPeopleDialog
               error={createGroup.error as Error | null}
               isPending={createGroup.isPending}
-              nameField={{ label: "Group name", placeholder: "Team Build Chat", maxLength: 120 }}
+              nameField={{ label: "Group name", placeholder: "Write the group name", maxLength: 120 }}
               onAdd={(people, title) => createGroup.mutate({ title, members: people })}
               onClose={() => {
                 createGroup.reset();
@@ -1403,7 +1405,9 @@ function ChatPageContent() {
                         ? activeConversation?.type === "GROUP"
                           ? "Accept the invite to start chatting."
                           : "You haven't accepted this message request yet."
-                        : "You are no longer an active participant in this conversation."}
+                        : myGroupParticipant?.state === "JOINING"
+                          ? "Setting up encryption. You can send once the other person's device is online."
+                          : "You are no longer an active participant in this conversation."}
                     </small>
                   </div>
                 </div>

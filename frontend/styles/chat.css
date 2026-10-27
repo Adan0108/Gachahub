@@ -4862,6 +4862,21 @@
   gap: 6px;
 }
 
+.chat-info-name {
+  max-width: 100%;
+  justify-content: center;
+}
+
+.chat-info-name b {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  text-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .chat-info-name button,
 .chat-info-rename button,
 .chat-info-member-more {

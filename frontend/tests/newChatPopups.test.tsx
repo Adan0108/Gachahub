@@ -79,6 +79,7 @@ describe("New chat and New group popups", () => {
     renderChat();
     await openCompose("New Chat");
 
+    mocks.createDirectMessage.mockResolvedValue({ conversationId: "friend", recipientState: "PENDING" });
     fireEvent.click(await screen.findByRole("radio", { name: "Friend Fox" }));
 
     expect(await screen.findByRole("button", { name: "Send message request" })).toBeEnabled();
@@ -86,6 +87,7 @@ describe("New chat and New group popups", () => {
     await waitFor(() =>
       expect(mocks.createDirectMessage).toHaveBeenCalledWith(expect.objectContaining({ recipientUserId: "friend" })),
     );
+    expect(await screen.findByText("Message request sent")).toBeInTheDocument();
   });
 
   it("says Open chat for someone you follow each other", async () => {
@@ -109,15 +111,14 @@ describe("New chat and New group popups", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("This person is not accepting new messages");
   });
 
-  it("opens New group as a popup that needs a name and shows how many more can join", async () => {
+  it("opens New group as a popup that needs a name and only shows how many more can join when few are left", async () => {
     renderChat();
     await openCompose("New Group");
 
     expect(await screen.findByRole("dialog", { name: "New group" })).toBeInTheDocument();
-    expect(screen.getByText("You can add 99 more people")).toBeInTheDocument();
+    expect(screen.queryByText(/people left/)).not.toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "Friend Fox" }));
-    expect(screen.getByText("You can add 98 more people")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create group" })).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText("Group name"), { target: { value: "Squad" } });

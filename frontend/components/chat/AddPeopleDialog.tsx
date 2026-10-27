@@ -10,6 +10,9 @@ import { AvatarFace } from "../AvatarFace";
 import "../SharePostDialog.css";
 import "./AddPeopleDialog.css";
 
+/** The count of people still addable only shows once it is this low. */
+const ROOM_WARNING_AT = 10;
+
 /** A sheet to pick people: search, tick them, and confirm in one go. Add people, New chat and New group all use it. */
 export function AddPeopleDialog({
   title = "Add people",
@@ -136,9 +139,9 @@ export function AddPeopleDialog({
           )}
         </div>
 
-        {room !== undefined && (
+        {room !== undefined && room <= ROOM_WARNING_AT && (
           <small className="add-people-room">
-            You can add {room} more {room === 1 ? "person" : "people"}
+            {room} {room === 1 ? "person" : "people"} left
           </small>
         )}
 

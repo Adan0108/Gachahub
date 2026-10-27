@@ -16,13 +16,13 @@ describe("AddPeopleDialog room", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Person a" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Person b" }));
 
-    expect(screen.getByText("You can add 0 more people")).toBeInTheDocument();
+    expect(screen.getByText("0 people left")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Person c" })).toBeDisabled();
     expect(screen.getByRole("checkbox", { name: "Person a" })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Person a" }));
 
-    expect(screen.getByText("You can add 1 more person")).toBeInTheDocument();
+    expect(screen.getByText("1 person left")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Person c" })).toBeEnabled();
   });
 });
