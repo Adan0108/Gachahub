@@ -6,7 +6,7 @@ import { COMMUNITY_SEND_LIMIT } from "../lib/community/communityChat";
 
 /** The window and cap a backend rate limiter is configured with, read from its source. */
 function backendLimiter(file: string) {
-  // Tests run from frontend/, locally and in CI.
+  // Tests run from frontend/.
   const source = readFileSync(resolve(process.cwd(), "../backend/src", file), "utf8");
   const number = (name: string) => {
     const match = new RegExp(`${name}:\\s*([\\d_]+)`).exec(source);
