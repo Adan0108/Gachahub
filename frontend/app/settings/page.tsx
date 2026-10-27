@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { FiBell, FiLock, FiSettings, FiSliders } from "react-icons/fi";
 import { QueryNotice } from "../../components/QueryNotice";
 import { LinkPreviewsSetting } from "../../components/settings/LinkPreviewsSetting";
+import { MessageRequestSetting } from "../../components/settings/MessageRequestSetting";
 import { ReadReceiptsSetting } from "../../components/settings/ReadReceiptsSetting";
 import { useToast } from "../../hooks/useToast";
 import { api } from "../../lib/api";
@@ -152,6 +153,7 @@ export default function SettingsPage() {
             </div>
             <ReadReceiptsSetting />
             <LinkPreviewsSetting />
+            <MessageRequestSetting />
             <button className="settings-placeholder" onClick={notAvailable} type="button">
               <span>
                 <b>Blocked accounts</b>

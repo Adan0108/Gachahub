@@ -311,9 +311,7 @@ export class ChatAccessService {
     target: { id: string; messageRequestSetting: MessageRequestSetting },
   ) {
     if (target.messageRequestSetting === 'NO_ONE') {
-      throw new ForbiddenException(
-        `User ${target.id} is not accepting new messages`,
-      );
+      throw new ForbiddenException('This person is not accepting new messages');
     }
 
     const [actorFollowsTargetResult, targetFollowsActorResult] =
@@ -326,7 +324,7 @@ export class ChatAccessService {
 
     if (target.messageRequestSetting === 'FOLLOWERS' && !targetFollowsActor) {
       throw new ForbiddenException(
-        `User ${target.id} only accepts messages from people they follow`,
+        'This person only accepts messages from people they follow',
       );
     }
 

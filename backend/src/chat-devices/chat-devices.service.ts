@@ -495,9 +495,7 @@ export class ChatDevicesService {
     }
 
     if (target.messageRequestSetting === 'NO_ONE') {
-      throw new ForbiddenException(
-        `User ${targetUserId} is not accepting new messages`,
-      );
+      throw new ForbiddenException('This person is not accepting new messages');
     }
 
     return target;
@@ -525,7 +523,7 @@ export class ChatDevicesService {
       );
       if (!targetFollowsRequester.following) {
         throw new ForbiddenException(
-          `User ${targetUserId} only accepts messages from people they follow`,
+          'This person only accepts messages from people they follow',
         );
       }
     }
