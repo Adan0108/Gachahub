@@ -30,7 +30,6 @@ import {
   EpochConflictError,
   GroupCreationLostError,
   MembershipMismatchError,
-  NoEncryptableMembersError,
 } from '../contract/errors';
 import { onMlsSecretsWiped } from '../storage/mlsEncryptedStore';
 import { parseDeclaredMembership } from './declaredMembership';
@@ -165,11 +164,7 @@ export class SyncEngine {
     );
     added.push(...myOtherDevices.map((claimed) => toKeyPackageOffer(this.ownUserId, claimed)));
 
-    // Without a Commit this device's leaf is never recorded server-side, so nothing could ever bootstrap the group
-    if (added.length === 0) {
-      throw new NoEncryptableMembersError(conversationId);
-    }
-
+    // Still committed with nobody to add: that Commit is what records this device's leaf server-side, so the group can start.
     return this.submitMembershipChange(conversationId, { added, removed: [] }, { groupIsNew: true });
   }
 

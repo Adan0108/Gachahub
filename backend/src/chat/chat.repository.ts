@@ -61,6 +61,11 @@ export type ChatMessageMediaInput = {
 };
 
 /** Chat database queries only; business decisions, permissions and delivery belong in ChatService. */
+type InboxStates = ChatParticipantState | readonly ChatParticipantState[];
+
+const inboxStateFilter = (state: InboxStates) =>
+  typeof state === 'string' ? state : { in: [...state] };
+
 @Injectable()
 export class ChatRepository {
   constructor(
@@ -554,15 +559,19 @@ export class ChatRepository {
   }
 
   /** Finds every convo for one inbox state, including the latest encrypted message. */
-  findInboxConversations(userId: string, state: ChatParticipantState) {
-    return this.inboxQuery(userId, { userId, state, deletedAt: null });
+  findInboxConversations(userId: string, state: InboxStates) {
+    return this.inboxQuery(userId, {
+      userId,
+      state: inboxStateFilter(state),
+      deletedAt: null,
+    });
   }
 
   /** This user's pinned convos for one inbox state: few, and always all on the first page. */
-  findPinnedInboxConversations(userId: string, state: ChatParticipantState) {
+  findPinnedInboxConversations(userId: string, state: InboxStates) {
     return this.inboxQuery(userId, {
       userId,
-      state,
+      state: inboxStateFilter(state),
       deletedAt: null,
       pinnedAt: { not: null },
     });
@@ -571,12 +580,12 @@ export class ChatRepository {
   /** One page of this user's unpinned convos, newest first by (updatedAt, id), after `before` when given. */
   findUnpinnedInboxPage(
     userId: string,
-    state: ChatParticipantState,
+    state: InboxStates,
     page: { limit: number; before?: { updatedAt: Date; id: string } },
   ) {
     return this.inboxQuery(
       userId,
-      { userId, state, deletedAt: null, pinnedAt: null },
+      { userId, state: inboxStateFilter(state), deletedAt: null, pinnedAt: null },
       page,
     );
   }

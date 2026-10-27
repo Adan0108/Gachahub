@@ -20,6 +20,7 @@ describe('ChatDevicesService', () => {
   const repository = {
     findById: jest.fn(),
     findUserMessagingProfile: jest.fn(),
+    findDirectPeerState: jest.fn(),
     createDeviceWithinCap: jest.fn(),
     addKeyPackages: jest.fn(),
     findActiveDevicesForUser: jest.fn(),
@@ -270,6 +271,7 @@ describe('ChatDevicesService', () => {
 
     beforeEach(() => {
       repository.findUserMessagingProfile.mockResolvedValue(activeTarget);
+      repository.findDirectPeerState.mockResolvedValue(undefined);
       repository.findActiveDevicesForUser.mockResolvedValue([
         device('device-2'),
       ]);
@@ -278,6 +280,18 @@ describe('ChatDevicesService', () => {
       });
       repository.findLastResortKeyPackage.mockResolvedValue(null);
     });
+
+    it.each(['DECLINED', 'BLOCKED'])(
+      'offers nothing, without an error, when the target is %s in your direct chat',
+      async (state) => {
+        repository.findDirectPeerState.mockResolvedValue(state);
+
+        await expect(
+          service.claimKeyPackagesForUser('user-1', 'user-2'),
+        ).resolves.toEqual([]);
+        expect(repository.claimSingleUseKeyPackage).not.toHaveBeenCalled();
+      },
+    );
 
     it('enforces the fetch rate limit', async () => {
       fetchRateLimiter.assertNotRateLimited.mockImplementationOnce(() => {

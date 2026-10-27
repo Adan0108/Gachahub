@@ -405,6 +405,7 @@ describe('ChatMessagingService', () => {
             conversationId: 'conversation-1',
             message: null,
             recipientState: 'PENDING',
+            selfState: 'JOINING',
           });
 
           expect(chatMembershipService.reopenDirect).toHaveBeenCalledWith(
@@ -441,13 +442,18 @@ describe('ChatMessagingService', () => {
           });
         });
 
-        it('refuses a new request until the wait is over, saying how long is left', async () => {
+        it('looks like a normal request during the wait, but sends them nothing', async () => {
           repository.findDirectPair.mockResolvedValue(declinedAgo(2 * DAY));
 
-          await expect(start()).rejects.toThrow('You can ask again in 5 days');
+          await expect(start()).resolves.toEqual({
+            conversationId: 'conversation-1',
+            message: null,
+            recipientState: 'PENDING',
+          });
           expect(
             chatMembershipService.requestDirectAgain,
           ).not.toHaveBeenCalled();
+          expect(chatDelivery.publishConversationUpdated).not.toHaveBeenCalled();
         });
 
         it('sends them a new request once the wait is over', async () => {
@@ -464,6 +470,10 @@ describe('ChatMessagingService', () => {
             'conversation-1',
             'user-2',
           );
+          expect(chatDelivery.publishConversationUpdated).toHaveBeenCalledWith({
+            conversationId: 'conversation-1',
+            recipientUserIds: ['user-2'],
+          });
         });
 
         it('still respects who they accept messages from', async () => {
@@ -1411,24 +1421,34 @@ describe('ChatMessagingService', () => {
       expect(repository.createMessage).not.toHaveBeenCalled();
     });
 
-    it('rejects when the direct recipient blocked or declined the conversation', async () => {
-      repository.findParticipant.mockResolvedValue({
-        userId: 'user-1',
-        state: 'ACTIVE',
-      });
-      repository.findConversationWithParticipants.mockResolvedValue(
-        directConversation([
-          { userId: 'user-1', state: 'ACTIVE' },
-          { userId: 'user-2', state: 'DECLINED' },
-        ]),
-      );
+    it.each(['DECLINED', 'BLOCKED'])(
+      'keeps the message but delivers nothing when the direct recipient is %s, and does not tell the sender',
+      async (state) => {
+        repository.findParticipant.mockResolvedValue({
+          userId: 'user-1',
+          state: 'ACTIVE',
+        });
+        repository.findConversationWithParticipants.mockResolvedValue(
+          directConversation([
+            { userId: 'user-1', state: 'ACTIVE' },
+            { userId: 'user-2', state },
+          ]),
+        );
+        repository.createMessage.mockResolvedValue({ id: 'message-1' });
 
-      await expect(
-        service.sendMessage('user-1', 'session-1', 'conversation-1', {
+        await service.sendMessage('user-1', 'session-1', 'conversation-1', {
           message: { clientMessageId: 'client-1' },
-        } as any),
-      ).rejects.toThrow(ForbiddenException);
-    });
+        } as any);
+
+        expect(repository.createMessage).toHaveBeenCalledWith(
+          'fake-tx',
+          expect.objectContaining({ participantUserIds: ['user-1'] }),
+        );
+        expect(chatDelivery.publishMessageCreated).not.toHaveBeenCalledWith(
+          expect.objectContaining({ recipientUserIds: ['user-2'] }),
+        );
+      },
+    );
 
     it('rejects an invalid reply target', async () => {
       repository.findParticipant.mockResolvedValue({

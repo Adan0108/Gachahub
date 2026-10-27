@@ -16,6 +16,9 @@ import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import type { ChatDeliveryPort } from './ports/chat-delivery.port';
 
+/** Someone still being added to the group (JOINING) already sees the chat, though they cannot send yet. */
+const INBOX_STATES = ['ACTIVE', 'JOINING'] as const;
+
 /**
  * Inbox listing, per-conversation settings, and read/delivery receipts.
  * Pulled out of the former monolithic ChatService as its own concern -
@@ -69,7 +72,7 @@ export class ChatInboxService {
     // QueryChatConversationsDto guarantees a whole cursor, and a limit with it.
     const { limit, beforeUpdatedAt, beforeId } = page;
     if (!limit) {
-      return this.chatRepository.findInboxConversations(userId, 'ACTIVE');
+      return this.chatRepository.findInboxConversations(userId, INBOX_STATES);
     }
 
     const before =
@@ -79,8 +82,8 @@ export class ChatInboxService {
     const [pinned, unpinned] = await Promise.all([
       before
         ? []
-        : this.chatRepository.findPinnedInboxConversations(userId, 'ACTIVE'),
-      this.chatRepository.findUnpinnedInboxPage(userId, 'ACTIVE', {
+        : this.chatRepository.findPinnedInboxConversations(userId, INBOX_STATES),
+      this.chatRepository.findUnpinnedInboxPage(userId, INBOX_STATES, {
         limit,
         before,
       }),

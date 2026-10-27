@@ -146,16 +146,17 @@ export class ChatMessagingService {
         // A declined row is not written to again, so its last update is when they declined.
         const waitMs =
           theirs.updatedAt.getTime() + DECLINED_REQUEST_RETRY_MS - Date.now();
-        if (waitMs > 0) {
-          const days = Math.ceil(waitMs / (24 * 60 * 60_000));
-          throw new ForbiddenException(
-            `They declined your message request. You can ask again in ${days} ${days === 1 ? 'day' : 'days'}.`,
+        // Inside the wait it looks like a normal request to the sender, and nothing reaches them.
+        if (waitMs <= 0) {
+          await this.chatMembershipService.requestDirectAgain(
+            existingPair.conversation.id,
+            dto.recipientUserId,
           );
+          await this.chatDelivery.publishConversationUpdated({
+            conversationId: existingPair.conversation.id,
+            recipientUserIds: [dto.recipientUserId],
+          });
         }
-        await this.chatMembershipService.requestDirectAgain(
-          existingPair.conversation.id,
-          dto.recipientUserId,
-        );
         return {
           conversationId: existingPair.conversation.id,
           message: null,
@@ -182,6 +183,8 @@ export class ChatMessagingService {
           conversationId: existingPair.conversation.id,
           message: null,
           recipientState: theirs?.state ?? null,
+          // Shown to them in the inbox meanwhile; sending waits until another member's device adds theirs.
+          selfState: 'JOINING' as const,
         };
       }
     }

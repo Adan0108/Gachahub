@@ -648,14 +648,14 @@ describe('ChatInboxService', () => {
       ]);
     });
 
-    it('fetches only ACTIVE inbox conversations', async () => {
+    it('fetches the ACTIVE and JOINING inbox conversations', async () => {
       repository.findInboxConversations.mockResolvedValue([]);
 
       await service.listConversations('user-1');
 
       expect(repository.findInboxConversations).toHaveBeenCalledWith(
         'user-1',
-        'ACTIVE',
+        ['ACTIVE', 'JOINING'],
       );
     });
 
@@ -679,11 +679,11 @@ describe('ChatInboxService', () => {
 
         expect(repository.findPinnedInboxConversations).toHaveBeenCalledWith(
           'user-1',
-          'ACTIVE',
+          ['ACTIVE', 'JOINING'],
         );
         expect(repository.findUnpinnedInboxPage).toHaveBeenCalledWith(
           'user-1',
-          'ACTIVE',
+          ['ACTIVE', 'JOINING'],
           { limit: 50, before: undefined },
         );
         expect(result.map((conversation) => conversation.id)).toEqual([
@@ -704,7 +704,7 @@ describe('ChatInboxService', () => {
         expect(repository.findPinnedInboxConversations).not.toHaveBeenCalled();
         expect(repository.findUnpinnedInboxPage).toHaveBeenCalledWith(
           'user-1',
-          'ACTIVE',
+          ['ACTIVE', 'JOINING'],
           {
             limit: 50,
             before: {
@@ -1097,7 +1097,7 @@ describe('ChatInboxService', () => {
         expect(readOf(result, 'user-2')?.readAt).toBeNull();
       });
 
-      it('shows only your own receipt on messages from other people', async () => {
+      it('shows your own receipt and where each other reader is up to on messages from other people', async () => {
         repository.findMessages.mockResolvedValue([
           {
             id: 'message-1',
@@ -1117,7 +1117,11 @@ describe('ChatInboxService', () => {
           {} as any,
         );
 
-        expect(receiptsOf(result).map((r) => r.userId)).toEqual(['user-1']);
+        expect(receiptsOf(result).map((r) => r.userId)).toEqual([
+          'user-1',
+          'user-2',
+          'user-3',
+        ]);
       });
     });
 

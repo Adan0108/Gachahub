@@ -344,6 +344,15 @@ export class ChatDevicesService {
 
     if (!isOwnDevices && !conversationId) {
       await this.assertMayFetchKeyPackage(requesterId, targetUserId);
+
+      // Someone who declined or blocked the chat gets nothing offered, and the sender is not told why.
+      const peerState = await this.chatDevicesRepository.findDirectPeerState(
+        requesterId,
+        targetUserId,
+      );
+      if (peerState === 'DECLINED' || peerState === 'BLOCKED') {
+        return [];
+      }
     }
 
     const devices = (

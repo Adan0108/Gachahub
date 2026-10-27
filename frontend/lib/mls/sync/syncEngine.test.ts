@@ -9,7 +9,6 @@ import {
   EpochConflictError,
   GroupStateUnavailableError,
   MembershipMismatchError,
-  NoEncryptableMembersError,
   StaleWelcomeError,
 } from '../contract/errors';
 import { UnreadableRecordError } from '../storage/mlsEncryptedStore';
@@ -320,16 +319,16 @@ describe('SyncEngine', () => {
       );
     });
 
-    it('refuses to seed a group with nobody to add, instead of silently leaving it at epoch 0', async () => {
+    it('still sends the first Commit when nobody can be added, so the group starts with this device alone', async () => {
       const { api } = await import('../../api');
       const alice = await setUpDevice('user-alice');
       await alice.engine.createGroup('conv-1');
       await mockClaims({});
 
-      await expect(alice.engine.seedNewGroupWithMembers('conv-1', [])).rejects.toThrow(
-        NoEncryptableMembersError,
-      );
-      expect(api.submitMlsHandshake).not.toHaveBeenCalled();
+      await alice.engine.seedNewGroupWithMembers('conv-1', ['user-bob']);
+
+      expect(api.submitMlsHandshake).toHaveBeenCalledTimes(1);
+      expect(await alice.engine.getCurrentEpoch('conv-1')).toBe(1);
     });
 
     it('seeds a group for a single member the same way seedNewGroup does', async () => {
