@@ -318,6 +318,7 @@ export const queries = {
     queryFn: api.getArchivedChatConversations,
     retry: 1,
     staleTime: 10000,
+    refetchInterval: 15000,
   }),
   chatRequests: () => ({
     queryKey: queryKeys.chatRequests,
