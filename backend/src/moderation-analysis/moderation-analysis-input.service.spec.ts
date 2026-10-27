@@ -63,6 +63,15 @@ describe('immutable moderation input API service', () => {
       status: 404,
     });
   });
+  it('serves the new model profile while retaining the original fixture profile', async () => {
+    findUnique.mockResolvedValue({
+      ...fixture(),
+      classifierProfile: 'toxicity-mmbert-small-v1',
+    });
+    await expect(service.getInput('job')).resolves.toMatchObject({
+      classifierProfile: 'toxicity-mmbert-small-v1',
+    });
+  });
   it.each([
     { inputSnapshot: {} },
     { inputSchemaVersion: 2 },

@@ -26,6 +26,15 @@ must follow this ordering and JSON escaping rather than hashing arbitrary JSON.
 and preprocessing bundle, not a configured model. Never repoint it to different
 models; introduce a new profile. There is no manual reanalysis path yet.
 
+Stage 2E preserves that profile for FixtureClassifier and adds the immutable
+`toxicity-mmbert-small-v1` bundle. `MODERATION_CLASSIFIER_PROFILE` selects which
+profile the scheduler assigns to new jobs (default `moderation-text-v1`, validated
+at startup). The immutable-input API accepts both. The selected Python worker
+backend must match; finish pending fixture requests before switching because
+multi-profile routing is deferred. No existing jobs are edited or reanalyzed.
+The pinned model name/revision and actual scores use the existing stored output
+fields. See the [Stage 2E worker documentation](../../../moderation-worker/README.md#stage-2e-local-text-model).
+
 The existing event envelope has version 1, aggregateId = caseId, and payload:
 `analysisJobId,caseId,targetType,targetId,generation,snapshotHash,inputSchemaVersion,classifierProfile`.
 The existing producer routes it to `gachahub.moderation.requests`, keyed by caseId.

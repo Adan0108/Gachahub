@@ -1,16 +1,17 @@
-# Stage 2C moderation worker
+# Stage 2C / 2E moderation worker
 
 NestJS owns PostgreSQL and all moderation state. The stateless Python process
 reads requests from Kafka, fetches the stored text snapshot through authenticated
-HTTP, verifies identity and its SHA-256 hash, runs a deterministic fixture, then
+HTTP, verifies identity and its SHA-256 hash, runs the selected local classifier, then
 publishes a Stage 2B result. Only NestJS writes the database. No database driver,
-raw TCP application protocol, model download, policy action or content deletion
-is included. Old generations complete as historical analyses; they do not replace
+raw TCP application protocol, policy action or content deletion is included.
+Stage 2E can download a pinned Hugging Face model to the normal local cache.
+Old generations complete as historical analyses; they do not replace
 newer generations or change the case.
 
 ```text
 Report HTTP -> transaction(case, analysis PENDING, outbox) -> Kafka requests
- -> Python -> authenticated immutable input HTTP -> hash check -> fixture
+ -> Python -> authenticated immutable input HTTP -> hash check -> classifier
  -> confirmed Kafka result -> Stage 2B dedupe + conditional terminal DB update
 ```
 
@@ -21,6 +22,9 @@ Report HTTP -> transaction(case, analysis PENDING, outbox) -> Kafka requests
 - `app/contracts.py`: strict request/input/result contracts and canonical hashing.
 - `app/backend_client.py`: `ModerationInputClient`, pooled bounded HTTP retrieval.
 - `app/classifier.py`: replaceable `Classifier` protocol and `FixtureClassifier`.
+- `app/huggingface_classifier.py`: pinned local CPU inference behind that protocol.
+- `app/model_profile.py`: immutable model identity, profile and token limit.
+- `app/evaluate_classifier.py`: standalone English/Vietnamese observations.
 - `app/processing.py`: identity verification, text projection and result assembly.
 - `app/kafka_consumer.py`: polling, assignment cancellation and offset ownership.
 - `app/kafka_producer.py`: confirmed result/quarantine delivery.
@@ -216,7 +220,9 @@ network isolation. Terminate HTTPS on trusted ingress (or use an equivalent encr
 service network); this worker intentionally requires an HTTPS URL outside loopback.
 Do not forward bearer headers or private response bodies into access logs. Disable
 caching, including ingress overrides. Restrict worker egress to backend HTTPS,
-Kafka and required DNS; it needs no PostgreSQL, storage or internet model access.
+Kafka and required DNS. The Hugging Face backend additionally needs Hub/download
+access to populate its local cache on first startup; a prewarmed cache permits
+`HF_HUB_OFFLINE=1`. It needs no PostgreSQL access.
 Use a non-admin runtime identity and secret/certificate mounts with read-only
 permissions. Kafka ACLs: read requests + own group; write results/quarantine;
 NestJS writes requests and reads results. Backend Kafka TLS/SASL wiring and actual
@@ -276,15 +282,95 @@ processes, deletes only test topics, removes inactive test groups where possible
 and drops the generated schema. A group still active after forced termination
 expires by broker group retention.
 
-## Limitations and Stage 2E
+## Stage 2E local text model
 
-The fixture reacts only to `fixture-toxic` / `fixture-violence`, has no ML accuracy
-claim, and is not a production policy classifier. Stage 2E should implement the
-same `Classifier.classify(text) -> ClassifierOutput` boundary with bounded runtime
-and model lifecycle management. Introduce a new immutable classifier profile and
-supported profile routing when changing preprocessing/model semantics; do not
-repoint `moderation-text-v1`. Cancellation is cooperative around inference: the
-current fixture is short-lived; future noninterruptible inference needs a bounded
-execution/cancellation strategy before rollout. No Torch/Transformers/models were
-installed here. No policy automation, automatic removal, analysis lease, automated
-quarantine replay or reconciliation service is implemented.
+The default remains `CLASSIFIER_BACKEND=fixture` (`moderation-text-v1`). The fixture
+still reacts only to `fixture-toxic` / `fixture-violence`; it has no ML accuracy claim.
+For real inference select `CLASSIFIER_BACKEND=huggingface` and set the backend's
+`MODERATION_CLASSIFIER_PROFILE=toxicity-mmbert-small-v1`, then restart both processes
+before creating a new report. Existing `.env` files and secrets are not edited by
+this change. The backend input API supports both historical profiles, while a worker
+accepts only its selected profile. Finish pending fixture jobs before switching;
+mixed profile routing is outside this step. A mismatched request follows the existing
+`UNSUPPORTED_INPUT` quarantine behavior. Existing completed analyses remain immutable;
+there is no manual reanalysis or migration.
+
+| Worker setting | Default / immutable value |
+|---|---|
+| `CLASSIFIER_BACKEND` | `fixture`; choose `huggingface` for Stage 2E |
+| `CLASSIFIER_MODEL_NAME` | `Horizon-Labs/multilingual-toxicity-small` |
+| `CLASSIFIER_MODEL_REVISION` | `01adcc628a33848569816d4851a38544c321b92c` |
+| `CLASSIFIER_MAX_LENGTH` | `256` tokens including special tokens |
+
+Model name, revision and length are validated against the immutable bundle, rather
+than permitting a mutable branch such as `main` or silently changing preprocessing.
+Changing these semantics requires a new profile. This preserves the original
+repository contract: `moderation-text-v1` must never be repointed to another model.
+No schema migration or event/result contract change is needed. Stored results already
+retain `output.model.name`, `output.model.revision` and all `output.labels` scores.
+
+The [pinned model card](https://huggingface.co/Horizon-Labs/multilingual-toxicity-small/blob/01adcc628a33848569816d4851a38544c321b92c/README.md)
+declares Apache-2.0 and 256-token toxicity training. Its config/tokenizer capacity
+is 8192; the classifier deliberately uses the trained 256-token right prefix.
+Labels are read in index order from `config.id2label`: `toxicity`, `severe_toxicity`,
+`obscene`, `threat`, `insult`, `identity_attack`, `sexual_explicit`. Each receives an
+independent sigmoid probability. There are no thresholds or decisions. Empty and
+whitespace strings are tokenized normally, matching the representable-empty contract.
+For posts, the existing title + two newlines + content projection precedes tokenization.
+The immutable hash covers the full canonical snapshot, even when inference truncates it.
+
+The model loads once before Kafka clients are created, using AutoTokenizer and
+AutoModelForSequenceClassification, safetensors, CPU eager attention, `eval()` and
+`torch.inference_mode()`. Remote repository code is disabled. Loading failure stops
+startup; there is no fallback. Runtime inference failures keep the existing
+`CLASSIFIER_ERROR` result path. Fixture imports do not import Torch/Transformers.
+
+First real startup downloads approximately 563 MB of weights plus a 34 MB tokenizer
+to the normal Hugging Face cache (`~/.cache/huggingface/hub`, or the existing `HF_HOME`
+configuration). Later runs reuse it. No model files belong in this repository.
+Windows without symlink support still caches files, potentially using more disk.
+
+Run standalone evaluation **before** enabling the real worker (no HTTP/Kafka/DB):
+
+```powershell
+# moderation-worker/
+.\.venv\Scripts\python.exe -m app.evaluate_classifier
+# Prints every label for four English and five Vietnamese synthetic examples.
+# Optional: after the first successful download, use cached files only.
+$env:HF_HUB_OFFLINE='1'
+$env:RUN_REAL_MODEL_TESTS='1'
+.\.venv\Scripts\python.exe -m unittest tests.test_classifier.RealModelTests -v
+Remove-Item Env:RUN_REAL_MODEL_TESTS
+Remove-Item Env:HF_HUB_OFFLINE
+```
+
+Ordinary `unittest discover` tests stub inference libraries and never download
+weights. The opt-in test loads one model and checks actual labels, finite bounded
+scores, repeated inference tolerance, 256-token truncation and empty/whitespace input.
+No model quality thresholds are asserted.
+
+The existing live harness also has a scoped real-model mode. After standalone
+evaluation has populated the cache, provide running local Kafka and an explicitly
+disposable loopback PostgreSQL URL, then run from `backend/`:
+
+```powershell
+$env:RUN_MODERATION_REAL_MODEL_LIVE='1'
+# Set MODERATION_TEST_DATABASE_URL to your disposable local database; never use a shared DB.
+$env:DATABASE_URL=$env:MODERATION_TEST_DATABASE_URL
+node --experimental-vm-modules node_modules/jest/bin/jest.js --config test/jest-e2e.json --runInBand moderation-worker-live.e2e-spec.ts
+Remove-Item Env:RUN_MODERATION_REAL_MODEL_LIVE
+Remove-Item Env:DATABASE_URL
+```
+
+This selects one real-model test instead of the fixture fault scenario. It reuses
+the real report/outbox/Kafka/authenticated HTTP/Stage 2B harness, requires SUCCEEDED
+and a committed offset, asserts the stored model/revision and seven bounded scores,
+and compares the entire case and post before/after. Its random schema/topics/groups
+are cleaned by the existing harness. See [Stage 2E review evidence](STAGE2E.md) for
+measured outputs and checks, including whether the live test ran.
+
+Cancellation remains cooperative around noninterruptible inference; the 256-token
+bound limits input size but is not a wall-clock deadline. Process isolation/hard
+inference deadlines are deferred before production rollout. No policy automation,
+automatic removal, analysis lease, automated quarantine replay or reconciliation
+service is implemented.

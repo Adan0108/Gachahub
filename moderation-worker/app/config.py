@@ -6,10 +6,16 @@ from urllib.parse import urlsplit
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
+from .model_profile import FIXTURE_PROFILE, HUGGINGFACE_PROFILE, MODEL_MAX_LENGTH, MODEL_NAME, MODEL_REVISION
+
 
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
     environment: Literal["local", "production"] = "production"
+    classifier_backend: Literal["fixture", "huggingface"] = "fixture"
+    classifier_model_name: str = MODEL_NAME
+    classifier_model_revision: str = MODEL_REVISION
+    classifier_max_length: int = MODEL_MAX_LENGTH
     backend_base_url: str
     moderation_worker_token: SecretStr
     kafka_brokers: str = Field(min_length=1)
@@ -32,6 +38,9 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def validate_security(self):
+        if (self.classifier_model_name, self.classifier_model_revision, self.classifier_max_length) != (
+                MODEL_NAME, MODEL_REVISION, MODEL_MAX_LENGTH):
+            raise ValueError("Classifier settings must match the immutable model profile")
         url = urlsplit(self.backend_base_url)
         if (url.scheme not in {"http", "https"} or not url.hostname or url.username or
                 url.password or url.query or url.fragment or url.path not in {"", "/"}):
@@ -49,6 +58,10 @@ class Settings(BaseModel):
         if len(set(topics)) != 3 or any(not re.fullmatch(r"[A-Za-z0-9._-]{1,249}", topic) or topic in {".", ".."} for topic in topics):
             raise ValueError("Kafka topics must be distinct valid topic names")
         return self
+
+    @property
+    def classifier_profile(self) -> str:
+        return HUGGINGFACE_PROFILE if self.classifier_backend == "huggingface" else FIXTURE_PROFILE
 
     @classmethod
     def from_env(cls) -> "Settings":

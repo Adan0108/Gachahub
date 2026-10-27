@@ -7,10 +7,11 @@ from .classifier import Classifier
 from .contracts import (AnalysisRequestedPayload, ClassifierOutput, FailedResult, ModerationInputResponse,
                         ModerationResultEvent, PostInput, SuccessResult, parse_request, snapshot_hash)
 from .errors import Cancelled, QuarantineRequired
+from .model_profile import FIXTURE_PROFILE, HUGGINGFACE_PROFILE
 
 
 def verify_identity(request: AnalysisRequestedPayload, resolved: ModerationInputResponse):
-    if request.inputSchemaVersion != 1 or request.classifierProfile != "moderation-text-v1":
+    if request.inputSchemaVersion != 1 or request.classifierProfile not in {FIXTURE_PROFILE, HUGGINGFACE_PROFILE}:
         raise QuarantineRequired("UNSUPPORTED_INPUT")
     for field in AnalysisRequestedPayload.model_fields:
         if getattr(request, field) != getattr(resolved, field):
@@ -20,9 +21,10 @@ def verify_identity(request: AnalysisRequestedPayload, resolved: ModerationInput
 
 
 class JobProcessor:
-    def __init__(self, backend: ModerationInputClient, classifier: Classifier):
+    def __init__(self, backend: ModerationInputClient, classifier: Classifier, classifier_profile: str = FIXTURE_PROFILE):
         self.backend = backend
         self.classifier = classifier
+        self.classifier_profile = classifier_profile
 
     def process(self, raw: bytes | None, cancelled: Event) -> ModerationResultEvent:
         try:
@@ -30,7 +32,7 @@ class JobProcessor:
         except (ValueError, UnicodeError):
             raise QuarantineRequired("REQUEST_CONTRACT") from None
         request = event.payload
-        if request.inputSchemaVersion != 1 or request.classifierProfile != "moderation-text-v1":
+        if request.inputSchemaVersion != 1 or request.classifierProfile != self.classifier_profile:
             raise QuarantineRequired("UNSUPPORTED_INPUT")
         resolved = self.backend.get_analysis_input(request.analysisJobId, cancelled)
         verify_identity(request, resolved)

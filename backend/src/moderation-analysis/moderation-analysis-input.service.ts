@@ -11,6 +11,7 @@ import {
   MAX_ANALYSIS_TITLE_LENGTH,
   normalizeAnalysisText,
   TEXT_CLASSIFIER_PROFILE,
+  HUGGINGFACE_TEXT_CLASSIFIER_PROFILE,
   TEXT_INPUT_SCHEMA_VERSION,
 } from './canonical-text-input';
 import type { ModerationAnalysisInputResponse } from './moderation-analysis-input.types';
@@ -73,7 +74,9 @@ export class ModerationAnalysisInputService {
     if (
       !parsed.success ||
       analysis.inputSchemaVersion !== TEXT_INPUT_SCHEMA_VERSION ||
-      analysis.classifierProfile !== TEXT_CLASSIFIER_PROFILE ||
+      ![TEXT_CLASSIFIER_PROFILE, HUGGINGFACE_TEXT_CLASSIFIER_PROFILE].includes(
+        analysis.classifierProfile,
+      ) ||
       parsed.data.type !== analysis.targetType ||
       hashTextInput(parsed.data) !== analysis.snapshotHash
     ) {

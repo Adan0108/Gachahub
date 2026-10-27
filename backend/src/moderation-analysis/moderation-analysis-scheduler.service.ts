@@ -4,11 +4,12 @@ import type { Prisma, ReportTargetType } from '../generated/prisma/client';
 import type { ReportTargetSnapshot } from '../reports/domain/report-target-snapshot';
 import {
   canonicalTextInput,
-  TEXT_CLASSIFIER_PROFILE,
+  configuredTextClassifierProfile,
 } from './canonical-text-input';
 
 @Injectable()
 export class ModerationAnalysisScheduler {
+  private readonly classifierProfile = configuredTextClassifierProfile();
   constructor(private readonly eventPublisher: EventPublisherPort) {}
 
   // Caller owns the transaction and holds the case row lock (or created it).
@@ -23,7 +24,7 @@ export class ModerationAnalysisScheduler {
     },
   ): Promise<void> {
     const input = canonicalTextInput(params.snapshot);
-    const classifierProfile = TEXT_CLASSIFIER_PROFILE;
+    const classifierProfile = this.classifierProfile;
     const existing = await tx.moderationAnalysis.findUnique({
       where: {
         caseId_snapshotHash_classifierProfile: {

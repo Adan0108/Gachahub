@@ -41,7 +41,9 @@ import { ModerationResultConsumer } from '../src/moderation-analysis/moderation-
 import { ProcessedEventRepository } from '../src/notifications/processed-event.repository';
 import { isolatedCaseDatabase } from './support/isolated-case-database';
 
-const enabled = process.env.RUN_MODERATION_WORKER_LIVE === '1';
+const realModelEnabled = process.env.RUN_MODERATION_REAL_MODEL_LIVE === '1';
+const enabled =
+  process.env.RUN_MODERATION_WORKER_LIVE === '1' || realModelEnabled;
 (enabled ? describe : describe.skip)('Stage 2C local live pipeline', () => {
   jest.setTimeout(180000);
   const prefix = `stage2c-${randomUUID()}`;
@@ -177,6 +179,9 @@ const enabled = process.env.RUN_MODERATION_WORKER_LIVE === '1';
     process.env.MODERATION_WORKER_TOKEN = token;
     process.env.KAFKA_BROKERS = 'localhost:9092';
     process.env.KAFKA_MODERATION_RESULTS_GROUP_ID = groups.result;
+    process.env.MODERATION_CLASSIFIER_PROFILE = realModelEnabled
+      ? 'toxicity-mmbert-small-v1'
+      : 'moderation-text-v1';
     Object.assign(KAFKA_TOPICS, {
       MODERATION_REQUESTS: topics.request,
       MODERATION_RESULTS: topics.result,
@@ -309,7 +314,82 @@ const enabled = process.env.RUN_MODERATION_WORKER_LIVE === '1';
     Object.assign(process.env, savedEnv);
   });
 
-  it('real report -> outbox -> Python -> immutable HTTP -> Kafka -> PostgreSQL, with failures/replay/history', async () => {
+  (realModelEnabled ? it : it.skip)(
+    'one real model report -> immutable HTTP -> Kafka -> stored scores, with no case/content changes',
+    async () => {
+      const post = await db.post.create({
+        data: {
+          authorId,
+          title: 'Test comment',
+          content: 'You are a complete idiot.',
+        },
+      });
+      const caseId = await report(post.id);
+      const job = await db.moderationAnalysis.findFirstOrThrow({
+        where: { caseId },
+      });
+      expect(job.status).toBe('PENDING');
+      expect(job.classifierProfile).toBe('toxicity-mmbert-small-v1');
+      const caseBefore = await db.moderationCase.findUniqueOrThrow({
+        where: { id: caseId },
+      });
+      const postBefore = await db.post.findUniqueOrThrow({
+        where: { id: post.id },
+      });
+      await dispatch();
+      startWorker({ CLASSIFIER_BACKEND: 'huggingface', HF_HUB_OFFLINE: '1' });
+      await waitFor(
+        async () =>
+          (
+            await db.moderationAnalysis.findUniqueOrThrow({
+              where: { id: job.id },
+            })
+          ).status === 'SUCCEEDED',
+        'real model result',
+        120000,
+      );
+      await waitFor(
+        async () => (await committedOffset()) >= 1,
+        'real model offset commit',
+      );
+      const completed = await db.moderationAnalysis.findUniqueOrThrow({
+        where: { id: job.id },
+      });
+      const result = completed.result as {
+        output: {
+          model: { name: string; revision: string };
+          labels: Array<{ label: string; score: number }>;
+        };
+      };
+      expect(result.output.model).toEqual({
+        name: 'Horizon-Labs/multilingual-toxicity-small',
+        revision: '01adcc628a33848569816d4851a38544c321b92c',
+      });
+      expect(result.output.labels.map(({ label }) => label)).toEqual([
+        'toxicity',
+        'severe_toxicity',
+        'obscene',
+        'threat',
+        'insult',
+        'identity_attack',
+        'sexual_explicit',
+      ]);
+      for (const { score } of result.output.labels) {
+        expect(Number.isFinite(score)).toBe(true);
+        expect(score).toBeGreaterThanOrEqual(0);
+        expect(score).toBeLessThanOrEqual(1);
+      }
+      expect(
+        await db.moderationCase.findUniqueOrThrow({ where: { id: caseId } }),
+      ).toEqual(caseBefore);
+      expect(
+        await db.post.findUniqueOrThrow({ where: { id: post.id } }),
+      ).toEqual(postBefore);
+    },
+  );
+
+  const fixtureTest = realModelEnabled ? it.skip : it;
+  fixtureTest('real report -> outbox -> Python -> immutable HTTP -> Kafka -> PostgreSQL, with failures/replay/history', async () => {
     const post = await db.post.create({
       data: { authorId, title: 'fixture title', content: 'fixture-toxic' },
     });

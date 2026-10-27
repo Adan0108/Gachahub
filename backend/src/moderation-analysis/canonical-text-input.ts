@@ -3,6 +3,20 @@ import type { ReportTargetSnapshot } from '../reports/domain/report-target-snaps
 
 export const TEXT_INPUT_SCHEMA_VERSION = 1;
 export const TEXT_CLASSIFIER_PROFILE = 'moderation-text-v1';
+export const HUGGINGFACE_TEXT_CLASSIFIER_PROFILE = 'toxicity-mmbert-small-v1';
+
+export function configuredTextClassifierProfile(): string {
+  const profile =
+    process.env.MODERATION_CLASSIFIER_PROFILE ?? TEXT_CLASSIFIER_PROFILE;
+  if (
+    ![TEXT_CLASSIFIER_PROFILE, HUGGINGFACE_TEXT_CLASSIFIER_PROFILE].includes(
+      profile,
+    )
+  ) {
+    throw new Error('Unsupported MODERATION_CLASSIFIER_PROFILE');
+  }
+  return profile;
+}
 export const MAX_ANALYSIS_TITLE_LENGTH = 300;
 export const MAX_ANALYSIS_CONTENT_LENGTH = 20_000;
 

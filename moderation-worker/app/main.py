@@ -4,7 +4,7 @@ import signal
 from pydantic import ValidationError
 
 from .backend_client import ModerationInputClient
-from .classifier import FixtureClassifier
+from .classifier import create_classifier
 from .config import Settings
 from .errors import SecurityFailure
 from .kafka_consumer import Worker, create_consumer, log_event
@@ -21,10 +21,12 @@ def main() -> int:
     worker = None
     try:
         settings = Settings.from_env()
+        # Download/load before creating Kafka clients or consuming requests.
+        classifier = create_classifier(settings)
         backend = ModerationInputClient(settings)
         publisher = ConfirmedPublisher(create_producer(settings), settings)
         consumer = create_consumer(settings)
-        worker = Worker(consumer, publisher, JobProcessor(backend, FixtureClassifier()), settings)
+        worker = Worker(consumer, publisher, JobProcessor(backend, classifier, settings.classifier_profile), settings)
         signal.signal(signal.SIGINT, worker.stop)
         signal.signal(signal.SIGTERM, worker.stop)
         worker.run()
