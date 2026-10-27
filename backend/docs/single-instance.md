@@ -1,5 +1,7 @@
 # Things that break with more than one backend instance
 
+Already shared through Redis: logins (`auth/session-storage.ts`) and realtime delivery (`websocket/redis-io.adapter.ts`; clients connect over websocket only, so no sticky sessions are needed).
+
 Every one of these lives in one process's memory. Running two or more backend
 instances does not crash - it quietly weakens them. Before scaling out, move
 each to a shared store (Redis) or a leader-elected job.
@@ -11,7 +13,6 @@ each to a shared store (Redis) or a leader-elected job.
 | Chat message rate limit | `src/chat/chat-message-rate-limiter.service.ts` | same |
 | Chat history fetch rate limit | `src/chat/chat-history-fetch-rate-limiter.service.ts` | same |
 | Self-join rate limit | `src/mls-handshakes/mls-self-join-rate-limiter.service.ts` | same |
-| Socket delivery | `src/websocket/socket-registry.service.ts` | an instance can only deliver to sockets connected to itself (sign-outs are shared: `SessionTerminator` broadcasts them over Redis, and the login cache lives in Redis) |
 | Cron jobs | `mls-key-package-cleanup`, `mls-retention` (daily 5am prune of consumed Welcomes, old faults, claimed key packages), `chat-invite-expiry`, the integrity sweep (`common/integrity`), media cleanup | run once per instance: duplicate work and duplicate Discord alerts |
 
 All five rate limiters are instances of `SlidingWindowRateLimiter` (`src/common/utils/sliding-window-rate-limiter.ts`), so a new one is a config, not a copy - add it to this table.
