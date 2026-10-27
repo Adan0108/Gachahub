@@ -163,6 +163,13 @@ export function useChatSocket() {
       queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
     });
 
+    // A group's name, photo, members or roles changed: refetch the lists, so an open member panel
+    // shows the new roles (and drops actions you may no longer take) without a reload.
+    on("conversation:updated", () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatRequests });
+    });
+
     // Outgoing: the composer (mounted separately, in app/chat/page.jsx) pings typingSignal while
     // the user types; turn that into throttled typing:start/typing:stop on this one socket.
     const typingStopTimers = new Map<string, ReturnType<typeof setTimeout>>();

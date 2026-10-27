@@ -302,6 +302,27 @@ describe("GroupMembersSection", () => {
     await waitFor(() => expect(mocks.removeGroupMembers).toHaveBeenCalledWith("g1", ["bo"]));
   });
 
+  // CFI-002: demoted while the Remove dialog was open, the confirm still showed and the server said 403
+  it("closes a dialog you are no longer allowed to use once your role changes", () => {
+    const client = new QueryClient();
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Harness conversation={group("ADMIN")} currentUserId="me" />
+      </QueryClientProvider>,
+    );
+    openMenu("Bo");
+    choose("Remove from group");
+    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <Harness conversation={group("MEMBER")} currentUserId="me" />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
+  });
+
   it("lets an admin remove a member but not change roles", () => {
     setup(group("ADMIN"));
 

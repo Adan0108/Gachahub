@@ -227,7 +227,10 @@ export function GroupMembersSection({
       mutation: leave,
     },
   };
-  const dialog = confirming ? dialogs[confirming.kind] : undefined;
+  // Your role can change while a dialog is open (someone else demotes you): one you may no longer use closes.
+  const stillAllowed =
+    confirming?.kind === "remove" ? canManage : confirming?.kind === "owner" ? isOwner : true;
+  const dialog = confirming && stillAllowed ? dialogs[confirming.kind] : undefined;
 
   const confirm = () => {
     if (!confirming) return;

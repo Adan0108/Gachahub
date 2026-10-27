@@ -244,3 +244,19 @@ describe("useChatSocket message deletes", () => {
     stop();
   });
 });
+
+// CFI-002: someone changed a group's roles or members; open lists refetch without a reload
+describe("useChatSocket conversation:updated", () => {
+  beforeEach(() => {
+    mocks.handlers = {};
+  });
+
+  it("refetches the conversation list and requests", () => {
+    const { invalidate } = setup();
+
+    mocks.handlers["conversation:updated"]!({ conversationId: "c1" });
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.chatConversations });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.chatRequests });
+  });
+});
