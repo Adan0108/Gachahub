@@ -21,6 +21,8 @@ import { ChatAccessService } from './chat-access.service';
 import { ChatDevicesService } from '../chat-devices/chat-devices.service';
 import { ChatMessageRateLimiterService } from './chat-message-rate-limiter.service';
 import { ChatMembershipService } from './membership/chat-membership.service';
+import { isMemberState } from './membership/leaf-entitlement';
+import { MembershipChangePendingException } from '../common/exceptions/membership-change-pending.exception';
 import { isUniqueViolationOn } from './prisma-unique-violation';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
 import { SendMessageDto } from './dto/send-message.dto';
@@ -437,6 +439,23 @@ export class ChatMessagingService {
         this.chatAccessService.assertNoMembershipChangePending(
           freshParticipants,
         );
+        // #123: a member whose device is not in the group yet could never read this message. The
+        // sender's app adds the device (it is told the change is pending), then encrypts again.
+        if (
+          await this.chatRepository.hasMemberDeviceMissingFromGroup(
+            tx,
+            conversationId,
+            freshParticipants
+              .filter(
+                (participant) =>
+                  isMemberState(participant.state) ||
+                  participant.state === 'JOINING',
+              )
+              .map((participant) => participant.userId),
+          )
+        ) {
+          throw new MembershipChangePendingException();
+        }
 
         // Someone was added, removed or changed since the first read: recipients come from the locked rows.
         // Rare, so repeating the block and mute lookups under the lock is worth it.

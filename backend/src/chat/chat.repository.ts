@@ -405,6 +405,27 @@ export class ChatRepository {
   }
 
   /**
+   * Whether a working device of one of `userIds` is not in the conversation's MLS group yet. A
+   * message encrypted now could never be read on it. No group at all (nothing sent yet) is not a gap.
+   */
+  async hasMemberDeviceMissingFromGroup(
+    tx: PrismaTransaction,
+    conversationId: string,
+    userIds: string[],
+  ): Promise<boolean> {
+    const [leaves, devices] = await Promise.all([
+      this.mlsGroupRosterRepository.findActiveLeaves(conversationId, tx),
+      tx.chatDevice.findMany({
+        where: { userId: { in: userIds }, revokedAt: null },
+        select: { id: true },
+      }),
+    ]);
+    if (leaves.length === 0) return false;
+    const inGroup = new Set(leaves.map((leaf) => leaf.deviceId));
+    return devices.some((device) => !inGroup.has(device.id));
+  }
+
+  /**
    * Creates an encrypted message in an existing conversation and updates lastMessageId. Runs
    * against the caller's own transaction - see createDirectConversationWithMessage above for why.
    */

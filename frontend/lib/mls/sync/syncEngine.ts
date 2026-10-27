@@ -28,6 +28,7 @@ import {
 import {
   GroupStateUnavailableError,
   EpochConflictError,
+  GroupCreationLostError,
   MembershipMismatchError,
   NoEncryptableMembersError,
 } from '../contract/errors';
@@ -146,7 +147,10 @@ export class SyncEngine {
     return this.seedNewGroupWithMembers(conversationId, [userId]);
   }
 
-  /** Seeds a group this device has just created: one Commit adds every active device of `userIds` and of this user */
+  /**
+   * Seeds a group this device has just created: one Commit adds every active device of `userIds` and of this user.
+   * Throws GroupCreationLostError, with the new local group dropped, when someone else's Commit won the first epoch.
+   */
   async seedNewGroupWithMembers(
     conversationId: ConversationId,
     userIds: UserId[],
@@ -166,7 +170,7 @@ export class SyncEngine {
       throw new NoEncryptableMembersError(conversationId);
     }
 
-    return this.submitMembershipChange(conversationId, { added, removed: [] });
+    return this.submitMembershipChange(conversationId, { added, removed: [] }, { groupIsNew: true });
   }
 
   reconcileMembership(options: ReconcileOptions = {}): Promise<ReconcileSummary> {
@@ -226,6 +230,7 @@ export class SyncEngine {
   async submitMembershipChange(
     conversationId: ConversationId,
     change: MembershipChangeRequest,
+    options: { groupIsNew?: boolean } = {},
   ): Promise<Epoch> {
     return this.cache.runExclusive(conversationId, async () => {
       const session = await this.openSession(conversationId);
@@ -272,6 +277,12 @@ export class SyncEngine {
         // The merged copy is the rejected Commit's: it must not survive in memory whatever fails below
         this.cache.drop(conversationId);
         await this.pendingCommits.discard(conversationId);
+        // A group still at its first epoch has never had a Commit accepted, so it is ours alone
+        if (options.groupIsNew && expectedEpoch === 0) {
+          // The winner's Commit belongs to another group with the same name, so it cannot be applied to this one
+          await this.forgetConversationLocked(conversationId);
+          throw new GroupCreationLostError(conversationId);
+        }
         const reloaded = await this.factory.restore(conversationId, epochBefore);
         this.cache.set(conversationId, reloaded);
         await this.applier.applyBatch(conversationId, reloaded, [response.handshake]);

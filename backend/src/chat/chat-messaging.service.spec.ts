@@ -58,6 +58,7 @@ describe('ChatMessagingService', () => {
     removeGroupMembers: jest.fn(),
     findConversationWithParticipants: jest.fn(),
     lockAndFindParticipants: jest.fn(),
+    hasMemberDeviceMissingFromGroup: jest.fn(),
     findParticipant: jest.fn(),
     transferGroupOwnership: jest.fn(),
     updateParticipantRole: jest.fn(),
@@ -191,6 +192,7 @@ describe('ChatMessagingService', () => {
     // By default the authoritative re-check under lock sees the same
     // roster as the earlier unlocked read - tests that want to simulate a
     // membership change racing the send override this directly.
+    repository.hasMemberDeviceMissingFromGroup.mockResolvedValue(false);
     repository.lockAndFindParticipants.mockImplementation(
       async (_tx: unknown, conversationId: string) => {
         const conversation = (await repository.findConversationWithParticipants(
@@ -1198,6 +1200,32 @@ describe('ChatMessagingService', () => {
         'conversation-1',
       );
       expect(repository.createMessage).not.toHaveBeenCalled();
+    });
+
+    // #123: a message encrypted before a member's device joined the group could never be read on it
+    it('refuses the send while a member device is not in the group yet, so the app adds it first', async () => {
+      repository.findConversationWithParticipants.mockResolvedValue(
+        groupConversation([
+          { userId: 'user-1', role: 'OWNER', state: 'ACTIVE' },
+          { userId: 'user-2', role: 'MEMBER', state: 'ACTIVE' },
+          { userId: 'user-3', role: 'MEMBER', state: 'PENDING' },
+        ]),
+      );
+      repository.hasMemberDeviceMissingFromGroup.mockResolvedValue(true);
+
+      await expect(
+        service.sendMessage('user-1', 'session-1', 'conversation-1', {
+          message: { clientMessageId: 'client-1' },
+        } as any),
+      ).rejects.toThrow(MembershipChangePendingException);
+
+      expect(repository.createMessage).not.toHaveBeenCalled();
+      // Members only: an invitee who has not answered never holds up the chat
+      expect(repository.hasMemberDeviceMissingFromGroup).toHaveBeenCalledWith(
+        'fake-tx',
+        'conversation-1',
+        ['user-1', 'user-2'],
+      );
     });
 
     it('rejects the insert when another member starts being removed only under the lock', async () => {
