@@ -51,7 +51,9 @@ export function useChatBackup(userId: string | undefined) {
     gcTime: Infinity,
     retry: false,
   });
-  const refresh = () => queryClient.invalidateQueries({ queryKey: statusKey });
+  // Exact: the key check sits under the status key, and re-running it against the status from before
+  // a change would read "backup off" and wipe the key this browser holds.
+  const refresh = () => queryClient.invalidateQueries({ queryKey: statusKey, exact: true });
 
   const [disabledElsewhere, setDisabledElsewhere] = useState(false);
   useEffect(
@@ -59,7 +61,7 @@ export function useChatBackup(userId: string | undefined) {
       onBackupDisabledElsewhere(() => {
         setDisabledElsewhere(true);
         queryClient.removeQueries({ queryKey: backupHoldsKeyKey(userId) });
-        void queryClient.invalidateQueries({ queryKey: backupStatusKey(userId) });
+        void queryClient.invalidateQueries({ queryKey: backupStatusKey(userId), exact: true });
       }),
     [queryClient, userId],
   );
@@ -93,11 +95,12 @@ export function useChatBackup(userId: string | undefined) {
       if (!pendingKey || !userId) throw new Error('No recovery key to save');
       await enableBackup(userId, pendingKey.raw);
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       setDisabledElsewhere(false);
       replacePending(null);
+      // Status first, for the same reason as `refresh`.
+      await refresh();
       queryClient.removeQueries({ queryKey: holdsKeyKey });
-      return refresh();
     },
     // Most likely another device turned it on first; the fresh status says so.
     onError: refresh,
@@ -152,8 +155,8 @@ export function useChatBackup(userId: string | undefined) {
         }
         setRestoreState({ status: 'done', result: outcome });
         setDisabledElsewhere(false);
+        await queryClient.invalidateQueries({ queryKey: backupStatusKey(userId), exact: true });
         queryClient.removeQueries({ queryKey: backupHoldsKeyKey(userId) });
-        await queryClient.invalidateQueries({ queryKey: backupStatusKey(userId) });
       } catch (error) {
         const message = recoveryKeyMessage(
           error,
