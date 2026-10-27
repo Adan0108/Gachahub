@@ -151,6 +151,17 @@ export function useDecryptedMessages(
     });
   }, [conversationId]);
 
+  // Rejoining after being removed swaps in a new group: messages from then on can be read now, so scan again instead of waiting for a reload.
+  useEffect(
+    () =>
+      syncEngine?.onGroupAdopted((adoptedId) => {
+        if (adoptedId !== conversationId) return;
+        retryAttemptsRef.current = 0;
+        setRetryTick((tick) => tick + 1);
+      }),
+    [syncEngine, conversationId],
+  );
+
   useEffect(() => {
     if (!syncEngine || !conversationId || messages.length === 0) {
       return;

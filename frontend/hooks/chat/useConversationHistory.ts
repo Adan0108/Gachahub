@@ -6,6 +6,7 @@ import { api } from "../../lib/api";
 import { messagesFallenOutOfWindow, type HistoryMessage } from "../../lib/chat/chatHistory";
 import { withOptimisticDelete } from "../../lib/chat/chatThread";
 import { messageDeletedSignal } from "../../lib/chat/messageDeletedSignal";
+import { messageChangedSignal } from "../../lib/chat/messageChangedSignal";
 
 const PAGE_SIZE = 50;
 const NEAR_TOP_PX = 80;
@@ -39,7 +40,9 @@ export interface ConversationHistory<Message> {
   containerRef: RefObject<HTMLDivElement | null>;
   handleScroll: (event: UIEvent<HTMLDivElement>) => void;
   /** Applies an edit (react/unsend) to the older messages held in this hook's own state, not react-query's cache. Returns the pre-edit array, for rolling back on failure. */
-  patchOlder: (updater: (items: Message[]) => Message[]) => Message[];
+  patchOlder: (updater: (items: Message[]) => Message[], token?: number) => Message[];
+  /** Identifies the current conversation's history; a `patchOlder` given an older token is ignored. */
+  historyToken: () => number;
 }
 
 /** Browsers with CSS scroll anchoring (overflow-anchor) keep the view steady on their own. */
@@ -76,8 +79,9 @@ export function useConversationHistory<Message extends HistoryMessage>(
   const olderMessagesRef = useRef(olderMessages);
   olderMessagesRef.current = olderMessages;
 
-  const patchOlder = (updater: (items: Message[]) => Message[]): Message[] => {
+  const patchOlder = (updater: (items: Message[]) => Message[], token?: number): Message[] => {
     const previous = olderMessagesRef.current;
+    if (token !== undefined && token !== generation.current) return previous;
     setOlderMessages(updater(previous));
     return previous;
   };
@@ -99,7 +103,34 @@ export function useConversationHistory<Message extends HistoryMessage>(
   );
 
   const latest = useMemo(() => newestPage?.items ?? [], [newestPage?.items]);
+  const latestRef = useRef(latest);
+  latestRef.current = latest;
   const hasMoreHistory = typeof nextBeforeMessageId === "string";
+
+  // A reaction or edit by someone else on a message held here: re-read just that message (the one
+  // right before its newer neighbour), since this state is never refetched by the query cache.
+  useEffect(
+    () =>
+      messageChangedSignal.subscribe((changedIn, messageId) => {
+        if (changedIn !== conversationId) return;
+        const older = olderMessagesRef.current;
+        const index = older.findIndex((message) => message.id === messageId);
+        const newerId = older[index + 1]?.id ?? latestRef.current[0]?.id;
+        if (index === -1 || !newerId) return;
+        const requestGeneration = generation.current;
+        api
+          .getChatMessages(conversationId, { beforeMessageId: newerId, limit: 1 })
+          .then((page) => {
+            const fresh = (page as MessagesPage<Message>).items[0];
+            if (generation.current !== requestGeneration || fresh?.id !== messageId) return;
+            setOlderMessages((previous) =>
+              previous.map((message) => (message.id === messageId ? fresh : message)),
+            );
+          })
+          .catch(() => {});
+      }),
+    [conversationId],
+  );
 
   if (conversationId !== ownerId) {
     setOwnerId(conversationId);
@@ -219,5 +250,6 @@ export function useConversationHistory<Message extends HistoryMessage>(
     containerRef,
     handleScroll,
     patchOlder,
+    historyToken: () => generation.current,
   };
 }

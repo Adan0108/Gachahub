@@ -7,6 +7,7 @@ import { addMessageToCache } from "../../lib/chat/messageCache";
 import { applyReceiptsEvent } from "../../lib/chat/receiptEvents";
 import { withOptimisticDelete } from "../../lib/chat/chatThread";
 import { messageDeletedSignal } from "../../lib/chat/messageDeletedSignal";
+import { messageChangedSignal } from "../../lib/chat/messageChangedSignal";
 import { queryKeys } from "../../lib/queries";
 import { useSharedSocket } from "../../lib/socket/sharedSocket";
 import { logTiming } from "../../lib/chat/chatTiming";
@@ -124,9 +125,14 @@ export function useChatSocket() {
     const refetchConversationMessages = (event: ConversationEvent) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(event.conversationId) });
     };
-    on("reaction:added", refetchConversationMessages);
-    on("reaction:removed", refetchConversationMessages);
-    on("message:edited", refetchConversationMessages);
+    // Older history is outside the cache this refetch updates, so it is told separately.
+    const refetchChangedMessage = (event: ConversationEvent & { messageId: string }) => {
+      messageChangedSignal.emit(event.conversationId, event.messageId);
+      refetchConversationMessages(event);
+    };
+    on("reaction:added", refetchChangedMessage);
+    on("reaction:removed", refetchChangedMessage);
+    on("message:edited", refetchChangedMessage);
     // Marked at once as well: a message the refetch pushes out of the newest window moves to older
     // history as the copy cached here, so that copy must already say it was deleted. Older history
     // lives outside the cache, so it hears about the delete through messageDeletedSignal.
@@ -168,6 +174,7 @@ export function useChatSocket() {
     on("conversation:updated", () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
       queryClient.invalidateQueries({ queryKey: queryKeys.chatRequests });
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatArchivedConversations });
     });
 
     // Outgoing: the composer (mounted separately, in app/chat/page.jsx) pings typingSignal while

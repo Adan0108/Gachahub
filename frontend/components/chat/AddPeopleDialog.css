@@ -123,10 +123,12 @@
 }
 
 .add-people-name-input {
-  margin: 0 16px 8px;
-  padding: 9px 12px;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 10px 14px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 999px;
   background: var(--panel2);
   color: var(--text);
 }

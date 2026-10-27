@@ -222,6 +222,10 @@ export class SyncEngine {
     return this.recovery.waitMs(conversationId);
   }
 
+  onGroupAdopted(listener: (conversationId: ConversationId) => void): () => void {
+    return this.cache.onAdopted(listener);
+  }
+
   processPendingWelcomes(): ReturnType<WelcomeJoiner['processPendingWelcomes']> {
     return this.welcomes.processPendingWelcomes();
   }

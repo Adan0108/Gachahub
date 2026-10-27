@@ -2,6 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { messageChangedSignal } from "../../lib/chat/messageChangedSignal";
 import { messageDeletedSignal } from "../../lib/chat/messageDeletedSignal";
 import { useConversationHistory, type ConversationHistory } from "./useConversationHistory";
 
@@ -303,6 +304,52 @@ describe("useConversationHistory", () => {
     await flush();
 
     expect(ids(hook.value.displayMessages)).toEqual(["m1", "m2", "m3", "m4", "m5"]);
+    await hook.unmount();
+  });
+
+  it("re-reads a message in older history when someone else reacts to it", async () => {
+    getChatMessages.mockResolvedValue(page(range(1, 2), null));
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+    await hook.scrollToTop();
+
+    getChatMessages.mockResolvedValueOnce(page([{ ...message(2), reactions: ["x"] } as Message]));
+    await act(async () => messageChangedSignal.emit("c1", "m2"));
+    await flush();
+
+    expect(getChatMessages).toHaveBeenLastCalledWith("c1", { beforeMessageId: "m3", limit: 1 });
+    expect(hook.value.displayMessages[1]).toMatchObject({ id: "m2", reactions: ["x"] });
+    await hook.unmount();
+  });
+
+  it("ignores a change to a message this history does not hold", async () => {
+    getChatMessages.mockResolvedValue(page(range(1, 2), null));
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+    await hook.scrollToTop();
+    getChatMessages.mockClear();
+
+    await act(async () => messageChangedSignal.emit("c1", "m4"));
+    await flush();
+
+    expect(getChatMessages).not.toHaveBeenCalled();
+    await hook.unmount();
+  });
+
+  it("patchOlder ignores a write whose token is from the conversation the user has since left", async () => {
+    getChatMessages.mockResolvedValue(page(range(1, 2), null));
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+    await hook.scrollToTop();
+    const token = hook.value.historyToken();
+
+    await hook.render({ conversationId: "c2", page: page(range(6, 7), null) });
+    await act(async () => {
+      hook.value.patchOlder(() => range(1, 2) as Message[], token);
+    });
+    await flush();
+
+    expect(ids(hook.value.displayMessages)).toEqual(["m6", "m7"]);
     await hook.unmount();
   });
 

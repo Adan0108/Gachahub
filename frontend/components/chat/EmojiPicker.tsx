@@ -9,12 +9,12 @@ function currentTheme() {
   return document.documentElement.dataset.theme === "light" ? "light" : "dark";
 }
 
-/** The full emoji picker, loaded only when first opened. Calls `onPick` with a reaction choice ({ emoji } or { emoteId, emote }). */
+/** The full emoji picker, loaded only when first opened. Calls `onPick` with a reaction choice and whether shift was held (keep the picker open). */
 export function EmojiPicker({
   onPick,
   emojiOnly = false,
 }: {
-  onPick: (choice: ReactionChoice) => void;
+  onPick: (choice: ReactionChoice, keepOpen: boolean) => void;
   emojiOnly?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -45,9 +45,9 @@ export function EmojiPicker({
           skinTonePosition: "search",
           navPosition: "top",
           maxFrequentRows: 2,
-          onEmojiSelect: (selection: Parameters<typeof choiceFromSelection>[0]) => {
+          onEmojiSelect: (selection: Parameters<typeof choiceFromSelection>[0], event?: { shiftKey?: boolean }) => {
             const choice = choiceFromSelection(selection, custom.byId);
-            if (choice) onPickRef.current(choice);
+            if (choice) onPickRef.current(choice, Boolean(event?.shiftKey));
           },
         });
         picker = created as unknown as HTMLElement;

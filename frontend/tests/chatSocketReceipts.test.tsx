@@ -258,5 +258,6 @@ describe("useChatSocket conversation:updated", () => {
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.chatConversations });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.chatRequests });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.chatArchivedConversations });
   });
 });

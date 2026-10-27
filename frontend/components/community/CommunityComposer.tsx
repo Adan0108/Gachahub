@@ -142,13 +142,13 @@ export function CommunityComposer({
     inputRef.current?.focus();
   };
 
-  const insertEmoji = (choice: ReactionChoice) => {
+  const insertEmoji = (choice: ReactionChoice, keepOpen: boolean) => {
     if (choice.kind !== "emoji") return;
     const input = inputRef.current;
     const start = input?.selectionStart ?? draft.length;
     const end = input?.selectionEnd ?? draft.length;
     setDraft(`${draft.slice(0, start)}${choice.emoji}${draft.slice(end)}`);
-    setIsPickerOpen(false);
+    if (!keepOpen) setIsPickerOpen(false);
     input?.focus();
   };
 

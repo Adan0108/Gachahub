@@ -24,6 +24,8 @@ vi.mock("../lib/backup/backupRuntime", () => ({
   cancelBackupDeletion: vi.fn(),
   scheduleBackupDeletion: vi.fn(),
   restoreOnThisDevice: vi.fn(),
+  resumeRestore: vi.fn(),
+  isRestorePending: async () => false,
   onBackupDisabledElsewhere: () => () => undefined,
 }));
 

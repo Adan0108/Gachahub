@@ -54,6 +54,7 @@ function fakeEngine() {
     processIncoming: vi.fn(),
     recoverBrokenGroup: vi.fn().mockResolvedValue(false),
     recoveryWaitMs: vi.fn().mockReturnValue(0),
+    onGroupAdopted: vi.fn().mockReturnValue(() => undefined),
   };
 }
 
@@ -345,6 +346,35 @@ describe('useDecryptedMessages', () => {
       envelope: { v: 1, type: 'text', body: 'caught up' },
     });
 
+    hook.unmount();
+  });
+  // regression: removed then added back, messages stayed unavailable until a reload.
+  it('reads a message left unavailable once this device rejoins the conversation', async () => {
+    const engine = fakeEngine();
+    let adopted: (conversationId: string) => void = () => undefined;
+    engine.onGroupAdopted.mockImplementation((listener: typeof adopted) => {
+      adopted = listener;
+      return () => undefined;
+    });
+    engine.isAtCurrentEpoch.mockResolvedValue(true);
+    engine.processIncoming.mockRejectedValue(new Error('no keys for this epoch'));
+    vi.mocked(useSyncEngine).mockReturnValue(keeping(engine) as never);
+    const hook = renderHook();
+    await hook.render({ conversationId: 'conv-1', messages: [message('m1')], currentUserId: 'me' });
+    expect(hook.value.m1).toEqual({ status: 'unavailable' });
+
+    engine.processIncoming.mockResolvedValue({
+      kind: 'application',
+      senderDeviceId: 'device-2',
+      epoch: 3,
+      envelope: { v: 1, type: 'text', body: 'after rejoin' },
+    });
+    await act(async () => {
+      adopted('conv-1');
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+
+    expect(hook.value.m1).toEqual({ status: 'ok', envelope: { v: 1, type: 'text', body: 'after rejoin' } });
     hook.unmount();
   });
   // regression: a run still finishing for the old conversation scheduled a retry that re-ran the new one

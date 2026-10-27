@@ -26,6 +26,7 @@ interface RollbackContext {
   key: QueryKey;
   previousQueryData: MessagePage | undefined;
   previousOlder: ThreadMessage[];
+  historyToken: number;
 }
 
 import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -65,7 +66,6 @@ import { RemoveMessageDialog } from "../../components/chat/RemoveMessageDialog";
 import { ThreadRow } from "../../components/chat/ThreadRow";
 import { ConversationListItem } from "../../components/chat/ConversationListItem";
 import { NoChatSelected } from "../../components/chat/NoChatSelected";
-import { SidebarMessageSearch } from "../../components/chat/SidebarMessageSearch";
 import { JumpToBottomButton } from "../../components/chat/JumpToBottomButton";
 import { AttachmentComposerTray } from "../../components/chat/AttachmentComposerTray";
 import { LinkPreviewTray } from "../../components/chat/LinkPreviewTray";
@@ -123,7 +123,7 @@ import { api } from "../../lib/api";
 import { queries, queryKeys } from "../../lib/queries";
 import { typingSignal } from "../../lib/chat/chatTypingSignal";
 import { conversationMatches } from "../../lib/chat/conversationSearch";
-import { MIN_SEARCH_CHARS, parseSearchQuery } from "../../lib/chat/searchFolding";
+import { parseSearchQuery } from "../../lib/chat/searchFolding";
 import {
   activeMembers,
   blockedPeerOf,
@@ -205,7 +205,6 @@ function ChatPageContent() {
   const [handledRequestId, setHandledRequestId] = useState("");
   const [search, setSearch] = useState("");
   // The text message search was last run for (on Enter); null until it has been used.
-  const [messageQuery, setMessageQuery] = useState<string | null>(null);
   const {
     conversations,
     requests,
@@ -281,6 +280,7 @@ function ChatPageContent() {
     announcement,
     now: threadNow,
     patchOlder,
+    historyToken,
   } = useThreadData(activeId, messages.data, activeConversation, user?.id);
 
   const {
@@ -307,7 +307,7 @@ function ChatPageContent() {
     preview: string;
   } | null>(null);
   const { draft, setDraft, setDraftFor } = useConversationDrafts(activeId);
-  const attachmentPicker = useAttachmentPicker();
+  const attachmentPicker = useAttachmentPicker(activeId);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   // Counts nested dragenter/dragleave pairs as the pointer crosses child elements, so only the
@@ -408,13 +408,15 @@ function ChatPageContent() {
   // you scrolled back to would otherwise silently miss the query cache entirely.
   const patchMessages = async (updater: (items: ThreadMessage[]) => ThreadMessage[]) => {
     const key = queryKeys.chatMessages(activeId);
+    // Taken before the await: if the user switches chats meanwhile, the older-history writes below are ignored.
+    const token = historyToken();
     await queryClient.cancelQueries({ queryKey: key });
     const previousQueryData = queryClient.getQueryData<MessagePage>(key);
     queryClient.setQueryData<MessagePage>(key, (old) =>
       old ? { ...old, items: updater(old.items) } : old,
     );
-    const previousOlder = patchOlder(updater);
-    return { key, previousQueryData, previousOlder };
+    const previousOlder = patchOlder(updater, token);
+    return { key, previousQueryData, previousOlder, historyToken: token };
   };
   const rollbackOptimisticUpdate = (
     _error: unknown,
@@ -423,7 +425,7 @@ function ChatPageContent() {
   ) => {
     if (!context) return;
     queryClient.setQueryData(context.key, context.previousQueryData);
-    patchOlder(() => context.previousOlder);
+    patchOlder(() => context.previousOlder, context.historyToken);
   };
   const reactMutation = useMutation({
     mutationFn: ({ messageId, choice }: { messageId: string; choice: ReactionChoice }) =>
@@ -691,6 +693,7 @@ function ChatPageContent() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations }),
       queryClient.invalidateQueries({ queryKey: queryKeys.chatRequests }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatArchivedConversations }),
     ]);
   };
 
@@ -765,21 +768,8 @@ function ChatPageContent() {
   );
 
   const [isConversationInfoOpen, setIsConversationInfoOpen] = useState(false);
-  // A message search started from the sidebar: opens that conversation's search panel with the same text.
-  const [searchSeed, setSearchSeed] = useState<{
-    conversationId: string;
-    messageId: string;
-    query: string;
-    nonce: number;
-  } | null>(null);
   const selectConversation = (conversationId: string) => {
     setSelectedId(conversationId);
-    setSearchSeed(null);
-  };
-  const openMessageSearch = (conversationId: string, messageId: string) => {
-    setSelectedId(conversationId);
-    setSearchSeed({ conversationId, messageId, query: messageQuery ?? "", nonce: Date.now() });
-    setIsConversationInfoOpen(true);
   };
 
   if (isSessionLoading || !isAuthenticated) {
@@ -1051,25 +1041,14 @@ function ChatPageContent() {
                 aria-describedby="limit-frontendappchatpagetsx-1"
                 maxLength={100}
                 enterKeyHint="search"
-                onChange={(event) => {
-                  setSearch(event.target.value);
-                  if (!event.target.value.trim())
-                    setMessageQuery((current) => (current === null ? null : ""));
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && search.trim().length >= MIN_SEARCH_CHARS)
-                    setMessageQuery(search.trim());
-                }}
-                placeholder="Search chats and messages..."
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search chats..."
                 type="text"
                 value={search}
               />
               <FieldLimit id="limit-frontendappchatpagetsx-1" value={search} max={100} />
             </>
           </div>
-          {search.trim().length >= MIN_SEARCH_CHARS && search.trim() !== messageQuery && (
-            <small className="chat-sidebar-search-hint">Press Enter to search messages</small>
-          )}
           {view === "blocked" ? (
             <BlockedPeopleList
               chatIdByUserId={directChatByUserId}
@@ -1132,14 +1111,6 @@ function ChatPageContent() {
               </button>
             )}
           </div>
-          )}
-          {messageQuery !== null && (
-            <SidebarMessageSearch
-              conversations={listData ?? []}
-              onSelect={openMessageSearch}
-              query={messageQuery}
-              userId={user?.id}
-            />
           )}
         </aside>
 
@@ -1672,7 +1643,6 @@ function ChatPageContent() {
             onJump: jumpToMessage,
           }}
           safety={safety.byUser}
-          searchSeed={searchSeed?.conversationId === activeId ? searchSeed : null}
           userId={user?.id}
           verifyLabel={verifyLabel}
           visualAttachments={flatAttachments}

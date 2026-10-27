@@ -8,6 +8,7 @@ import {
 const STORE = 'backupState';
 const KEY_RECORD = 'key';
 const QUEUE_RECORD = 'queue';
+const RESTORE_RECORD = 'restorePending';
 
 export interface StoredBackupKey {
   userId: string;
@@ -46,8 +47,20 @@ export async function saveUploadState(state: UploadState): Promise<void> {
   await encryptAndStore(await openMlsDatabase(), STORE, QUEUE_RECORD, state);
 }
 
+/** Whether a restore started on this device has not run to the end yet. */
+export async function loadRestorePending(): Promise<boolean> {
+  return (await loadAndDecryptOrMissing<boolean>(await openMlsDatabase(), STORE, RESTORE_RECORD)) === true;
+}
+
+export async function saveRestorePending(pending: boolean): Promise<void> {
+  const db = await openMlsDatabase();
+  if (pending) await encryptAndStore(db, STORE, RESTORE_RECORD, true);
+  else await deleteRecord(db, STORE, RESTORE_RECORD);
+}
+
 export async function clearBackupState(): Promise<void> {
   const db = await openMlsDatabase();
   await deleteRecord(db, STORE, KEY_RECORD);
   await deleteRecord(db, STORE, QUEUE_RECORD);
+  await deleteRecord(db, STORE, RESTORE_RECORD);
 }
