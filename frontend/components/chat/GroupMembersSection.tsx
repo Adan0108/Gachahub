@@ -164,6 +164,9 @@ export function GroupMembersSection({
 
   const itemsFor = (participant: ChatParticipant) => {
     const items: MenuItem[] = [];
+    if (participant.state === "PENDING") {
+      return [{ id: "remove", icon: <FiUserMinus aria-hidden="true" />, label: "Cancel invite", danger: true }];
+    }
     const hasSafety = Boolean(safety[participant.userId]?.pairNumber);
     if (hasSafety) {
       items.push({
@@ -288,7 +291,7 @@ export function GroupMembersSection({
           .filter((participant: ChatParticipant) => participant.state !== "DECLINED")
           .map((participant: ChatParticipant) => {
             const isSelf = participant.userId === currentUserId;
-            const items = !isSelf && participant.state === "ACTIVE" ? itemsFor(participant) : [];
+            const items = !isSelf && (participant.state === "ACTIVE" || (participant.state === "PENDING" && canManage)) ? itemsFor(participant) : [];
             return (
               <li className="chat-info-member" key={participant.userId}>
                 <MemberAvatar isSelf={isSelf} participant={participant} />

@@ -91,14 +91,14 @@ describe('planMembershipChanges', () => {
       ).toEqual([{ userId: 'u2', from: 'LEAVING', to: 'ACTIVE' }]);
     });
 
-    it('does not let an invite skip the acceptance step for someone still being removed', () => {
-      expect(() =>
+    it('asks someone still being removed to accept again, instead of putting them straight back', () => {
+      expect(
         plan({
           requests: [{ userId: 'u2', event: 'ADD_INVITE' }],
           participants: [participant('u2', 'LEAVING')],
           withLeaves: ['u2'],
         }),
-      ).toThrow('still being removed');
+      ).toEqual([{ userId: 'u2', from: 'LEAVING', to: 'PENDING' }]);
     });
   });
 

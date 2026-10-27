@@ -48,7 +48,7 @@ describe("idsInGroup", () => {
       ],
     };
 
-    expect(idsInGroup(conversation)).toEqual(["active", "pending", "joining", "leaving", "archived"]);
+    expect(idsInGroup(conversation)).toEqual(["active", "pending", "joining", "archived"]);
   });
 
   it("is empty for something that is not a conversation", () => {

@@ -71,6 +71,21 @@ describe('applyParticipantTransitions', () => {
     });
   });
 
+  it('starts fresh when someone still being removed is invited again', async () => {
+    await apply([{ userId: 'u2', from: 'LEAVING', to: 'PENDING' }]);
+
+    expect(tx.chatParticipant.updateMany).toHaveBeenCalledWith({
+      where: { conversationId: 'conv-1', userId: 'u2', state: 'LEAVING' },
+      data: {
+        state: 'PENDING',
+        pendingSince: expect.any(Date),
+        role: 'MEMBER',
+        deletedAt: null,
+        archivedAt: null,
+      },
+    });
+  });
+
   it('keeps a member’s role when a pending removal is cancelled', async () => {
     await apply([{ userId: 'u2', from: 'LEAVING', to: 'ACTIVE' }]);
 

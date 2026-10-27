@@ -116,7 +116,8 @@ export async function applyParticipantTransitions(
               data: {
                 state: change.to,
                 ...pendingSince,
-                ...(change.from === 'DECLINED'
+                ...(change.from === 'DECLINED' ||
+                (change.from === 'LEAVING' && change.to === 'PENDING')
                   ? { role: 'MEMBER', deletedAt: null, archivedAt: null }
                   : {}),
               },

@@ -43,10 +43,10 @@ export function activeMembers(conversation: unknown): ChatParticipant[] {
   );
 }
 
-/** Everyone still in the group or waiting to be: people who left, were removed or declined (`DECLINED`) are not, and can be added again. */
+/** Everyone still in the group or waiting to be: people who left, were removed or declined (`DECLINED`, or `LEAVING` until it lands) are not, and can be added again. */
 export function idsInGroup(conversation: unknown): string[] {
   return (asConversation(conversation)?.participants || [])
-    .filter((participant) => participant.state !== "DECLINED")
+    .filter((participant) => participant.state !== "DECLINED" && participant.state !== "LEAVING")
     .map((participant) => participant.userId);
 }
 

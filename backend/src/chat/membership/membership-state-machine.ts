@@ -63,13 +63,11 @@ const MLS_TRANSITIONS: Record<
     ARCHIVED: 'noop',
     BLOCKED: 'noop',
   },
-  // No LEAVING here: an invite needs the person's acceptance, and someone still
-  // being removed has just chosen (or been made) to go - putting them straight
-  // back would skip that step, while the same invite once the removal lands
-  // asks for acceptance. Retry after the removal completes.
+  // From LEAVING they are asked again and must accept; PENDING keeps their leaves, so the removal is dropped.
   ADD_INVITE: {
     NONE: 'PENDING',
     DECLINED: 'PENDING',
+    LEAVING: 'PENDING',
     PENDING: 'noop',
     JOINING: 'noop',
     ACTIVE: 'noop',

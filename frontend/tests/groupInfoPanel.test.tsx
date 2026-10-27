@@ -243,11 +243,14 @@ describe("GroupMembersSection", () => {
     expect(screen.getByRole("dialog", { name: "Add people" })).toBeInTheDocument();
   });
 
-  // Reproduces #117: someone invited and not yet answered has no menu, so nobody can cancel the invite.
-  it.fails("lets the owner cancel an invite nobody has answered yet", () => {
+  it("lets the owner cancel an invite nobody has answered yet", async () => {
     setup(group("OWNER", { participants: [person("me", "Me", "OWNER"), person("cy", "Cy", "MEMBER", "PENDING")] }));
 
-    expect(screen.getByRole("button", { name: "Options for Cy" })).toBeInTheDocument();
+    openMenu("Cy");
+    expect(screen.queryByText("Make admin")).not.toBeInTheDocument();
+    choose("Cancel invite");
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(mocks.removeGroupMembers).toHaveBeenCalledWith("g1", ["cy"]));
   });
 
   it("shows who is still invited or leaving", () => {
@@ -403,7 +406,7 @@ describe("GroupMembersSection", () => {
       expect(screen.queryByRole("checkbox", { name: "Bo" })).not.toBeInTheDocument();
     });
 
-    it("offers someone who left or declined again, but still hides members, invitees and people being removed", () => {
+    it("offers someone who left, declined or is being removed again, but still hides members and invitees", () => {
       const conversation = group("OWNER", {
         participants: [
           person("me", "Me", "OWNER"),
@@ -420,7 +423,7 @@ describe("GroupMembersSection", () => {
 
       const listed = screen.getAllByRole("checkbox").map((box) => box.getAttribute("aria-label"));
 
-      expect(listed).toEqual(["gone", "fresh"]);
+      expect(listed).toEqual(["gone", "out", "fresh"]);
     });
 
     it("ticks people, shows them as chips with a count on the button, and lets one be taken back", () => {
