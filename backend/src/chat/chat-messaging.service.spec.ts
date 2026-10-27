@@ -44,7 +44,10 @@ jest.mock('../generated/prisma/client', () => ({
 import { Prisma } from '../generated/prisma/client';
 import { MembershipChangePendingException } from '../common/exceptions/membership-change-pending.exception';
 import { ChatAccessService } from './chat-access.service';
-import { ChatMessagingService } from './chat-messaging.service';
+import {
+  ChatMessagingService,
+  DECLINED_REQUEST_RETRY_MS,
+} from './chat-messaging.service';
 
 describe('ChatMessagingService', () => {
   const repository = {
@@ -133,6 +136,7 @@ describe('ChatMessagingService', () => {
     publishReactionRemoved: jest.fn(),
     publishRequestAccepted: jest.fn(),
     publishReceiptsUpdated: jest.fn(),
+    publishConversationUpdated: jest.fn(),
   };
 
   const eventPublisher = {
@@ -140,7 +144,10 @@ describe('ChatMessagingService', () => {
     publishMany: jest.fn(),
   };
 
-  const chatMembershipService = { reopenDirect: jest.fn() };
+  const chatMembershipService = {
+    reopenDirect: jest.fn(),
+    requestDirectAgain: jest.fn(),
+  };
   const prisma = {
     $transaction: jest.fn((callback: (tx: unknown) => Promise<unknown>) =>
       callback('fake-tx'),
@@ -405,6 +412,74 @@ describe('ChatMessagingService', () => {
           expect(prisma.$transaction).not.toHaveBeenCalled();
         },
       );
+
+      // #115: the person you messaged declined; after a pause you may ask again
+      describe('when they declined your request', () => {
+        const declinedAgo = (ms: number) => ({
+          conversation: {
+            id: 'conversation-1',
+            participants: [
+              { userId: 'user-1', state: 'ACTIVE', deletedAt: null },
+              {
+                userId: 'user-2',
+                state: 'DECLINED',
+                deletedAt: null,
+                updatedAt: new Date(Date.now() - ms),
+              },
+            ],
+          },
+        });
+        const DAY = 24 * 60 * 60_000;
+
+        beforeEach(() => {
+          repository.findUserById.mockResolvedValue({
+            id: 'user-2',
+            status: 'ACTIVE',
+            messageRequestSetting: 'EVERYONE',
+          });
+        });
+
+        it('refuses a new request until the wait is over, saying how long is left', async () => {
+          repository.findDirectPair.mockResolvedValue(declinedAgo(2 * DAY));
+
+          await expect(start()).rejects.toThrow('You can ask again in 5 days');
+          expect(
+            chatMembershipService.requestDirectAgain,
+          ).not.toHaveBeenCalled();
+        });
+
+        it('sends them a new request once the wait is over', async () => {
+          repository.findDirectPair.mockResolvedValue(
+            declinedAgo(DECLINED_REQUEST_RETRY_MS + 1000),
+          );
+
+          await expect(start()).resolves.toEqual({
+            conversationId: 'conversation-1',
+            message: null,
+            recipientState: 'PENDING',
+          });
+          expect(chatMembershipService.requestDirectAgain).toHaveBeenCalledWith(
+            'conversation-1',
+            'user-2',
+          );
+        });
+
+        it('still respects who they accept messages from', async () => {
+          repository.findDirectPair.mockResolvedValue(
+            declinedAgo(DECLINED_REQUEST_RETRY_MS + 1000),
+          );
+          repository.findUserById.mockResolvedValue({
+            id: 'user-2',
+            status: 'ACTIVE',
+            messageRequestSetting: 'NO_ONE',
+          });
+
+          await expect(start()).rejects.toThrow(ForbiddenException);
+          expect(
+            chatMembershipService.requestDirectAgain,
+          ).not.toHaveBeenCalled();
+        });
+      });
 
       it('does not reopen anything for a chat you are already in', async () => {
         repository.findDirectPair.mockResolvedValue(pair('ACTIVE'));

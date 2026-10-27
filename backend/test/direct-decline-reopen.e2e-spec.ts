@@ -124,4 +124,17 @@ describe('Declining a direct chat and changing your mind (real database)', () =>
     await expect(membership.reopenDirect(conversationId, decliner)).resolves.toBeUndefined();
     expect(await stateOf(conversationId, decliner)).toBe('ACTIVE');
   });
+
+  // #115: the person who was declined asks again (after the wait, checked in ChatMessagingService)
+  it('sends a new request the other side can decline again', async () => {
+    const conversationId = await request();
+    await membership.declineInvite(conversationId, decliner);
+
+    await membership.requestDirectAgain(conversationId, decliner);
+    expect(await stateOf(conversationId, decliner)).toBe('PENDING');
+    expect(await stateOf(conversationId, asker)).toBe('ACTIVE');
+
+    await membership.declineInvite(conversationId, decliner);
+    expect(await stateOf(conversationId, decliner)).toBe('DECLINED');
+  });
 });

@@ -147,6 +147,14 @@ export class ChatMembershipService {
     await this.change(conversationId, [{ userId, event: 'DECLINE_INVITE' }]);
   }
 
+  /** Someone whose direct message request was declined asks again: the other person gets a new request to answer. */
+  async requestDirectAgain(
+    conversationId: string,
+    userId: string,
+  ): Promise<void> {
+    await this.change(conversationId, [{ userId, event: 'ADD_INVITE' }]);
+  }
+
   /** Someone who declined a direct chat starts it again: they come back as if added directly, with no invite to answer. */
   async reopenDirect(conversationId: string, userId: string): Promise<void> {
     await this.change(conversationId, [{ userId, event: 'ADD_DIRECT' }]);

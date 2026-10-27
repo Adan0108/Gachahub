@@ -38,6 +38,9 @@ type RecipientCandidate = {
   mutedUntil: Date | null;
 };
 
+// After someone declines your message request, how long until you can send them another.
+export const DECLINED_REQUEST_RETRY_MS = 7 * 24 * 60 * 60_000;
+
 /** Everything about the participants that decides who a message goes to; equal keys give equal recipients. */
 function participantsKey(participants: RecipientCandidate[]) {
   return participants
@@ -128,10 +131,37 @@ export class ChatMessagingService {
       const mine = existingPair.conversation.participants.find(
         (participant) => participant.userId === senderId,
       );
-      if (mine?.state === 'ACTIVE' && !mine.deletedAt) {
-        const theirs = existingPair.conversation.participants.find(
-          (participant) => participant.userId === dto.recipientUserId,
+      const theirs = existingPair.conversation.participants.find(
+        (participant) => participant.userId === dto.recipientUserId,
+      );
+      // They declined your request: after a pause you may ask again, and they may decline again.
+      // Block stays the way to cut someone off for good.
+      if (mine?.state === 'ACTIVE' && theirs?.state === 'DECLINED') {
+        await this.chatAccessService.assertMessageRequestAllowed(
+          senderId,
+          recipient,
         );
+        // A declined row is not written to again, so its last update is when they declined.
+        const waitMs =
+          theirs.updatedAt.getTime() + DECLINED_REQUEST_RETRY_MS - Date.now();
+        if (waitMs > 0) {
+          const days = Math.ceil(waitMs / (24 * 60 * 60_000));
+          throw new ForbiddenException(
+            `They declined your message request. You can ask again in ${days} ${days === 1 ? 'day' : 'days'}.`,
+          );
+        }
+        await this.chatMembershipService.requestDirectAgain(
+          existingPair.conversation.id,
+          dto.recipientUserId,
+        );
+        return {
+          conversationId: existingPair.conversation.id,
+          message: null,
+          recipientState: 'PENDING' as const,
+        };
+      }
+
+      if (mine?.state === 'ACTIVE' && !mine.deletedAt) {
         return {
           conversationId: existingPair.conversation.id,
           message: null,
@@ -145,9 +175,6 @@ export class ChatMessagingService {
         await this.chatMembershipService.reopenDirect(
           existingPair.conversation.id,
           senderId,
-        );
-        const theirs = existingPair.conversation.participants.find(
-          (participant) => participant.userId === dto.recipientUserId,
         );
         return {
           conversationId: existingPair.conversation.id,
