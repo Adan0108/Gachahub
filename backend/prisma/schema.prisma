@@ -28,6 +28,8 @@ model User {
   // original casing kept for display. Null until the user completes onboarding.
   username              String?               @unique @db.Citext
   onboarded             Boolean               @default(false)
+  /// A short line about the person, shown on their profile.
+  bio                   String?               @db.VarChar(160)
   /// MediaUpload backing `image` (the avatar), so a replace can release the old Cloudinary asset.
   avatarMediaUploadId   String?               @unique
   avatarMediaUpload     MediaUpload?          @relation("UserAvatarUpload", fields: [avatarMediaUploadId], references: [id], onDelete: SetNull)
