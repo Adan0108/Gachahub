@@ -416,14 +416,34 @@ model ChatParticipant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation ChatConversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rounds       ChatMembershipRound[]
 
   @@unique([conversationId, userId])
   @@index([userId, state])
   @@index([conversationId, state])
   // Partial index on pendingSince WHERE state = 'PENDING' lives only in migration 20260925140100 (Prisma can't express it).
   @@map("chat_participants")
+}
+
+/// One time someone was invited to or added to a group, so a chat can tell every round apart:
+/// "invited", then "joined the group" once they accept. Invited and never joined is a declined or
+/// expired invite.
+model ChatMembershipRound {
+  id             String    @id @default(cuid())
+  conversationId String
+  userId         String
+  /// When they were invited; null if they were added directly.
+  invitedAt      DateTime?
+  /// When they became a member: accepted the invite, or were added directly.
+  joinedAt       DateTime?
+  createdAt      DateTime  @default(now())
+
+  participant ChatParticipant @relation(fields: [conversationId, userId], references: [conversationId, userId], onDelete: Cascade)
+
+  @@index([conversationId, userId, createdAt])
+  @@map("chat_membership_rounds")
 }
 
 model ChatDirectPair {
@@ -1078,8 +1098,9 @@ model Report {
 
   createdAt DateTime @default(now())
 
-  reporter User?          @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: SetNull)
-  case     ModerationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  reporter User?                @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: SetNull)
+  case     ModerationCase       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  analyses ModerationAnalysis[]
 
   // Reporter duplication is checked while holding the case row lock. Closed
   // cases allow re-reporting; no unconditional reporter/target unique constraint.
@@ -1112,9 +1133,10 @@ model ModerationCase {
   updatedAt DateTime @updatedAt
 
   reports           Report[]
-  game              Game?    @relation(fields: [gameId], references: [id], onDelete: SetNull)
-  assignedModerator User?    @relation("ModerationCasesAssigned", fields: [assignedModeratorId], references: [id], onDelete: SetNull)
-  resolvedBy        User?    @relation("ModerationCasesResolved", fields: [resolvedById], references: [id], onDelete: SetNull)
+  analyses          ModerationAnalysis[]
+  game              Game?                @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  assignedModerator User?                @relation("ModerationCasesAssigned", fields: [assignedModeratorId], references: [id], onDelete: SetNull)
+  resolvedBy        User?                @relation("ModerationCasesResolved", fields: [resolvedById], references: [id], onDelete: SetNull)
 
   // Partial unique index moderation_cases_open_target_key in migration
   // 20261015060000: (targetType, targetId) WHERE status IN ('OPEN', 'IN_REVIEW').
@@ -1128,6 +1150,40 @@ model ModerationCase {
   @@index([targetType, targetId])
   @@index([assignedModeratorId])
   @@map("moderation_cases")
+}
+
+enum ModerationAnalysisStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+model ModerationAnalysis {
+  id                 String                   @id @default(cuid())
+  caseId             String
+  sourceReportId     String?
+  targetType         ReportTargetType
+  targetId           String
+  generation         Int
+  inputSchemaVersion Int
+  inputSnapshot      Json
+  snapshotHash       String
+  classifierProfile  String
+  status             ModerationAnalysisStatus @default(PENDING)
+
+  result Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  case              ModerationCase               @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  sourceReport      Report?                      @relation(fields: [sourceReportId], references: [id], onDelete: SetNull)
+  policyEvaluations ModerationPolicyEvaluation[]
+
+  @@unique([caseId, snapshotHash, classifierProfile])
+  @@unique([caseId, generation])
+  @@index([sourceReportId])
+  @@map("moderation_analyses")
 }
 
 enum AuditAction {
@@ -1517,4 +1573,53 @@ model PostSave {
   @@index([userId, createdAt, postId])
   @@index([postId])
   @@map("post_saves")
+}
+
+enum ModerationPolicyEvaluationStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  UNSUPPORTED
+}
+
+enum ModerationPolicyRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model ModerationPolicyEvaluation {
+  id String @id @default(cuid())
+
+  analysisId String
+  analysis   ModerationAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  policyVersion String @db.VarChar(128)
+
+  status ModerationPolicyEvaluationStatus @default(PENDING)
+
+  riskLevel     ModerationPolicyRiskLevel?
+  priorityScore Int?
+  signals       Json?
+
+  /// Successful evaluation time; retry attempts use operational metadata instead.
+  evaluatedAt DateTime?
+
+  attemptCount   Int       @default(0)
+  nextAttemptAt  DateTime?
+  leaseExpiresAt DateTime?
+  leaseToken     String?
+
+  errorCode String? @db.VarChar(64)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([analysisId, policyVersion])
+  @@index([status, nextAttemptAt])
+  @@index([leaseExpiresAt])
+  @@index([analysisId])
+  // SQL migration additionally enforces output/status consistency and value bounds.
+  @@map("moderation_policy_evaluations")
 }
