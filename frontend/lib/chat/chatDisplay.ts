@@ -1,6 +1,11 @@
 /** Shared, pure helpers for rendering a conversation/participant - used by the chat page and the group settings modal alike. */
 
-export type ChatUser = { id?: string; name?: string | null; image?: string | null };
+export type ChatUser = {
+  id?: string;
+  name?: string | null;
+  username?: string | null;
+  image?: string | null;
+};
 export type ChatParticipant = {
   userId: string;
   state?: string;
@@ -10,6 +15,8 @@ export type ChatParticipant = {
   mutedUntil?: string | null;
   isMuted?: boolean | null;
   isBlockedByMe?: boolean;
+  /** Every time they were invited (invitedAt) or added, oldest first; joinedAt is when they became a member. */
+  rounds?: Array<{ invitedAt: string | null; joinedAt: string | null }>;
 };
 export type ChatConversation = {
   id: string;
@@ -34,6 +41,16 @@ export function activeMembers(conversation: unknown): ChatParticipant[] {
   return (asConversation(conversation)?.participants || []).filter(
     (participant) => participant.state === "ACTIVE",
   );
+}
+
+/** The most people one group can hold, you included; the backend refuses more. */
+export const MAX_GROUP_MEMBERS = 100;
+
+/** Everyone still in the group or waiting to be: people who left, were removed or declined (`DECLINED`, or `LEAVING` until it lands) are not, and can be added again. */
+export function idsInGroup(conversation: unknown): string[] {
+  return (asConversation(conversation)?.participants || [])
+    .filter((participant) => participant.state !== "DECLINED" && participant.state !== "LEAVING")
+    .map((participant) => participant.userId);
 }
 
 /** Active members other than `userId` - who this device's MLS group needs to include. */

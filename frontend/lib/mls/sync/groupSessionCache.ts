@@ -19,6 +19,7 @@ export class GroupSessionCache {
   private readonly versions = new Map<ConversationId, string | undefined>();
   private readonly locks = new Map<ConversationId, Promise<unknown>>();
   private readonly taskGenerations = new Map<ConversationId, number>();
+  private readonly adoptedListeners = new Set<(conversationId: ConversationId) => void>();
 
   constructor(
     private readonly factory: GroupSessionFactory,
@@ -86,6 +87,13 @@ export class GroupSessionCache {
   async adopt(conversationId: ConversationId, session: GroupSession): Promise<void> {
     await this.persist(conversationId, session);
     this.sessions.set(conversationId, session);
+    this.adoptedListeners.forEach((listener) => listener(conversationId));
+  }
+
+  /** Runs when a group is joined, created or recovered here, so messages that failed before can be read again; returns an unsubscribe. */
+  onAdopted(listener: (conversationId: ConversationId) => void): () => void {
+    this.adoptedListeners.add(listener);
+    return () => this.adoptedListeners.delete(listener);
   }
 
   async persist(conversationId: ConversationId, session: GroupSession): Promise<void> {

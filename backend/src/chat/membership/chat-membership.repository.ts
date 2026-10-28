@@ -6,6 +6,7 @@ import {
   applyParticipantTransitions,
   type ParticipantTransition,
 } from './apply-participant-transitions';
+import { ENTITLED_TO_LEAF_STATES } from './leaf-entitlement';
 import { lockConversation } from './lock-conversation';
 import {
   planMembershipChanges,
@@ -56,6 +57,13 @@ export class ChatMembershipRepository {
     await applyParticipantTransitions(tx, conversationId, changes);
 
     return changes;
+  }
+
+  /** How many people hold a seat in the group: everyone entitled to a leaf, invitees included. */
+  countGroupMembers(tx: Prisma.TransactionClient, conversationId: string) {
+    return tx.chatParticipant.count({
+      where: { conversationId, state: { in: [...ENTITLED_TO_LEAF_STATES] } },
+    });
   }
 
   /** Returns how many participants changed. Opens its own transaction - use changeMembershipInTransaction directly when the caller needs to publish a domain event alongside this write. */

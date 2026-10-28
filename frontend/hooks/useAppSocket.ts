@@ -23,7 +23,8 @@ export function useAppSocket() {
       return undefined;
     }
 
-    const socket = io(API_BASE_URL, { withCredentials: true });
+    // Websocket only: long-polling would need every request of a socket to reach the same backend instance.
+    const socket = io(API_BASE_URL, { withCredentials: true, transports: ["websocket"] });
     let reconnectAttempts = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 

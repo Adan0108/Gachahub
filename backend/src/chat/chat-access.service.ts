@@ -200,7 +200,8 @@ export class ChatAccessService {
   /**
    * Everything that must hold before `senderId` can put new encrypted content into a
    * conversation (a message or an edit): they are in it and active, no member is mid-removal,
-   * and in a direct chat neither side has blocked, declined or been blocked out of it.
+   * and in a direct chat they have not blocked the other side. A recipient who declined or blocked
+   * is not refused here: the message is kept and simply never reaches them.
    */
   async assertSenderCanPost(
     conversation: {
@@ -239,11 +240,8 @@ export class ChatAccessService {
       return;
     }
 
+    // A recipient who declined or blocked the chat is not an error: the sender is never told (see isStateDeliveryEligible).
     await this.assertSenderHasNotBlockedRecipient(senderId, recipient.userId);
-
-    if (['BLOCKED', 'DECLINED'].includes(recipient.state)) {
-      throw new ForbiddenException('Recipient is not accepting messages');
-    }
   }
 
   /**
@@ -254,7 +252,7 @@ export class ChatAccessService {
   isStateDeliveryEligible(conversationType: string, state: string): boolean {
     return conversationType === 'GROUP'
       ? ['ACTIVE', 'ARCHIVED'].includes(state)
-      : true;
+      : !['DECLINED', 'BLOCKED'].includes(state);
   }
 
   /**
@@ -311,9 +309,7 @@ export class ChatAccessService {
     target: { id: string; messageRequestSetting: MessageRequestSetting },
   ) {
     if (target.messageRequestSetting === 'NO_ONE') {
-      throw new ForbiddenException(
-        `User ${target.id} is not accepting new messages`,
-      );
+      throw new ForbiddenException('This person is not accepting new messages');
     }
 
     const [actorFollowsTargetResult, targetFollowsActorResult] =
@@ -326,7 +322,7 @@ export class ChatAccessService {
 
     if (target.messageRequestSetting === 'FOLLOWERS' && !targetFollowsActor) {
       throw new ForbiddenException(
-        `User ${target.id} only accepts messages from people they follow`,
+        'This person only accepts messages from people they follow',
       );
     }
 
@@ -384,11 +380,11 @@ export class ChatAccessService {
   }
 
   /**
-   * Verifies the caller can manage a group conversation.
+   * Verifies the caller is an active member of a group conversation.
    *
-   * Group management is scoped to active OWNER and ADMIN participants.
+   * Any member may rename the group, change its photo and add people.
    */
-  async assertCanManageGroup(userId: string, conversationId: string) {
+  async assertIsGroupMember(userId: string, conversationId: string) {
     const conversation =
       await this.chatRepository.findConversationWithParticipants(
         conversationId,
@@ -405,6 +401,17 @@ export class ChatAccessService {
     if (!participant || participant.state !== 'ACTIVE') {
       throw new ForbiddenException('You are not in this group');
     }
+
+    return participant;
+  }
+
+  /**
+   * Verifies the caller can manage a group conversation.
+   *
+   * Removing people is scoped to active OWNER and ADMIN participants.
+   */
+  async assertCanManageGroup(userId: string, conversationId: string) {
+    const participant = await this.assertIsGroupMember(userId, conversationId);
 
     if (!['OWNER', 'ADMIN'].includes(participant.role)) {
       throw new ForbiddenException('Group admin permission required');

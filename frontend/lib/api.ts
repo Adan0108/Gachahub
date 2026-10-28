@@ -595,6 +595,7 @@ function encryptedMessagePayload({
   clientMessageId,
   replyToId,
   media,
+  mentionUserIds,
 }: any) {
   return {
     ciphertext,
@@ -602,6 +603,7 @@ function encryptedMessagePayload({
     ...(contentType ? { contentType } : {}),
     ...(clientMessageId ? { clientMessageId } : {}),
     ...(replyToId ? { replyToId } : {}),
+    ...(mentionUserIds?.length ? { mentionUserIds } : {}),
     ...(media?.length ? { media } : {}),
   };
 }
@@ -883,7 +885,8 @@ export const api = {
       undefined,
       { method: "PATCH" },
     ),
-  getChatConversations: () => request(backendRoutes.chatConversations),
+  // One inbox page: `limit` newest, after `beforeUpdatedAt`/`beforeId` when given (pinned ones come on the first).
+  getChatConversations: (page: any = {}) => request(withQuery(backendRoutes.chatConversations, page)),
   getArchivedChatConversations: () => request(backendRoutes.chatArchivedConversations),
   /** @param {{ limit?: number, cursor?: string }} [query] @param {{ signal?: AbortSignal }} [options] */
   getNotifications: (query: any = {}, options: any = {}) =>

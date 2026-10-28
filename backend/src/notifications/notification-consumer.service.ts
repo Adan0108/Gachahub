@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Kafka, type Consumer, type EachMessagePayload } from 'kafkajs';
 
+import { MAX_GROUP_MEMBERS } from '../chat/group-size-policy';
 import type {
   DomainEventPayloadMap,
   DomainEventType,
@@ -16,6 +17,7 @@ import type {
 } from '../generated/prisma/client';
 import { KAFKA_TOPICS } from '../kafka/kafka-topics';
 import { KafkaBackgroundStart } from '../kafka/kafka-background-start';
+import { MAX_MENTIONS_PER_TEXT } from '../mentions/mention-parser';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from './notification.service';
 import { ProcessedEventRepository } from './processed-event.repository';
@@ -34,8 +36,8 @@ type ChatMessageSentPayload = DomainEventPayloadMap['chat.message.sent'];
 type ChatParticipantAddedPayload =
   DomainEventPayloadMap['chat.participant.added'];
 
-/** Group member cap (CreateGroupChatDto/UpdateGroupMembersDto: 99) plus one, so recipientUserIds can never legitimately exceed it. */
-const MAX_CHAT_RECIPIENTS = 100;
+/** A message's recipients are everyone in its group but the sender, so they never legitimately exceed the group cap. */
+const MAX_CHAT_RECIPIENTS = MAX_GROUP_MEMBERS;
 
 /** An event that can never succeed, no matter how many times Kafka redelivers it - handleMessage logs and drops it instead of retrying. */
 export class PermanentEventError extends Error {}
@@ -72,7 +74,15 @@ function asChatMessageSentPayload(
                 ? 'recipientUserIds is not an array of strings'
                 : candidate.recipientUserIds.length > MAX_CHAT_RECIPIENTS
                   ? `recipientUserIds has ${candidate.recipientUserIds.length} entries`
-                  : undefined;
+                  : candidate.mentionedUserIds !== undefined &&
+                      (!Array.isArray(candidate.mentionedUserIds) ||
+                        candidate.mentionedUserIds.length >
+                          MAX_MENTIONS_PER_TEXT ||
+                        !candidate.mentionedUserIds.every(
+                          (id) => typeof id === 'string',
+                        ))
+                    ? 'mentionedUserIds is not a short array of strings'
+                    : undefined;
 
   if (problem) {
     throw new PermanentEventError(
@@ -466,10 +476,12 @@ export class NotificationConsumerService
   ): Promise<NotificationRecord[]> {
     const payload = asChatMessageSentPayload(event.payload, event.eventId);
 
+    const mentionedIds = payload.mentionedUserIds ?? [];
+
     // Someone reading the chat as the message lands has already seen it; nothing to notify.
     const alreadyRead = await this.findRecipientsWhoRead(
       payload.messageId,
-      payload.recipientUserIds,
+      [...new Set([...payload.recipientUserIds, ...mentionedIds])],
       transaction,
     );
     const recipientUserIds = payload.recipientUserIds.filter(
@@ -498,9 +510,29 @@ export class NotificationConsumerService
         )
       : null;
 
-    // Exclude the reply target so they don't get both notification types.
+    // Mentioned people may have muted the chat, so they are not limited to recipientUserIds.
+    const mentionedUserIds = mentionedIds.filter(
+      (id) => !alreadyRead.has(id) && id !== repliedToUserId,
+    );
+    const mentionNotifications: NotificationRecord[] = [];
+    for (const recipientId of mentionedUserIds) {
+      const notification = await this.notificationService.createNotification(
+        {
+          recipientId,
+          actorId: payload.senderId,
+          type: 'USER_MENTIONED',
+          entityType: 'MESSAGE',
+          entityId: payload.messageId,
+          conversationId: payload.conversationId,
+        },
+        transaction,
+      );
+      if (notification) mentionNotifications.push(notification);
+    }
+
+    // Exclude the reply target and the mentioned so nobody gets two notifications for one message.
     const receivedRecipientIds = recipientUserIds.filter(
-      (id) => id !== repliedToUserId,
+      (id) => id !== repliedToUserId && !mentionedUserIds.includes(id),
     );
 
     // One stacked row per person and conversation, not one per message
@@ -515,9 +547,11 @@ export class NotificationConsumerService
         transaction,
       );
 
-    return replyNotification
-      ? [replyNotification, ...receivedNotifications]
-      : receivedNotifications;
+    return [
+      ...(replyNotification ? [replyNotification] : []),
+      ...mentionNotifications,
+      ...receivedNotifications,
+    ];
   }
 
   /** Recipients whose device has already read the message by the time its event is handled. */

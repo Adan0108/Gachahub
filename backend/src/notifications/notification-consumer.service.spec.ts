@@ -637,6 +637,48 @@ describe('NotificationConsumerService', () => {
       );
     });
 
+    it('sends USER_MENTIONED to the mentioned, muted or not, instead of the stacked message notification', async () => {
+      claimMock.mockResolvedValue(true);
+      createNotificationMock.mockResolvedValue({ id: 'notification-m' });
+
+      await handleEvent(service, {
+        eventId: 'chat-event-mention',
+        type: 'chat.message.sent',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateId: 'conversation-1',
+        payload: {
+          messageId: 'message-1',
+          conversationId: 'conversation-1',
+          senderId: 'user-a',
+          replyToMessageId: null,
+          replyToSenderId: null,
+          // user-muted muted the chat, so only the mention list names them
+          recipientUserIds: ['user-b', 'user-c'],
+          mentionedUserIds: ['user-c', 'user-muted'],
+        },
+      });
+
+      expect(createNotificationMock).toHaveBeenCalledTimes(2);
+      for (const recipientId of ['user-c', 'user-muted']) {
+        expect(createNotificationMock).toHaveBeenCalledWith(
+          {
+            recipientId,
+            actorId: 'user-a',
+            type: 'USER_MENTIONED',
+            entityType: 'MESSAGE',
+            entityId: 'message-1',
+            conversationId: 'conversation-1',
+          },
+          transactionMock,
+        );
+      }
+      expect(stackMessageNotificationsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ recipientIds: ['user-b'] }),
+        transactionMock,
+      );
+    });
+
     /**
      * Verifies that a reply produces MESSAGE_REPLIED for the original
      * message's author AND MESSAGE_RECEIVED for everyone else notifiable -

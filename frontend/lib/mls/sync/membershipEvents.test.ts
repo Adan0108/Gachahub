@@ -44,10 +44,9 @@ describe('deriveMembershipEvents', () => {
     expect(events.map((event) => event.kind)).toEqual(['joined']);
   });
 
-  it('reports an extra device of a present member as a new sign-in', () => {
+  it('says nothing when a present member signs in on another device', () => {
     const phone = device('bob', 'bob-2');
-    const events = derive({ added: [phone] }, [device('bob', 'bob-1'), phone]);
-    expect(events).toMatchObject([{ kind: 'device-added', userId: 'bob', deviceId: 'bob-2' }]);
+    expect(derive({ added: [phone] }, [device('bob', 'bob-1'), phone])).toEqual([]);
   });
 
   it('reports the last device leaving as a leave', () => {
@@ -59,10 +58,9 @@ describe('deriveMembershipEvents', () => {
     expect(derive({ removed: [device('bob', 'bob-2')] }, [device('bob', 'bob-1')])).toEqual([]);
   });
 
-  it('treats a device swap for a present member as a new sign-in, not a leave', () => {
+  it('says nothing for a device swap of a present member, not a leave', () => {
     const fresh = device('bob', 'bob-3');
-    const events = derive({ added: [fresh], removed: [device('bob', 'bob-1')] }, [fresh]);
-    expect(events.map((event) => event.kind)).toEqual(['device-added']);
+    expect(derive({ added: [fresh], removed: [device('bob', 'bob-1')] }, [fresh])).toEqual([]);
   });
 
   it('never announces this device itself', () => {

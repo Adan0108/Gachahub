@@ -38,9 +38,9 @@ export function ComposerEmojiButton({
         floatingPortal(
           <div className="message-actions-picker" ref={menuRef} style={floatingStyle(style)}>
             <EmojiPicker
-              onPick={(choice: ReactionChoice) => {
+              onPick={(choice: ReactionChoice, keepOpen: boolean) => {
                 onPick(choice);
-                setIsOpen(false);
+                if (!keepOpen) setIsOpen(false);
               }}
             />
           </div>,

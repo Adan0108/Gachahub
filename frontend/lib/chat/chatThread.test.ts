@@ -39,18 +39,89 @@ const shape = (items: ReturnType<typeof buildThreadItems>) =>
   );
 
 describe('eventsForDisplay', () => {
-  it('keeps every event kind for a group', () => {
-    const events = [event('e1', 0), { ...event('e2', 1), kind: 'device-added' as const }];
+  type Round = { invitedAt?: string; joinedAt?: string };
+  const group = (participants: Array<{ userId: string; rounds: Round[] }>) => ({
+    type: 'GROUP',
+    participants: participants.map(({ userId, rounds }) => ({
+      userId,
+      rounds: rounds.map((round) => ({ invitedAt: round.invitedAt ?? null, joinedAt: round.joinedAt ?? null })),
+    })),
+  });
+  const verified = (id: string, userId: string, minute: number, kind: 'joined' | 'left' = 'joined') => ({
+    ...event(id, minute),
+    userId,
+    kind,
+  });
+  const kinds = (events: ReturnType<typeof eventsForDisplay>) =>
+    events.map((item) => `${item.kind}:${item.userId}@${new Date(item.at).getUTCMinutes()}`);
 
-    expect(eventsForDisplay(events, true)).toEqual(events);
+  // A invites B and C at minute 0; B accepts at minute 2; A and B talk; C answers at minute 10.
+  it('says B and C are invited, then that B joined when B accepted', () => {
+    const shown = eventsForDisplay(
+      [verified('b-in', 'bob', 0), verified('c-in', 'cy', 0)],
+      group([
+        { userId: 'bob', rounds: [{ invitedAt: at(0), joinedAt: at(2) }] },
+        { userId: 'cy', rounds: [{ invitedAt: at(0) }] },
+      ]),
+    );
+
+    expect(kinds(shown)).toEqual(['invited:bob@0', 'invited:cy@0', 'accepted:bob@2']);
   });
 
-  it('drops joined/left for a DM, keeping only new-device notices', () => {
-    const joined = event('e1', 0);
-    const left = { ...event('e2', 1), kind: 'left' as const };
-    const deviceAdded = { ...event('e3', 2), kind: 'device-added' as const };
+  it('says C joined when C accepts later, at that time', () => {
+    const shown = eventsForDisplay(
+      [verified('c-in', 'cy', 0)],
+      group([{ userId: 'cy', rounds: [{ invitedAt: at(0), joinedAt: at(10) }] }]),
+    );
 
-    expect(eventsForDisplay([joined, left, deviceAdded], false)).toEqual([deviceAdded]);
+    expect(kinds(shown)).toEqual(['invited:cy@0', 'accepted:cy@10']);
+  });
+
+  it('says nothing when C declines: no "left", no "declined"', () => {
+    const shown = eventsForDisplay(
+      [verified('c-in', 'cy', 0), verified('c-out', 'cy', 10, 'left')],
+      group([{ userId: 'cy', rounds: [{ invitedAt: at(0) }] }]),
+    );
+
+    expect(kinds(shown)).toEqual(['invited:cy@0']);
+  });
+
+  it('keeps "joined" for someone added directly, and "left" for a member who leaves', () => {
+    const shown = eventsForDisplay(
+      [verified('d-in', 'dee', 0), verified('d-out', 'dee', 5, 'left')],
+      group([{ userId: 'dee', rounds: [{ joinedAt: at(0) }] }]),
+    );
+
+    expect(kinds(shown)).toEqual(['joined:dee@0', 'left:dee@5']);
+  });
+
+  // Invited at 0, accepted at 2, left at 5, invited again at 20: every line stays.
+  it('keeps the earlier rounds when someone is invited again', () => {
+    const shown = eventsForDisplay(
+      [verified('in-1', 'bob', 0), verified('out-1', 'bob', 5, 'left'), verified('in-2', 'bob', 20)],
+      group([{ userId: 'bob', rounds: [{ invitedAt: at(0), joinedAt: at(2) }, { invitedAt: at(20) }] }]),
+    );
+
+    expect(kinds(shown)).toEqual(['invited:bob@0', 'left:bob@5', 'invited:bob@20', 'accepted:bob@2']);
+  });
+
+  it('still hides a declined first invite after a second one', () => {
+    const shown = eventsForDisplay(
+      [verified('in-1', 'cy', 0), verified('out-1', 'cy', 3, 'left'), verified('in-2', 'cy', 20)],
+      group([{ userId: 'cy', rounds: [{ invitedAt: at(0) }, { invitedAt: at(20), joinedAt: at(21) }] }]),
+    );
+
+    expect(kinds(shown)).toEqual(['invited:cy@0', 'invited:cy@20', 'accepted:cy@21']);
+  });
+
+  it('drops the new-device notices older builds stored', () => {
+    const stored = { ...event('old', 1), kind: 'device-added' } as unknown as MembershipEvent;
+
+    expect(eventsForDisplay([stored], group([]))).toEqual([]);
+  });
+
+  it('shows nothing in a DM', () => {
+    expect(eventsForDisplay([event('e1', 0)], { type: 'DIRECT', participants: [] })).toEqual([]);
   });
 });
 
@@ -146,6 +217,39 @@ describe('buildThreadItems', () => {
       collapseLeading: true,
     });
     expect(shape(items)).toEqual(['timestamp', 'a', 'mid', 'tie', 'b', 'c', 'late']);
+  });
+
+  // They used to pile up at the bottom, under the loading spinner.
+  it('shows no membership events while the thread is loading or still decrypting', () => {
+    const events = [event('joined', 3)];
+    const loading = buildThreadItems({
+      messages: [],
+      decrypted: {},
+      events,
+      collapseLeading: true,
+      loaded: false,
+    });
+    const decrypting = buildThreadItems({
+      messages: [message('a', 1), message('b', 5)],
+      decrypted: decrypted({ a: 'ok', b: 'pending' }),
+      events,
+      collapseLeading: true,
+    });
+
+    expect(loading).toEqual([]);
+    expect(shape(decrypting)).toEqual(['timestamp', 'a']);
+  });
+
+  it('leaves out events from before the oldest loaded message while older history is unloaded', () => {
+    const items = buildThreadItems({
+      messages: [message('a', 5), message('b', 9)],
+      decrypted: decrypted({ a: 'ok', b: 'ok' }),
+      events: [event('long-ago', 1), event('between', 7)],
+      collapseLeading: true,
+      hasOlderHistory: true,
+    });
+
+    expect(shape(items)).toEqual(['timestamp', 'a', 'between', 'b']);
   });
 
   it('records each message index in the original list', () => {
@@ -279,11 +383,16 @@ describe('membershipEventText', () => {
 
   it('words each kind, falling back for an unknown name', () => {
     expect(membershipEventText(base, 'Bob', false)).toBe('Bob joined the group');
-    expect(membershipEventText({ ...base, kind: 'left' }, undefined, false)).toBe(
-      'A member left or was removed from the group',
+    expect(membershipEventText({ ...base, kind: 'invited' }, 'Bob', false)).toBe(
+      'Bob was invited to the group',
     );
-    expect(membershipEventText({ ...base, kind: 'device-added' }, undefined, true)).toBe(
-      'You signed in on a new device',
+    expect(membershipEventText({ ...base, kind: 'invited' }, undefined, true)).toBe(
+      'You were invited to the group',
+    );
+    expect(membershipEventText({ ...base, kind: 'accepted' }, 'Bob', false)).toBe('Bob joined the group');
+    expect(membershipEventText({ ...base, kind: 'accepted' }, undefined, true)).toBe('You joined the group');
+    expect(membershipEventText({ ...base, kind: 'left' }, undefined, false)).toBe(
+      'Deleted user left or was removed from the group',
     );
   });
 });

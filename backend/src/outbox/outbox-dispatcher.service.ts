@@ -14,6 +14,9 @@ import { OutboxRepository } from './outbox.repository';
 
 const DISPATCH_INTERVAL_MS = 2_000;
 const BATCH_SIZE = 20;
+// A full batch means more is waiting: keep going this many batches into one tick instead of
+// waiting 2 s each, which capped the dispatcher at 10 events a second however fast it ran.
+const MAX_BATCHES_PER_CYCLE = 50;
 
 const MAX_ATTEMPTS = 8;
 
@@ -69,10 +72,14 @@ export class OutboxDispatcherService implements OnModuleInit, OnModuleDestroy {
       // is unavailable. The producer retries startup independently of HTTP.
       if (!this.kafkaProducer.isConnected) return;
 
-      const events = await this.outboxRepository.findReady(BATCH_SIZE);
+      for (let batch = 0; batch < MAX_BATCHES_PER_CYCLE; batch += 1) {
+        const events = await this.outboxRepository.findReady(BATCH_SIZE);
 
-      for (const event of events) {
-        await this.processEvent(event);
+        for (const event of events) {
+          await this.processEvent(event);
+        }
+
+        if (events.length < BATCH_SIZE) break;
       }
     } catch (error) {
       this.logger.error(

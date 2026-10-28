@@ -59,6 +59,18 @@ describe("useConversationPreviews", () => {
     expect(mocks.get).not.toHaveBeenCalled();
   });
 
+  it("swaps a loaded preview for the unsent wording when that same last message is unsent", async () => {
+    mocks.get.mockResolvedValue(text("secret"));
+    const { result, rerender } = renderHook(({ list }) => useConversationPreviews(list, "me"), {
+      initialProps: { list: [convo("c1", msg("m1"))] },
+    });
+    await waitFor(() => expect(result.current).toEqual({ m1: "secret" }));
+
+    rerender({ list: [convo("c1", msg("m1", { status: "DELETED" }))] });
+
+    await waitFor(() => expect(result.current).toEqual({ m1: "Message unsent" }));
+  });
+
   it("fills in a preview the moment a message is saved", async () => {
     const list = [convo("c1", msg("m1"))];
     const { result } = renderHook(() => useConversationPreviews(list, "me"));

@@ -70,6 +70,28 @@ describe('sendAttachmentsWithCache', () => {
     expect(api.uploadChatBlobs).not.toHaveBeenCalled();
   });
 
+  // R2-11: a reply or @mention with a file attached keeps both
+  it('sends the reply target and mentions with the attachment, on a retry too', async () => {
+    const { api } = await import('../../api');
+    const engine = {
+      getCurrentEpoch: vi.fn().mockResolvedValue(1),
+      encryptMessage: vi.fn().mockResolvedValue({ wireBytes: new Uint8Array([1]), epoch: 1 }),
+    };
+    vi.mocked(api.sendChatMessage)
+      .mockRejectedValueOnce(Object.assign(new Error('down'), { status: 500 }))
+      .mockResolvedValue({ message: { id: 'msg-1' } });
+    const cache = new Map([['client-1', new Map([[0, uploaded[0]!]])]]);
+    const send = () =>
+      sendAttachmentsWithCache({ ...params(cache, engine), replyToId: 'msg-0', mentionUserIds: ['user-bob'] });
+
+    await expect(send()).rejects.toThrow('down');
+    await send();
+
+    for (const [, body] of vi.mocked(api.sendChatMessage).mock.calls) {
+      expect(body).toMatchObject({ replyToId: 'msg-0', mentionUserIds: ['user-bob'] });
+    }
+  });
+
   it('uploads once, then reuses the result when the send is retried', async () => {
     const { api } = await import('../../api');
     vi.mocked(api.uploadChatBlobs).mockResolvedValue(['up-1']);

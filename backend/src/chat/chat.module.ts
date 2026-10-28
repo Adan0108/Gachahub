@@ -8,6 +8,7 @@ import { ChatMessagingService } from './chat-messaging.service';
 import { ChatGroupPhotoRepository } from './chat-group-photo.repository';
 import { ChatGroupPhotoService } from './chat-group-photo.service';
 import { ChatGroupService } from './chat-group.service';
+import { GroupChangeNotifier } from './group-change-notifier.service';
 import { ChatInboxService } from './chat-inbox.service';
 import { ChatEmotesService } from './chat-emotes.service';
 import { ChatMessageActionsService } from './chat-message-actions.service';
@@ -69,6 +70,7 @@ import { NotificationModule } from '../notifications/notification.module';
     ChatGroupService,
     ChatGroupPhotoRepository,
     ChatGroupPhotoService,
+    GroupChangeNotifier,
     ChatInboxService,
     ChatMessageActionsService,
     ChatEmotesService,

@@ -105,7 +105,8 @@ export function ConversationInfoPanel({
   const [isAddingPeople, setIsAddingPeople] = useState(false);
   const isBlocked = Boolean(blockedPeerOf(conversation, userId));
   const myRole = myParticipant(conversation, userId)?.role;
-  const canManageGroup = isGroup && (myRole === "OWNER" || myRole === "ADMIN");
+  // Any member can rename, change the photo and add people; only owner/admin remove people.
+  const canEditGroup = isGroup && Boolean(myRole);
   const toastTimerRef = useRef<number | undefined>(undefined);
 
   useEffect(() => () => window.clearTimeout(toastTimerRef.current), []);
@@ -142,7 +143,7 @@ export function ConversationInfoPanel({
             <div className="chat-info-banner" />
             <div className="chat-info-profile">
               {isGroup ? (
-                <GroupIdentity canManage={canManageGroup} conversation={conversation} onChanged={onGroupChanged} />
+                <GroupIdentity canManage={canEditGroup} conversation={conversation} onChanged={onGroupChanged} />
               ) : (
                 <>
                   <span className="chat-avatar large">
@@ -157,7 +158,7 @@ export function ConversationInfoPanel({
             </div>
 
             <div className="chat-info-quick-actions">
-              {canManageGroup ? (
+              {canEditGroup ? (
                 <button
                   onClick={() => {
                     setIsMembersOpen(true);

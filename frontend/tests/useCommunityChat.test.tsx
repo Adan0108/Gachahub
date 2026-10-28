@@ -168,6 +168,49 @@ describe("useCommunityChat", () => {
       await waitFor(() => expect(hook.result.current.pending).toEqual([]));
     });
 
+    // A burst past the server's limit is held back here instead of failing there.
+    it("sends five messages in a row, then holds the sixth back and says how long to wait", async () => {
+      mocks.api.sendCommunityMessage.mockResolvedValue(message("m3", 3));
+      const hook = await loaded(setup());
+
+      await act(async () => {
+        for (let i = 0; i < 6; i += 1) await hook.result.current.send(`hi ${i}`, null);
+      });
+
+      expect(mocks.api.sendCommunityMessage).toHaveBeenCalledTimes(5);
+      expect(hook.result.current.pending).toEqual([]);
+      expect(hook.result.current.sendCooldownSeconds).toBeGreaterThan(0);
+    });
+
+    it("lets moderators send as fast as they like, as the server does", async () => {
+      mocks.api.getCommunityChannels.mockResolvedValue({
+        channels: [CHANNEL],
+        canModerate: true,
+        isMember: true,
+      });
+      mocks.api.sendCommunityMessage.mockResolvedValue(message("m3", 3));
+      const hook = await loaded(setup());
+      await waitFor(() => expect(hook.result.current.canModerate).toBe(true));
+
+      await act(async () => {
+        for (let i = 0; i < 6; i += 1) await hook.result.current.send(`hi ${i}`, null);
+      });
+
+      expect(mocks.api.sendCommunityMessage).toHaveBeenCalledTimes(6);
+      expect(hook.result.current.sendCooldownSeconds).toBe(0);
+    });
+
+    it("waits as long as the server says when it refuses a message as too fast", async () => {
+      mocks.api.sendCommunityMessage.mockRejectedValue(
+        Object.assign(new Error("Slow down"), { status: 429, retryAfterSeconds: 4 }),
+      );
+      const hook = await loaded(setup());
+
+      await act(() => hook.result.current.send("hello", null));
+
+      await waitFor(() => expect(hook.result.current.sendCooldownSeconds).toBe(4));
+    });
+
     describe("with pictures", () => {
       const file = (name: any) => new File(["x"], name, { type: "image/png" });
 

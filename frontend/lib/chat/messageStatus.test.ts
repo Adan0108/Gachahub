@@ -159,11 +159,20 @@ describe('receiptDisplay', () => {
     expect(result.readersAt.size).toBe(0);
   });
 
-  it('never places readers on messages sent by someone else', () => {
-    const result = receiptDisplay([{ ...theirs('m1'), receipts: [{ userId: 'ann', readAt: READ }] }], 'me', ['ann'], {
-      isGroup: true,
-    });
+  it('puts a member under the last message they read even when someone else sent it', () => {
+    const result = receiptDisplay(
+      [
+        mine('m1', [{ userId: 'ann', readAt: READ }]),
+        { ...theirs('m2'), receipts: [{ userId: 'ann', readAt: READ }, { userId: 'bob', readAt: READ }] },
+        { ...theirs('m3'), receipts: [{ userId: 'bob', readAt: READ }] },
+      ],
+      'me',
+      ['ann', 'bob'],
+      { isGroup: true },
+    );
 
-    expect(result.readersAt.size).toBe(0);
+    expect(result.readersAt.get('m2')).toEqual(['ann']);
+    expect(result.readersAt.get('m3')).toEqual(['bob']);
+    expect(result.readersAt.has('m1')).toBe(false);
   });
 });

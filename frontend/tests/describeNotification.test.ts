@@ -145,8 +145,8 @@ describe("describeNotification", () => {
     });
 
     it("names the sender and counts the messages in a group", () => {
-      expect(describeNotification(stack({ count: 1, conversation: squad })).action).toBe("Rover sent a message");
-      expect(describeNotification(stack({ count: 12, conversation: squad })).action).toBe("Rover sent 12 messages");
+      expect(describeNotification(stack({ count: 1, conversation: squad })).action).toBe("Rover sent a message in Squad");
+      expect(describeNotification(stack({ count: 12, conversation: squad })).action).toBe("Rover sent 12 messages in Squad");
     });
 
     it("falls back to the old wording for a row with no count or conversation", () => {
@@ -170,10 +170,10 @@ describe("describeNotification", () => {
 
       expect(describeNotification(row("MESSAGE_REPLIED", "MESSAGE"))).toMatchObject({
         title: "Squad",
-        action: "Rover replied to your message",
+        action: "Rover replied to your message in Squad",
       });
-      expect(describeNotification(row("GROUP_ADDED", "CONVERSATION")).action).toBe("Rover added you");
-      expect(describeNotification(row("GROUP_INVITE_PENDING", "CONVERSATION")).action).toBe("Rover invited you");
+      expect(describeNotification(row("GROUP_ADDED", "CONVERSATION")).action).toBe("Rover added you to Squad");
+      expect(describeNotification(row("GROUP_INVITE_PENDING", "CONVERSATION")).action).toBe("Rover invited you to Squad");
     });
 
     it("calls a group with no name Unnamed group", () => {
@@ -181,7 +181,7 @@ describe("describeNotification", () => {
 
       expect(describeNotification({ ...base, type: "GROUP_ADDED", entityType: "CONVERSATION", conversation: untitled })).toMatchObject({
         title: "Unnamed group",
-        action: "Rover added you",
+        action: "Rover added you to Unnamed group",
       });
     });
   });

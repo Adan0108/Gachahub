@@ -1,7 +1,7 @@
 import { api } from '../../api';
 import { bytesToBase64, base64ToBytes } from '../storage/base64';
 import type { GroupSession, GroupSessionFactory } from '../contract/client';
-import { CommitApplier, handshakeTime, type Handshake } from './commitApplier';
+import { CommitApplier, handshakeTime, type ApplicationResult, type Handshake } from './commitApplier';
 import { CommitVerifier } from './commitVerifier';
 import { publishableGroupInfo } from './groupInfoPublishing';
 import { RecoveryCooldown } from './recoveryCooldown';
@@ -28,8 +28,8 @@ import {
 import {
   GroupStateUnavailableError,
   EpochConflictError,
+  GroupCreationLostError,
   MembershipMismatchError,
-  NoEncryptableMembersError,
 } from '../contract/errors';
 import { onMlsSecretsWiped } from '../storage/mlsEncryptedStore';
 import { parseDeclaredMembership } from './declaredMembership';
@@ -146,7 +146,10 @@ export class SyncEngine {
     return this.seedNewGroupWithMembers(conversationId, [userId]);
   }
 
-  /** Seeds a group this device has just created: one Commit adds every active device of `userIds` and of this user */
+  /**
+   * Seeds a group this device has just created: one Commit adds every active device of `userIds` and of this user.
+   * Throws GroupCreationLostError, with the new local group dropped, when someone else's Commit won the first epoch.
+   */
   async seedNewGroupWithMembers(
     conversationId: ConversationId,
     userIds: UserId[],
@@ -161,12 +164,8 @@ export class SyncEngine {
     );
     added.push(...myOtherDevices.map((claimed) => toKeyPackageOffer(this.ownUserId, claimed)));
 
-    // Without a Commit this device's leaf is never recorded server-side, so nothing could ever bootstrap the group
-    if (added.length === 0) {
-      throw new NoEncryptableMembersError(conversationId);
-    }
-
-    return this.submitMembershipChange(conversationId, { added, removed: [] });
+    // Still committed with nobody to add: that Commit is what records this device's leaf server-side, so the group can start.
+    return this.submitMembershipChange(conversationId, { added, removed: [] }, { groupIsNew: true });
   }
 
   reconcileMembership(options: ReconcileOptions = {}): Promise<ReconcileSummary> {
@@ -218,6 +217,10 @@ export class SyncEngine {
     return this.recovery.waitMs(conversationId);
   }
 
+  onGroupAdopted(listener: (conversationId: ConversationId) => void): () => void {
+    return this.cache.onAdopted(listener);
+  }
+
   processPendingWelcomes(): ReturnType<WelcomeJoiner['processPendingWelcomes']> {
     return this.welcomes.processPendingWelcomes();
   }
@@ -226,6 +229,7 @@ export class SyncEngine {
   async submitMembershipChange(
     conversationId: ConversationId,
     change: MembershipChangeRequest,
+    options: { groupIsNew?: boolean } = {},
   ): Promise<Epoch> {
     return this.cache.runExclusive(conversationId, async () => {
       const session = await this.openSession(conversationId);
@@ -272,6 +276,12 @@ export class SyncEngine {
         // The merged copy is the rejected Commit's: it must not survive in memory whatever fails below
         this.cache.drop(conversationId);
         await this.pendingCommits.discard(conversationId);
+        // A group still at its first epoch has never had a Commit accepted, so it is ours alone
+        if (options.groupIsNew && expectedEpoch === 0) {
+          // The winner's Commit belongs to another group with the same name, so it cannot be applied to this one
+          await this.forgetConversationLocked(conversationId);
+          throw new GroupCreationLostError(conversationId);
+        }
         const reloaded = await this.factory.restore(conversationId, epochBefore);
         this.cache.set(conversationId, reloaded);
         await this.applier.applyBatch(conversationId, reloaded, [response.handshake]);
@@ -322,11 +332,12 @@ export class SyncEngine {
   async processIncoming(
     conversationId: ConversationId,
     wireBytes: Uint8Array,
+    keep?: (message: ApplicationResult) => Promise<void>,
   ): Promise<ProcessResult> {
     return this.cache.runExclusive(conversationId, async () => {
       // Reading at the current epoch does not need a pending Commit settled, so an unreachable server must not block it
       const session = await this.openSession(conversationId, 'best-effort');
-      return this.applier.applyIncoming(conversationId, session, wireBytes);
+      return this.applier.applyIncoming(conversationId, session, wireBytes, keep);
     });
   }
 

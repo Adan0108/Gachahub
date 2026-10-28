@@ -44,6 +44,33 @@
   outline: none;
 }
 
+/* The chip's remove button: a small round icon, not a boxed form button. Focus shows as the
+   hover fill instead of the ring removed above. */
+.user-picker .user-picker-chip button {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.user-picker .user-picker-chip button:hover,
+.user-picker .user-picker-chip button:focus-visible {
+  background: var(--line);
+  color: var(--text);
+}
+
+.user-picker .user-picker-chip button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .user-picker-results {
   margin: 0;
   padding: 4px;

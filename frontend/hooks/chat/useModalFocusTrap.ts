@@ -33,6 +33,7 @@ export function useModalFocusTrap(
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
         onClose();
         return;
       }

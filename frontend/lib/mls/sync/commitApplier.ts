@@ -2,6 +2,8 @@ import { base64ToBytes } from '../storage/base64';
 import type { GroupSession } from '../contract/client';
 import { MembershipMismatchError } from '../contract/errors';
 import type { ConversationId, DeviceId, Epoch, ProcessResult } from '../contract/types';
+
+export type ApplicationResult = Extract<ProcessResult, { kind: 'application' }>;
 import type { CommitVerifier } from './commitVerifier';
 import { parseDeclaredMembership } from './declaredMembership';
 import type { GroupProblemTracker } from './groupProblems';
@@ -146,13 +148,28 @@ export class CommitApplier {
     return new MembershipMismatchError(conversationId, problem);
   }
 
-  /** Applies a live wire item and saves it at once. */
+  /**
+   * Applies a live wire item and saves it at once. `keep` stores a decrypted message BEFORE the
+   * advanced ratchet is saved: a crash in between leaves the old ratchet with the plaintext
+   * already kept, never a consumed key with nothing to show for it.
+   */
   async applyIncoming(
     conversationId: ConversationId,
     session: GroupSession,
     wireBytes: Uint8Array,
+    keep?: (message: ApplicationResult) => Promise<void>,
   ): Promise<ProcessResult> {
     const result = await session.process(wireBytes);
+
+    if (result.kind === 'application' && keep) {
+      try {
+        await keep(result);
+      } catch (error) {
+        // The in-memory session consumed the key; reload from disk so the message can be decrypted again
+        this.cache.drop(conversationId);
+        throw error;
+      }
+    }
 
     if (result.kind === 'commit') {
       // A Commit outside catch-up has no declaration to check it against, so it is always refused

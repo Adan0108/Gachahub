@@ -5,7 +5,7 @@ import { AppShell } from "../components/AppShell";
 import type { ComponentProps } from "react";
 import type { Topbar } from "../components/Topbar";
 
-const mocks = vi.hoisted(() => ({ pathname: "/explore" }));
+const mocks = vi.hoisted(() => ({ pathname: "/explore", waiting: 0 }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => mocks.pathname,
@@ -19,6 +19,7 @@ vi.mock("../hooks/useTheme", () => ({
 }));
 vi.mock("../hooks/chat/useDeviceIdentity", () => ({ useDeviceIdentity: vi.fn() }));
 vi.mock("../hooks/chat/useChatSocket", () => ({ useChatSocket: vi.fn() }));
+vi.mock("../hooks/chat/useWaitingChats", () => ({ useWaitingChats: () => mocks.waiting }));
 vi.mock("../hooks/useAppSocket", () => ({ useAppSocket: vi.fn() }));
 vi.mock("../hooks/useNotificationSocket", () => ({ useNotificationSocket: vi.fn() }));
 vi.mock("../hooks/presence/usePresenceSocket", () => ({ usePresenceSocket: vi.fn() }));
@@ -34,6 +35,7 @@ vi.mock("../components/Topbar", () => ({
 describe("AppShell navigation", () => {
   beforeEach(() => {
     mocks.pathname = "/explore";
+    mocks.waiting = 0;
     document.body.style.overflow = "";
   });
 
@@ -50,6 +52,26 @@ describe("AppShell navigation", () => {
     );
     expect(document.querySelector("#main-content")).toHaveAttribute("tabindex", "-1");
     expect(screen.getByRole("link", { name: /Explore/ })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("shows a dot on Messages while chats or requests are waiting, and none when nothing is", () => {
+    // A fresh element each time: re-rendering the very same one would not re-run the shell.
+    const shell = () => (
+      <AppShell>
+        <p>Page content</p>
+      </AppShell>
+    );
+    const { rerender } = render(shell());
+    expect(screen.getByRole("link", { name: /Messages/ })).not.toHaveClass("has-waiting");
+
+    mocks.waiting = 3;
+    rerender(shell());
+    expect(screen.getByRole("link", { name: /Messages/ })).toHaveClass("has-waiting");
+    expect(screen.getByRole("link", { name: /Messages/ })).toHaveTextContent("unread chats waiting");
+
+    mocks.waiting = 0;
+    rerender(shell());
+    expect(screen.getByRole("link", { name: /Messages/ })).not.toHaveClass("has-waiting");
   });
 
   it("locks background scrolling and closes the menu with Escape", () => {

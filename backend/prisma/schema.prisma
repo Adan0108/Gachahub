@@ -28,6 +28,8 @@ model User {
   // original casing kept for display. Null until the user completes onboarding.
   username              String?               @unique @db.Citext
   onboarded             Boolean               @default(false)
+  /// A short line about the person, shown on their profile.
+  bio                   String?               @db.VarChar(160)
   /// MediaUpload backing `image` (the avatar), so a replace can release the old Cloudinary asset.
   avatarMediaUploadId   String?               @unique
   avatarMediaUpload     MediaUpload?          @relation("UserAvatarUpload", fields: [avatarMediaUploadId], references: [id], onDelete: SetNull)
@@ -414,14 +416,34 @@ model ChatParticipant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation ChatConversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rounds       ChatMembershipRound[]
 
   @@unique([conversationId, userId])
   @@index([userId, state])
   @@index([conversationId, state])
   // Partial index on pendingSince WHERE state = 'PENDING' lives only in migration 20260925140100 (Prisma can't express it).
   @@map("chat_participants")
+}
+
+/// One time someone was invited to or added to a group, so a chat can tell every round apart:
+/// "invited", then "joined the group" once they accept. Invited and never joined is a declined or
+/// expired invite.
+model ChatMembershipRound {
+  id             String    @id @default(cuid())
+  conversationId String
+  userId         String
+  /// When they were invited; null if they were added directly.
+  invitedAt      DateTime?
+  /// When they became a member: accepted the invite, or were added directly.
+  joinedAt       DateTime?
+  createdAt      DateTime  @default(now())
+
+  participant ChatParticipant @relation(fields: [conversationId, userId], references: [conversationId, userId], onDelete: Cascade)
+
+  @@index([conversationId, userId, createdAt])
+  @@map("chat_membership_rounds")
 }
 
 model ChatDirectPair {

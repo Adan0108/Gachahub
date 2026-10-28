@@ -8,13 +8,42 @@ import {
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MlsGroupRosterRepository } from '../mls-group-roster/mls-group-roster.repository';
-import { pendingSinceChange } from './membership/apply-participant-transitions';
-import { lockConversation } from './membership/lock-conversation';
+import {
+  firstRound,
+  pendingSinceChange,
+} from './membership/apply-participant-transitions';
+import {
+  inTransactionAsRole,
+  lockConversation,
+} from './membership/lock-conversation';
 import { notMutedParticipantWhere } from './notification-mute';
 import {
   claimUploadsForAttachment,
   type PrismaTransaction,
 } from '../media/media.repository';
+
+/**
+ * The one order of a conversation's messages, newest first: by time, then id for messages in the
+ * same millisecond. History pages, the inbox's last message and the read marker all use it, and
+ * the client sorts the same way (frontend/lib/chat/chatHistory.ts compareMessages).
+ */
+const NEWEST_MESSAGE_FIRST: Prisma.ChatMessageOrderByWithRelationInput[] = [
+  { createdAt: 'desc' },
+  { id: 'desc' },
+];
+
+/** Rows strictly before `before` in a newest-first (field, id) order: older, or as old with a smaller id. */
+function olderThan<Field extends 'createdAt' | 'updatedAt'>(
+  field: Field,
+  before: { id: string } & Record<Field, Date>,
+) {
+  return {
+    OR: [
+      { [field]: { lt: before[field] } },
+      { [field]: before[field], id: { lt: before.id } },
+    ],
+  };
+}
 
 /** An upload already validated by ChatService, ready to be claimed and attached to a message. */
 export type ChatMessageMediaInput = {
@@ -32,6 +61,11 @@ export type ChatMessageMediaInput = {
 };
 
 /** Chat database queries only; business decisions, permissions and delivery belong in ChatService. */
+type InboxStates = ChatParticipantState | readonly ChatParticipantState[];
+
+const inboxStateFilter = (state: InboxStates) =>
+  typeof state === 'string' ? state : { in: [...state] };
+
 @Injectable()
 export class ChatRepository {
   constructor(
@@ -258,12 +292,14 @@ export class ChatRepository {
               userId: params.creatorId,
               role: 'OWNER',
               state: 'ACTIVE',
+              ...firstRound('ACTIVE', now),
             },
             ...params.members.map((member) => ({
               userId: member.userId,
               role: 'MEMBER' as const,
               state: member.state,
               ...pendingSinceChange(null, member.state, now),
+              ...firstRound(member.state, now),
             })),
           ],
         },
@@ -275,12 +311,15 @@ export class ChatRepository {
   }
 
   /** Updates group conversation metadata. */
-  updateGroupConversation(params: {
-    conversationId: string;
-    title?: string;
-    photoUrl?: string;
-  }) {
-    return this.prisma.chatConversation.update({
+  updateGroupConversation(
+    params: {
+      conversationId: string;
+      title?: string;
+      photoUrl?: string;
+    },
+    client: PrismaTransaction = this.prisma,
+  ) {
+    return client.chatConversation.update({
       where: {
         id: params.conversationId,
       },
@@ -329,8 +368,9 @@ export class ChatRepository {
     conversationId: string,
     userId: string,
     role: ChatParticipantRole,
+    client: PrismaTransaction = this.prisma,
   ) {
-    return this.prisma.chatParticipant.update({
+    return client.chatParticipant.update({
       where: {
         conversationId_userId: {
           conversationId,
@@ -367,6 +407,27 @@ export class ChatRepository {
     await lockConversation(tx, conversationId);
 
     return tx.chatParticipant.findMany({ where: { conversationId } });
+  }
+
+  /**
+   * Whether a working device of one of `userIds` is not in the conversation's MLS group yet. A
+   * message encrypted now could never be read on it. No group at all (nothing sent yet) is not a gap.
+   */
+  async hasMemberDeviceMissingFromGroup(
+    tx: PrismaTransaction,
+    conversationId: string,
+    userIds: string[],
+  ): Promise<boolean> {
+    const [leaves, devices] = await Promise.all([
+      this.mlsGroupRosterRepository.findActiveLeaves(conversationId, tx),
+      tx.chatDevice.findMany({
+        where: { userId: { in: userIds }, revokedAt: null },
+        select: { id: true },
+      }),
+    ]);
+    if (leaves.length === 0) return false;
+    const inGroup = new Set(leaves.map((leaf) => leaf.deviceId));
+    return devices.some((device) => !inGroup.has(device.id));
   }
 
   /**
@@ -497,18 +558,50 @@ export class ChatRepository {
     });
   }
 
-  /** Finds convos for one inbox state, including the latest encrypted message. */
-  findInboxConversations(userId: string, state: ChatParticipantState) {
+  /** Finds every convo for one inbox state, including the latest encrypted message. */
+  findInboxConversations(userId: string, state: InboxStates) {
+    return this.inboxQuery(userId, {
+      userId,
+      state: inboxStateFilter(state),
+      deletedAt: null,
+    });
+  }
+
+  /** This user's pinned convos for one inbox state: few, and always all on the first page. */
+  findPinnedInboxConversations(userId: string, state: InboxStates) {
+    return this.inboxQuery(userId, {
+      userId,
+      state: inboxStateFilter(state),
+      deletedAt: null,
+      pinnedAt: { not: null },
+    });
+  }
+
+  /** One page of this user's unpinned convos, newest first by (updatedAt, id), after `before` when given. */
+  findUnpinnedInboxPage(
+    userId: string,
+    state: InboxStates,
+    page: { limit: number; before?: { updatedAt: Date; id: string } },
+  ) {
+    return this.inboxQuery(
+      userId,
+      { userId, state: inboxStateFilter(state), deletedAt: null, pinnedAt: null },
+      page,
+    );
+  }
+
+  /** The inbox query all three share: the viewer's participant row filter, plus paging. */
+  private inboxQuery(
+    userId: string,
+    viewer: Prisma.ChatParticipantWhereInput,
+    page: { limit?: number; before?: { updatedAt: Date; id: string } } = {},
+  ) {
     return this.prisma.chatConversation.findMany({
       where: {
-        participants: {
-          some: {
-            userId,
-            state,
-            deletedAt: null,
-          },
-        },
+        participants: { some: viewer },
+        ...(page.before && olderThan('updatedAt', page.before)),
       },
+      ...(page.limit && { take: page.limit }),
       include: {
         participants: {
           include: {
@@ -520,14 +613,17 @@ export class ChatRepository {
                 image: true,
               },
             },
+            rounds: {
+              select: { invitedAt: true, joinedAt: true },
+              orderBy: { createdAt: 'asc' },
+            },
           },
         },
         messages: {
           // an edit is never the "last message" of a conversation
           where: { contentType: { not: 'EDIT' } },
-          orderBy: {
-            createdAt: 'desc',
-          },
+          // Same order as history, so two messages sent in the same millisecond agree on the last.
+          orderBy: NEWEST_MESSAGE_FIRST,
           take: 1,
           include: {
             receipts: {
@@ -538,9 +634,7 @@ export class ChatRepository {
           },
         },
       },
-      orderBy: {
-        updatedAt: 'desc',
-      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
     });
   }
 
@@ -628,27 +722,25 @@ export class ChatRepository {
     });
   }
 
-  /** Finds encrypted messages newest-first with cursor pagination. */
+  /**
+   * One page of encrypted messages, newest first: those strictly older than `before`. An explicit (createdAt, id) boundary rather than
+   * Prisma's cursor + skip: the boundary message may since have been deleted, and then it is
+   * not among the filtered rows that skip would drop.
+   * Deleted messages come back as tombstones (no ciphertext), so every client that loaded one
+   * learns it is gone and drops its own copy.
+   */
   findMessages(params: {
     conversationId: string;
-    beforeMessageId?: string;
+    before?: { id: string; createdAt: Date };
     limit: number;
   }) {
     return this.prisma.chatMessage.findMany({
       where: {
         conversationId: params.conversationId,
-        status: 'SENT',
+        ...(params.before && olderThan('createdAt', params.before)),
       },
-      ...(params.beforeMessageId
-        ? {
-            cursor: {
-              id: params.beforeMessageId,
-            },
-            skip: 1,
-          }
-        : {}),
       take: params.limit,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: NEWEST_MESSAGE_FIRST,
       include: {
         receipts: true,
         reactions: {
@@ -661,6 +753,14 @@ export class ChatRepository {
           orderBy: { sortOrder: 'asc' },
         },
       },
+    });
+  }
+
+  /** The position of any message in this conversation - shown, edit or deleted - to page from. */
+  findMessagePosition(messageId: string, conversationId: string) {
+    return this.prisma.chatMessage.findFirst({
+      where: { id: messageId, conversationId },
+      select: { id: true, createdAt: true },
     });
   }
 
@@ -706,30 +806,47 @@ export class ChatRepository {
     userId: string,
     currentEpoch: number,
   ) {
-    return this.prisma.$transaction(async (tx) => {
-      const participant = await tx.chatParticipant.update({
-        where: {
-          conversationId_userId: { conversationId, userId },
-        },
-        data: { state: 'DECLINED' },
-      });
+    return inTransactionAsRole(
+      this.prisma,
+      conversationId,
+      userId,
+      ['OWNER'],
+      async (tx) => {
+        // Someone may have joined since the caller saw the owner alone; they would be left in a closed group
+        const othersActive = await tx.chatParticipant.count({
+          where: { conversationId, userId: { not: userId }, state: 'ACTIVE' },
+        });
+        if (othersActive > 0) {
+          throw new ConflictException(
+            'Owner cannot leave before transferring ownership',
+          );
+        }
 
-      const activeLeaves = await this.mlsGroupRosterRepository.findActiveLeaves(
-        conversationId,
-        tx,
-      );
-      const ownDeviceIds = activeLeaves
-        .filter((leaf) => leaf.userId === userId)
-        .map((leaf) => leaf.deviceId);
-      await this.mlsGroupRosterRepository.removeLeaves(
-        conversationId,
-        ownDeviceIds,
-        currentEpoch,
-        tx,
-      );
+        const participant = await tx.chatParticipant.update({
+          where: {
+            conversationId_userId: { conversationId, userId },
+          },
+          data: { state: 'DECLINED' },
+        });
 
-      return participant;
-    });
+        const activeLeaves =
+          await this.mlsGroupRosterRepository.findActiveLeaves(
+            conversationId,
+            tx,
+          );
+        const ownDeviceIds = activeLeaves
+          .filter((leaf) => leaf.userId === userId)
+          .map((leaf) => leaf.deviceId);
+        await this.mlsGroupRosterRepository.removeLeaves(
+          conversationId,
+          ownDeviceIds,
+          currentEpoch,
+          tx,
+        );
+
+        return participant;
+      },
+    );
   }
 
   /** Marks selected receipts delivered for a user; only empty deliveredAt is updated. */
@@ -785,7 +902,7 @@ export class ChatRepository {
               conversationId: params.conversationId,
               contentType: { not: 'EDIT' },
             },
-            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            orderBy: NEWEST_MESSAGE_FIRST,
           });
 
       if (!lastReadMessage) {
@@ -1162,8 +1279,12 @@ export class ChatRepository {
   }
 
   /** Clears deletedAt for the given participants when a new message reaches them. */
-  restoreDeletedParticipants(conversationId: string, userIds: string[]) {
-    return this.prisma.chatParticipant.updateMany({
+  restoreDeletedParticipants(
+    tx: PrismaTransaction,
+    conversationId: string,
+    userIds: string[],
+  ) {
+    return tx.chatParticipant.updateMany({
       where: {
         conversationId,
         userId: { in: userIds },

@@ -967,3 +967,15 @@
 .settings-toggle-row .settings-toggle-error {
   color: var(--pink);
 }
+
+fieldset.settings-toggle-row {
+  min-width: 0;
+  margin-inline: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-toggle-row input[type="radio"] {
+  width: 18px;
+  height: 18px;
+}

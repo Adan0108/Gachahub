@@ -212,11 +212,9 @@ function MessageBubble({
   const copyText = copyTextOf(view);
   const versions = edited?.get(message.id)?.versions;
   const receiptStatus = mine ? receiptInfo?.statusFor.get(message.id) : undefined;
-  const receiptReaders = mine
-    ? (receiptInfo?.readersAt.get(message.id) ?? [])
-        .map((id) => participantUser(conversation, id))
-        .filter((reader): reader is ChatUser => Boolean(reader))
-    : [];
+  const receiptReaders = (receiptInfo?.readersAt.get(message.id) ?? [])
+    .map((id) => participantUser(conversation, id))
+    .filter((reader): reader is ChatUser => Boolean(reader));
   const canEdit = canEditMessage({
     mine,
     isText: view?.kind === "text",
@@ -237,6 +235,9 @@ function MessageBubble({
     .filter(Boolean)
     .join(" ");
 
+  const mentions = (conversation?.participants ?? [])
+    .map((participant) => participant.user?.username)
+    .filter((handle): handle is string => Boolean(handle));
   const pendingClass = pendingEdit ? `pending ${pendingEdit.failed ? "failed" : ""}` : "";
   const body =
     decrypted.status === "ok" ? (
@@ -244,6 +245,7 @@ function MessageBubble({
         <EnvelopeContent
           envelope={decrypted.envelope}
           media={message.media}
+          mentions={mentions}
           messageId={message.id}
         />
       ) : (
@@ -251,6 +253,7 @@ function MessageBubble({
           <EnvelopeContent
             envelope={decrypted.envelope}
             media={message.media}
+            mentions={mentions}
             messageId={message.id}
           />
         </article>
@@ -404,11 +407,20 @@ export function ThreadRow({
   }
   if (message.status === "DELETED") {
     const mine = message.senderId === userId;
+    const sender = participantUser(conversation, message.senderId);
     return (
       <div className={`chat-message-row ${mine ? "mine" : ""}`} id={`chat-message-${message.id}`}>
-        <article className={`chat-message deleted ${mine ? "mine" : ""}`}>
-          <p>{mine ? "You unsent a message" : "This message was unsent"}</p>
-        </article>
+        <div className="chat-message-bubble-anchor">
+          {/* The last bubble of someone's run carries their picture, unsent or not. */}
+          {!mine && (
+            <span className={`chat-avatar small ${groupedWithNext ? "placeholder" : ""}`}>
+              {!groupedWithNext && <AvatarFace image={sender?.image} name={sender?.name} />}
+            </span>
+          )}
+          <article className={`chat-message deleted ${mine ? "mine" : ""}`}>
+            <p>{mine ? "You unsent a message" : "This message was unsent"}</p>
+          </article>
+        </div>
       </div>
     );
   }

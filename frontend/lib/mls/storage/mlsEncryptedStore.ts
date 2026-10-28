@@ -2,12 +2,12 @@ import { bytesToBase64, base64ToBytes } from './base64';
 
 // Before accounts had their own database, everyone's data lived here; it is only read to hand an account its own.
 const LEGACY_DB_NAME = 'gachahub-mls';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const KEY_STORE = 'cryptoKeys';
 const ENCRYPTION_KEY_RECORD = 'local-encryption-key';
 
 /** Every object store this app's local MLS secrets live in - listed once so opening the database always creates the full schema, and wipeAllLocalMlsSecrets always clears every one of them, not just whichever store a particular caller happens to know about */
-const DATA_STORE_NAMES = ['deviceIdentity', 'groupSessions', 'decryptedMessages', 'verifiedPeers', 'membershipEvents', 'backupState'] as const;
+const DATA_STORE_NAMES = ['deviceIdentity', 'groupSessions', 'decryptedMessages', 'verifiedPeers', 'membershipEvents', 'backupState', 'outgoingMessages'] as const;
 export type DataStoreName = (typeof DATA_STORE_NAMES)[number];
 
 interface TaggedBytes {

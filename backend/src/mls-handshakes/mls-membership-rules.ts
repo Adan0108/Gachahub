@@ -161,7 +161,7 @@ export function assertAddedDevicesAuthorized(params: {
 
     if (!isEntitledToLeaf(participantStateByUserId.get(device.userId))) {
       throw new ForbiddenException(
-        `User ${device.userId} is not authorized to join this conversation`,
+        'A user in this commit is not authorized to join this conversation',
       );
     }
   }
@@ -335,7 +335,7 @@ export function planCommitTransitions(params: {
       // the roster and the participant rows disagree - refuse the Commit
       // rather than leave them out of step.
       throw new ConflictException(
-        `Cannot complete ${event} for user ${userId} in state ${from ?? 'NONE'}`,
+        `Cannot complete ${event} for a user in state ${from ?? 'NONE'}`,
       );
     }
 

@@ -303,6 +303,53 @@ describe('MediaService opaque chat blobs', () => {
       expect(mediaRepository.markUploaded).not.toHaveBeenCalled();
     });
 
+    // #104: cleanup can claim the row while Cloudinary is being checked; confirming must not undo that.
+    it('does not revive an upload cleanup claimed while it was being checked', async () => {
+      mediaRepository.findById
+        .mockResolvedValueOnce({
+          id: 'up-1',
+          userId: 'user-1',
+          status: 'INITIATED',
+          resourceType: 'IMAGE',
+          publicId: path,
+        })
+        .mockResolvedValueOnce({ id: 'up-1', status: 'CLEANING' });
+      mediaRepository.markUploaded.mockResolvedValue(null);
+
+      const result = await service.confirmUploads(confirmDto(), 'user-1');
+
+      expect(result.successfulCount).toBe(0);
+      expect(result.failed[0]).toMatchObject({
+        statusCode: 409,
+        error: 'Cannot confirm media upload in CLEANING state',
+      });
+    });
+
+    it('answers a confirmation the same way when an identical one finished first', async () => {
+      mediaRepository.findById
+        .mockResolvedValueOnce({
+          id: 'up-1',
+          userId: 'user-1',
+          status: 'INITIATED',
+          resourceType: 'IMAGE',
+          publicId: path,
+        })
+        .mockResolvedValueOnce({
+          id: 'up-1',
+          purpose: 'CHAT',
+          resourceType: 'IMAGE',
+          status: 'UPLOADED',
+          assetId: 'asset-1',
+          publicId: path,
+          secureUrl: 'x',
+        });
+      mediaRepository.markUploaded.mockResolvedValue(null);
+
+      const result = await service.confirmUploads(confirmDto(), 'user-1');
+
+      expect(result.successfulCount).toBe(1);
+    });
+
     it('treats a stored opaqueKind as opaque regardless of folder', async () => {
       mediaRepository.findById.mockResolvedValue({
         id: 'up-1',

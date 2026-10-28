@@ -35,7 +35,6 @@ export default defineConfig([
       "hooks/chat/useReadWhenSeen.ts",
       "hooks/chat/useReceiptDisplay.ts",
       "hooks/chat/useSharePost.ts",
-      "hooks/chat/useSidebarMessageSearch.ts",
       "hooks/chat/useStickToBottom.ts",
       "hooks/chat/useThreadMessageSearch.ts",
       "hooks/chat/useTypingNames.ts",

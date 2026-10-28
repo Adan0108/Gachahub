@@ -34,6 +34,26 @@ export class ChatDevicesRepository {
     });
   }
 
+  /** The other person's state in your direct chat, when you have one. */
+  async findDirectPeerState(userId: string, peerId: string) {
+    const [userIdA, userIdB] = [userId, peerId].sort() as [string, string];
+    const pair = await this.prisma.chatDirectPair.findUnique({
+      where: { userIdA_userIdB: { userIdA, userIdB } },
+      select: {
+        conversation: {
+          select: {
+            participants: {
+              where: { userId: peerId },
+              select: { state: true },
+            },
+          },
+        },
+      },
+    });
+
+    return pair?.conversation.participants[0]?.state;
+  }
+
   findUserMessagingProfile(userId: string) {
     return this.prisma.user.findUnique({
       where: { id: userId },

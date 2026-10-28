@@ -522,10 +522,11 @@ export class NotificationService {
         if (
           entityType !== NotificationEntityType.POST &&
           entityType !== NotificationEntityType.COMMENT &&
-          entityType !== NotificationEntityType.MESSAGE
+          entityType !== NotificationEntityType.MESSAGE &&
+          entityType !== NotificationEntityType.COMMUNITY_MESSAGE
         ) {
           throw new BadRequestException(
-            'USER_MENTIONED must target a POST, COMMENT, or MESSAGE',
+            'USER_MENTIONED must target a POST, COMMENT, MESSAGE, or COMMUNITY_MESSAGE',
           );
         }
         return;

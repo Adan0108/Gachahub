@@ -138,7 +138,7 @@ describe('maskReceiptsForViewer', () => {
     }
   });
 
-  it("shows only your own receipt on other people's messages", () => {
+  it("shows your own receipt and only readers who share theirs on other people's messages", () => {
     const [masked] = maskReceiptsForViewer(
       [
         message('m1', 'bob', [
@@ -151,7 +151,7 @@ describe('maskReceiptsForViewer', () => {
       rows,
     );
 
-    expect(masked?.receipts.map((r) => r.userId)).toEqual(['me']);
+    expect(masked?.receipts.map((r) => r.userId)).toEqual(['me', 'bob']);
     expect(Object.keys(masked?.receipts[0] ?? {}).sort()).toEqual([
       'delivered',
       'messageId',
@@ -177,6 +177,30 @@ describe('maskReceiptsForViewer', () => {
 
     expect(masked).toMatchObject({ id: 'm1', ciphertext: 'x' });
     expect(input[0]?.receipts[0]?.readAt).toEqual(read);
+  });
+
+  it('on messages from others, shows each other reader only on the newest message they read', () => {
+    const masked = maskReceiptsForViewer(
+      [
+        message('m1', 'bob', [receipt('m1', 'me'), receipt('m1', 'bob')]),
+        message('m2', 'bob', [receipt('m2', 'me'), receipt('m2', 'bob')]),
+      ],
+      'me',
+      rows,
+    );
+
+    expect(masked[0]?.receipts.map((r) => r.userId)).toEqual(['me']);
+    expect(masked[1]?.receipts.map((r) => r.userId)).toEqual(['me', 'bob']);
+  });
+
+  it('on messages from others, hides the read of someone who does not share receipts', () => {
+    const [masked] = maskReceiptsForViewer(
+      [message('m1', 'bob', [receipt('m1', 'me'), receipt('m1', 'quiet')])],
+      'me',
+      rows,
+    );
+
+    expect(masked?.receipts.map((r) => r.userId)).toEqual(['me']);
   });
 
   it('copes with no messages', () => {
