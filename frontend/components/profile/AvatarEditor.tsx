@@ -1,30 +1,63 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { AvatarFace } from "../AvatarFace";
-import { IMAGE_ACCEPT, useImageUpload } from "../../hooks/useImageUpload";
-import { useProfileImages } from "../../hooks/useProfileImages";
+import { IMAGE_ACCEPT, imageFileProblem } from "../../hooks/useImageUpload";
+import { useLocalFileUrl } from "../../hooks/useLocalFileUrl";
 import { api } from "../../lib/api";
 
-/** Pick, replace or remove the signed-in user's profile picture. */
+/** What Save should do with the picture: leave it, use an uploaded new one, or take it away. */
+export type AvatarChange =
+  | { kind: "keep" }
+  | { kind: "upload"; mediaUploadId: string; file: File }
+  | { kind: "remove" };
+
+/**
+ * Pick, replace or remove the profile picture. A picked file is uploaded at once so Save is quick,
+ * but nothing changes on the profile until the dialog's Save; `onUploadingChange` holds Save back
+ * while the upload runs.
+ */
 export function AvatarEditor({
   user,
+  change,
+  onChange,
+  onUploadingChange,
 }: {
-  user: { id?: string; image?: string | null; name?: string | null };
+  user: { image?: string | null; name?: string | null };
+  change: AvatarChange;
+  onChange: (change: AvatarChange) => void;
+  onUploadingChange?: (uploading: boolean) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [confirmingRemove, setConfirmingRemove] = useState(false);
-  const { cacheUser, removeAvatar } = useProfileImages();
-  const { pickFile, displayUrl, isPending, error } = useImageUpload({
-    purpose: "AVATAR",
-    currentUrl: user.image,
-    save: api.updateAvatar,
-    getUrl: (updated) => (typeof updated.image === "string" ? updated.image : null),
-    onSaved: cacheUser,
+  const [uploadingFile, setUploadingFile] = useState<File | null>(null);
+  const upload = useMutation({
+    mutationFn: async (file: File) => {
+      const problem = imageFileProblem(file);
+      if (problem) throw new Error(problem);
+      return (await api.uploadSingleImage(file, "AVATAR")).mediaUploadId;
+    },
+    onMutate: (file) => {
+      setUploadingFile(file);
+      onUploadingChange?.(true);
+    },
+    onSuccess: (mediaUploadId, file) => onChange({ kind: "upload", mediaUploadId, file }),
+    onSettled: () => {
+      setUploadingFile(null);
+      onUploadingChange?.(false);
+    },
   });
-  const busy = isPending || removeAvatar.isPending;
-  const failure =
-    error || (removeAvatar.isError ? removeAvatar.error.message || "Could not remove it" : null);
+
+  const shownFile = uploadingFile ?? (change.kind === "upload" ? change.file : null);
+  const localUrl = useLocalFileUrl(shownFile, Boolean(shownFile));
+  const displayUrl = change.kind === "remove" ? null : localUrl || user.image;
+
+  const pickFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Reset, so picking the same file again still fires
+    event.target.value = "";
+    if (file) upload.mutate(file);
+  };
 
   return (
     <div className="profile-image-field">
@@ -37,52 +70,35 @@ export function AvatarEditor({
           <div className="profile-avatar-buttons">
             <button
               className="profile-image-btn"
-              disabled={busy}
+              disabled={upload.isPending}
               onClick={() => inputRef.current?.click()}
               type="button"
             >
-              {isPending ? "Uploading..." : displayUrl ? "Replace" : "Upload"}
+              {upload.isPending ? "Uploading..." : displayUrl ? "Replace" : "Upload"}
             </button>
-            {displayUrl && !confirmingRemove ? (
+            {displayUrl ? (
               <button
                 className="profile-image-btn"
-                disabled={busy}
-                onClick={() => setConfirmingRemove(true)}
+                disabled={upload.isPending}
+                onClick={() => onChange({ kind: "remove" })}
                 type="button"
               >
                 Remove
               </button>
             ) : null}
-            {displayUrl && confirmingRemove ? (
-              <>
-                <button
-                  className="profile-image-btn profile-image-danger"
-                  disabled={busy}
-                  onClick={() =>
-                    removeAvatar.mutate(undefined, { onSettled: () => setConfirmingRemove(false) })
-                  }
-                  type="button"
-                >
-                  {removeAvatar.isPending ? "Removing..." : "Delete picture"}
-                </button>
-                <button
-                  className="profile-image-btn"
-                  disabled={busy}
-                  onClick={() => setConfirmingRemove(false)}
-                  type="button"
-                >
-                  Keep
-                </button>
-              </>
+            {change.kind !== "keep" && !upload.isPending ? (
+              <button className="profile-image-btn" onClick={() => onChange({ kind: "keep" })} type="button">
+                Undo
+              </button>
             ) : null}
           </div>
           <small className="profile-image-hint">JPG, PNG, WebP or GIF, up to 10 MB</small>
         </div>
         <input accept={IMAGE_ACCEPT} hidden onChange={pickFile} ref={inputRef} type="file" />
       </div>
-      {failure ? (
+      {upload.isError ? (
         <p className="profile-image-error" role="alert">
-          {failure}
+          {upload.error.message || "Upload failed"}
         </p>
       ) : null}
     </div>

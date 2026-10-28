@@ -12,10 +12,10 @@ import {
   NAME_MIN_CHARS,
   type ProfileOwner,
 } from "../../lib/profile/profileView";
-import { AvatarEditor } from "./AvatarEditor";
+import { AvatarEditor, type AvatarChange } from "./AvatarEditor";
 import { BannerPicker } from "./BannerPicker";
 
-/** Edit your picture, banner, display name and bio. Picture and banner save as soon as they are picked; name and bio on Save. */
+/** Edit your picture, banner, display name and bio. Nothing is saved until Save changes; closing throws the changes away. */
 export function EditProfileDialog({
   user,
   onClose,
@@ -32,16 +32,25 @@ export function EditProfileDialog({
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const [name, setName] = useState(user.name ?? "");
   const [bio, setBio] = useState(user.bio ?? "");
+  const [avatar, setAvatar] = useState<AvatarChange>({ kind: "keep" });
+  const [banner, setBanner] = useState(user.bannerPresetId ?? null);
+  const [uploading, setUploading] = useState(false);
 
   const trimmedName = name.trim();
   const nameValid = trimmedName.length >= NAME_MIN_CHARS && trimmedName.length <= NAME_MAX_CHARS;
-  const changed = trimmedName !== (user.name ?? "") || bio.trim() !== (user.bio ?? "");
+  const textChanged = trimmedName !== (user.name ?? "") || bio.trim() !== (user.bio ?? "");
+  const bannerChanged = banner !== (user.bannerPresetId ?? null);
+  const changed = textChanged || bannerChanged || avatar.kind !== "keep";
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!nameValid || !changed) return;
+    if (!nameValid || !changed || uploading) return;
     save.mutate(
-      { name: trimmedName, bio: bio.trim() },
+      {
+        ...(textChanged ? { name: trimmedName, bio: bio.trim() } : {}),
+        ...(avatar.kind !== "keep" ? { avatar } : {}),
+        ...(bannerChanged ? { bannerPresetId: banner } : {}),
+      },
       {
         onSuccess: () => {
           onSaved?.();
@@ -68,8 +77,8 @@ export function EditProfileDialog({
             <FiX />
           </button>
         </div>
-        <AvatarEditor user={user} />
-        <BannerPicker currentId={user.bannerPresetId} />
+        <AvatarEditor change={avatar} onChange={setAvatar} onUploadingChange={setUploading} user={user} />
+        <BannerPicker onChange={setBanner} value={banner} />
         <label>
           Display name
           <input
@@ -105,10 +114,10 @@ export function EditProfileDialog({
         )}
         <button
           className="primary"
-          disabled={!nameValid || !changed || save.isPending}
+          disabled={!nameValid || !changed || uploading || save.isPending}
           type="submit"
         >
-          {save.isPending ? "Saving..." : "Save changes"}
+          {save.isPending ? "Saving..." : uploading ? "Uploading picture..." : "Save changes"}
         </button>
       </form>
     </div>

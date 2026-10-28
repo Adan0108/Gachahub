@@ -1,9 +1,10 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AvatarEditor } from "../components/profile/AvatarEditor";
 import { BannerPicker } from "../components/profile/BannerPicker";
+import { EditProfileDialog } from "../components/profile/EditProfileDialog";
 import { queryKeys } from "../lib/queries";
 
 const mocks = vi.hoisted(() => ({
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getBannerOptions: vi.fn(),
   updateBanner: vi.fn(),
   removeBanner: vi.fn(),
+  updateProfile: vi.fn(),
 }));
 
 vi.mock("../lib/api", () => ({
@@ -25,8 +27,10 @@ vi.mock("../lib/api", () => ({
 
 const banners = [
   { id: "violet", label: "Violet", tier: "FREE", available: true },
+  { id: "rose", label: "Rose", tier: "FREE", available: true },
   { id: "gilded", label: "Gilded", tier: "PREMIUM", available: false },
 ];
+const me = { id: "user-1", name: "Rover", username: "rover", bio: "", image: "https://cdn/old.png", bannerPresetId: "violet" };
 
 let client: QueryClient;
 
@@ -34,90 +38,64 @@ function renderWithClient(ui: import("react").ReactNode) {
   client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  client.setQueryData(queryKeys.currentUser, { id: "user-1", name: "Rover", image: null });
+  client.setQueryData(queryKeys.currentUser, me);
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 
 const png = () => new File([new Uint8Array(10)], "me.png", { type: "image/png" });
+const pickPicture = (file: File = png()) =>
+  fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } });
+const saveButton = () => screen.getByRole("button", { name: /Save changes|Uploading picture|Saving/ });
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  URL.createObjectURL = vi.fn(() => "blob:preview");
+  URL.revokeObjectURL = vi.fn();
+  mocks.getBannerOptions.mockResolvedValue(banners);
+});
 
 describe("AvatarEditor", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    URL.createObjectURL = vi.fn(() => "blob:preview");
-    URL.revokeObjectURL = vi.fn();
-  });
-
-  it("uploads a picture, saves it, and writes the updated user into the cache", async () => {
+  it("uploads a picked picture and reports it as a change, without setting it as the picture", async () => {
     mocks.uploadSingleImage.mockResolvedValue({ mediaUploadId: "upload-1" });
-    mocks.updateAvatar.mockResolvedValue({ id: "user-1", image: "https://cdn/me.png" });
-    renderWithClient(<AvatarEditor user={{ id: "user-1", name: "Rover", image: null }} />);
+    const onChange = vi.fn();
+    renderWithClient(<AvatarEditor change={{ kind: "keep" }} onChange={onChange} user={me} />);
 
-    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [png()] } });
+    pickPicture();
 
     await waitFor(() =>
-      expect(client.getQueryData(queryKeys.currentUser)).toMatchObject({
-        name: "Rover",
-        image: "https://cdn/me.png",
-      }),
+      expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ kind: "upload", mediaUploadId: "upload-1" })),
     );
-    expect(mocks.uploadSingleImage).toHaveBeenCalledWith(expect.any(File), "AVATAR");
-    expect(mocks.updateAvatar).toHaveBeenCalledWith("upload-1");
+    expect(mocks.updateAvatar).not.toHaveBeenCalled();
   });
 
   it("offers Upload and no Remove when there is no picture", () => {
-    renderWithClient(<AvatarEditor user={{ id: "user-1", name: "Rover", image: null }} />);
+    renderWithClient(<AvatarEditor change={{ kind: "keep" }} onChange={vi.fn()} user={{ ...me, image: null }} />);
 
     expect(screen.getByRole("button", { name: "Upload" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
   });
 
-  it("removes the picture and updates the cache", async () => {
-    mocks.removeAvatar.mockResolvedValue({ id: "user-1", image: null });
-    renderWithClient(
-      <AvatarEditor user={{ id: "user-1", name: "Rover", image: "https://cdn/me.png" }} />,
-    );
+  it("Remove only marks the picture to go, and Undo takes that back", () => {
+    const onChange = vi.fn();
+    const { rerender } = renderWithClient(<AvatarEditor change={{ kind: "keep" }} onChange={onChange} user={me} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(onChange).toHaveBeenCalledWith({ kind: "remove" });
     expect(mocks.removeAvatar).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Delete picture" }));
 
-    await waitFor(() =>
-      expect(
-        client.getQueryData<{ image: string | null }>(queryKeys.currentUser)!.image,
-      ).toBeNull(),
+    rerender(
+      <QueryClientProvider client={client}>
+        <AvatarEditor change={{ kind: "remove" }} onChange={onChange} user={me} />
+      </QueryClientProvider>,
     );
-  });
-
-  it("does not delete anything when the user keeps the picture", () => {
-    renderWithClient(
-      <AvatarEditor user={{ id: "user-1", name: "Rover", image: "https://cdn/me.png" }} />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
-    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
-
-    expect(mocks.removeAvatar).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
-  });
-
-  it("shows the error when removal fails", async () => {
-    mocks.removeAvatar.mockRejectedValue(new Error("Your avatar was changed elsewhere"));
-    renderWithClient(
-      <AvatarEditor user={{ id: "user-1", name: "Rover", image: "https://cdn/me.png" }} />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete picture" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("changed elsewhere");
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(onChange).toHaveBeenLastCalledWith({ kind: "keep" });
   });
 
   it("rejects an unsupported file before uploading", async () => {
-    renderWithClient(<AvatarEditor user={{ id: "user-1", name: "Rover", image: null }} />);
+    renderWithClient(<AvatarEditor change={{ kind: "keep" }} onChange={vi.fn()} user={me} />);
 
-    fireEvent.change(document.querySelector('input[type="file"]')!, {
-      target: { files: [new File(["x"], "a.pdf", { type: "application/pdf" })] },
-    });
+    pickPicture(new File(["x"], "a.pdf", { type: "application/pdf" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/jpg, png, webp or gif/i);
     expect(mocks.uploadSingleImage).not.toHaveBeenCalled();
@@ -125,68 +103,102 @@ describe("AvatarEditor", () => {
 });
 
 describe("BannerPicker", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.getBannerOptions.mockResolvedValue(banners);
-  });
+  it("lists designs, marks the chosen one, and locks unavailable ones", async () => {
+    renderWithClient(<BannerPicker onChange={vi.fn()} value="violet" />);
 
-  it("lists designs, marks the current one, and locks unavailable ones", async () => {
-    renderWithClient(<BannerPicker currentId="violet" />);
-
-    const free = await screen.findByRole("radio", { name: "Violet" });
-    expect(free).toHaveAttribute("aria-checked", "true");
+    expect(await screen.findByRole("radio", { name: "Violet" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "Gilded" })).toBeDisabled();
   });
 
-  it("saves the picked design into the cache", async () => {
-    mocks.updateBanner.mockResolvedValue({ id: "user-1", bannerPresetId: "violet" });
-    renderWithClient(<BannerPicker currentId={null} />);
+  it("reports a picked design or the default, and saves nothing itself", async () => {
+    const onChange = vi.fn();
+    renderWithClient(<BannerPicker onChange={onChange} value="violet" />);
 
-    fireEvent.click(await screen.findByRole("radio", { name: "Violet" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Rose" }));
+    fireEvent.click(screen.getByRole("button", { name: /reset to default/i }));
 
-    await waitFor(() =>
-      expect(
-        client.getQueryData<{ bannerPresetId: string | null }>(queryKeys.currentUser)!
-          .bannerPresetId,
-      ).toBe("violet"),
-    );
-    expect(mocks.updateBanner.mock.calls[0]![0]!).toBe("violet");
-  });
-
-  it("only offers 'Use default' when a banner is set, and clears it", async () => {
-    mocks.removeBanner.mockResolvedValue({ id: "user-1", bannerPresetId: null });
-    const { unmount } = renderWithClient(<BannerPicker currentId={null} />);
-    await screen.findByRole("radio", { name: "Violet" });
-    expect(screen.queryByRole("button", { name: /reset to default/i })).not.toBeInTheDocument();
-    unmount();
-
-    renderWithClient(<BannerPicker currentId="violet" />);
-    fireEvent.click(await screen.findByRole("button", { name: /reset to default/i }));
-
-    await waitFor(() =>
-      expect(
-        client.getQueryData<{ bannerPresetId: string | null }>(queryKeys.currentUser)!
-          .bannerPresetId,
-      ).toBeNull(),
-    );
-  });
-
-  it("shows the server's message when saving is refused", async () => {
-    mocks.updateBanner.mockRejectedValue(new Error("This banner is not available to you yet"));
-    renderWithClient(<BannerPicker currentId={null} />);
-
-    fireEvent.click(await screen.findByRole("radio", { name: "Violet" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("not available");
+    expect(onChange.mock.calls).toEqual([["rose"], [null]]);
+    expect(mocks.updateBanner).not.toHaveBeenCalled();
+    expect(mocks.removeBanner).not.toHaveBeenCalled();
   });
 
   it("shows an error instead of an empty grid when the catalog fails to load", async () => {
     mocks.getBannerOptions.mockRejectedValue(new Error("down"));
-    renderWithClient(<BannerPicker currentId={null} />);
+    renderWithClient(<BannerPicker onChange={vi.fn()} value={null} />);
 
     // the query retries once (retry: 1) before surfacing the error
-    expect(await screen.findByRole("alert", {}, { timeout: 4000 })).toHaveTextContent(
-      /could not load banners/i,
-    );
+    expect(await screen.findByRole("alert", {}, { timeout: 4000 })).toHaveTextContent(/could not load banners/i);
+  });
+});
+
+describe("EditProfileDialog picture and banner", () => {
+  const openDialog = () => {
+    const onClose = vi.fn();
+    renderWithClient(<EditProfileDialog onClose={onClose} user={me} />);
+    return onClose;
+  };
+
+  it("saves a new picture and banner only when Save changes is pressed", async () => {
+    mocks.uploadSingleImage.mockResolvedValue({ mediaUploadId: "upload-1" });
+    mocks.updateAvatar.mockResolvedValue({ id: "user-1", image: "https://cdn/new.png" });
+    mocks.updateBanner.mockResolvedValue({ id: "user-1", bannerPresetId: "rose" });
+    const onClose = openDialog();
+
+    pickPicture();
+    fireEvent.click(await screen.findByRole("radio", { name: "Rose" }));
+    await waitFor(() => expect(saveButton()).toHaveTextContent("Save changes"));
+    expect(mocks.updateAvatar).not.toHaveBeenCalled();
+    expect(mocks.updateBanner).not.toHaveBeenCalled();
+
+    fireEvent.click(saveButton());
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(mocks.updateAvatar).toHaveBeenCalledWith("upload-1");
+    expect(mocks.updateBanner).toHaveBeenCalledWith("rose");
+    expect(mocks.updateProfile).not.toHaveBeenCalled();
+    expect(client.getQueryData(queryKeys.currentUser)).toMatchObject({
+      image: "https://cdn/new.png",
+      bannerPresetId: "rose",
+    });
+  });
+
+  it("keeps Save greyed out while the picture uploads", async () => {
+    let finish!: (value: { mediaUploadId: string }) => void;
+    mocks.uploadSingleImage.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    openDialog();
+
+    pickPicture();
+
+    await waitFor(() => expect(saveButton()).toHaveTextContent("Uploading picture..."));
+    expect(saveButton()).toBeDisabled();
+    await act(async () => finish({ mediaUploadId: "upload-1" }));
+    expect(saveButton()).toBeEnabled();
+  });
+
+  it("changes nothing when closed without saving", async () => {
+    mocks.uploadSingleImage.mockResolvedValue({ mediaUploadId: "upload-1" });
+    const onClose = openDialog();
+
+    pickPicture();
+    fireEvent.click(await screen.findByRole("radio", { name: "Rose" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close edit profile" }));
+
+    expect(onClose).toHaveBeenCalled();
+    expect(mocks.updateAvatar).not.toHaveBeenCalled();
+    expect(mocks.removeAvatar).not.toHaveBeenCalled();
+    expect(mocks.updateBanner).not.toHaveBeenCalled();
+    expect(client.getQueryData(queryKeys.currentUser)).toEqual(me);
+  });
+
+  it("removes the picture on Save", async () => {
+    mocks.removeAvatar.mockResolvedValue({ id: "user-1", image: null });
+    const onClose = openDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    fireEvent.click(saveButton());
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(mocks.removeAvatar).toHaveBeenCalled();
   });
 });

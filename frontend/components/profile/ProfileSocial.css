@@ -185,6 +185,8 @@
 .post-author-link {
   display: contents;
   color: inherit;
+  /* The picture inside rounds itself with `inherit`; pass the post's circle through this link. */
+  border-radius: inherit;
 }
 
 .post-comment-author a {
