@@ -1,9 +1,16 @@
 import { Module } from '@nestjs/common';
 import { ModerationPolicyService } from './moderation-policy.service';
+import { PrismaModule } from '../prisma/prisma.module';
+import { ModerationPolicyRepository } from './moderation-policy.repository';
+import { ModerationPolicyRunner } from './moderation-policy-runner.service';
 
-// Not imported by result ingestion; starts no background work.
 @Module({
-  providers: [ModerationPolicyService],
-  exports: [ModerationPolicyService],
+  imports: [PrismaModule],
+  providers: [
+    ModerationPolicyService,
+    ModerationPolicyRepository,
+    ModerationPolicyRunner,
+  ],
+  exports: [ModerationPolicyService, ModerationPolicyRepository],
 })
 export class ModerationPolicyModule {}

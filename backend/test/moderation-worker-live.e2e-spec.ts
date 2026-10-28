@@ -1,3 +1,4 @@
+import { ModerationPolicyRepository } from '../src/moderation-policy/moderation-policy.repository';
 // Opt-in real local PostgreSQL/Kafka/HTTP/Python integration. No shared DB URL fallback.
 jest.mock('@thallesp/nestjs-better-auth', () => {
   const common =
@@ -277,7 +278,11 @@ const enabled =
     outboxProducer.onModuleInit();
     await outboxProducer['startup'].waitForAttempt();
     resultConsumer = new ModerationResultConsumer(
-      new ModerationResultService(db, new ProcessedEventRepository()),
+      new ModerationResultService(
+        db,
+        new ProcessedEventRepository(),
+        new ModerationPolicyRepository(db),
+      ),
     );
     resultConsumer.onModuleInit();
     await resultConsumer['startup'].waitForAttempt();
@@ -528,7 +533,11 @@ const enabled =
       ).status,
     ).toBe('PENDING');
     resultConsumer = new ModerationResultConsumer(
-      new ModerationResultService(db, new ProcessedEventRepository()),
+      new ModerationResultService(
+        db,
+        new ProcessedEventRepository(),
+        new ModerationPolicyRepository(db),
+      ),
     );
     resultConsumer.onModuleInit();
     await resultConsumer['startup'].waitForAttempt();

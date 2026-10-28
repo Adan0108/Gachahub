@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProcessedEventRepository } from '../notifications/processed-event.repository';
+import { ModerationPolicyRepository } from '../moderation-policy/moderation-policy.repository';
 import {
   ModerationResultEvent,
   toStoredModerationResult,
@@ -15,6 +16,7 @@ export class ModerationResultService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly processedEvents: ProcessedEventRepository,
+    private readonly policyWork: ModerationPolicyRepository,
   ) {}
 
   async ingest(event: ModerationResultEvent): Promise<void> {
@@ -128,17 +130,11 @@ export class ModerationResultService {
         );
       }
 
-      /**
-       * IMPORTANT:
-       *
-       * Stage 2B ends here.
-       *
-       * Do NOT:
-       * - mutate ModerationCase risk
-       * - hide content
-       * - resolve case
-       * - emit Policy events
-       */
+      // Durable work and accepted classifier result commit atomically. Evaluation
+      // happens later, outside this transaction; no case/content actions here.
+      if (updated.count === 1 && event.payload.status === 'SUCCEEDED') {
+        await this.policyWork.enqueueForAnalysis(tx, analysis.id);
+      }
     });
   }
 }

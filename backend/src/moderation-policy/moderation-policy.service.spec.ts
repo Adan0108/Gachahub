@@ -1,3 +1,4 @@
+import { PrismaService } from '../prisma/prisma.service';
 import { Test } from '@nestjs/testing';
 import { ModerationPolicyModule } from './moderation-policy.module';
 import { getModerationPolicyClassifierProfile } from './moderation-policy.profiles';
@@ -148,7 +149,10 @@ describe('pure moderation policy service', () => {
   it('exports the evaluator through the module without external infrastructure', async () => {
     const module = await Test.createTestingModule({
       imports: [ModerationPolicyModule],
-    }).compile();
+    })
+      .overrideProvider(PrismaService)
+      .useValue({})
+      .compile();
     expect(
       module.get(ModerationPolicyService).evaluate(input()).riskLevel,
     ).toBe('LOW');

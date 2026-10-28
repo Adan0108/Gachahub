@@ -1,3 +1,4 @@
+import { PrismaService } from '../prisma/prisma.service';
 import { parseModerationPolicyOutput } from './moderation-policy.contract';
 import {
   MODERATION_POLICY_RISK_LEVELS,
@@ -77,10 +78,13 @@ describe('moderation policy output contract', () => {
       expect(() => parseModerationPolicyOutput(output)).toThrow();
     },
   );
-  it('compiles the inert module', async () => {
+  it('compiles the module with infrastructure substituted', async () => {
     const module = await Test.createTestingModule({
       imports: [ModerationPolicyModule],
-    }).compile();
+    })
+      .overrideProvider(PrismaService)
+      .useValue({})
+      .compile();
     await module.close();
   });
 });

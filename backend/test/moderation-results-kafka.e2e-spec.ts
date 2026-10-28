@@ -1,3 +1,4 @@
+import { ModerationPolicyRepository } from '../src/moderation-policy/moderation-policy.repository';
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import { Kafka, type Producer } from 'kafkajs';
@@ -88,11 +89,13 @@ describe('Stage 2B deterministic fixture through real Kafka topic', () => {
     const results = new ModerationResultService(
       db,
       new ProcessedEventRepository(),
+      new ModerationPolicyRepository(db),
     );
     let failOnce = true;
     const actualResults = new ModerationResultService(
       db,
       new ProcessedEventRepository(),
+      new ModerationPolicyRepository(db),
     );
     const ingest = jest
       .spyOn(results, 'ingest')

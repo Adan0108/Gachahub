@@ -1,3 +1,4 @@
+import { ModerationPolicyRepository } from '../src/moderation-policy/moderation-policy.repository';
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import { ModerationResultService } from '../src/moderation-analysis/moderation-result.service';
@@ -14,7 +15,11 @@ describe('Stage 2B real PostgreSQL', () => {
   beforeAll(async () => {
     isolated = await isolatedCaseDatabase();
     db = isolated.prisma as PrismaService;
-    service = new ModerationResultService(db, new ProcessedEventRepository());
+    service = new ModerationResultService(
+      db,
+      new ProcessedEventRepository(),
+      new ModerationPolicyRepository(db),
+    );
   });
   afterAll(async () => {
     await isolated?.cleanup();

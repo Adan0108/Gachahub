@@ -1,13 +1,65 @@
-# Moderation policy: Stage 2D.1 foundation and Stage 2D.2 pure rules
+# Moderation policy: foundation, pure rules and durable execution
 
 Stage 2D.1 defines schema/contracts and the production classifier registry.
 Stage 2D.2 adds pure classifier-score to advisory mapping through
-`ModerationPolicyService.evaluate(input)`. The module exports the service but is
-not imported into result ingestion. Evaluation has no injected infrastructure,
+`ModerationPolicyService.evaluate(input)`. Pure evaluation has no injected infrastructure,
 database writes, network calls, clock, randomness, or environment lookup.
 
-Not yet implemented: DB runner, retries, result-ingestion wiring, freshness API,
-context/NLI model, or enforcement. No evaluation is triggered automatically.
+Stage 2D.3 adds durable backend execution below. Not yet implemented: freshness
+API, moderator advisory projection, priority queue sorting, context/NLI model,
+or enforcement. Evaluations are historical records, not current-case decisions.
+
+## Stage 2D.3 durable execution
+
+`ModerationResultsModule` imports `ModerationPolicyModule`. In the existing
+result-ingestion transaction, only a winning PENDING -> SUCCEEDED update enqueues
+`(analysisId, moderation-policy-v1)` with create-or-ignore semantics. The event
+claim, accepted classifier result and policy work commit together. An enqueue
+failure rolls all three back for Kafka replay. FAILED classifier results enqueue
+nothing. Identity/hash checks, case locking and the terminal result guard remain
+unchanged. Policy evaluation never runs in that transaction.
+
+The backend runner loads the persisted `result.output.model` and
+`result.output.labels` array, validates the wrapper/unique labels, constructs
+classifier evidence, evaluates the pure policy, validates output, then writes
+the advisory in a separate database statement. It never evaluates a raw Kafka
+payload. Source analyses and case/content state are never changed by the runner.
+
+Claims use a single PostgreSQL CTE with FOR UPDATE SKIP LOCKED followed by UPDATE
+RETURNING. Only v1 PENDING work with a due retry and absent/expired lease is
+eligible. Each claim increments attemptCount and installs a random UUID token.
+Finalization and retry require PENDING, that exact token and an unexpired lease,
+using database time. A reclaimed row has a different token; stale writes update
+zero rows. Successful terminal output cannot be overwritten. Database failures
+leave the lease recoverable rather than being mislabeled as unsupported evidence.
+
+Execution constants are centralized:
+
+- Maximum attempts: 5 (including attempts abandoned by crashes).
+- Lease: 30 seconds; no heartbeat is needed for the bounded synchronous v1 rules.
+- Retry: 2 seconds \* 2^(attempt-1), capped at 60 seconds.
+- Poll: 2 seconds after the previous cycle completes; at most 10 items per cycle.
+- Reconciliation: one page of at most 100 analyses every 60 seconds.
+
+Internal failures remain PENDING with nextAttemptAt until attempt 5 becomes FAILED
+with POLICY_EVALUATION_ERROR. Unsupported evidence becomes UNSUPPORTED immediately
+with UNSUPPORTED_CLASSIFIER_EVIDENCE. A fifth attempt abandoned by a crashed runner
+becomes FAILED/POLICY_ATTEMPTS_EXHAUSTED when its expired lease is next examined.
+No raw input, exception messages or stacks are persisted/logged. Successful
+evaluation uses database time for evaluatedAt and clears all retry/lease errors.
+
+Reconciliation walks ALL analyses in primary-key order, inspecting no more than
+100 per page even when successes are sparse. It inserts missing v1 work for
+SUCCEEDED analyses only; the unique key makes competing reconciliation/ingestion
+safe. A process-local cursor advances only after commit, wraps at the end, and
+restarts after process restart. New lower IDs or concurrent successes are picked
+up on a later sweep. Existing status/retry, lease, PK and analysis/version indexes
+are used; no schema/migration change is needed. Backfill does not replay Kafka.
+
+Lifecycle polling is nonoverlapping. Shutdown cancels the next timer, stops
+claiming additional work and awaits the in-flight cycle before returning.
+This depends on deploying the existing Stage 2D.1 migration before enabling the
+updated application; this stage does not apply development migrations.
 
 ## Provisional v1 rules
 
@@ -57,7 +109,7 @@ not a replacement for ingestion's identity/hash checks or a raw JSON parser.
 
 `ModerationPolicyEvaluation` belongs to an analysis, cascading on deletion.
 `(analysisId, policyVersion)` is unique. Rows carry retry/lease metadata for future
-execution, but this stage creates no rows automatically and implements no leases.
+execution. Stage 2D.3 implements creation, claims, retries and fenced completion.
 There is no context-analysis foreign key or combined classifier/context JSON.
 
 The additive `20261028000000_add_moderation_policy_evaluations` migration enforces:
@@ -73,7 +125,7 @@ The additive `20261028000000_add_moderation_policy_evaluations` migration enforc
 SQL checks are not represented by Prisma's datamodel; preserve them in future
 migrations. Signal membership/uniqueness and exact supported policy version are
 application-contract checks. Historical versions remain representable in storage.
-Future services must enforce successful-output immutability and lease fencing;
+The execution repository enforces terminal-output immutability and lease fencing;
 the database checks alone do not implement a transition state machine.
 
 Generate migration SQL using read-only `prisma migrate diff` between the previous
@@ -88,6 +140,7 @@ npx.cmd prisma validate
 npx.cmd prisma generate
 npm.cmd test -- --runInBand moderation-policy moderation-analysis
 npm.cmd run test:e2e -- --runInBand moderation-policy-schema.e2e-spec.ts moderation-results.e2e-spec.ts
+npm.cmd run test:e2e -- --runInBand moderation-policy-execution.e2e-spec.ts
 npx.cmd tsc --noEmit
 npm.cmd run build
 ```

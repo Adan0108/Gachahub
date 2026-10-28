@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
+import { ModerationPolicyModule } from '../moderation-policy/moderation-policy.module';
 import { ProcessedEventRepository } from '../notifications/processed-event.repository';
 import { ModerationResultService } from './moderation-result.service';
 import { ModerationResultConsumer } from './moderation-result-consumer.service';
@@ -9,7 +10,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ModerationAnalysisInputService } from './moderation-analysis-input.service';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, ModerationPolicyModule],
   controllers: [ModerationAnalysisInternalController],
   providers: [
     ModerationServiceAuthGuard,
