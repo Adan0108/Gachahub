@@ -1096,8 +1096,9 @@ model Report {
 
   createdAt DateTime @default(now())
 
-  reporter User?          @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: SetNull)
-  case     ModerationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  reporter User?                @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: SetNull)
+  case     ModerationCase       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  analyses ModerationAnalysis[]
 
   // Reporter duplication is checked while holding the case row lock. Closed
   // cases allow re-reporting; no unconditional reporter/target unique constraint.
@@ -1130,9 +1131,10 @@ model ModerationCase {
   updatedAt DateTime @updatedAt
 
   reports           Report[]
-  game              Game?    @relation(fields: [gameId], references: [id], onDelete: SetNull)
-  assignedModerator User?    @relation("ModerationCasesAssigned", fields: [assignedModeratorId], references: [id], onDelete: SetNull)
-  resolvedBy        User?    @relation("ModerationCasesResolved", fields: [resolvedById], references: [id], onDelete: SetNull)
+  analyses          ModerationAnalysis[]
+  game              Game?                @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  assignedModerator User?                @relation("ModerationCasesAssigned", fields: [assignedModeratorId], references: [id], onDelete: SetNull)
+  resolvedBy        User?                @relation("ModerationCasesResolved", fields: [resolvedById], references: [id], onDelete: SetNull)
 
   // Partial unique index moderation_cases_open_target_key in migration
   // 20261015060000: (targetType, targetId) WHERE status IN ('OPEN', 'IN_REVIEW').
@@ -1146,6 +1148,39 @@ model ModerationCase {
   @@index([targetType, targetId])
   @@index([assignedModeratorId])
   @@map("moderation_cases")
+}
+
+enum ModerationAnalysisStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+model ModerationAnalysis {
+  id                 String                   @id @default(cuid())
+  caseId             String
+  sourceReportId     String?
+  targetType         ReportTargetType
+  targetId           String
+  generation         Int
+  inputSchemaVersion Int
+  inputSnapshot      Json
+  snapshotHash       String
+  classifierProfile  String
+  status             ModerationAnalysisStatus @default(PENDING)
+
+  result Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  case         ModerationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  sourceReport Report?        @relation(fields: [sourceReportId], references: [id], onDelete: SetNull)
+
+  @@unique([caseId, snapshotHash, classifierProfile])
+  @@unique([caseId, generation])
+  @@index([sourceReportId])
+  @@map("moderation_analyses")
 }
 
 enum AuditAction {
