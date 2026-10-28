@@ -1,8 +1,46 @@
-# Stage 2D.1: policy foundation
+# Moderation policy: Stage 2D.1 foundation and Stage 2D.2 pure rules
 
-This package defines advisory contracts and production classifier compatibility
-only. The empty module is not wired into ingestion. There are no policy rules,
-thresholds, evaluations, runners, actions, or context-model implementations.
+Stage 2D.1 defines schema/contracts and the production classifier registry.
+Stage 2D.2 adds pure classifier-score to advisory mapping through
+`ModerationPolicyService.evaluate(input)`. The module exports the service but is
+not imported into result ingestion. Evaluation has no injected infrastructure,
+database writes, network calls, clock, randomness, or environment lookup.
+
+Not yet implemented: DB runner, retries, result-ingestion wiring, freshness API,
+context/NLI model, or enforcement. No evaluation is triggered automatically.
+
+## Provisional v1 rules
+
+All thresholds are provisional engineering defaults, not production-calibrated
+probabilities or certainty of a violation. Constants live in
+`moderation-policy.rules.ts`:
+
+| Signal                     | Inclusive threshold                 | Risk / priority            |
+| -------------------------- | ----------------------------------- | -------------------------- |
+| SEVERE_TOXICITY_HIGH_SCORE | severe_toxicity >= 0.90             | HIGH / 70                  |
+| TOXICITY_WITH_INSULT       | toxicity >= 0.85 AND insult >= 0.80 | MEDIUM / 50                |
+| IDENTITY_ATTACK_POSSIBLE   | identity_attack >= 0.85             | HIGH / 70                  |
+| SEXUAL_CONTENT_POSSIBLE    | sexual_explicit >= 0.90             | MEDIUM / 40                |
+| PROFANITY_POSSIBLE         | obscene >= 0.90                     | MEDIUM / 40                |
+| POSSIBLE_THREAT            | threat >= 0.70                      | MEDIUM / 40                |
+| CONTEXT_REVIEW_REQUIRED    | whenever POSSIBLE_THREAT fires      | caution; no extra priority |
+
+No signals maps to LOW / 10. Multiple signals use the maximum applicable fixed
+band, never a sum. CRITICAL is reserved and cannot be emitted by v1. Toxicity
+alone does not escalate; threat plus toxicity remains MEDIUM unless an
+independent HIGH rule fires. Signals follow `MODERATION_POLICY_SIGNALS` order.
+
+The service validates runtime classifier shape, exact production compatibility,
+finite bounded scores, then rules and the existing strict Zod output contract.
+Unsupported/malformed evidence throws `UnsupportedModerationPolicyEvidenceError`
+with fixed code `UNSUPPORTED_CLASSIFIER_EVIDENCE`; it never fabricates LOW.
+Optional context is explicitly ignored by v1, not interpreted or persisted.
+There are no keyword gaming exemptions. The fixed gaming regression uses
+toxicity=0.74, threat=0.74 and other scores=0: MEDIUM / 40 with threat and context
+caution. This is conservative score mapping, not gaming-context understanding.
+Output contains no evaluatedAt; future persistence owns that timestamp.
+
+## Foundation and persistence contract
 
 `moderation-policy-v1` is the reserved immutable policy version. Risk values are
 LOW/MEDIUM/HIGH/CRITICAL; accepting a value in the contract does not assign it.
