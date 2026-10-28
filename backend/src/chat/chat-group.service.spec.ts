@@ -193,7 +193,6 @@ describe('ChatGroupService', () => {
 
       await service.createGroupChat('user-1', {
         title: 'Team Chat',
-        photoUrl: 'https://cdn.example.com/photo.png',
         memberUserIds: ['user-2', 'user-3', 'user-2', 'user-1'],
       });
 
@@ -206,7 +205,6 @@ describe('ChatGroupService', () => {
         {
           creatorId: 'user-1',
           title: 'Team Chat',
-          photoUrl: 'https://cdn.example.com/photo.png',
           members: [
             { userId: 'user-2', state: 'PENDING' },
             { userId: 'user-3', state: 'PENDING' },
@@ -408,7 +406,6 @@ describe('ChatGroupService', () => {
         expect(repository.updateGroupConversation).toHaveBeenCalledWith({
           conversationId: 'conversation-1',
           title: 'New Title',
-          photoUrl: undefined,
         });
       },
     );

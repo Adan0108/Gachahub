@@ -48,9 +48,10 @@ describe('UserModerationService', () => {
   // interactive callback form, so this just runs the callback against a
   // fake tx (the repository call inside it is mocked, so its identity
   // doesn't matter).
+  const fakeTx = { moderationCase: { updateMany: jest.fn() } };
   const prisma = {
     $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
-      callback('fake-tx'),
+      callback(fakeTx),
     ),
   };
 
@@ -67,7 +68,7 @@ describe('UserModerationService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.$transaction.mockImplementation(
-      (callback: (tx: unknown) => unknown) => callback('fake-tx'),
+      (callback: (tx: unknown) => unknown) => callback(fakeTx),
     );
     auditLogService.recordOrThrow.mockResolvedValue(undefined);
     sessionTerminator.endAllForUser.mockResolvedValue(undefined);
@@ -171,7 +172,7 @@ describe('UserModerationService', () => {
       );
 
       expect(usersRepository.updateStatus).toHaveBeenCalledWith(
-        'fake-tx',
+        fakeTx,
         'user-1',
         'ACTIVE',
         'BANNED',
@@ -184,13 +185,39 @@ describe('UserModerationService', () => {
           targetType: 'USER',
           metadata: { previousStatus: 'ACTIVE', reason: 'Repeated abuse' },
         },
-        'fake-tx',
+        fakeTx,
       );
       expect(sessionTerminator.endAllForUser).toHaveBeenCalledWith('user-1');
       // Audit write happens inside the transaction, before the (fallible)
       // session sweep runs outside it - a failed sweep can never cost the trail.
       expect(order).toEqual(['audit', 'sessions']);
       expect(result).toEqual({ ...targetUser, status: 'BANNED' });
+    });
+
+    it("hands a banned moderator's open cases back to the queue, but not on reactivation", async () => {
+      usersRepository.findForModeration.mockResolvedValue(targetUser);
+      usersRepository.updateStatus.mockResolvedValue({
+        ...targetUser,
+        status: 'BANNED',
+      });
+
+      await service.setStatus('user-1', 'BANNED', 'admin-1');
+
+      expect(fakeTx.moderationCase.updateMany).toHaveBeenCalledWith({
+        where: {
+          assignedModeratorId: 'user-1',
+          status: { in: ['OPEN', 'IN_REVIEW'] },
+        },
+        data: { assignedModeratorId: null, status: 'OPEN' },
+      });
+
+      fakeTx.moderationCase.updateMany.mockClear();
+      usersRepository.findForModeration.mockResolvedValue({
+        ...targetUser,
+        status: 'BANNED',
+      });
+      await service.setStatus('user-1', 'ACTIVE', 'admin-1');
+      expect(fakeTx.moderationCase.updateMany).not.toHaveBeenCalled();
     });
 
     it('rolls back the status change if the audit write fails', async () => {
@@ -223,7 +250,7 @@ describe('UserModerationService', () => {
       expect(sessionTerminator.endAllForUser).not.toHaveBeenCalled();
       expect(auditLogService.recordOrThrow).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'USER_REACTIVATED' }),
-        'fake-tx',
+        fakeTx,
       );
     });
   });

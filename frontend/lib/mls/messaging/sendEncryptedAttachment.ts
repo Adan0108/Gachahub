@@ -1,4 +1,5 @@
 import { api } from '../../api';
+import { startTiming } from '../../chat/chatTiming';
 import { buildAttachmentEnvelope, envelopeBlobIds } from '../media/attachmentEnvelope';
 import {
   prepareAttachments,
@@ -52,9 +53,12 @@ export async function sendAttachmentsWithCache(params: {
 }) {
   const done = params.uploaded.get(params.clientMessageId) ?? new Map();
   params.uploaded.set(params.clientMessageId, done);
+  const stopAll = startTiming('attachment send', { files: params.files.length });
+  const stopUpload = startTiming('attachments encrypted and uploaded', { files: params.files.length });
   const prepared = await uploadEncryptedAttachments(params.files, params.onStage, done);
+  stopUpload();
 
-  return sendEncryptedAttachmentMessage(
+  const sent = sendEncryptedAttachmentMessage(
     params.syncEngine,
     params.deviceId,
     params.conversationId,
@@ -62,4 +66,5 @@ export async function sendAttachmentsWithCache(params: {
     { files: prepared, caption: params.caption },
     params.clientMessageId,
   );
+  return sent.finally(() => stopAll());
 }

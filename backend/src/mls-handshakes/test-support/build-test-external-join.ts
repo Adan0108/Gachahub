@@ -4,6 +4,7 @@ import {
   defaultCapabilities,
   encodeMlsMessage,
   generateKeyPackage,
+  generateKeyPackageWithKey,
   getCiphersuiteFromName,
   getCiphersuiteImpl,
   joinGroupExternal,
@@ -99,5 +100,89 @@ export async function buildTestExternalJoin(
       await createGroupInfoWithExternalPubAndRatchetTree(newState, [], impl),
     ),
     joinerSignatureKey: joinerPackage.publicPackage.leafNode.signaturePublicKey,
+  };
+}
+
+export interface TestExternalResync extends TestExternalJoin {
+  /** The leaf the commit removes: the device's own old leaf. */
+  removedLeafIndex: number;
+}
+
+/** Builds a real resync: a device that is already a leaf of a two-member group joins it again, replacing that leaf. */
+export async function buildTestExternalResync(
+  conversationId: string,
+  device: { userId: string; deviceId: string },
+): Promise<TestExternalResync> {
+  const impl = await getImpl();
+  const creator = await newMember({
+    userId: 'creator',
+    deviceId: 'creator-device',
+  });
+  const old = await newMember(device);
+
+  const created = await createGroup(
+    new TextEncoder().encode(conversationId),
+    creator.publicPackage,
+    creator.privatePackage,
+    [],
+    impl,
+  );
+  const firstInfo = await createGroupInfoWithExternalPubAndRatchetTree(
+    created,
+    [],
+    impl,
+  );
+  const joined = await joinGroupExternal(
+    firstInfo,
+    old.publicPackage,
+    old.privatePackage,
+    false,
+    impl,
+  );
+  const state = joined.newState;
+  const groupInfo = await createGroupInfoWithExternalPubAndRatchetTree(
+    state,
+    [],
+    impl,
+  );
+
+  // Same device identity and signing key, fresh encryption keys: what a device that lost its state has
+  const signatureKey = old.publicPackage.leafNode.signaturePublicKey;
+  const fresh = await generateKeyPackageWithKey(
+    {
+      credentialType: 'basic',
+      identity: new TextEncoder().encode(JSON.stringify(device)),
+    },
+    defaultCapabilities(),
+    lifetime(),
+    [],
+    {
+      signKey: old.privatePackage.signaturePrivateKey,
+      publicKey: signatureKey,
+    },
+    impl,
+  );
+
+  const { publicMessage, newState } = await joinGroupExternal(
+    groupInfo,
+    fresh.publicPackage,
+    fresh.privatePackage,
+    true,
+    impl,
+  );
+
+  return {
+    epoch: Number(state.groupContext.epoch),
+    groupInfoPayload: encodeGroupInfo(groupInfo),
+    commitPayload: encodeMlsMessage({
+      publicMessage,
+      wireformat: 'mls_public_message',
+      version: 'mls10',
+    }),
+    nextGroupInfoPayload: encodeGroupInfo(
+      await createGroupInfoWithExternalPubAndRatchetTree(newState, [], impl),
+    ),
+    joinerSignatureKey: signatureKey,
+    removedLeafIndex: 1,
   };
 }

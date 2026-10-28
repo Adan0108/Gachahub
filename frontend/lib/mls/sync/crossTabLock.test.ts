@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CrossTabLockUnavailableError } from '../contract/errors';
 import { withCrossTabLock } from './crossTabLock';
 
 afterEach(() => {
@@ -6,8 +7,21 @@ afterEach(() => {
 });
 
 describe('withCrossTabLock', () => {
-  it('runs the task without the Web Locks API', async () => {
-    await expect(withCrossTabLock('a', async () => 42)).resolves.toBe(42);
+  it('refuses to run the task without the Web Locks API, with a message the user can act on', async () => {
+    vi.stubGlobal('navigator', {});
+    const task = vi.fn(async () => 42);
+
+    const refused = withCrossTabLock('a', task);
+
+    await expect(refused).rejects.toBeInstanceOf(CrossTabLockUnavailableError);
+    await expect(refused).rejects.toThrow(/up-to-date browser/);
+    expect(task).not.toHaveBeenCalled();
+  });
+
+  it('refuses when there is no navigator at all', async () => {
+    vi.stubGlobal('navigator', undefined);
+
+    await expect(withCrossTabLock('a', async () => 42)).rejects.toBeInstanceOf(CrossTabLockUnavailableError);
   });
 
   it('runs the task inside an exclusive lock of that name and returns its result', async () => {

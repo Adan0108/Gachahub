@@ -10,6 +10,7 @@ import {
 } from './limits';
 import {
   assertSendable,
+  PREPARE_CONCURRENCY,
   prepareAttachments,
   type OpaqueBlob,
   type PreparedFiles,
@@ -65,16 +66,15 @@ describe('prepareAttachments', () => {
     expect(plaintext).toEqual(secret);
   });
 
-  it('keeps upload ids aligned with files in order', async () => {
+  it('keeps the entries in the order of the files, each with its own upload', async () => {
     const upload = fakeUpload();
     const files = [new File(['a'], 'a.bin'), new File(['b'], 'b.bin')];
 
     const entries = await prepareAttachments(files, upload);
 
-    expect(entries.map((entry) => [entry.name, entry.blob])).toEqual([
-      ['a.bin', 'upload-0'],
-      ['b.bin', 'upload-1'],
-    ]);
+    expect(entries.map((entry) => entry.name)).toEqual(['a.bin', 'b.bin']);
+    // Which upload finishes first is up to the network; each file just has to keep its own
+    expect(new Set(entries.map((entry) => entry.blob)).size).toBe(2);
     expect(entries[0]!.mime).toBe('application/octet-stream');
   });
 
@@ -94,6 +94,81 @@ describe('prepareAttachments', () => {
 
     expect(upload).toHaveBeenCalledTimes(3);
     expect(entries[0]!.blob).toBe('first');
+  });
+
+  describe('several files at once', () => {
+    /** An uploader that records how many uploads are under way, and finishes each after a tick. */
+    function trackedUpload() {
+      let inFlight = 0;
+      let peak = 0;
+      const upload = vi.fn(async (blobs: OpaqueBlob[]) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        inFlight -= 1;
+        return blobs.map((_, index) => `id-${upload.mock.calls.length}-${index}`);
+      });
+      return { upload, peak: () => peak };
+    }
+    const names = (count: number) =>
+      Array.from({ length: count }, (_, index) => new File([`f${index}`], `f${index}.bin`));
+
+    it('overlaps the uploads, but never more than the limit', async () => {
+      const { upload, peak } = trackedUpload();
+
+      await prepareAttachments(names(8), upload);
+
+      expect(peak()).toBeGreaterThan(1);
+      expect(peak()).toBeLessThanOrEqual(PREPARE_CONCURRENCY);
+      expect(upload).toHaveBeenCalledTimes(8);
+    });
+
+    it('still returns the entries in the order of the files', async () => {
+      const { upload } = trackedUpload();
+      const files = names(6);
+
+      const entries = await prepareAttachments(files, upload);
+
+      expect(entries.map((entry) => entry.name)).toEqual(files.map((file) => file.name));
+    });
+
+    it('stops starting new files after a failure, keeps the ones that finished, and throws the first error', async () => {
+      const done: PreparedFiles = new Map();
+      let calls = 0;
+      const upload = vi.fn(async (blobs: OpaqueBlob[]) => {
+        calls += 1;
+        if (calls === 2) throw new Error('network');
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return blobs.map(() => `ok-${calls}`);
+      });
+
+      await expect(prepareAttachments(names(9), upload, undefined, done)).rejects.toThrow('network');
+
+      // The others already under way were let finish and kept; nothing new was started after the failure
+      expect(done.size).toBeLessThan(9);
+      expect(done.size).toBeGreaterThan(0);
+      expect(upload.mock.calls.length).toBeLessThan(9);
+    });
+
+    it('does not redo files that already finished when it is tried again', async () => {
+      const done: PreparedFiles = new Map();
+      const files = names(4);
+      let failOnce = true;
+      const upload = vi.fn(async (blobs: OpaqueBlob[]) => {
+        if (failOnce && upload.mock.calls.length === 3) {
+          failOnce = false;
+          throw new Error('network');
+        }
+        return blobs.map(() => `ok-${upload.mock.calls.length}`);
+      });
+
+      await expect(prepareAttachments(files, upload, undefined, done)).rejects.toThrow('network');
+      const finished = done.size;
+      upload.mockClear();
+      await prepareAttachments(files, upload, undefined, done);
+
+      expect(upload).toHaveBeenCalledTimes(4 - finished);
+    });
   });
 
   it('refuses before encrypting when the selection is not sendable', async () => {

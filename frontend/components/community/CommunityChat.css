@@ -1,0 +1,727 @@
+/* A community's chat room: a header, a scrolling list in a Discord-like layout, and the composer. */
+.community-chat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: min(74vh, 760px);
+  min-height: 480px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+.community-chat.gate {
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: auto;
+  min-height: 260px;
+  padding: 32px 20px;
+  text-align: center;
+}
+
+.community-chat.gate h3,
+.community-chat.gate p {
+  margin: 0;
+}
+
+.community-chat.gate p {
+  max-width: 420px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.community-chat.gate svg {
+  color: var(--muted);
+  font-size: 26px;
+}
+
+.community-chat.gate .primary {
+  display: inline-block;
+  margin-top: 8px;
+  text-decoration: none;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--purple);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.community-chat-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.community-chat-head svg {
+  align-self: center;
+  color: var(--muted);
+}
+
+.community-chat-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.community-chat-head small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.community-list-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.community-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 8px 0 10px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--bg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+/* A short room sits against the composer, not at the top; unlike justify-content: flex-end this stays scrollable. */
+.community-list::before {
+  content: "";
+  flex: 0 0 auto;
+  margin-top: auto;
+}
+
+.community-older {
+  align-self: center;
+  margin: 6px 0 10px;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel2);
+  color: var(--muted-strong);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.community-day {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 16px 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.community-day::before,
+.community-day::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.community-empty {
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+}
+
+.community-empty p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.community-message {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 1px 16px 1px 12px;
+  border-radius: 0;
+}
+
+.community-message.with-header {
+  margin-top: 10px;
+  padding-top: 4px;
+}
+
+.community-message:hover,
+.community-message:focus-within {
+  background: color-mix(in srgb, var(--panel2), transparent 50%);
+}
+
+.community-message.flash {
+  animation: community-flash 1.6s ease-out;
+}
+
+@keyframes community-flash {
+  0%,
+  40% {
+    background: color-mix(in srgb, var(--purple), transparent 70%);
+  }
+}
+
+.community-gutter {
+  display: flex;
+  flex: 0 0 40px;
+  justify-content: center;
+  padding-top: 2px;
+}
+
+.community-msg-avatar {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--panel2);
+  font-weight: 700;
+}
+
+.community-msg-avatar .avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.community-hover-time {
+  align-self: center;
+  color: var(--muted);
+  font-size: 10px;
+  opacity: 0;
+}
+
+.community-message:hover .community-hover-time {
+  opacity: 1;
+}
+
+.community-msg-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.community-msg-body header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.community-author {
+  font-size: 14px;
+}
+
+.community-msg-body header time {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.community-badge {
+  align-self: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--panel2);
+  color: var(--purple);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.community-badge.admin {
+  background: color-mix(in srgb, #ff6b6b, transparent 80%);
+  color: #ff8a8a;
+}
+
+.community-text,
+.community-removed {
+  margin: 1px 0 0;
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.community-text a {
+  color: var(--purple);
+}
+
+.community-edited {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.community-removed {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.community-message.removed {
+  opacity: 0.8;
+}
+
+.community-reply {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin: 2px 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.community-reply.static {
+  cursor: default;
+}
+
+.community-reply span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.community-reply b {
+  flex: 0 0 auto;
+  color: var(--muted-strong);
+}
+
+.community-message .chat-reaction-chips {
+  margin-top: 4px;
+}
+
+/* The shared hover toolbar sits on the top right of the row here, not beside a bubble. */
+.community-message .message-actions {
+  top: -14px;
+  right: 16px;
+  left: auto;
+  transform: none;
+}
+
+.community-message:hover .message-actions,
+.community-message:focus-within .message-actions,
+.community-message .message-actions.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.community-message.pending {
+  opacity: 0.7;
+}
+
+.community-pending-note {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.community-error {
+  color: #ff6b6b;
+  font-size: 12px;
+}
+
+.community-error button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.community-edit {
+  display: grid;
+  gap: 6px;
+}
+
+.community-edit textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--purple);
+  border-radius: 8px;
+  background: var(--panel2);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.community-edit small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.community-edit > div {
+  display: flex;
+  gap: 8px;
+}
+
+.community-edit button {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.community-edit button.primary {
+  border-color: transparent;
+  background: var(--purple);
+  color: #fff;
+}
+
+.community-edit button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.community-skeleton {
+  display: grid;
+  gap: 18px;
+  padding: 16px;
+}
+
+.community-skeleton div {
+  display: flex;
+  gap: 12px;
+  animation: community-pulse 1.3s ease-in-out infinite;
+}
+
+.community-skeleton span {
+  flex: 0 0 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--panel2);
+}
+
+.community-skeleton p {
+  flex: 1;
+  max-width: 60%;
+  height: 34px;
+  margin: 0;
+  border-radius: 8px;
+  background: var(--panel2);
+}
+
+@keyframes community-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.community-composer {
+  display: grid;
+  gap: 6px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.community-composer.disabled {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.community-composer-reply {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.community-composer-reply span {
+  flex: 1;
+}
+
+.community-composer-reply button,
+.community-composer-tools button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted-strong);
+  font-size: 17px;
+  cursor: pointer;
+}
+
+.community-composer-tools button:hover {
+  background: var(--panel2);
+}
+
+.community-composer-row {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 6px 8px 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel2);
+}
+
+.community-composer-row:focus-within {
+  border-color: var(--purple);
+}
+
+.community-composer textarea {
+  flex: 1;
+  max-height: 160px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+  outline: none;
+  resize: none;
+  field-sizing: content;
+}
+
+.community-composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.community-composer-tools small {
+  margin-right: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.community-composer-tools small.limit {
+  color: #ff6b6b;
+}
+
+.community-composer-tools .send:not(:disabled) {
+  background: var(--purple);
+  color: #fff;
+}
+
+.community-composer-tools .send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.community-emoji-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+}
+
+.community-hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.community-composer-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 8px 0 0;
+  list-style: none;
+}
+
+.community-composer-files li {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel2);
+}
+
+.community-composer-files img,
+.community-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.community-composer-files img,
+.community-composer-files .community-local-blank {
+  border-radius: 9px;
+}
+
+.community-composer-files button {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  place-items: center;
+  line-height: 0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  background: #2b2e3d;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.community-local-blank {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--panel2);
+}
+
+.community-media {
+  display: grid;
+  gap: 4px;
+  max-width: 420px;
+  margin-top: 4px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.community-media > button,
+.community-media > span {
+  display: block;
+  aspect-ratio: 1;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--panel2);
+  cursor: pointer;
+}
+
+.community-media > span {
+  cursor: default;
+}
+
+.community-media.count-1 {
+  grid-template-columns: minmax(0, 320px);
+}
+
+.community-media.count-1 > button,
+.community-media.count-1 > span {
+  aspect-ratio: auto;
+  max-height: 320px;
+}
+
+.community-media.count-1 img {
+  height: auto;
+  max-height: 320px;
+  object-fit: contain;
+  object-position: left top;
+}
+
+.community-media.count-3 > :first-child {
+  grid-column: 1 / -1;
+  aspect-ratio: 2;
+}
+
+/* Shown over the whole room while files are dragged in: says if they would be taken. */
+.community-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  border: 2px dashed var(--purple);
+  border-radius: 14px;
+  background: rgba(10, 12, 20, 0.82);
+  color: var(--text);
+  font-size: 15px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.community-drop-overlay.refused {
+  border-color: #ff6b6b;
+  color: #ff9b9b;
+}
+
+/* A message that names you stands out, with a bar on its side. */
+.community-message.mentions-me {
+  background: color-mix(in srgb, var(--purple), transparent 90%);
+  box-shadow: inset 3px 0 0 var(--purple);
+}
+
+.community-message.mentions-me:hover {
+  background: color-mix(in srgb, var(--purple), transparent 86%);
+}
+
+/* Members suggested while typing an @. */
+.community-mention-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 25;
+  display: grid;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  list-style: none;
+}
+
+.community-mention-menu li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.community-mention-menu li.active {
+  background: var(--panel2);
+}
+
+.community-mention-name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.community-mention-handle {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}

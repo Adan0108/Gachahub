@@ -1,4 +1,6 @@
 import { AuditLogModule } from '../audit-log/audit-log.module';
+import { PlatformModeratorsService } from './platform-moderators.service';
+import { PlatformModeratorsController } from './platform-moderators.controller';
 import { Module } from '@nestjs/common';
 import { CommonModule } from '../common/common.module';
 import { GameModeratorsController } from './game-moderators.controller';
@@ -15,8 +17,12 @@ import { GameModeratorsService } from './game-moderators.service';
  */
 @Module({
   imports: [CommonModule, AuditLogModule],
-  controllers: [GameModeratorsController],
-  providers: [GameModeratorsService, GameModeratorsRepository],
+  controllers: [GameModeratorsController, PlatformModeratorsController],
+  providers: [
+    GameModeratorsService,
+    GameModeratorsRepository,
+    PlatformModeratorsService,
+  ],
   exports: [GameModeratorsService, GameModeratorsRepository],
 })
 export class GameModeratorsModule {}

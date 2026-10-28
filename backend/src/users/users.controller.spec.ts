@@ -14,7 +14,11 @@ import { CheckUsernameQueryDto } from './dto/check-username-query.dto';
 describe('UsersController.getMe', () => {
   it('reads a live row via the service instead of returning session.user directly', () => {
     const usersService = { getMe: jest.fn().mockReturnValue('r') };
-    const controller = new UsersController({} as any, usersService as any, {} as any);
+    const controller = new UsersController(
+      {} as any,
+      usersService as any,
+      {} as any,
+    );
 
     expect(
       controller.getMe({ user: { id: 'me' } } as unknown as UserSession),
@@ -46,7 +50,11 @@ describe('UsersController.search', () => {
     expect(paramTypes[1]).toBe(SearchUsersQueryDto);
 
     const usersService = { searchForPicker: jest.fn().mockReturnValue('r') };
-    const controller = new UsersController({} as any, usersService as any, {} as any);
+    const controller = new UsersController(
+      {} as any,
+      usersService as any,
+      {} as any,
+    );
     const query = new SearchUsersQueryDto();
 
     expect(
@@ -86,7 +94,11 @@ describe('UsersController.checkUsernameAvailable', () => {
     const usersService = {
       isUsernameAvailable: jest.fn().mockResolvedValue(true),
     };
-    const controller = new UsersController({} as any, usersService as any, {} as any);
+    const controller = new UsersController(
+      {} as any,
+      usersService as any,
+      {} as any,
+    );
     const query = new CheckUsernameQueryDto();
     query.username = 'Mado-123';
 
@@ -115,7 +127,11 @@ describe('UsersController.completeOnboarding', () => {
     const usersService = {
       completeOnboarding: jest.fn().mockReturnValue('r'),
     };
-    const controller = new UsersController({} as any, usersService as any, {} as any);
+    const controller = new UsersController(
+      {} as any,
+      usersService as any,
+      {} as any,
+    );
     const dto = new CompleteOnboardingDto();
 
     expect(

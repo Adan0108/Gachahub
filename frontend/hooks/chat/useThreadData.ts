@@ -9,10 +9,17 @@ import { useNewMessageAnnouncement } from "./useNewMessageAnnouncement";
 import { useNowTick } from "../useNowTick";
 import { useSafetyNumbers } from "./useSafetyNumbers";
 import { otherActiveMemberIds, participantUser } from "../../lib/chat/chatDisplay";
-import { buildThreadItems, eventsForDisplay, readableNeighbors } from "../../lib/chat/chatThread";
+import {
+  buildThreadItems,
+  eventsForDisplay,
+  newestUnreadableFromOthers,
+  readableNeighbors,
+} from "../../lib/chat/chatThread";
 import { applyEdits, isEditMessage } from "../../lib/chat/messageEdits";
+import type { RawReaction } from "../../lib/chat/chatReactions";
+import type { ReceiptLike } from "../../lib/chat/messageStatus";
 
-interface ThreadMessage {
+export interface ThreadMessage {
   id: string;
   senderId: string;
   ciphertext: string;
@@ -20,6 +27,11 @@ interface ThreadMessage {
   contentType?: string;
   status?: string;
   editsMessageId?: string | null;
+  reactions?: RawReaction[];
+  receipts?: ReceiptLike[];
+  media?: { mediaUploadId: string; url: string }[];
+  replyToId?: string | null;
+  replyTo?: ThreadMessage | null;
 }
 
 interface NewestPage {
@@ -46,7 +58,9 @@ export function useThreadData(
   // An unsent message takes its edits with it, so their cached text goes too.
   const deletedMessageIds = useMemo(() => {
     const unsent = new Set(
-      displayMessages.filter((message) => message.status === "DELETED").map((message) => message.id),
+      displayMessages
+        .filter((message) => message.status === "DELETED")
+        .map((message) => message.id),
     );
     return displayMessages
       .filter(
@@ -101,10 +115,16 @@ export function useThreadData(
       (newestItems ?? [])
         .filter(
           (message) =>
-            !isEditMessage(message) && message.senderId !== userId && decrypted[message.id]?.status === "ok",
+            !isEditMessage(message) &&
+            message.senderId !== userId &&
+            decrypted[message.id]?.status === "ok",
         )
         .map((message) => message.id),
     [newestItems, userId, decrypted],
+  );
+  const unreadableMessageId = useMemo(
+    () => newestUnreadableFromOthers(visibleMessages, decrypted, userId),
+    [visibleMessages, decrypted, userId],
   );
   const lastMessage = newestPage ? (visibleMessages.at(-1) ?? null) : undefined;
   const announcement = useNewMessageAnnouncement(
@@ -129,6 +149,7 @@ export function useThreadData(
     safetyPeerIds,
     threadItems,
     readableMessageIds,
+    unreadableMessageId,
     announcement,
     now,
   };

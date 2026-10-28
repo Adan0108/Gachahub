@@ -146,6 +146,8 @@ export class UsersRepository {
           role: true,
           status: true,
           createdAt: true,
+          username: true,
+          image: true,
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip,

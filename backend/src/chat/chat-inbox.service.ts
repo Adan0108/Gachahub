@@ -239,22 +239,41 @@ export class ChatInboxService {
   }
 
   /**
-   * Blocks a convo for the current user.
+   * Blocks the other person of a direct chat for the current user.
    *
-   * Blocking is stored on the participant row because chat safety state is
-   * user-specific, not global to the convo.
+   * It is the same reversible block as blockUser: the conversation stays in the list and
+   * can still be opened, the person just cannot be written to until they are unblocked. A
+   * message request that has not been accepted also leaves the requests list. Group chats
+   * are left, not blocked.
    */
   async blockConversation(userId: string, conversationId: string) {
-    await this.chatAccessService.assertReadableParticipant(
+    const participant = await this.chatAccessService.assertReadableParticipant(
       conversationId,
       userId,
+    );
+    const conversation =
+      await this.chatRepository.findConversationWithParticipants(
+        conversationId,
+      );
+    const other = conversation?.participants.find(
+      (item) => item.userId !== userId,
     );
 
-    return this.chatRepository.updateParticipantState(
-      conversationId,
-      userId,
-      'BLOCKED',
-    );
+    if (!conversation || conversation.type !== 'DIRECT' || !other) {
+      throw new BadRequestException('Only a direct chat can be blocked');
+    }
+
+    await this.blockUser(userId, other.userId);
+
+    if (participant.state === 'PENDING') {
+      await this.chatRepository.updateParticipantState(
+        conversationId,
+        userId,
+        'DECLINED',
+      );
+    }
+
+    return { blockedUserId: other.userId };
   }
 
   /**
@@ -275,6 +294,11 @@ export class ChatInboxService {
     }
 
     return this.blocksService.block(blockerId, blockedId);
+  }
+
+  /** Everyone the caller has blocked, so they can see and undo it. */
+  listBlockedUsers(userId: string) {
+    return this.blocksService.listBlockedUsers(userId);
   }
 
   /**

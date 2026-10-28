@@ -10,6 +10,8 @@ describe('BlocksService', () => {
     find: jest.fn(),
     findBlockedIdsAmong: jest.fn(),
     findBlocksBetween: jest.fn(),
+    findBlockedUsers: jest.fn(),
+    findBlockersAmong: jest.fn(),
     create: jest.fn(),
     delete: jest.fn(),
   };
@@ -122,6 +124,11 @@ describe('BlocksService', () => {
       ]);
 
       expect([...blocked].sort()).toEqual(['bo', 'cy']);
+      expect(repository.findBlocksBetween).toHaveBeenCalledWith('me', [
+        'bo',
+        'cy',
+        'di',
+      ]);
     });
 
     it('is empty when there are no blocks', async () => {
@@ -130,6 +137,45 @@ describe('BlocksService', () => {
       await expect(
         service.getMutuallyBlockedIdsAmong('me', ['bo']),
       ).resolves.toEqual(new Set());
+    });
+  });
+
+  describe('listBlockedUsers', () => {
+    it('gives each blocked person with when they were blocked', async () => {
+      const blockedAt = new Date('2026-10-01T00:00:00Z');
+      repository.findBlockedUsers.mockResolvedValue([
+        {
+          createdAt: blockedAt,
+          blocked: { id: 'bo', name: 'Bo', username: 'bo', image: null },
+        },
+      ]);
+
+      const list = await service.listBlockedUsers('me');
+
+      expect(list).toEqual([
+        { id: 'bo', name: 'Bo', username: 'bo', image: null, blockedAt },
+      ]);
+      expect(repository.findBlockedUsers).toHaveBeenCalledWith('me', 200);
+    });
+
+    it('is empty when nobody is blocked', async () => {
+      repository.findBlockedUsers.mockResolvedValue([]);
+
+      await expect(service.listBlockedUsers('me')).resolves.toEqual([]);
+    });
+  });
+
+  describe('getBlockersAmong', () => {
+    it('gives the people among the candidates who blocked this person', async () => {
+      repository.findBlockersAmong.mockResolvedValue([{ blockerId: 'bo' }]);
+
+      const blockers = await service.getBlockersAmong('me', ['bo', 'cy']);
+
+      expect([...blockers]).toEqual(['bo']);
+      expect(repository.findBlockersAmong).toHaveBeenCalledWith('me', [
+        'bo',
+        'cy',
+      ]);
     });
   });
 });

@@ -92,8 +92,8 @@ async function provisionIfNeeded(
     if (existing.userId === userId) {
       return existing;
     }
-    // A different user signed into this browser profile - device identity is per-user (client.ts: "one instance per logged-in user per browser profile"), so the old identity can't be reused for the new one
-    await revokeDeviceEverywhere(store);
+    // Each account has its own local database, so this should not happen; if the identity in it is
+    // someone else's it is of no use here (and not ours to revoke), so it goes and a new one is made.
     await wipeAllLocalMlsSecrets();
   }
 

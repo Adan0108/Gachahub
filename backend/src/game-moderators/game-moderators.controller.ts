@@ -1,3 +1,4 @@
+import { QueryCaseAssigneesDto } from '../reports/dto/query-case-assignees.dto';
 import {
   Body,
   Controller,
@@ -5,6 +6,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -38,6 +40,23 @@ export class GameModeratorsController {
    * Example:
    * GET /games/wuthering-waves/moderators
    */
+  @Get('candidates')
+  @ApiOperation({
+    summary:
+      'Search active users for a new community moderator assignment. Admin only.',
+  })
+  candidates(
+    @Param('gameSlug') gameSlug: string,
+    @Session() session: UserSession,
+    @Query() query: QueryCaseAssigneesDto,
+  ) {
+    return this.gameModeratorsService.searchCandidates(
+      gameSlug,
+      session.user.id,
+      query.q,
+    );
+  }
+
   @Get()
   @ApiOperation({ summary: 'List game moderators. Admin only.' })
   @ApiParam({
