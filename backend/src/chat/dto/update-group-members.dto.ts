@@ -6,6 +6,7 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
+import { MAX_MEMBERS_PER_REQUEST } from '../group-size-policy';
 
 export class UpdateGroupMembersDto {
   @ApiProperty({
@@ -13,7 +14,7 @@ export class UpdateGroupMembersDto {
   })
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(99)
+  @ArrayMaxSize(MAX_MEMBERS_PER_REQUEST)
   @IsString({ each: true })
   @MaxLength(120, { each: true })
   userIds!: string[];

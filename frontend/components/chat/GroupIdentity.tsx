@@ -107,7 +107,10 @@ export function GroupIdentity({
                 event.preventDefault();
                 saveName();
               }
-              if (event.key === "Escape") setIsRenaming(false);
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setIsRenaming(false);
+              }
             }}
             value={draft}
           />
@@ -120,7 +123,7 @@ export function GroupIdentity({
         </div>
       ) : (
         <span className="chat-info-name">
-          <b>{name}</b>
+          <b title={name}>{name}</b>
           {canManage && (
             <button aria-label="Change group name" onClick={startRename} type="button">
               <FiEdit2 />

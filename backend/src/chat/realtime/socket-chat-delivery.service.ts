@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { userRoom } from '../../websocket/socket.util';
 import { SocketRegistry } from '../../websocket/socket-registry.service';
 import {
+  ChatConversationUpdatedEvent,
   ChatDeliveryPort,
   ChatMessageCreatedEvent,
   ChatMessageActionEvent,
@@ -16,7 +17,8 @@ type ChatSocketEventName =
   | 'reaction:added'
   | 'reaction:removed'
   | 'request:accepted'
-  | 'receipts:updated';
+  | 'receipts:updated'
+  | 'conversation:updated';
 
 // real ChatDeliveryPort now, was noop before, ChatService untouched either way
 @Injectable()
@@ -74,6 +76,18 @@ export class SocketChatDeliveryService implements ChatDeliveryPort {
         ? { messageIds: event.messageIds }
         : { upToMessageId: event.upToMessageId, at: event.at }),
     });
+  }
+
+  publishConversationUpdated(
+    event: ChatConversationUpdatedEvent,
+  ): Promise<void> {
+    return this.emitToRecipients(
+      'conversation:updated',
+      event.recipientUserIds,
+      {
+        conversationId: event.conversationId,
+      },
+    );
   }
 
   // shared by edit/delete/reaction events, only the event name differs

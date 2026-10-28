@@ -1,3 +1,4 @@
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { ChatMembershipRepository } from './chat-membership.repository';
 
 jest.mock('./chat-membership.repository', () => ({
@@ -10,11 +11,18 @@ describe('ChatMembershipService', () => {
   const repository = {
     changeMembership: jest.fn(),
     changeMembershipInTransaction: jest.fn(),
+    countGroupMembers: jest.fn(),
   };
   const eventPublisher = { publish: jest.fn(), publishMany: jest.fn() };
+  // The locked actor lookup: the actor still manages the group unless a test revokes them via actorRow
+  let actorRow: { state: string; role: string } | null;
+  const fakeTx = {
+    $queryRaw: jest.fn(),
+    chatParticipant: { findUnique: jest.fn(() => Promise.resolve(actorRow)) },
+  };
   const prisma = {
     $transaction: jest.fn((callback: (tx: unknown) => Promise<unknown>) =>
-      callback('fake-tx'),
+      callback(fakeTx),
     ),
   };
 
@@ -22,13 +30,15 @@ describe('ChatMembershipService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    actorRow = { state: 'ACTIVE', role: 'OWNER' };
     prisma.$transaction.mockImplementation(
-      (callback: (tx: unknown) => Promise<unknown>) => callback('fake-tx'),
+      (callback: (tx: unknown) => Promise<unknown>) => callback(fakeTx),
     );
     repository.changeMembership.mockImplementation(
       (_conversationId: string, requests: unknown[]) =>
         Promise.resolve(requests.length),
     );
+    repository.countGroupMembers.mockResolvedValue(3);
     repository.changeMembershipInTransaction.mockImplementation(
       (_tx: unknown, _conversationId: string, requests: unknown[]) =>
         // Default double: every request became a genuine ACTIVE transition. Individual tests
@@ -63,7 +73,7 @@ describe('ChatMembershipService', () => {
       ).resolves.toEqual({ count: 2 });
 
       expect(repository.changeMembershipInTransaction).toHaveBeenCalledWith(
-        'fake-tx',
+        fakeTx,
         'conv-1',
         [
           { userId: 'u2', event: 'ADD_DIRECT' },
@@ -110,7 +120,7 @@ describe('ChatMembershipService', () => {
             },
           },
         ],
-        'fake-tx',
+        fakeTx,
       );
     });
 
@@ -138,7 +148,7 @@ describe('ChatMembershipService', () => {
             },
           },
         ],
-        'fake-tx',
+        fakeTx,
       );
     });
 
@@ -172,7 +182,7 @@ describe('ChatMembershipService', () => {
             },
           },
         ],
-        'fake-tx',
+        fakeTx,
       );
     });
 
@@ -200,10 +210,42 @@ describe('ChatMembershipService', () => {
       );
 
       expect(repository.changeMembershipInTransaction).toHaveBeenCalledWith(
-        'fake-tx',
+        fakeTx,
         'conv-1',
         [{ userId: 'u2', event: 'ADD_DIRECT' }],
       );
+    });
+
+    // #103: the count is taken under the lock after the write, so concurrent adds cannot both get in.
+    it('refuses an add that takes the group past 100 members, and publishes nothing', async () => {
+      repository.countGroupMembers.mockResolvedValue(101);
+
+      await expect(
+        service.addMembers(
+          'conv-1',
+          [{ userId: 'u2', entitlement: 'DIRECT' }],
+          'actor-1',
+        ),
+      ).rejects.toThrow(
+        new BadRequestException('A group can have at most 100 members'),
+      );
+      expect(repository.countGroupMembers).toHaveBeenCalledWith(
+        fakeTx,
+        'conv-1',
+      );
+      expect(eventPublisher.publishMany).not.toHaveBeenCalled();
+    });
+
+    it('lets an add that fills the group to exactly 100 through', async () => {
+      repository.countGroupMembers.mockResolvedValue(100);
+
+      await expect(
+        service.addMembers(
+          'conv-1',
+          [{ userId: 'u2', entitlement: 'DIRECT' }],
+          'actor-1',
+        ),
+      ).resolves.toEqual({ count: 1 });
     });
   });
 
@@ -220,6 +262,43 @@ describe('ChatMembershipService', () => {
     );
   });
 
+  // #94: the manager's role is checked again under the lock, after the caller's earlier check
+  describe('when the acting manager loses their role before the write', () => {
+    it.each([
+      ['removed', { state: 'DECLINED', role: 'MEMBER' }],
+      ['gone', null],
+    ])('refuses an add by a %s member and changes nothing', async (_, row) => {
+      actorRow = row;
+
+      await expect(
+        service.addMembers(
+          'conv-1',
+          [{ userId: 'u2', entitlement: 'DIRECT' }],
+          'u1',
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(repository.changeMembershipInTransaction).not.toHaveBeenCalled();
+      expect(eventPublisher.publishMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses a removal by a demoted admin and changes nothing', async () => {
+      actorRow = { state: 'ACTIVE', role: 'MEMBER' };
+
+      await expect(
+        service.removeMembers('conv-1', ['u2'], 'u1'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(repository.changeMembershipInTransaction).not.toHaveBeenCalled();
+    });
+
+    it('still lets someone leave, which needs no role', async () => {
+      actorRow = null;
+
+      await service.removeMembers('conv-1', ['u1']);
+
+      expect(repository.changeMembership).toHaveBeenCalled();
+    });
+  });
+
   it('accepts and declines an invite', async () => {
     await service.acceptInvite('conv-1', 'u2');
     await service.declineInvite('conv-1', 'u2');
@@ -234,6 +313,16 @@ describe('ChatMembershipService', () => {
       2,
       'conv-1',
       [{ userId: 'u2', event: 'DECLINE_INVITE' }],
+      undefined,
+    );
+  });
+
+  it('lets someone who declined a direct chat back in as a direct add, with no invite to answer', async () => {
+    await service.reopenDirect('conv-1', 'u2');
+
+    expect(repository.changeMembership).toHaveBeenCalledWith(
+      'conv-1',
+      [{ userId: 'u2', event: 'ADD_DIRECT' }],
       undefined,
     );
   });

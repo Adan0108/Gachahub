@@ -243,17 +243,27 @@ describe("GroupMembersSection", () => {
     expect(screen.getByRole("dialog", { name: "Add people" })).toBeInTheDocument();
   });
 
+  it("lets the owner cancel an invite nobody has answered yet", async () => {
+    setup(group("OWNER", { participants: [person("me", "Me", "OWNER"), person("cy", "Cy", "MEMBER", "PENDING")] }));
+
+    openMenu("Cy");
+    expect(screen.queryByText("Make admin")).not.toBeInTheDocument();
+    choose("Cancel invite");
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(mocks.removeGroupMembers).toHaveBeenCalledWith("g1", ["cy"]));
+  });
+
   it("shows who is still invited or leaving", () => {
     setup(group("OWNER", { participants: [person("me", "Me", "OWNER"), person("cy", "Cy", "MEMBER", "PENDING")] }));
 
     expect(screen.getByText(/Invited/)).toBeInTheDocument();
   });
 
-  it("gives a plain member no member menus and no Add people, but they can leave", () => {
+  it("gives a plain member Add people but no member menus, and they can leave", () => {
     setup(group("MEMBER"));
 
     expect(screen.queryByRole("button", { name: /Options for/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Add people/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Add people/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Leave group/ })).toBeEnabled();
   });
 
@@ -293,6 +303,27 @@ describe("GroupMembersSection", () => {
     choose("Remove from group");
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(mocks.removeGroupMembers).toHaveBeenCalledWith("g1", ["bo"]));
+  });
+
+  // CFI-002: demoted while the Remove dialog was open, the confirm still showed and the server said 403
+  it("closes a dialog you are no longer allowed to use once your role changes", () => {
+    const client = new QueryClient();
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Harness conversation={group("ADMIN")} currentUserId="me" />
+      </QueryClientProvider>,
+    );
+    openMenu("Bo");
+    choose("Remove from group");
+    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <Harness conversation={group("MEMBER")} currentUserId="me" />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
   });
 
   it("lets an admin remove a member but not change roles", () => {
@@ -373,6 +404,26 @@ describe("GroupMembersSection", () => {
       expect(screen.getByRole("checkbox", { name: "Newbie" })).toBeInTheDocument();
       expect(screen.getByText("@newbie")).toBeInTheDocument();
       expect(screen.queryByRole("checkbox", { name: "Bo" })).not.toBeInTheDocument();
+    });
+
+    it("offers someone who left, declined or is being removed again, but still hides members and invitees", () => {
+      const conversation = group("OWNER", {
+        participants: [
+          person("me", "Me", "OWNER"),
+          person("ann", "Ann", "ADMIN"),
+          person("gone", "Gone", "MEMBER", "DECLINED"),
+          person("wait", "Wait", "MEMBER", "PENDING"),
+          person("out", "Out", "MEMBER", "LEAVING"),
+        ],
+      });
+      search.state.items = ["gone", "wait", "out", "ann", "fresh"].map((id) => ({ id, name: id, username: id, image: null }));
+      setup(conversation);
+      fireEvent.click(screen.getByRole("button", { name: /^Add people/ }));
+      fireEvent.change(screen.getByRole("searchbox", { name: "Search people to add" }), { target: { value: "xx" } });
+
+      const listed = screen.getAllByRole("checkbox").map((box) => box.getAttribute("aria-label"));
+
+      expect(listed).toEqual(["gone", "out", "fresh"]);
     });
 
     it("ticks people, shows them as chips with a count on the button, and lets one be taken back", () => {

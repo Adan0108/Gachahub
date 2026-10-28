@@ -1,14 +1,18 @@
-const SWEEP_INTERVAL_MS = 10 * 60_000;
-// The SAME junk cookie is answered from memory for a minute; distinct junk still costs one read each.
-const MISS_TTL_MS = 60_000;
+import type { RedisClientType } from 'redis';
+
+// The SAME junk cookie is answered from the cache for a minute; distinct junk still costs one read each.
+const MISS_TTL_SECONDS = 60;
+// How long a revoked key refuses to be filled again from a database read that started before the revoke.
+const REVOKED_TTL_SECONDS = 60;
 const ACTIVE_SESSIONS_PREFIX = 'active-sessions-';
 // better-auth session tokens are 32 random letters and digits; anything else (rate-limit keys, ...) is not one
 const TOKEN_SHAPE = /^[A-Za-z0-9]{20,64}$/;
 
-interface Entry {
-  value: string;
-  expiresAt: number | undefined;
-}
+// Fills a key only if it was not revoked meanwhile: one atomic step, so no instance can bring it back.
+const FILL_UNLESS_REVOKED = `
+if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+return 1`;
 
 export interface LoadedValue {
   value: string;
@@ -21,94 +25,94 @@ export interface SessionLoader {
   activeSessions(userId: string): Promise<LoadedValue | null>;
 }
 
-/**
- * Where better-auth keeps logins for fast lookups, so a request doesn't read the
- * database. It lives in this server's memory, and a miss (after a restart, say)
- * is filled from the database and cached, so it is never slower for long.
- * Deleting an entry takes effect at once. Single-instance only - see
- * docs/single-instance.md before running more than one backend.
- */
-export class InMemorySessionStorage {
-  private readonly entries = new Map<string, Entry>();
-  // keys the database said do not exist, each until its expiry
-  private readonly misses = new Map<string, number>();
-  // counts deletions, so a database read that raced a revoke is not cached
-  private deletions = 0;
+type Redis = Pick<RedisClientType, 'get' | 'set' | 'del' | 'eval' | 'multi'>;
 
-  constructor(private readonly loader?: SessionLoader) {
-    setInterval(() => this.sweep(), SWEEP_INTERVAL_MS).unref();
-  }
+/**
+ * Where better-auth keeps logins for fast lookups. It lives in Redis, shared by every backend
+ * instance, so signing out or revoking a login ends it everywhere at once. A miss (a flushed
+ * Redis, say) is filled from the database, which stays the source of truth: while Redis is
+ * unreachable, lookups read the database directly.
+ */
+export class RedisSessionStorage {
+  constructor(
+    private readonly redis: () => Promise<Redis>,
+    private readonly prefix: string,
+    private readonly loader?: SessionLoader,
+  ) {}
 
   async get(key: string): Promise<string | null> {
-    const cached = this.getCached(key);
-    if (cached !== null || !this.loader) return cached;
-    if ((this.misses.get(key) ?? 0) > Date.now()) return null;
+    let redis: Redis;
+    let cached: string | null;
+    let missed: string | null;
+    try {
+      redis = await this.redis();
+      [cached, missed] = await Promise.all([
+        redis.get(this.key(key)),
+        redis.get(this.missKey(key)),
+      ]);
+    } catch {
+      return (await this.load(key))?.value ?? null;
+    }
+    if (cached !== null || !this.loader || missed !== null) return cached;
 
-    const deletionsBefore = this.deletions;
     const loaded = await this.load(key);
-    if (!loaded) {
-      if (this.deletions === deletionsBefore) {
-        this.misses.set(key, Date.now() + MISS_TTL_MS);
+    try {
+      if (!loaded) {
+        await redis.set(this.missKey(key), '1', { EX: MISS_TTL_SECONDS });
+        return null;
       }
-      return null;
+      await redis.eval(FILL_UNLESS_REVOKED, {
+        keys: [this.key(key), this.revokedKey(key)],
+        arguments: [loaded.value, String(Math.max(1, loaded.ttlSeconds))],
+      });
+    } catch {
+      // the database answered; failing to cache it only costs a read next time
     }
-
-    if (this.deletions === deletionsBefore) {
-      this.set(key, loaded.value, loaded.ttlSeconds);
-    }
-    return loaded.value;
+    return loaded?.value ?? null;
   }
 
   /** `ttlSeconds` is how long better-auth wants it kept; none means forever. */
-  set(key: string, value: string, ttlSeconds?: number): void {
-    this.misses.delete(key);
-    this.entries.set(key, {
-      value,
-      expiresAt: ttlSeconds ? Date.now() + ttlSeconds * 1000 : undefined,
-    });
+  async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
+    const redis = await this.redis();
+    await redis
+      .multi()
+      .del([this.missKey(key), this.revokedKey(key)])
+      .set(this.key(key), value, ttlSeconds ? { EX: ttlSeconds } : undefined)
+      .exec();
   }
 
-  delete(key: string): void {
-    this.deletions += 1;
-    this.entries.delete(key);
-    this.misses.delete(key);
+  /** Throws when Redis cannot be reached, so a revoke is never reported done while other instances still serve it. */
+  async delete(key: string): Promise<void> {
+    const redis = await this.redis();
+    await redis
+      .multi()
+      .del(this.key(key))
+      .set(this.revokedKey(key), '1', { EX: REVOKED_TTL_SECONDS })
+      .exec();
   }
 
-  private getCached(key: string): string | null {
-    const entry = this.entries.get(key);
-    if (!entry) return null;
+  private key(key: string) {
+    return `${this.prefix}${key}`;
+  }
 
-    if (entry.expiresAt !== undefined && entry.expiresAt <= Date.now()) {
-      this.entries.delete(key);
-      return null;
-    }
+  private missKey(key: string) {
+    return `${this.prefix}miss:${key}`;
+  }
 
-    return entry.value;
+  private revokedKey(key: string) {
+    return `${this.prefix}revoked:${key}`;
   }
 
   private load(key: string): Promise<LoadedValue | null> {
+    if (!this.loader) return Promise.resolve(null);
     if (key.startsWith(ACTIVE_SESSIONS_PREFIX)) {
-      return this.loader!.activeSessions(
+      return this.loader.activeSessions(
         key.slice(ACTIVE_SESSIONS_PREFIX.length),
       );
     }
 
     return TOKEN_SHAPE.test(key)
-      ? this.loader!.session(key)
+      ? this.loader.session(key)
       : Promise.resolve(null);
-  }
-
-  private sweep(): void {
-    const now = Date.now();
-    for (const [key, entry] of this.entries) {
-      if (entry.expiresAt !== undefined && entry.expiresAt <= now) {
-        this.entries.delete(key);
-      }
-    }
-    for (const [key, expiresAt] of this.misses) {
-      if (expiresAt <= now) {
-        this.misses.delete(key);
-      }
-    }
   }
 }

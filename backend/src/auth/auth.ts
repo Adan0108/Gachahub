@@ -3,9 +3,10 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { betterAuth } from 'better-auth';
 import { APIError } from 'better-auth/api';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
+import { createClient, type RedisClientType } from 'redis';
 import { PrismaClient } from '../generated/prisma/client';
 import { createPrismaSessionLoader } from './session-loader';
-import { InMemorySessionStorage } from './session-storage';
+import { RedisSessionStorage } from './session-storage';
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -21,7 +22,24 @@ const prisma = new PrismaClient({
   adapter,
 });
 
-const sessionStorage = new InMemorySessionStorage(
+// Its own connection, opened on first use: this module loads before Nest's RedisModule exists.
+let redis: Promise<RedisClientType> | undefined;
+const connectRedis = () =>
+  (redis ??= (
+    createClient({
+      url: process.env.REDIS_URL ?? 'redis://localhost:6379',
+    }) as RedisClientType
+  )
+    .on('error', () => undefined)
+    .connect()
+    .catch((error: unknown) => {
+      redis = undefined;
+      throw error;
+    }) as Promise<RedisClientType>);
+
+const sessionStorage = new RedisSessionStorage(
+  connectRedis,
+  `${process.env.REDIS_KEY_PREFIX ?? 'gachahub:dev:'}auth:`,
   createPrismaSessionLoader(prisma),
 );
 
@@ -74,9 +92,9 @@ export const auth = betterAuth({
     },
   },
 
-  // Logins are looked up in this server-side cache, not the database, and deleting one takes effect
-  // at once. A cookieCache can't do that: it sits in the browser and can't be revoked. A miss is
-  // filled from the database (see InMemorySessionStorage), so a restart only costs one read per login.
+  // Logins are looked up in this Redis cache, shared by every instance, not the database, and
+  // deleting one takes effect everywhere at once. A cookieCache can't do that: it sits in the
+  // browser and can't be revoked. A miss is filled from the database (see RedisSessionStorage).
   secondaryStorage: sessionStorage,
   // rate-limit counters stay in memory, out of the login cache
   rateLimit: { storage: 'memory' },

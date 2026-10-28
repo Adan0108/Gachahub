@@ -26,6 +26,10 @@ describe('ChatRepository inbox conversations', () => {
               user: {
                 select: { id: true, name: true, username: true, image: true },
               },
+              rounds: {
+                select: { invitedAt: true, joinedAt: true },
+                orderBy: { createdAt: 'asc' },
+              },
             },
           },
         }) as unknown,

@@ -68,16 +68,16 @@ export async function decryptPendingMessages(params: DecryptPendingParams): Prom
     for (const { message, release } of claimed) {
       try {
         // Each message must be applied in order.
-        const result = await engine.processIncoming(conversationId, wire.get(message.id)!);
-        if (result.kind !== "application") continue;
-        // Save at once: the key cannot be used again.
-        await store.save({
-          messageId: message.id,
-          conversationId,
-          senderDeviceId: result.senderDeviceId,
-          epoch: result.epoch,
-          envelope: result.envelope,
-        });
+        // Kept before the ratchet is saved: the key cannot be used again.
+        await engine.processIncoming(conversationId, wire.get(message.id)!, (decrypted) =>
+          store.save({
+            messageId: message.id,
+            conversationId,
+            senderDeviceId: decrypted.senderDeviceId,
+            epoch: decrypted.epoch,
+            envelope: decrypted.envelope,
+          }),
+        );
       } catch (error) {
         console.warn(`Could not decrypt message ${message.id} in the background`, error);
       } finally {

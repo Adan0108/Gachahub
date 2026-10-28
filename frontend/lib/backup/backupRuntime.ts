@@ -16,8 +16,10 @@ import {
 import { restoreBackup, type RestoreProgress, type RestoreResult } from './backupRestore';
 import {
   clearBackupState,
+  loadRestorePending,
   loadStoredBackupKey,
   loadUploadState,
+  saveRestorePending,
   saveStoredBackupKey,
   saveUploadState,
   type StoredBackupKey,
@@ -245,12 +247,37 @@ export function cancelBackupDeletion(userId: string, rawKey?: Uint8Array): Promi
   });
 }
 
+/** Whether a restore on this device was started and never finished (stopped, failed or interrupted by a reload). */
+export function isRestorePending(): Promise<boolean> {
+  return loadRestorePending();
+}
+
+type RestoreRunOptions = { onProgress: (progress: RestoreProgress) => void; signal: AbortSignal };
+
+/** Marks the restore unfinished until it runs to the end; a stop or failure leaves the mark for a later resume. */
+async function runRestore(
+  key: CryptoKey,
+  userId: string,
+  options: RestoreRunOptions,
+): Promise<RestoreResult> {
+  await saveRestorePending(true);
+  const result = await restoreBackup({
+    key,
+    userId,
+    store: plaintextStore,
+    fetchPage: (after) => api.getChatBackupBlobs({ after, limit: 100 }),
+    ...options,
+  });
+  if (!result.cancelled) await saveRestorePending(false);
+  return result;
+}
+
 /** Restores into this device, then keeps this device backing up too. Throws on network failure. */
 export async function restoreOnThisDevice(
   userId: string,
   rawKey: Uint8Array,
   status: BackupStatus,
-  options: { onProgress: (progress: RestoreProgress) => void; signal: AbortSignal },
+  options: RestoreRunOptions,
 ): Promise<RestoreResult | 'wrong-key'> {
   const key = await importBackupKey(rawKey);
   const matches =
@@ -263,11 +290,17 @@ export async function restoreOnThisDevice(
     // Messages that only exist on this device are not on the server yet.
     await (await startUploader(userId, key)).startRescan();
   });
-  return restoreBackup({
-    key,
-    userId,
-    store: plaintextStore,
-    fetchPage: (after) => api.getChatBackupBlobs({ after, limit: 100 }),
-    ...options,
-  });
+  return runRestore(key, userId, options);
+}
+
+/** Picks an unfinished restore back up with the key this device already holds; messages already restored are skipped. */
+export async function resumeRestore(
+  userId: string,
+  options: RestoreRunOptions,
+): Promise<RestoreResult> {
+  const stored = await exclusive(() => ownStoredKey(userId));
+  if (!stored) throw new Error('This device does not hold the recovery key');
+  const key = await importBackupKey(stored.key);
+  stored.key.fill(0);
+  return runRestore(key, userId, options);
 }

@@ -241,8 +241,9 @@ export class MediaService {
 
     const verifiedBytes = await this.validateUploadedAsset(upload, dto);
 
+    let confirmed: Awaited<ReturnType<MediaRepository['markUploaded']>>;
     try {
-      const confirmed = await this.mediaRepository.markUploaded({
+      confirmed = await this.mediaRepository.markUploaded({
         id: upload.id,
         assetId: dto.assetId,
         secureUrl: dto.secureUrl,
@@ -254,8 +255,6 @@ export class MediaService {
         duration: dto.duration,
         responseSignature: dto.signature,
       });
-
-      return this.formatUpload(confirmed);
     } catch (error) {
       // assetId is unique: one Cloudinary asset cannot back several MediaUpload records.
       console.log(error);
@@ -263,6 +262,22 @@ export class MediaService {
         'This Cloudinary asset has already been registered',
       );
     }
+
+    if (confirmed) return this.formatUpload(confirmed);
+
+    // It left INITIATED while the provider was checked: an identical confirmation that finished
+    // first gets the same answer, anything else (cleanup claimed it) is refused, never revived.
+    const current = await this.mediaRepository.findById(upload.id);
+    if (
+      current?.status === 'UPLOADED' &&
+      current.assetId === dto.assetId &&
+      current.publicId === dto.publicId
+    ) {
+      return this.formatUpload(current);
+    }
+    throw new ConflictException(
+      `Cannot confirm media upload in ${current?.status ?? 'DELETED'} state`,
+    );
   }
 
   async removePendingUpload(uploadId: string, userId: string) {

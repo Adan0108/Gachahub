@@ -16,8 +16,10 @@ import {
   endBackupSession,
   getBackupUploadStats,
   onBackupDisabledElsewhere,
+  isRestorePending,
   resumeBackup,
   restoreOnThisDevice,
+  resumeRestore,
   rotateBackupKey,
   scheduleBackupDeletion,
   stopBackupUploads,
@@ -310,6 +312,33 @@ describe('restoreOnThisDevice', () => {
 
     expect(outcome).not.toBe('wrong-key');
     await vi.waitFor(() => expect(uploadedIds()).toEqual(['local-only']));
+  });
+
+  it('stays unfinished after a failed page fetch, and a later resume finishes it', async () => {
+    const { original, status } = await enable();
+    await endBackupSession();
+    const options = { onProgress: () => undefined, signal: new AbortController().signal };
+
+    api.getChatBackupBlobs.mockRejectedValueOnce(new Error('offline'));
+    await expect(restoreOnThisDevice('u1', original, status, options)).rejects.toThrow('offline');
+    await expect(isRestorePending()).resolves.toBe(true);
+
+    await expect(resumeRestore('u1', options)).resolves.toMatchObject({ cancelled: false });
+    await expect(isRestorePending()).resolves.toBe(false);
+  });
+
+  it('stays unfinished when the restore is stopped', async () => {
+    const { original, status } = await enable();
+    await endBackupSession();
+    const controller = new AbortController();
+    controller.abort();
+
+    await restoreOnThisDevice('u1', original, status, {
+      onProgress: () => undefined,
+      signal: controller.signal,
+    });
+
+    await expect(isRestorePending()).resolves.toBe(true);
   });
 
   it('rejects the wrong key without touching stored state', async () => {

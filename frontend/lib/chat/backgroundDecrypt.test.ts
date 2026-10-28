@@ -16,6 +16,21 @@ const application = (body: string) => ({
   envelope: { v: 1, type: 'text', body },
 });
 
+
+/** Acts like the real engine: hands a decrypted message to `keep` before returning it (see SyncEngine.processIncoming). */
+function keeping<T extends { processIncoming: (...args: never[]) => unknown }>(fake: T): T {
+  return {
+    ...fake,
+    processIncoming: async (id: unknown, wire: unknown, keep?: (result: unknown) => Promise<void>) => {
+      const result = (await (fake.processIncoming as (...args: unknown[]) => unknown)(id, wire, keep)) as
+        | { kind?: string }
+        | undefined;
+      if (result?.kind === 'application') await keep?.(result);
+      return result;
+    },
+  };
+}
+
 describe('decryptPendingMessages', () => {
   const engine = {
     isAtCurrentEpoch: vi.fn(),
@@ -25,7 +40,7 @@ describe('decryptPendingMessages', () => {
   const store = { get: vi.fn(), save: vi.fn() };
   const run = (messages: PendingMessageRow[]) =>
     decryptPendingMessages({
-      engine: engine as never,
+      engine: keeping(engine) as never,
       store: store as never,
       conversationId: 'c1' as never,
       messages,

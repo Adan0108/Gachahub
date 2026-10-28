@@ -155,6 +155,23 @@ describe("usePostShare", () => {
     expect(mocks.send).not.toHaveBeenCalled();
   });
 
+  it("sends into a chat the server says already exists, even one not loaded here", async () => {
+    mocks.api.createDirectMessage.mockResolvedValue({
+      conversationId: "cOld",
+      message: null,
+      recipientState: "PENDING",
+    });
+    const { result } = setup();
+
+    const outcome = await result.current.sendTo(
+      { key: "person:dan", person: { id: "dan", name: "Dan" } },
+      SHARE,
+    );
+
+    expect(outcome.status).toBe(SHARE_RESULT.SENT);
+    expect(mocks.send.mock.calls[0]![2]).toBe("cOld");
+  });
+
   it("reports a failure with its reason, and a retry reuses the same client id", async () => {
     mocks.send.mockRejectedValueOnce(new Error("Network down"));
     const { result } = setup();

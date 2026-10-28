@@ -92,16 +92,9 @@ export class ChatMessageEditService {
       dto,
       target.conversationId,
     );
-    const deliverableUserIds = target.conversation.participants
-      .filter((participant) =>
-        this.chatAccessService.isStateDeliveryEligible(
-          target.conversation.type,
-          participant.state,
-        ),
-      )
-      .map((participant) => participant.userId);
-
     let edit: Awaited<ReturnType<ChatRepository['createEditMessage']>>;
+    // Taken from the locked roster, so someone removed meanwhile gets nothing and someone added gets it
+    let lockedConversation = target.conversation;
     try {
       edit = await this.prisma.$transaction(async (tx) => {
         // The same lock a membership change takes, so a removal cannot slip in between the checks and the insert.
@@ -110,8 +103,12 @@ export class ChatMessageEditService {
             tx,
             target.conversationId,
           );
+        lockedConversation = {
+          ...target.conversation,
+          participants: freshParticipants,
+        };
         await this.chatAccessService.assertSenderCanPost(
-          { type: target.conversation.type, participants: freshParticipants },
+          lockedConversation,
           userId,
         );
 
@@ -139,7 +136,14 @@ export class ChatMessageEditService {
         return this.chatRepository.createEditMessage(tx, {
           conversationId: target.conversationId,
           senderId: userId,
-          participantUserIds: deliverableUserIds,
+          participantUserIds: lockedConversation.participants
+            .filter((participant) =>
+              this.chatAccessService.isStateDeliveryEligible(
+                lockedConversation.type,
+                participant.state,
+              ),
+            )
+            .map((participant) => participant.userId),
           editsMessageId: messageId,
           ciphertext: payload.ciphertext,
           encryptionMeta: payload.encryptionMeta as
@@ -160,7 +164,7 @@ export class ChatMessageEditService {
       messageId,
       actorId: userId,
       recipientUserIds: this.chatAccessService.getDeliverableRecipientIds(
-        target.conversation,
+        lockedConversation,
         userId,
       ),
     });

@@ -1,9 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import type { ChatParticipantState } from '../../generated/prisma/client';
 import { EventPublisherPort } from '../../domain-events/event-publisher.port';
 import type { ChatParticipantAddedState } from '../../domain-events/domain-event.types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ChatMembershipRepository } from './chat-membership.repository';
+import { MAX_GROUP_MEMBERS } from '../group-size-policy';
+import {
+  GROUP_MANAGER_ROLES,
+  GROUP_MEMBER_ROLES,
+  inTransactionAsRole,
+} from './lock-conversation';
 import type {
   MembershipRequest,
   OnIllegalMembershipChange,
@@ -54,45 +60,87 @@ export class ChatMembershipService {
       })),
     );
 
-    const count = await this.prisma.$transaction(async (tx) => {
-      const changes =
-        await this.chatMembershipRepository.changeMembershipInTransaction(
-          tx,
-          conversationId,
-          requests,
-        );
+    // Only managers add members; the role checked before this transaction can be gone by now
+    const count = await inTransactionAsRole(
+      this.prisma,
+      conversationId,
+      actorId,
+      GROUP_MEMBER_ROLES,
+      async (tx) => {
+        const changes =
+          await this.chatMembershipRepository.changeMembershipInTransaction(
+            tx,
+            conversationId,
+            requests,
+          );
 
-      if (changes.length > 0) {
-        await this.eventPublisher.publishMany(
-          changes.map((change) => ({
-            type: 'chat.participant.added' as const,
-            aggregateId: conversationId,
-            payload: {
-              conversationId,
-              addedUserId: change.userId,
-              actorId,
-              state: toAddedParticipantState(change.to),
-            },
-          })),
-          tx,
-        );
-      }
+        // Counted after the write, under the same lock: two adds at once cannot both pass the cap.
+        // Throwing rolls the whole add back.
+        if (
+          changes.length > 0 &&
+          (await this.chatMembershipRepository.countGroupMembers(
+            tx,
+            conversationId,
+          )) > MAX_GROUP_MEMBERS
+        ) {
+          throw new BadRequestException(
+            `A group can have at most ${MAX_GROUP_MEMBERS} members`,
+          );
+        }
 
-      return changes.length;
-    });
+        if (changes.length > 0) {
+          await this.eventPublisher.publishMany(
+            changes.map((change) => ({
+              type: 'chat.participant.added' as const,
+              aggregateId: conversationId,
+              payload: {
+                conversationId,
+                addedUserId: change.userId,
+                actorId,
+                state: toAddedParticipantState(change.to),
+              },
+            })),
+            tx,
+          );
+        }
+
+        return changes.length;
+      },
+    );
 
     return { count };
   }
 
-  /** Removes members, or lets someone leave. Owners are skipped: ownership must be transferred first. */
+  /**
+   * Removes members, or lets someone leave. Owners are skipped: ownership must be transferred first.
+   * `actorId` is the manager removing others (left out when someone leaves); their role is rechecked under the lock.
+   */
   async removeMembers(
     conversationId: string,
     userIds: string[],
+    actorId?: string,
   ): Promise<{ count: number }> {
-    return this.change(
-      conversationId,
-      userIds.map((userId) => ({ userId, event: 'REMOVE' })),
+    const requests = dedupeByUser(
+      userIds.map((userId) => ({ userId, event: 'REMOVE' as const })),
     );
+    if (!actorId) {
+      return this.change(conversationId, requests);
+    }
+
+    const changes = await inTransactionAsRole(
+      this.prisma,
+      conversationId,
+      actorId,
+      GROUP_MANAGER_ROLES,
+      (tx) =>
+        this.chatMembershipRepository.changeMembershipInTransaction(
+          tx,
+          conversationId,
+          requests,
+        ),
+    );
+
+    return { count: changes.length };
   }
 
   async acceptInvite(conversationId: string, userId: string): Promise<void> {
@@ -101,6 +149,19 @@ export class ChatMembershipService {
 
   async declineInvite(conversationId: string, userId: string): Promise<void> {
     await this.change(conversationId, [{ userId, event: 'DECLINE_INVITE' }]);
+  }
+
+  /** Someone whose direct message request was declined asks again: the other person gets a new request to answer. */
+  async requestDirectAgain(
+    conversationId: string,
+    userId: string,
+  ): Promise<void> {
+    await this.change(conversationId, [{ userId, event: 'ADD_INVITE' }]);
+  }
+
+  /** Someone who declined a direct chat starts it again: they come back as if added directly, with no invite to answer. */
+  async reopenDirect(conversationId: string, userId: string): Promise<void> {
+    await this.change(conversationId, [{ userId, event: 'ADD_DIRECT' }]);
   }
 
   /** Expires invites nobody answered; anyone no longer PENDING is skipped, not offboarded. */

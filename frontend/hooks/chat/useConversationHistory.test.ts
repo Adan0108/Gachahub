@@ -2,6 +2,8 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { messageChangedSignal } from "../../lib/chat/messageChangedSignal";
+import { messageDeletedSignal } from "../../lib/chat/messageDeletedSignal";
 import { useConversationHistory, type ConversationHistory } from "./useConversationHistory";
 
 const { getChatMessages } = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
@@ -115,13 +117,26 @@ describe("useConversationHistory", () => {
     await hook.unmount();
   });
 
-  it("does not bring a deleted message back", async () => {
+  it("shows a deleted message once, as the tombstone the server sends", async () => {
     const hook = renderHistory();
     await hook.render({ conversationId: "c1", page: page(range(1, 10), null) });
 
-    await hook.render({ conversationId: "c1", page: page(range(2, 10), null) });
+    const tombstone = { ...message(1), status: "DELETED" } as Message;
+    await hook.render({ conversationId: "c1", page: page([tombstone, ...range(2, 10)], null) });
 
-    expect(ids(hook.value.displayMessages)).toEqual(ids(range(2, 10)));
+    expect(ids(hook.value.displayMessages)).toEqual(ids(range(1, 10)));
+    expect(hook.value.displayMessages[0]).toMatchObject({ status: "DELETED" });
+    await hook.unmount();
+  });
+
+  // #101: live pushes grow the newest window past a page; the next poll brings it back to one page.
+  it("keeps the messages a shrinking newest window dropped", async () => {
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(1, 59), "m1") });
+
+    await hook.render({ conversationId: "c1", page: page(range(10, 59), "m10") });
+
+    expect(ids(hook.value.displayMessages)).toEqual(ids(range(1, 59)));
     await hook.unmount();
   });
 
@@ -289,6 +304,72 @@ describe("useConversationHistory", () => {
     await flush();
 
     expect(ids(hook.value.displayMessages)).toEqual(["m1", "m2", "m3", "m4", "m5"]);
+    await hook.unmount();
+  });
+
+  it("re-reads a message in older history when someone else reacts to it", async () => {
+    getChatMessages.mockResolvedValue(page(range(1, 2), null));
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+    await hook.scrollToTop();
+
+    getChatMessages.mockResolvedValueOnce(page([{ ...message(2), reactions: ["x"] } as Message]));
+    await act(async () => messageChangedSignal.emit("c1", "m2"));
+    await flush();
+
+    expect(getChatMessages).toHaveBeenLastCalledWith("c1", { beforeMessageId: "m3", limit: 1 });
+    expect(hook.value.displayMessages[1]).toMatchObject({ id: "m2", reactions: ["x"] });
+    await hook.unmount();
+  });
+
+  it("ignores a change to a message this history does not hold", async () => {
+    getChatMessages.mockResolvedValue(page(range(1, 2), null));
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+    await hook.scrollToTop();
+    getChatMessages.mockClear();
+
+    await act(async () => messageChangedSignal.emit("c1", "m4"));
+    await flush();
+
+    expect(getChatMessages).not.toHaveBeenCalled();
+    await hook.unmount();
+  });
+
+  it("patchOlder ignores a write whose token is from the conversation the user has since left", async () => {
+    getChatMessages.mockResolvedValue(page(range(1, 2), null));
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+    await hook.scrollToTop();
+    const token = hook.value.historyToken();
+
+    await hook.render({ conversationId: "c2", page: page(range(6, 7), null) });
+    await act(async () => {
+      hook.value.patchOlder(() => range(1, 2) as Message[], token);
+    });
+    await flush();
+
+    expect(ids(hook.value.displayMessages)).toEqual(["m6", "m7"]);
+    await hook.unmount();
+  });
+
+  // #102: older history is never refetched, so a delete someone else pushes must reach it here.
+  it("marks a deleted message in older history when the delete is pushed, for this conversation only", async () => {
+    getChatMessages.mockResolvedValue(page(range(1, 2), null));
+    const hook = renderHistory();
+    await hook.render({ conversationId: "c1", page: page(range(3, 5), "m3") });
+    await hook.scrollToTop();
+
+    await act(async () => {
+      messageDeletedSignal.emit("other", "m2");
+      messageDeletedSignal.emit("c1", "m1");
+    });
+    await flush();
+
+    const status = (id: string) =>
+      (hook.value.displayMessages.find((item) => item.id === id) as { status?: string }).status;
+    expect(status("m1")).toBe("DELETED");
+    expect(status("m2")).toBeUndefined();
     await hook.unmount();
   });
 });

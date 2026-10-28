@@ -47,3 +47,37 @@ export function splitMentions(text: string, usernames: ReadonlySet<string>): Men
   if (cursor < text.length) parts.push({ text: text.slice(cursor) });
   return parts;
 }
+
+/** Someone who can be @mentioned. */
+export type MentionMember = {
+  id: string;
+  name?: string | null;
+  username?: string | null;
+  image?: string | null;
+};
+
+// Mirrors MAX_MENTIONS_PER_TEXT on the backend, which refuses a message naming more.
+export const MAX_MENTIONS_PER_TEXT = 10;
+
+/** People in `members` ({ id, name, username }) whose handle or name starts like `query`, for the @ list. */
+export function matchMembers<M extends MentionMember>(members: M[], query: string, limit = 8): M[] {
+  const needle = query.toLowerCase();
+  return members
+    .filter(
+      (member) =>
+        member.username &&
+        (member.username.toLowerCase().startsWith(needle) ||
+          member.name?.toLowerCase().startsWith(needle)),
+    )
+    .slice(0, limit);
+}
+
+/** Ids of the `members` an @handle in the text names, at most MAX_MENTIONS_PER_TEXT. */
+export function mentionedIds(text: string, members: MentionMember[]): string[] {
+  const idByHandle = new Map(members.map((member) => [member.username?.toLowerCase(), member.id]));
+  const ids = findMentions(text).map((mention) => idByHandle.get(mention.handle.toLowerCase()));
+  return [...new Set(ids.filter((id): id is string => Boolean(id)))].slice(
+    0,
+    MAX_MENTIONS_PER_TEXT,
+  );
+}

@@ -31,7 +31,7 @@ describe('resolveMembershipTransition', () => {
       ['NONE', 'ADD_INVITE', change('PENDING')],
       ['DECLINED', 'ADD_INVITE', change('PENDING')],
       ['PENDING', 'ADD_INVITE', noop],
-      ['LEAVING', 'ADD_INVITE', illegal],
+      ['LEAVING', 'ADD_INVITE', change('PENDING')],
       ['JOINING', 'ADD_INVITE', noop],
       ['ACTIVE', 'ADD_INVITE', noop],
       // invites

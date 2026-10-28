@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
+import { MlsCommitConflictException } from '../common/exceptions/mls-commit-conflict.exception';
 import { isEntitledToLeaf } from '../chat/membership/leaf-entitlement';
 import { ChatDevicesService } from '../chat-devices/chat-devices.service';
 import {
@@ -346,11 +347,9 @@ export class MlsHandshakesService {
   private toSubmitResponse(result: HandshakeAcceptResult) {
     if (result.outcome === 'conflict') {
       // 409: lost the race for this epoch; the body carries the winning handshake.
-      throw new ConflictException({
-        message: 'Another commit already won this epoch',
-        outcome: 'conflict',
-        handshake: this.serializeHandshake(result.handshake),
-      });
+      throw new MlsCommitConflictException(
+        this.serializeHandshake(result.handshake),
+      );
     }
 
     return {

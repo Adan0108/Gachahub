@@ -6,7 +6,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ChatMessageContentType, Prisma } from '../generated/prisma/client';
+import {
+  ChatConversationType,
+  ChatMessageContentType,
+  ChatParticipantState,
+  Prisma,
+} from '../generated/prisma/client';
 import { EventPublisherPort } from '../domain-events/event-publisher.port';
 import { PrismaService } from '../prisma/prisma.service';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
@@ -15,6 +20,9 @@ import { ChatRepository } from './chat.repository';
 import { ChatAccessService } from './chat-access.service';
 import { ChatDevicesService } from '../chat-devices/chat-devices.service';
 import { ChatMessageRateLimiterService } from './chat-message-rate-limiter.service';
+import { ChatMembershipService } from './membership/chat-membership.service';
+import { isMemberState } from './membership/leaf-entitlement';
+import { MembershipChangePendingException } from '../common/exceptions/membership-change-pending.exception';
 import { isUniqueViolationOn } from './prisma-unique-violation';
 import { CreateDirectMessageDto } from './dto/create-direct-message.dto';
 import { SendMessageDto } from './dto/send-message.dto';
@@ -24,6 +32,27 @@ import { MAX_OPAQUE_BLOBS_PER_MESSAGE } from '../media/opaque-blob';
 import type { ChatMessageMediaInput } from './chat.repository';
 import type { MessageEncryptionPort } from './ports/message-encryption.port';
 import type { ChatDeliveryPort } from './ports/chat-delivery.port';
+
+type RecipientCandidate = {
+  userId: string;
+  state: ChatParticipantState;
+  notificationLevel: 'ALL' | 'NOTHING';
+  mutedUntil: Date | null;
+};
+
+// After someone declines your message request, how long until you can send them another.
+export const DECLINED_REQUEST_RETRY_MS = 7 * 24 * 60 * 60_000;
+
+/** Everything about the participants that decides who a message goes to; equal keys give equal recipients. */
+function participantsKey(participants: RecipientCandidate[]) {
+  return participants
+    .map(
+      (p) =>
+        `${p.userId}:${p.state}:${p.notificationLevel}:${p.mutedUntil?.getTime() ?? ''}`,
+    )
+    .sort()
+    .join(',');
+}
 
 /** Sends encrypted messages: first direct message and follow-ups, with idempotency, eligibility and delivery fan-out. */
 @Injectable()
@@ -40,6 +69,7 @@ export class ChatMessagingService {
     private readonly chatDevicesService: ChatDevicesService,
     private readonly eventPublisher: EventPublisherPort,
     private readonly prisma: PrismaService,
+    private readonly chatMembershipService: ChatMembershipService,
   ) {}
 
   /** Creates or reuses a direct convo and sends a first encrypted message; clientMessageId dedupes retries, needs an active linked device. New convos start PENDING unless the users mutually follow (then ACTIVE). */
@@ -96,6 +126,69 @@ export class ChatMessagingService {
       };
     }
 
+    // "Start a chat" with someone you already have a visible chat with opens that chat: another
+    // "conversation started" marker would land in it, and clients that only page the inbox cannot
+    // always tell the chat exists. Hidden or archived on your side, the marker still brings it back.
+    if (existingPair && dto.message.contentType === 'SYSTEM') {
+      const mine = existingPair.conversation.participants.find(
+        (participant) => participant.userId === senderId,
+      );
+      const theirs = existingPair.conversation.participants.find(
+        (participant) => participant.userId === dto.recipientUserId,
+      );
+      // They declined your request: after a pause you may ask again, and they may decline again.
+      // Block stays the way to cut someone off for good.
+      if (mine?.state === 'ACTIVE' && theirs?.state === 'DECLINED') {
+        await this.chatAccessService.assertMessageRequestAllowed(
+          senderId,
+          recipient,
+        );
+        // A declined row is not written to again, so its last update is when they declined.
+        const waitMs =
+          theirs.updatedAt.getTime() + DECLINED_REQUEST_RETRY_MS - Date.now();
+        // Inside the wait it looks like a normal request to the sender, and nothing reaches them.
+        if (waitMs <= 0) {
+          await this.chatMembershipService.requestDirectAgain(
+            existingPair.conversation.id,
+            dto.recipientUserId,
+          );
+          await this.chatDelivery.publishConversationUpdated({
+            conversationId: existingPair.conversation.id,
+            recipientUserIds: [dto.recipientUserId],
+          });
+        }
+        return {
+          conversationId: existingPair.conversation.id,
+          message: null,
+          recipientState: 'PENDING' as const,
+        };
+      }
+
+      if (mine?.state === 'ACTIVE' && !mine.deletedAt) {
+        return {
+          conversationId: existingPair.conversation.id,
+          message: null,
+          recipientState: theirs?.state ?? null,
+        };
+      }
+
+      // Starting the chat yourself after declining (or while the decline is still being applied)
+      // is a change of mind: they are let back in, and rejoin like anyone who accepts.
+      if (mine?.state === 'DECLINED' || mine?.state === 'LEAVING') {
+        await this.chatMembershipService.reopenDirect(
+          existingPair.conversation.id,
+          senderId,
+        );
+        return {
+          conversationId: existingPair.conversation.id,
+          message: null,
+          recipientState: theirs?.state ?? null,
+          // Shown to them in the inbox meanwhile; sending waits until another member's device adds theirs.
+          selfState: 'JOINING' as const,
+        };
+      }
+    }
+
     // Only known when the direct pair already exists; a new conversation has no id to check group_id against.
     const preparedPayload = await this.messageEncryption.preparePayload(
       dto.message,
@@ -141,7 +234,7 @@ export class ChatMessagingService {
     );
 
     let result: Awaited<
-      ReturnType<typeof this.chatRepository.createDirectConversationWithMessage>
+      ReturnType<ChatRepository['createDirectConversationWithMessage']>
     >;
 
     try {
@@ -311,32 +404,12 @@ export class ChatMessagingService {
       dto.message.replyToId,
     );
 
-    const stateEligibleParticipants = participants.filter(
-      (participant) =>
-        participant.userId === senderId ||
-        this.chatAccessService.isStateDeliveryEligible(
-          conversation.type,
-          participant.state,
-        ),
-    );
-
-    const deliverableParticipants = stateEligibleParticipants;
-
-    // People who blocked the sender keep their chat as they left it: a deleted or archived chat
-    // stays hidden, and the message never counts as unread for them. The sender is not told.
-    const blockerIds = await this.chatAccessService.findRecipientsWhoBlocked(
+    let recipients = await this.resolveRecipients(
+      conversation.type,
       senderId,
-      deliverableParticipants
-        .map((participant) => participant.userId)
-        .filter((userId) => userId !== senderId),
+      participants,
+      dto.message.mentionUserIds,
     );
-
-    const deletedParticipantIds = stateEligibleParticipants
-      .filter(
-        (participant) =>
-          participant.deletedAt && !blockerIds.has(participant.userId),
-      )
-      .map((participant) => participant.userId);
 
     const payload =
       preparedPayload ??
@@ -350,34 +423,7 @@ export class ChatMessagingService {
       dto.message.media,
     );
 
-    // Deferred until every step that can still throw has succeeded.
-    if (deletedParticipantIds.length > 0) {
-      await this.chatRepository.restoreDeletedParticipants(
-        conversationId,
-        deletedParticipantIds,
-      );
-    }
-
-    const recipientParticipants = deliverableParticipants.filter(
-      (participant) => participant.userId !== senderId,
-    );
-
-    // Resolved before opening the transaction below - awaiting it from inside would hold that connection open.
-    const notifiableFlags = await Promise.all(
-      recipientParticipants.map((participant) =>
-        this.chatAccessService.isRecipientNotifiable(senderId, participant),
-      ),
-    );
-
-    const notifiableRecipientIds = recipientParticipants
-      .filter((_, index) => notifiableFlags[index])
-      .map((participant) => participant.userId);
-
-    const silentRecipientIds = recipientParticipants
-      .filter((_, index) => !notifiableFlags[index])
-      .map((participant) => participant.userId);
-
-    let message: Awaited<ReturnType<typeof this.chatRepository.createMessage>>;
+    let message: Awaited<ReturnType<ChatRepository['createMessage']>>;
     try {
       message = await this.prisma.$transaction(async (tx) => {
         // Authoritative re-check under the same lock a membership change takes:
@@ -396,14 +442,59 @@ export class ChatMessagingService {
         this.chatAccessService.assertNoMembershipChangePending(
           freshParticipants,
         );
+        // #123: a member whose device is not in the group yet could never read this message. The
+        // sender's app adds the device (it is told the change is pending), then encrypts again.
+        if (
+          await this.chatRepository.hasMemberDeviceMissingFromGroup(
+            tx,
+            conversationId,
+            freshParticipants
+              .filter(
+                (participant) =>
+                  isMemberState(participant.state) ||
+                  participant.state === 'JOINING',
+              )
+              .map((participant) => participant.userId),
+          )
+        ) {
+          throw new MembershipChangePendingException();
+        }
+
+        // Someone was added, removed or changed since the first read: recipients come from the locked rows.
+        // Rare, so repeating the block and mute lookups under the lock is worth it.
+        if (
+          participantsKey(freshParticipants) !== participantsKey(participants)
+        ) {
+          recipients = await this.resolveRecipients(
+            conversation.type,
+            senderId,
+            freshParticipants,
+            dto.message.mentionUserIds,
+          );
+        }
+
+        // A message brings a deleted chat back for its recipients, except people who blocked the sender.
+        const deletedParticipantIds = freshParticipants
+          .filter(
+            (participant) =>
+              participant.deletedAt &&
+              recipients.deliverableIds.includes(participant.userId) &&
+              !recipients.blockerIds.has(participant.userId),
+          )
+          .map((participant) => participant.userId);
+        if (deletedParticipantIds.length > 0) {
+          await this.chatRepository.restoreDeletedParticipants(
+            tx,
+            conversationId,
+            deletedParticipantIds,
+          );
+        }
 
         const created = await this.chatRepository.createMessage(tx, {
           conversationId,
           senderId,
-          participantUserIds: deliverableParticipants.map(
-            (participant) => participant.userId,
-          ),
-          alreadyReadUserIds: [...blockerIds],
+          participantUserIds: recipients.deliverableIds,
+          alreadyReadUserIds: [...recipients.blockerIds],
           ciphertext: payload.ciphertext,
           encryptionMeta: payload.encryptionMeta as
             | Prisma.InputJsonValue
@@ -424,7 +515,8 @@ export class ChatMessagingService {
               senderId,
               replyToMessageId: dto.message.replyToId ?? null,
               replyToSenderId: replyTarget?.senderId ?? null,
-              recipientUserIds: notifiableRecipientIds,
+              recipientUserIds: recipients.notifiableIds,
+              mentionedUserIds: recipients.mentionedIds,
             },
           },
           tx,
@@ -457,18 +549,18 @@ export class ChatMessagingService {
       media: message.media,
     };
 
-    if (notifiableRecipientIds.length > 0) {
+    if (recipients.notifiableIds.length > 0) {
       await this.chatDelivery.publishMessageCreated({
         ...messagePayload,
-        recipientUserIds: notifiableRecipientIds,
+        recipientUserIds: recipients.notifiableIds,
         shouldNotify: true,
       });
     }
 
-    if (silentRecipientIds.length > 0) {
+    if (recipients.silentIds.length > 0) {
       await this.chatDelivery.publishMessageCreated({
         ...messagePayload,
-        recipientUserIds: silentRecipientIds,
+        recipientUserIds: recipients.silentIds,
         shouldNotify: false,
       });
     }
@@ -477,6 +569,64 @@ export class ChatMessagingService {
       conversationId,
       message,
       duplicate: false,
+    };
+  }
+
+  /**
+   * Who a message goes to: receipts (deliverableIds, the sender included), who blocked the
+   * sender, who gets a notification or a silent delivery, and who is @mentioned. Blocks and
+   * mutes are read on their own connection - see the caller for when that happens under the lock.
+   */
+  private async resolveRecipients(
+    conversationType: ChatConversationType,
+    senderId: string,
+    participants: RecipientCandidate[],
+    mentionUserIds: string[] = [],
+  ) {
+    const deliverable = participants.filter(
+      (participant) =>
+        participant.userId === senderId ||
+        this.chatAccessService.isStateDeliveryEligible(
+          conversationType,
+          participant.state,
+        ),
+    );
+    const others = deliverable.filter(
+      (participant) => participant.userId !== senderId,
+    );
+
+    // People who blocked the sender keep their chat as they left it: a deleted or archived chat
+    // stays hidden, and the message never counts as unread for them. The sender is not told.
+    const blockerIds = await this.chatAccessService.findRecipientsWhoBlocked(
+      senderId,
+      others.map((participant) => participant.userId),
+    );
+    const notifiable = await Promise.all(
+      others.map((participant) =>
+        this.chatAccessService.isRecipientNotifiable(senderId, participant),
+      ),
+    );
+
+    // A mention reaches someone who muted the chat, but never a non-member or someone who blocked the sender
+    const requestedMentions = new Set(mentionUserIds);
+
+    return {
+      deliverableIds: deliverable.map((participant) => participant.userId),
+      blockerIds,
+      notifiableIds: others
+        .filter((_, index) => notifiable[index])
+        .map((participant) => participant.userId),
+      silentIds: others
+        .filter((_, index) => !notifiable[index])
+        .map((participant) => participant.userId),
+      mentionedIds: others
+        .filter(
+          (participant) =>
+            requestedMentions.has(participant.userId) &&
+            participant.state === 'ACTIVE' &&
+            !blockerIds.has(participant.userId),
+        )
+        .map((participant) => participant.userId),
     };
   }
 

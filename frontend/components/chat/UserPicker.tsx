@@ -20,7 +20,7 @@ export function UserPicker({
   multiple = false,
   disabled = false,
   excludeIds = [],
-  placeholder = "Search by name or @handle...",
+  placeholder,
   label = "Search people",
   currentUser,
 }: {
@@ -50,6 +50,8 @@ export function UserPicker({
   // pasting your own id) always comes back empty - without this, that reads as a plain "nobody
   // matches" instead of the actual reason.
   const trimmedQuery = query.trim();
+  // Two @handles or a list typed into one search: only one person is found and added at a time.
+  const looksLikeSeveral = multiple && /@\S+\s+@|[,;]/.test(trimmedQuery);
   const isSelfQuery =
     Boolean(currentUser) &&
     currentUser &&
@@ -135,13 +137,21 @@ export function UserPicker({
               setActiveIndex(0);
             }}
             onKeyDown={handleKeyDown}
-            placeholder={placeholder}
+            placeholder={
+              placeholder ??
+              (multiple ? "Add one person at a time by name or @handle..." : "Search by name or @handle...")
+            }
             role="combobox"
             type="text"
             value={query}
           />
           <FieldLimit id={`${listId}-limit`} value={query} max={50} />
         </>
+      )}
+      {looksLikeSeveral && (
+        <small className="user-picker-hint" role="status">
+          Add one person at a time: pick them from the list, then search for the next.
+        </small>
       )}
       {showInput && query.trim() && !search.isActive && (
         <small className="user-picker-hint">

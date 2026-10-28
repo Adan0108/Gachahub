@@ -121,3 +121,22 @@
   width: 100%;
   justify-content: center;
 }
+
+.add-people-name-input {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel2);
+  color: var(--text);
+}
+
+.add-people-room,
+.add-people-heading {
+  display: block;
+  padding: 4px 16px;
+  color: var(--muted);
+  font-size: 12px;
+}

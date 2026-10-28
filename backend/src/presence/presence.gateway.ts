@@ -7,6 +7,7 @@ import {
   WebSocketGateway,
 } from '@nestjs/websockets';
 import { websocketGatewayOptions } from '../websocket/websocket-gateway.options';
+import { hasLiveSession } from '../websocket/socket.util';
 import type { AppSocket } from '../websocket/websocket.gateway';
 import { PresenceService } from './presence.service';
 
@@ -49,7 +50,8 @@ export class PresenceGateway
     await socket.data.authReady;
 
     const userId = socket.data.userId;
-    if (!userId) return;
+    // An expired login's socket is closed at expiry; this covers the moment before that.
+    if (!userId || !hasLiveSession(socket)) return;
 
     try {
       await this.presence.socketAlive(userId, socket.id);

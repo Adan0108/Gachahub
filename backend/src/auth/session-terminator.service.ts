@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SocketRegistry } from '../websocket/socket-registry.service';
 import { auth } from './auth';
 
-/** Ends logins the way better-auth itself does, then tells any open browser of them it is signed out. */
+/** Ends logins the way better-auth itself does, then tells any open browser of them, on any instance (RedisIoAdapter), it is signed out. */
 @Injectable()
 export class SessionTerminator {
   constructor(

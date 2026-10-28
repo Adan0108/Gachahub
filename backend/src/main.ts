@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { appConfig } from './config/app.config';
+import { RedisIoAdapter } from './websocket/redis-io.adapter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -14,6 +15,11 @@ async function bootstrap() {
     origin: appConfig.frontendUrl,
     credentials: true,
   });
+
+  // Realtime events reach sockets on every backend instance, not only the one that emitted them.
+  const socketAdapter = new RedisIoAdapter(app);
+  await socketAdapter.connectToRedis();
+  app.useWebSocketAdapter(socketAdapter);
 
   app.useGlobalPipes(
     new ValidationPipe({
