@@ -407,11 +407,20 @@ export function ThreadRow({
   }
   if (message.status === "DELETED") {
     const mine = message.senderId === userId;
+    const sender = participantUser(conversation, message.senderId);
     return (
       <div className={`chat-message-row ${mine ? "mine" : ""}`} id={`chat-message-${message.id}`}>
-        <article className={`chat-message deleted ${mine ? "mine" : ""}`}>
-          <p>{mine ? "You unsent a message" : "This message was unsent"}</p>
-        </article>
+        <div className="chat-message-bubble-anchor">
+          {/* The last bubble of someone's run carries their picture, unsent or not. */}
+          {!mine && (
+            <span className={`chat-avatar small ${groupedWithNext ? "placeholder" : ""}`}>
+              {!groupedWithNext && <AvatarFace image={sender?.image} name={sender?.name} />}
+            </span>
+          )}
+          <article className={`chat-message deleted ${mine ? "mine" : ""}`}>
+            <p>{mine ? "You unsent a message" : "This message was unsent"}</p>
+          </article>
+        </div>
       </div>
     );
   }

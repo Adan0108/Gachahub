@@ -207,3 +207,44 @@ describe("ThreadRow receipts", () => {
     expect(screen.queryByText("Sent")).not.toBeInTheDocument();
   });
 });
+
+// An unsent message that ends someone's run of messages still carries their picture
+describe("ThreadRow unsent message", () => {
+  const renderUnsent = (groupedWithNext: boolean) => {
+    const message = { ...theirs("gone"), status: "DELETED" };
+    const { container } = render(
+      <ThreadRow
+        conversation={dm}
+        decryptedById={{}}
+        item={{ kind: "message", message, index: 0, gapBefore: false, groupedWithPrevious: true, groupedWithNext }}
+        messagesById={new Map([[message.id, message]])}
+        neighbors={{ before: [], after: [] }}
+        now={Date.parse(READ)}
+        onCopy={vi.fn()}
+        onRetryEdit={vi.fn()}
+        onDiscardEdit={vi.fn()}
+        onEdit={vi.fn()}
+        onJumpToMessage={vi.fn()}
+        onReact={vi.fn()}
+        onRemove={vi.fn()}
+        onReply={vi.fn()}
+        userId="me"
+      />,
+    );
+    return container;
+  };
+
+  it("shows the sender's picture when it is the last of their messages", () => {
+    const container = renderUnsent(false);
+
+    expect(screen.getByText("This message was unsent")).toBeInTheDocument();
+    expect(container.querySelector(".chat-avatar.small:not(.placeholder)")).toBeInTheDocument();
+  });
+
+  it("keeps only the space for it when more of their messages follow", () => {
+    const container = renderUnsent(true);
+
+    expect(container.querySelector(".chat-avatar.small.placeholder")).toBeInTheDocument();
+    expect(container.querySelector(".chat-avatar.small:not(.placeholder)")).not.toBeInTheDocument();
+  });
+});
