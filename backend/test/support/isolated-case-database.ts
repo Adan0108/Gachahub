@@ -37,7 +37,9 @@ export async function isolatedCaseDatabase() {
     .split(';')
     .filter(
       (statement) =>
-        !/moderation_analyses|ModerationAnalysisStatus/.test(statement) &&
+        !/moderation_analyses|ModerationAnalysisStatus|moderation_policy_evaluations|ModerationPolicy/.test(
+          statement,
+        ) &&
         !statement.includes(
           'CREATE INDEX "moderation_cases_lastReportedAt_id_idx"',
         ) &&
@@ -115,6 +117,16 @@ export async function isolatedCaseDatabase() {
         resolve(
           root,
           'prisma/migrations/20261022042915_moderation_analysis_results/migration.sql',
+        ),
+        'utf8',
+      ),
+    );
+    // Apply the real policy migration so custom CHECK constraints are tested too.
+    await admin.query(
+      readFileSync(
+        resolve(
+          root,
+          'prisma/migrations/20261028000000_add_moderation_policy_evaluations/migration.sql',
         ),
         'utf8',
       ),

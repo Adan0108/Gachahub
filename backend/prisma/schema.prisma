@@ -1176,8 +1176,9 @@ model ModerationAnalysis {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  case         ModerationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  sourceReport Report?        @relation(fields: [sourceReportId], references: [id], onDelete: SetNull)
+  case              ModerationCase               @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  sourceReport      Report?                      @relation(fields: [sourceReportId], references: [id], onDelete: SetNull)
+  policyEvaluations ModerationPolicyEvaluation[]
 
   @@unique([caseId, snapshotHash, classifierProfile])
   @@unique([caseId, generation])
@@ -1572,4 +1573,53 @@ model PostSave {
   @@index([userId, createdAt, postId])
   @@index([postId])
   @@map("post_saves")
+}
+
+enum ModerationPolicyEvaluationStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  UNSUPPORTED
+}
+
+enum ModerationPolicyRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model ModerationPolicyEvaluation {
+  id String @id @default(cuid())
+
+  analysisId String
+  analysis   ModerationAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  policyVersion String @db.VarChar(128)
+
+  status ModerationPolicyEvaluationStatus @default(PENDING)
+
+  riskLevel     ModerationPolicyRiskLevel?
+  priorityScore Int?
+  signals       Json?
+
+  /// Successful evaluation time; retry attempts use operational metadata instead.
+  evaluatedAt DateTime?
+
+  attemptCount   Int       @default(0)
+  nextAttemptAt  DateTime?
+  leaseExpiresAt DateTime?
+  leaseToken     String?
+
+  errorCode String? @db.VarChar(64)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([analysisId, policyVersion])
+  @@index([status, nextAttemptAt])
+  @@index([leaseExpiresAt])
+  @@index([analysisId])
+  // SQL migration additionally enforces output/status consistency and value bounds.
+  @@map("moderation_policy_evaluations")
 }
