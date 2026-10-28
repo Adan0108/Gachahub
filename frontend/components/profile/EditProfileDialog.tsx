@@ -61,7 +61,7 @@ export function EditProfileDialog({
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={save.isPending ? undefined : onClose}>
       <form
         aria-label="Edit profile"
         aria-modal="true"
@@ -73,10 +73,12 @@ export function EditProfileDialog({
       >
         <div className="panel-head">
           <h2>Edit profile</h2>
-          <button aria-label="Close edit profile" onClick={onClose} type="button">
+          <button aria-label="Close edit profile" disabled={save.isPending} onClick={onClose} type="button">
             <FiX />
           </button>
         </div>
+        {/* Everything is read-only while saving, so nothing changes under a save in flight. */}
+        <fieldset className="profile-edit-fields" disabled={save.isPending}>
         <AvatarEditor change={avatar} onChange={setAvatar} onUploadingChange={setUploading} user={user} />
         <BannerPicker onChange={setBanner} value={banner} />
         <label>
@@ -107,6 +109,7 @@ export function EditProfileDialog({
           />
         </label>
         <FieldLimit id="profile-bio-limit" max={BIO_MAX_CHARS} value={bio} />
+        </fieldset>
         {save.isError && (
           <small className="profile-field-hint error" role="alert">
             {save.error?.message || "Could not save your profile."}

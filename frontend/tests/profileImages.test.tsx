@@ -201,4 +201,21 @@ describe("EditProfileDialog picture and banner", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(mocks.removeAvatar).toHaveBeenCalled();
   });
+
+  it("greys out every field and the close button while saving", async () => {
+    let finish!: (value: { id: string }) => void;
+    mocks.removeAvatar.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    openDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    fireEvent.click(saveButton());
+
+    await waitFor(() => expect(saveButton()).toHaveTextContent("Saving..."));
+    expect(screen.getByRole("textbox", { name: "Display name" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Bio" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Rose" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Close edit profile" })).toBeDisabled();
+    await act(async () => finish({ id: "user-1" }));
+  });
 });
