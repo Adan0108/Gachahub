@@ -4,8 +4,10 @@ import {
   type OnModuleInit,
   type OnModuleDestroy,
 } from '@nestjs/common';
-import { z } from 'zod';
-import { parseModerationPolicyOutput } from './moderation-policy.contract';
+import {
+  parseModerationPolicyOutput,
+  parsePersistedPolicyInput,
+} from './moderation-policy.contract';
 import {
   POLICY_POLL_MS,
   POLICY_RECONCILE_MS,
@@ -21,40 +23,15 @@ import type {
   ModerationPolicyOutput,
 } from './moderation-policy.types';
 
-const storedOutputSchema = z.object({
-  output: z.strictObject({
-    model: z.strictObject({ name: z.string(), revision: z.string() }),
-    labels: z
-      .array(
-        z.strictObject({
-          label: z.string(),
-          score: z.number().finite().min(0).max(1),
-        }),
-      )
-      .min(1)
-      .max(32)
-      .refine(
-        (labels) =>
-          new Set(labels.map((entry) => entry.label)).size === labels.length,
-      ),
-  }),
-});
-
 export function persistedPolicyInput(
   classifierProfile: string,
   result: unknown,
 ): ModerationPolicyInput {
-  const parsed = storedOutputSchema.safeParse(result);
-  if (!parsed.success) throw new UnsupportedModerationPolicyEvidenceError();
-  return {
-    classifier: {
-      profile: classifierProfile,
-      model: parsed.data.output.model,
-      labels: Object.fromEntries(
-        parsed.data.output.labels.map(({ label, score }) => [label, score]),
-      ),
-    },
-  };
+  try {
+    return parsePersistedPolicyInput(classifierProfile, result);
+  } catch {
+    throw new UnsupportedModerationPolicyEvidenceError();
+  }
 }
 
 @Injectable()

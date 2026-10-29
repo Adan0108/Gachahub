@@ -3,42 +3,16 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   hashTextInput,
-  MAX_ANALYSIS_CONTENT_LENGTH,
-  MAX_ANALYSIS_TITLE_LENGTH,
-  normalizeAnalysisText,
+  moderationInputSnapshotSchema as snapshotSchema,
   TEXT_CLASSIFIER_PROFILE,
   HUGGINGFACE_TEXT_CLASSIFIER_PROFILE,
   TEXT_INPUT_SCHEMA_VERSION,
 } from './canonical-text-input';
 import type { ModerationAnalysisInputResponse } from './moderation-analysis-input.types';
 
-function boundedText(limit: number) {
-  return z
-    .string()
-    .max(limit * 2)
-    .refine(
-      (text) =>
-        !text.includes('\0') &&
-        !/\p{Surrogate}/u.test(text) &&
-        Array.from(text).length <= limit &&
-        (normalizeAnalysisText(text, limit) === text ||
-          (Array.from(text).length === limit &&
-            normalizeAnalysisText(text, limit) === text.trimEnd())),
-    );
-}
-const content = boundedText(MAX_ANALYSIS_CONTENT_LENGTH);
-const snapshotSchema = z.discriminatedUnion('type', [
-  z.strictObject({
-    type: z.literal('POST'),
-    title: boundedText(MAX_ANALYSIS_TITLE_LENGTH).min(1).nullable(),
-    content,
-  }),
-  z.strictObject({ type: z.literal('COMMENT'), content }),
-]);
 export const MAX_INPUT_RESPONSE_BYTES = 256 * 1024;
 
 @Injectable()

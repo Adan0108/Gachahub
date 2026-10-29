@@ -44,7 +44,8 @@ export class QueryModerationCasesDto {
 
   @ApiPropertyOptional({
     enum: ModerationCaseStatus,
-    description: 'Native workflow status; omit for all statuses.',
+    description:
+      'Native workflow status; omitted status defaults to active cases, or closed cases with view=history.',
   })
   @IsOptional()
   @IsEnum(ModerationCaseStatus)

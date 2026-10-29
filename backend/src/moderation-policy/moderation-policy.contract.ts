@@ -4,6 +4,7 @@ import {
   MODERATION_POLICY_SIGNALS,
   MODERATION_POLICY_VERSION_V1,
   type ModerationPolicyOutput,
+  type ModerationPolicyInput,
 } from './moderation-policy.types';
 
 export const moderationPolicyOutputSchema = z.strictObject({
@@ -22,4 +23,40 @@ export function parseModerationPolicyOutput(
   raw: unknown,
 ): ModerationPolicyOutput {
   return moderationPolicyOutputSchema.parse(raw);
+}
+
+const storedOutputSchema = z.object({
+  output: z.strictObject({
+    model: z.strictObject({ name: z.string(), revision: z.string() }),
+    labels: z
+      .array(
+        z.strictObject({
+          label: z.string(),
+          score: z.number().finite().min(0).max(1),
+        }),
+      )
+      .min(1)
+      .max(32)
+      .refine(
+        (labels) =>
+          new Set(labels.map((entry) => entry.label)).size === labels.length,
+      ),
+  }),
+});
+
+/** Pure persisted-result parsing shared by policy execution and advisory reads. */
+export function parsePersistedPolicyInput(
+  classifierProfile: string,
+  result: unknown,
+): ModerationPolicyInput {
+  const parsed = storedOutputSchema.parse(result);
+  return {
+    classifier: {
+      profile: classifierProfile,
+      model: parsed.output.model,
+      labels: Object.fromEntries(
+        parsed.output.labels.map(({ label, score }) => [label, score]),
+      ),
+    },
+  };
 }

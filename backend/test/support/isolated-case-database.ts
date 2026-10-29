@@ -8,7 +8,7 @@ import { PrismaClient } from '../../src/generated/prisma/client';
 import { TRANSACTION_OPTIONS } from '../../src/prisma/prisma.service';
 
 /** Test-only schema: never deploy checkout migrations over an unrelated shared DB history. */
-export async function isolatedCaseDatabase() {
+export async function isolatedCaseDatabase(onQuery?: (query: string) => void) {
   const schema = `case_test_${randomUUID().replaceAll('-', '')}`;
   if (!/^case_test_[a-f0-9]{32}$/.test(schema))
     throw new Error('Invalid test schema');
@@ -147,7 +147,9 @@ export async function isolatedCaseDatabase() {
   const prisma = new PrismaClient({
     adapter: new PrismaPg({ connectionString: url.toString() }, { schema }),
     transactionOptions: TRANSACTION_OPTIONS,
+    log: [{ level: 'query', emit: 'event' }],
   });
+  if (onQuery) prisma.$on('query', (event) => onQuery(event.query));
   Object.assign(prisma, {
     onModuleInit: () => prisma.$connect(),
     onModuleDestroy: () => prisma.$disconnect(),

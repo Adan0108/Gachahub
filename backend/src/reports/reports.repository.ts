@@ -23,6 +23,12 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import type { ReportTargetSnapshot } from './domain/report-target-snapshot';
 import { ModerationAnalysisScheduler } from '../moderation-analysis/moderation-analysis-scheduler.service';
+import { MODERATION_POLICY_VERSION_V1 } from '../moderation-policy/moderation-policy.types';
+import {
+  projectAiAdvisory,
+  type AdvisoryAnalysisRow,
+  type AdvisoryCase,
+} from './domain/ai-advisory';
 
 const reportReceiptSelect = {
   id: true,
@@ -95,15 +101,55 @@ export class ReportsRepository {
     private readonly analysisScheduler: ModerationAnalysisScheduler,
   ) {}
 
-  async findModerationCases(params: {
-    gameId?: string | null;
-    status?: ModerationCaseStatus;
-    view?: 'all' | 'assigned' | 'unassigned' | 'history';
-    moderatorId?: string;
-    targetType?: ReportTargetType;
-    limit: number;
-    cursor?: CaseCursor;
-  }) {
+  /** All response contributors share one PostgreSQL snapshot; writes are prohibited. */
+  readSnapshot<T>(
+    read: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+        return read(tx);
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  }
+
+  async findLatestAdvisoryAnalyses(
+    caseIds: string[],
+    db: Prisma.TransactionClient = this.prisma,
+  ) {
+    if (!caseIds.length) return new Map<string, AdvisoryAnalysisRow>();
+    const rows = await db.$queryRaw<AdvisoryAnalysisRow[]>(Prisma.sql`
+      SELECT c.id AS "caseId", a.id AS "analysisId", a."targetType" AS "analysisTargetType",
+        a."targetId" AS "analysisTargetId", a.generation, a."inputSchemaVersion", a."inputSnapshot",
+        a."snapshotHash", a."classifierProfile", a.status AS "analysisStatus", a.result,
+        p."policyVersion", p.status AS "policyStatus", p."riskLevel", p."priorityScore", p.signals, p."evaluatedAt"
+      FROM moderation_cases c
+      LEFT JOIN LATERAL (
+        SELECT id, "targetType", "targetId", generation, "inputSchemaVersion", "inputSnapshot",
+          "snapshotHash", "classifierProfile", status, result
+        FROM moderation_analyses WHERE "caseId" = c.id
+        ORDER BY generation DESC LIMIT 1
+      ) a ON true
+      LEFT JOIN moderation_policy_evaluations p ON p."analysisId" = a.id
+        AND p."policyVersion" = ${MODERATION_POLICY_VERSION_V1}
+      WHERE c.id IN (${Prisma.join(caseIds)})
+    `);
+    return new Map(rows.map((row) => [row.caseId, row]));
+  }
+
+  async findModerationCases(
+    params: {
+      gameId?: string | null;
+      status?: ModerationCaseStatus;
+      view?: 'all' | 'assigned' | 'unassigned' | 'history';
+      moderatorId?: string;
+      targetType?: ReportTargetType;
+      limit: number;
+      cursor?: CaseCursor;
+    },
+    db: Prisma.TransactionClient = this.prisma,
+  ) {
     const where: Prisma.ModerationCaseWhereInput = {
       ...((params.view && params.view !== 'all') || params.status === undefined
         ? {
@@ -141,7 +187,7 @@ export class ReportsRepository {
           }
         : {}),
     };
-    const rows = await this.prisma.moderationCase.findMany({
+    const rows = await db.moderationCase.findMany({
       where,
       select: caseSummarySelect,
       orderBy: [{ lastReportedAt: 'desc' }, { id: 'desc' }],
@@ -150,20 +196,23 @@ export class ReportsRepository {
     const page = rows.slice(0, params.limit);
     const last = page.at(-1);
     return {
-      items: await this.enrichCasePage(page),
+      items: await this.enrichCasePage(page, db),
       nextCursor:
         rows.length > params.limit && last ? encodeCaseCursor(last) : null,
     };
   }
 
   /** One aggregation for this bounded set of cases; never fetch complaint bodies. */
-  async findCaseReasonSummaries(caseIds: string[]) {
+  async findCaseReasonSummaries(
+    caseIds: string[],
+    db: Prisma.TransactionClient = this.prisma,
+  ) {
     const result = new Map<
       string,
       Array<{ reasonCode: ReportReason; count: number }>
     >();
     if (!caseIds.length) return result;
-    const groups = await this.prisma.report.groupBy({
+    const groups = await db.report.groupBy({
       by: ['caseId', 'reasonCode'],
       where: { caseId: { in: caseIds } },
       _count: { _all: true },
@@ -180,9 +229,10 @@ export class ReportsRepository {
     return result;
   }
 
-  private async enrichCasePage<
-    T extends { id: string; targetId: string; targetType: ReportTargetType },
-  >(items: T[]) {
+  private async enrichCasePage<T extends AdvisoryCase>(
+    items: T[],
+    db: Prisma.TransactionClient,
+  ) {
     if (!items.length) return [];
     const postIds = items
       .filter((item) => item.targetType === 'POST')
@@ -190,15 +240,17 @@ export class ReportsRepository {
     const commentIds = items
       .filter((item) => item.targetType === 'COMMENT')
       .map((item) => item.targetId);
-    // LEFT bounds text in PostgreSQL, not after transferring entire content bodies.
+    // Public previews stay SQL-bounded; private raw text is needed for canonical hashing.
     // The lateral media lookup returns at most one image per post using (postId,sortOrder).
-    const [previews, reasons] = await Promise.all([
-      this.prisma.$queryRaw<
+    const [previews, reasons, analyses] = await Promise.all([
+      db.$queryRaw<
         Array<{
           targetType: ReportTargetType;
           targetId: string;
           deleted: boolean;
           title: string | null;
+          rawTitle: string | null;
+          rawContent: string;
           excerpt: string;
           thumbnailUrl: string | null;
           author: {
@@ -214,7 +266,8 @@ export class ReportsRepository {
           LEFT(NULLIF(BTRIM(p.title), ''), 160) AS title,
           LEFT(regexp_replace(p.content, '\\s+', ' ', 'g'), 240) AS excerpt,
           m.url AS "thumbnailUrl",
-          json_build_object('id', u.id, 'name', LEFT(u.name,160), 'username', u.username, 'image', LEFT(u.image,2048)) AS author
+          json_build_object('id', u.id, 'name', LEFT(u.name,160), 'username', u.username, 'image', LEFT(u.image,2048)) AS author,
+          p.title AS "rawTitle", p.content AS "rawContent"
         FROM posts p JOIN "user" u ON u.id = p."authorId"
         LEFT JOIN LATERAL (SELECT url FROM post_media
           WHERE "postId" = p.id AND "mediaType" = 'IMAGE'
@@ -225,19 +278,48 @@ export class ReportsRepository {
         SELECT 'COMMENT'::text, c.id,
           (c."deletedAt" IS NOT NULL OR p."deletedAt" IS NOT NULL OR p.status = 'DELETED'),
           NULL, LEFT(regexp_replace(c.content, '\\s+', ' ', 'g'), 240), NULL,
-          json_build_object('id', u.id, 'name', LEFT(u.name,160), 'username', u.username, 'image', LEFT(u.image,2048))
+          json_build_object('id', u.id, 'name', LEFT(u.name,160), 'username', u.username, 'image', LEFT(u.image,2048)),
+          NULL, c.content
         FROM comments c JOIN posts p ON p.id = c."postId" JOIN "user" u ON u.id = c."authorId"
         WHERE c.id IN (${Prisma.join(commentIds.length ? commentIds : [''])})
       `),
-      this.findCaseReasonSummaries(items.map((item) => item.id)),
+      this.findCaseReasonSummaries(
+        items.map((item) => item.id),
+        db,
+      ),
+      this.findLatestAdvisoryAnalyses(
+        items.map((item) => item.id),
+        db,
+      ),
     ]);
     const targets = new Map(
       previews.map((row) => [`${row.targetType}:${row.targetId}`, row]),
     );
     return items.map((item) => {
       const row = targets.get(`${item.targetType}:${item.targetId}`);
+      const targetState = !row
+        ? 'missing'
+        : row.deleted
+          ? 'deleted'
+          : 'available';
+      const source = !row
+        ? null
+        : item.targetType === 'POST'
+          ? typeof row.rawTitle === 'string'
+            ? {
+                targetType: 'POST' as const,
+                title: row.rawTitle,
+                content: row.rawContent,
+              }
+            : null
+          : { targetType: 'COMMENT' as const, content: row.rawContent };
       return {
         ...item,
+        aiAdvisory: projectAiAdvisory(
+          item,
+          { targetState, source },
+          analyses.get(item.id),
+        ),
         targetState: !row
           ? ('missing' as const)
           : row.deleted
@@ -257,8 +339,11 @@ export class ReportsRepository {
     });
   }
 
-  findModerationCaseById(id: string) {
-    return this.prisma.moderationCase.findUnique({
+  findModerationCaseById(
+    id: string,
+    db: Prisma.TransactionClient = this.prisma,
+  ) {
+    return db.moderationCase.findUnique({
       where: { id },
       select: { ...caseSummarySelect, resolutionNote: true },
     });
@@ -268,8 +353,9 @@ export class ReportsRepository {
     caseId: string,
     limit: number,
     cursor?: EvidenceCursor,
+    db: Prisma.TransactionClient = this.prisma,
   ) {
-    const rows = await this.prisma.report.findMany({
+    const rows = await db.report.findMany({
       where: {
         caseId,
         ...(cursor
@@ -314,9 +400,13 @@ export class ReportsRepository {
     };
   }
 
-  async findCaseTarget(targetType: ReportTargetType, targetId: string) {
+  async findCaseTarget(
+    targetType: ReportTargetType,
+    targetId: string,
+    db: Prisma.TransactionClient = this.prisma,
+  ) {
     if (targetType === 'POST') {
-      const post = await this.prisma.post.findUnique({
+      const post = await db.post.findUnique({
         where: { id: targetId },
         select: {
           id: true,
@@ -346,7 +436,7 @@ export class ReportsRepository {
             : ('available' as const),
       };
     }
-    const comment = await this.prisma.comment.findUnique({
+    const comment = await db.comment.findUnique({
       where: { id: targetId },
       select: {
         id: true,

@@ -5,9 +5,59 @@ Stage 2D.2 adds pure classifier-score to advisory mapping through
 `ModerationPolicyService.evaluate(input)`. Pure evaluation has no injected infrastructure,
 database writes, network calls, clock, randomness, or environment lookup.
 
-Stage 2D.3 adds durable backend execution below. Not yet implemented: freshness
-API, moderator advisory projection, priority queue sorting, context/NLI model,
-or enforcement. Evaluations are historical records, not current-case decisions.
+Stage 2D.3 adds durable backend execution below. Stage 2D.4 projects freshness
+on existing moderator case reads. Queue sorting, context/NLI models and enforcement
+remain out of scope. Persisted evaluations remain historical records.
+
+## Stage 2D.4 freshness-aware case reads
+
+The platform and game case list/detail routes share the `AiAdvisory` union in
+`reports/domain/ai-advisory.ts`. `CURRENT` contains `analysisGeneration`,
+`policyVersion`, `riskLevel`, `priorityScore`, `signals` and ISO `evaluatedAt`.
+Every other state contains only `state` and an optional `analysisGeneration`;
+historical risk/priority/signals are never a fallback. Legacy case risk fields,
+queue ordering and filters are unchanged.
+
+After existing authorization, each response reads all contributors in one scoped
+PostgreSQL `REPEATABLE READ`, `READ ONLY` transaction. Game ownership is checked
+inside that snapshot. No transaction spans external network work. Database errors
+fail the request normally; GETs never schedule, repair or evaluate work.
+
+The pure projection checks, in order:
+
+1. RESOLVED/DISMISSED case: `CASE_CLOSED`.
+2. Missing/deleted target or unavailable comment parent: `TARGET_UNAVAILABLE`.
+3. No analysis: `NO_ANALYSIS`.
+4. Unverifiable canonical/input metadata: `FRESHNESS_UNVERIFIED`.
+5. Current canonical hash differs: `CONTENT_CHANGED`.
+6. Analysis PENDING/FAILED: `ANALYSIS_PENDING`/`ANALYSIS_FAILED`.
+7. Successful evidence unsupported by the production parser/registry:
+   `UNSUPPORTED_EVIDENCE`.
+8. Active `moderation-policy-v1` absent/PENDING: `POLICY_PENDING`; FAILED:
+   `POLICY_FAILED`; UNSUPPORTED: `UNSUPPORTED_EVIDENCE`.
+9. Successful policy output/date invalid: `FRESHNESS_UNVERIFIED`; otherwise
+   `CURRENT`.
+
+The candidate is always the highest allocated generation across all statuses and
+profiles, selected with a parameterized lateral `ORDER BY generation DESC LIMIT 1`.
+Only its active-version policy row is joined. Completion time and older successful
+rows cannot override it. With scheduler reuse for A -> B -> A, generation B remains
+the candidate and the result is `CONTENT_CHANGED`; scheduling semantics are unchanged.
+
+Canonical hashing reuses `canonical-text-input.ts`, including its existing NFC,
+newline normalization, trim, code-point bounds and versioned SHA-256 format.
+Freshness describes that bounded analyzed prefix, not text beyond its bounds.
+List preview SQL privately loads current text for hashing, then explicitly returns
+the existing preview allowlist. Raw text, classifier results and lease/retry fields
+are not added to the response. Detail reuses its existing target read.
+
+A nonempty list uses four bounded data operations: case page, target previews,
+reason aggregation and one advisory query. Prisma relation/auth/transaction SQL
+adds constant overhead. Existing case/generation and analysis/policy-version unique
+indexes serve the joins; no migration is added. The PostgreSQL/HTTP regression suite
+checks query counts and actual advisory query plans at page sizes 20, 50 and 100,
+all five generation/content races, snapshot consistency, authorization and read-only
+behavior. No frontend advisory UI is introduced in this stage.
 
 ## Stage 2D.3 durable execution
 
