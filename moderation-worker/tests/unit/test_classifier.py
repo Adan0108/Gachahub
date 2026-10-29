@@ -1,6 +1,5 @@
 import json
 import math
-import os
 import unittest
 from threading import Event
 from types import SimpleNamespace
@@ -82,6 +81,13 @@ class ClassifierTests(unittest.TestCase):
         self.modules = patch.dict("sys.modules", {"torch": self.torch, "transformers": self.transformers})
         self.modules.start()
         self.addCleanup(self.modules.stop)
+        # Window planning/batching have dedicated tests with real tensor math.
+        self.chunk_plan = patch("app.classifiers.huggingface.prepare_chunks", return_value=None)
+        self.chunk_plan.start()
+        self.addCleanup(self.chunk_plan.stop)
+        self.tokenizer_check = patch("app.classifiers.huggingface.verify_tokenizer")
+        self.tokenizer_check.start()
+        self.addCleanup(self.tokenizer_check.stop)
 
     def test_load_once_eval_cpu_and_pinned_revision(self):
         classifier = HuggingFaceClassifier()

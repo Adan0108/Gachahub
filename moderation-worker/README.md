@@ -25,7 +25,7 @@ Report HTTP -> transaction(case, analysis PENDING, outbox) -> Kafka requests
 - `app/classifiers/fixture.py`: deterministic `FixtureClassifier`.
 - `app/classifiers/huggingface.py`: pinned local CPU inference behind that protocol.
 - `app/classifiers/model_profile.py`: immutable model identity, profile and token limit.
-- `app/evaluation/evaluate_classifier.py`: standalone English/Vietnamese observations.
+- `app/evaluation/validate_toxicity.py`: reusable bilingual, edge-case and long-content regression evaluation.
 - `app/processing/job_processor.py`: identity verification, text projection and result assembly.
 - `app/infrastructure/kafka/consumer.py`: polling, assignment cancellation and offset ownership.
 - `app/infrastructure/kafka/producer.py`: confirmed result/quarantine delivery.
@@ -384,20 +384,22 @@ there is no manual reanalysis or migration.
 
 Model name, revision and length are validated against the immutable bundle, rather
 than permitting a mutable branch such as `main` or silently changing preprocessing.
-Changing these semantics requires a new profile. This preserves the original
+The original model selection used a new profile. This preserves the original
 repository contract: `moderation-text-v1` must never be repointed to another model.
 No schema migration or event/result contract change is needed. Stored results already
 retain `output.model.name`, `output.model.revision` and all `output.labels` scores.
 
 The [pinned model card](https://huggingface.co/Horizon-Labs/multilingual-toxicity-small/blob/01adcc628a33848569816d4851a38544c321b92c/README.md)
 declares Apache-2.0 and 256-token toxicity training. Its config/tokenizer capacity
-is 8192; the classifier deliberately uses the trained 256-token right prefix.
+is 8192; each inference window uses the trained 256-token length. Long input is
+covered by overlapping token windows and per-label MAX aggregation; see
+[coverage and validation](ML_VALIDATION.md) for bounds, checks and limitations.
 Labels are read in index order from `config.id2label`: `toxicity`, `severe_toxicity`,
 `obscene`, `threat`, `insult`, `identity_attack`, `sexual_explicit`. Each receives an
-independent sigmoid probability. There are no thresholds or decisions. Empty and
+independent sigmoid score. There are no thresholds or decisions. Empty and
 whitespace strings are tokenized normally, matching the representable-empty contract.
 For posts, the existing title + two newlines + content projection precedes tokenization.
-The immutable hash covers the full canonical snapshot, even when inference truncates it.
+The immutable hash covers the full canonical snapshot. Windowing does not change it.
 
 The model loads once before Kafka clients are created, using AutoTokenizer and
 AutoModelForSequenceClassification, safetensors, CPU eager attention, `eval()` and
@@ -410,13 +412,11 @@ to the normal Hugging Face cache (`~/.cache/huggingface/hub`, or the existing `H
 configuration). Later runs reuse it. No model files belong in this repository.
 Windows without symlink support still caches files, potentially using more disk.
 
-Run standalone evaluation **before** enabling the real worker (no HTTP/Kafka/DB):
+Run offline regression checks **before** enabling the real worker (no HTTP/Kafka/DB):
 
 ```powershell
 # moderation-worker/
-.\.venv\Scripts\python.exe -m app.evaluation.evaluate_classifier
-# Prints every label for four English and five Vietnamese synthetic examples.
-# Optional: after the first successful download, use cached files only.
+# After the model has been baked or downloaded, use cached files only.
 $env:HF_HUB_OFFLINE='1'
 $env:RUN_REAL_MODEL_TESTS='1'
 .\.venv\Scripts\python.exe -m unittest tests.integration.test_real_classifier.RealModelTests -v
@@ -426,7 +426,7 @@ Remove-Item Env:HF_HUB_OFFLINE
 
 Ordinary `unittest discover` tests stub inference libraries and never download
 weights. The opt-in test loads one model and checks actual labels, finite bounded
-scores, repeated inference tolerance, 256-token truncation and empty/whitespace input.
+scores, short-input reference equality, full token coverage and empty/whitespace input.
 No model quality thresholds are asserted.
 
 The existing live harness also has a scoped real-model mode. After standalone
@@ -446,11 +446,19 @@ This selects one real-model test instead of the fixture fault scenario. It reuse
 the real report/outbox/Kafka/authenticated HTTP/Stage 2B harness, requires SUCCEEDED
 and a committed offset, asserts the stored model/revision and seven bounded scores,
 and compares the entire case and post before/after. Its random schema/topics/groups
-are cleaned by the existing harness. See [Stage 2E review evidence](STAGE2E.md) for
-measured outputs and checks, including whether the live test ran.
+are cleaned by the existing harness. See [validation instructions](ML_VALIDATION.md)
+for reproducible checks and their limits.
 
-Cancellation remains cooperative around noninterruptible inference; the 256-token
-bound limits input size but is not a wall-clock deadline. Process isolation/hard
+Cancellation remains cooperative around noninterruptible inference; the per-window
+token bound and total chunk cap bound work but are not a wall-clock deadline. Process isolation/hard
 inference deadlines are deferred before production rollout. No policy automation,
 automatic removal, analysis lease, automated quarantine replay or reconciliation
 service is implemented.
+
+## Current toxicity-model health
+
+The expanded production-model validation covers bilingual, long and edge
+cases, real offline inference, canonical hashing, full token coverage and the existing live
+Kafka/HTTP/PostgreSQL path. See [validation instructions](ML_VALIDATION.md) for
+checks, known limitations and reproduction.
+The model remains advisory; production policy behavior is unchanged.

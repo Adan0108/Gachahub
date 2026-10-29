@@ -1,4 +1,6 @@
 import { ModerationPolicyRepository } from '../src/moderation-policy/moderation-policy.repository';
+import { ModerationPolicyRunner } from '../src/moderation-policy/moderation-policy-runner.service';
+import { ModerationPolicyService } from '../src/moderation-policy/moderation-policy.service';
 // Opt-in real local PostgreSQL/Kafka/HTTP/Python integration. No shared DB URL fallback.
 jest.mock('@thallesp/nestjs-better-auth', () => {
   const common =
@@ -320,13 +322,15 @@ const enabled =
   });
 
   (realModelEnabled ? it : it.skip)(
-    'one real model report -> immutable HTTP -> Kafka -> stored scores, with no case/content changes',
+    'long real model report -> immutable HTTP -> chunked scores -> Kafka -> stored policy, with no case/content changes',
     async () => {
       const post = await db.post.create({
         data: {
           authorId,
           title: 'Test comment',
-          content: 'You are a complete idiot.',
+          // The threat is beyond the legacy first-256-token boundary.
+          content: 'This guide lists equipment costs and upgrade schedules. '.repeat(250) +
+            'I know where you live and I will kill you tonight.',
         },
       });
       const caseId = await report(post.id);
@@ -384,6 +388,17 @@ const enabled =
         expect(score).toBeGreaterThanOrEqual(0);
         expect(score).toBeLessThanOrEqual(1);
       }
+      const threat = result.output.labels.find(({ label }) => label === 'threat')!;
+      expect(threat.score).toBeGreaterThan(0.5); // Fixture signal, not a policy threshold.
+      const runner = new ModerationPolicyRunner(
+        new ModerationPolicyRepository(db), new ModerationPolicyService(),
+      );
+      expect(await runner.processNext()).toBe(true);
+      const policy = await db.moderationPolicyEvaluation.findFirstOrThrow({
+        where: { analysisId: job.id },
+      });
+      expect(policy.status).toBe('SUCCEEDED');
+      expect(policy.policyVersion).toBe('moderation-policy-v1');
       expect(
         await db.moderationCase.findUniqueOrThrow({ where: { id: caseId } }),
       ).toEqual(caseBefore);

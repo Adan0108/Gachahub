@@ -46,7 +46,9 @@ def processor(classifier=None):
 
 class ContractsTests(unittest.TestCase):
     def test_shared_hash_vectors(self):
-        vectors = json.loads((Path(__file__).parents[1] / "fixtures/canonical-text-v1.json").read_text(encoding="utf-8"))
+        vectors = []
+        for filename in ("canonical-text-v1.json", "canonical-text-health-v1.json"):
+            vectors.extend(json.loads((Path(__file__).parents[1] / "fixtures" / filename).read_text(encoding="utf-8")))
         for vector in vectors:
             with self.subTest(vector["name"]):
                 source = vector["source"]

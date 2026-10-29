@@ -3,21 +3,32 @@ import { resolve } from 'node:path';
 import { canonicalTextInput, hashTextInput } from './canonical-text-input';
 import type { ReportTargetSnapshot } from '../reports/domain/report-target-snapshot';
 
-const vectors = JSON.parse(
-  readFileSync(
-    resolve(
-      __dirname,
-      '../../../moderation-worker/tests/fixtures/canonical-text-v1.json',
-    ),
-    'utf8',
-  ),
-) as Array<{
-  name: string;
-  source: { type: 'POST' | 'COMMENT'; title?: string | null; content: string };
-  input: Parameters<typeof hashTextInput>[0];
-  serialized: string;
-  snapshotHash: string;
-}>;
+const vectors = [
+  'canonical-text-v1.json',
+  'canonical-text-health-v1.json',
+].flatMap(
+  (filename) =>
+    JSON.parse(
+      readFileSync(
+        resolve(
+          __dirname,
+          '../../../moderation-worker/tests/fixtures',
+          filename,
+        ),
+        'utf8',
+      ),
+    ) as Array<{
+      name: string;
+      source: {
+        type: 'POST' | 'COMMENT';
+        title?: string | null;
+        content: string;
+      };
+      input: Parameters<typeof hashTextInput>[0];
+      serialized: string;
+      snapshotHash: string;
+    }>,
+);
 describe('shared TypeScript/Python canonical fingerprint vectors', () => {
   it.each(vectors)('$name', (vector) => {
     const snapshot = {

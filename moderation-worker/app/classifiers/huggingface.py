@@ -1,5 +1,6 @@
 from app.contracts.moderation import ClassifierOutput, ModelIdentity, ModerationLabel
 from app.classifiers.model_profile import MODEL_MAX_LENGTH, MODEL_NAME, MODEL_REVISION
+from app.classifiers.chunking import CHUNK_BATCH_SIZE, prepare_chunks, verify_tokenizer
 
 
 class HuggingFaceClassifier:
@@ -22,6 +23,7 @@ class HuggingFaceClassifier:
         )
         self.model.to("cpu")
         self.model.eval()
+        verify_tokenizer(self.tokenizer)
         config = self.model.config
         if config.problem_type != "multi_label_classification":
             raise ValueError("Expected a multi-label sequence classifier")
@@ -33,7 +35,11 @@ class HuggingFaceClassifier:
                                                      for label in self.labels])
 
     def classify(self, text: str) -> ClassifierOutput:
-        # Preserve the pipeline's exact text (including representable empty input).
+        chunks = prepare_chunks(self.tokenizer, text, self.max_length)
+        if chunks is not None:
+            scores = self._chunk_scores(chunks).amax(dim=0).tolist()
+            return self._output(scores)
+        # Preserve exact legacy scores for text fitting one model window.
         inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=self.max_length)
         with self._torch.inference_mode():
             logits = self.model(**inputs).logits
@@ -41,6 +47,21 @@ class HuggingFaceClassifier:
                 raise ValueError("Invalid classifier logits")
             scores = self._torch.sigmoid(logits[0]).tolist()
         # Pydantic rejects nonfinite or out-of-range probabilities; no clamping.
+        return self._output(scores)
+
+    def _chunk_scores(self, chunks, batch_size=CHUNK_BATCH_SIZE):
+        scores = []
+        with self._torch.inference_mode():
+            for offset in range(0, len(chunks), batch_size):
+                batch = chunks[offset:offset + batch_size]
+                inputs = self.tokenizer.pad(batch, padding=True, return_tensors="pt")
+                logits = self.model(**inputs).logits
+                if tuple(logits.shape) != (len(batch), len(self.labels)) or not self._torch.isfinite(logits).all().item():
+                    raise ValueError("Invalid chunk classifier logits")
+                scores.append(self._torch.sigmoid(logits))
+        return self._torch.cat(scores, dim=0)
+
+    def _output(self, scores):
         return ClassifierOutput(model=self.identity, labels=[
             ModerationLabel(label=label, score=score) for label, score in zip(self.labels, scores, strict=True)
         ])
