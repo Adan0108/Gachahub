@@ -22,6 +22,8 @@ interface CommentRecord {
   createdAt?: string;
   mentions?: string[];
   replyCount?: number;
+  likeCount?: number;
+  likedByCurrentUser?: boolean;
 }
 export interface PostRecord {
   id: string;
@@ -85,6 +87,49 @@ function videoMimeType(format?: string) {
   return normalizedFormat === "mov" ? "video/quicktime" : `video/${normalizedFormat}`;
 }
 
+/** Heart on a comment or reply; optimistic, rolls back if the server says no. */
+function CommentLikeButton({ comment }: { comment: CommentRecord }) {
+  const { isAuthenticated } = useCurrentUser();
+  const router = useRouter();
+  const [state, setState] = useState({
+    liked: Boolean(comment.likedByCurrentUser),
+    count: comment.likeCount ?? 0,
+  });
+  const toggle = useMutation({
+    mutationFn: (like: boolean) => (like ? api.likeComment(comment.id) : api.unlikeComment(comment.id)),
+    onMutate: (like) => {
+      const previous = state;
+      setState({ liked: like, count: Math.max(0, state.count + (like ? 1 : -1)) });
+      return previous;
+    },
+    onError: (_error, _like, previous) => {
+      if (previous) setState(previous);
+    },
+    onSuccess: (result: { liked: boolean; likeCount: number }) => {
+      setState({ liked: result.liked, count: result.likeCount });
+    },
+  });
+
+  return (
+    <button
+      aria-label={state.liked ? "Unlike comment" : "Like comment"}
+      aria-pressed={state.liked}
+      className={state.liked ? "comment-liked" : undefined}
+      disabled={toggle.isPending}
+      onClick={() => {
+        if (!isAuthenticated) {
+          router.push("/login");
+          return;
+        }
+        toggle.mutate(!state.liked);
+      }}
+      type="button"
+    >
+      <FiHeart /> {state.count > 0 ? state.count : "Like"}
+    </button>
+  );
+}
+
 function CommentItem({ comment, onReport }: { comment: CommentRecord; onReport: OpenReport }) {
   const queryClient = useQueryClient();
   const { isAuthenticated } = useCurrentUser();
@@ -134,6 +179,7 @@ function CommentItem({ comment, onReport }: { comment: CommentRecord; onReport: 
         <MentionText content={comment.content} usernames={comment.mentions} />
       </p>
       <div className="post-comment-actions">
+        <CommentLikeButton comment={comment} />
         <button onClick={startReply} type="button">
           <FiCornerUpLeft /> Reply
         </button>
@@ -204,6 +250,7 @@ function CommentItem({ comment, onReport }: { comment: CommentRecord; onReport: 
                 <MentionText content={item.content} usernames={item.mentions} />
               </p>
               <div className="post-comment-actions">
+                <CommentLikeButton comment={item} />
                 <button
                   onClick={() =>
                     onReport("COMMENT", item.id, `reply by ${item.author?.name || "user"}`)

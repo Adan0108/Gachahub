@@ -72,7 +72,12 @@ describe('UsersService', () => {
         'viewer-1',
         'user-2',
       );
-      expect(result).toEqual({ ...profileFields, isBlockedByMe: true });
+      expect(result).toEqual({
+        ...profileFields,
+        reputation: 0,
+        rank: 'STARGAZER',
+        isBlockedByMe: true,
+      });
     });
 
     it('returns isBlockedByMe: false when the viewer has not blocked this user', async () => {

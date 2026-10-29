@@ -12,6 +12,7 @@ import type { PostAuditAction } from '../../audit-log/audit-log.types';
 import { GameModeratorsService } from '../../game-moderators/game-moderators.service';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EconomyService } from '../../economy/economy.service';
 import { formatPost } from '../post.mapper';
 import { PostsRepository } from '../posts.repository';
 import { resolvePagination, toPaginated } from '../../common/utils/paginated';
@@ -30,6 +31,7 @@ export class PostModerationService {
     private readonly gameModeratorsService: GameModeratorsService,
     private readonly auditLogService: AuditLogService,
     private readonly prisma: PrismaService,
+    private readonly economy: EconomyService,
   ) {}
 
   async hideAsModerator(gameSlug: string, postId: string, moderatorId: string) {
@@ -182,6 +184,12 @@ export class PostModerationService {
         },
         tx,
       );
+
+      if (to === PostStatus.HIDDEN) {
+        await this.economy.revokeForContent(tx, 'POST', postId);
+      } else {
+        await this.economy.restoreForContent(tx, 'POST', postId);
+      }
 
       return result;
     });

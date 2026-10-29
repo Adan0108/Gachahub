@@ -1,3 +1,4 @@
+import type { EconomyService } from '../economy/economy.service';
 import {
   ConflictException,
   ForbiddenException,
@@ -77,6 +78,14 @@ describe('CommentModerationService', () => {
       gameModeratorsService as unknown as GameModeratorsService,
       auditLogService as unknown as AuditLogService,
       prisma as unknown as PrismaService,
+      {
+        recordLike: jest.fn(),
+        recordComment: jest.fn(),
+        revokeForContent: jest.fn(),
+        restoreForContent: jest.fn(),
+        revokeForActor: jest.fn(),
+        restoreForActor: jest.fn(),
+      } as unknown as EconomyService,
     );
   });
 

@@ -33,6 +33,8 @@ export const queryKeys = {
   },
   moderatedGames: ["moderated-games"],
   currentUser: ["current-user"],
+  wallet: ["wallet"],
+  walletLedger: ["wallet", "ledger"],
   bannerOptions: ["profile-banner-options"],
   myPosts: ["posts", "mine"],
   posts: (search: any) => ["posts", { search }],
@@ -156,6 +158,16 @@ export const queries = {
     },
     retry: false,
     staleTime: 30000,
+  }),
+  wallet: () => ({
+    queryKey: queryKeys.wallet,
+    queryFn: ({ signal }: any) => api.getWallet({ signal }),
+    staleTime: 15000,
+  }),
+  walletLedger: () => ({
+    queryKey: queryKeys.walletLedger,
+    queryFn: ({ signal }: any) => api.getWalletLedger({ signal }),
+    staleTime: 15000,
   }),
   bannerOptions: () => ({
     queryKey: queryKeys.bannerOptions,

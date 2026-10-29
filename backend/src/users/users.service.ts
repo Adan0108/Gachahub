@@ -183,6 +183,7 @@ export class UsersService {
         image: true,
         bannerPresetId: true,
         createdAt: true,
+        wallet: { select: { reputation: true, rank: true } },
       },
     });
 
@@ -195,6 +196,12 @@ export class UsersService {
         ? await this.blocksService.isBlocked(viewerId, userId)
         : false;
 
-    return { ...user, isBlockedByMe };
+    const { wallet, ...profile } = user;
+    return {
+      ...profile,
+      reputation: wallet?.reputation ?? 0,
+      rank: wallet?.rank ?? 'STARGAZER',
+      isBlockedByMe,
+    };
   }
 }

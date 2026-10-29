@@ -12,6 +12,7 @@ import type { CommentAuditAction } from '../audit-log/audit-log.types';
 import { GameModeratorsService } from '../game-moderators/game-moderators.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { EconomyService } from '../economy/economy.service';
 import { CommentsRepository } from './comments.repository';
 import { resolvePagination, toPaginated } from '../common/utils/paginated';
 
@@ -35,6 +36,7 @@ export class CommentModerationService {
     private readonly gameModeratorsService: GameModeratorsService,
     private readonly auditLogService: AuditLogService,
     private readonly prisma: PrismaService,
+    private readonly economy: EconomyService,
   ) {}
 
   async hideAsModerator(
@@ -188,6 +190,12 @@ export class CommentModerationService {
         },
         tx,
       );
+
+      if (to === CommentStatus.HIDDEN) {
+        await this.economy.revokeForContent(tx, 'COMMENT', commentId);
+      } else {
+        await this.economy.restoreForContent(tx, 'COMMENT', commentId);
+      }
 
       return result;
     });

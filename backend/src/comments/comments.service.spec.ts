@@ -1,3 +1,4 @@
+import type { EconomyService } from '../economy/economy.service';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
 import type { Prisma } from '../generated/prisma/client';
@@ -34,6 +35,7 @@ describe('CommentsService', () => {
     findByPostId: jest.fn(),
     findReplies: jest.fn(),
     findMentionedUsernames: jest.fn(),
+    findLikedCommentIds: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     softDelete: jest.fn(),
@@ -69,6 +71,7 @@ describe('CommentsService', () => {
     jest.clearAllMocks();
     mentions.resolveTargets.mockResolvedValue(['mentioned-1']);
     commentsRepository.findMentionedUsernames.mockResolvedValue(new Map());
+    commentsRepository.findLikedCommentIds.mockResolvedValue(new Set());
 
     prisma.$transaction.mockImplementation(
       async (
@@ -83,6 +86,14 @@ describe('CommentsService', () => {
       eventPublisher as EventPublisherPort,
       prisma as unknown as PrismaService,
       mentions as unknown as MentionsService,
+      {
+        recordLike: jest.fn(),
+        recordComment: jest.fn(),
+        revokeForContent: jest.fn(),
+        restoreForContent: jest.fn(),
+        revokeForActor: jest.fn(),
+        restoreForActor: jest.fn(),
+      } as unknown as EconomyService,
     );
   });
 

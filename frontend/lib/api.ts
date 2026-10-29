@@ -74,6 +74,10 @@ export const backendRoutes = {
   followStatus: (userId: any) => `/users/${encodePathParam(userId)}/follow-status`,
   postComments: (postId: any) => `/posts/${encodePathParam(postId)}/comments`,
   commentReplies: (commentId: any) => `/comments/${encodePathParam(commentId)}/replies`,
+  commentLike: (commentId: string) => `/comments/${encodePathParam(commentId)}/like`,
+  wallet: "/wallet",
+  walletLedger: "/wallet/ledger",
+  walletCheckIn: "/wallet/check-in",
   reports: "/reports",
   notifications: "/notifications",
   notificationsUnreadCount: "/notifications/unread-count",
@@ -733,6 +737,12 @@ export const api = {
   getGameFeed: (gameSlug: any, query: any = {}, options: any = {}) =>
     api.getFeedCollection(backendRoutes.gameFeed(gameSlug), query, options),
   likePost: (postId: any) => mutation(backendRoutes.postLike(postId)),
+  likeComment: (commentId: string) => mutation(backendRoutes.commentLike(commentId)),
+  unlikeComment: (commentId: string) =>
+    mutation(backendRoutes.commentLike(commentId), undefined, { method: "DELETE" }),
+  getWallet: (options: any = {}) => request(backendRoutes.wallet, options),
+  getWalletLedger: (options: any = {}) => request(backendRoutes.walletLedger, options),
+  checkIn: () => mutation(backendRoutes.walletCheckIn),
   deletePost: (postId: string) =>
     mutation(backendRoutes.post(postId), undefined, { method: "DELETE" }),
   unlikePost: (postId: any) =>

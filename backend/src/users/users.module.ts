@@ -1,3 +1,4 @@
+import { EconomyModule } from '../economy/economy.module';
 import { Module } from '@nestjs/common';
 import { UsersController } from './users.controller';
 import { AdminUsersController } from './admin-users.controller';
@@ -19,6 +20,7 @@ import { UserBannerService } from './banner/user-banner.service';
 
 @Module({
   imports: [
+    EconomyModule,
     PostsModule,
     BlocksModule,
     AuditLogModule,

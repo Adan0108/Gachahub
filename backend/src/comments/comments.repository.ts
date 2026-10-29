@@ -46,6 +46,62 @@ export class CommentsRepository {
     });
   }
 
+  /** Adds a like; `changed` is false when it was already there. */
+  async like(
+    transaction: Prisma.TransactionClient,
+    commentId: string,
+    userId: string,
+  ) {
+    const created = await transaction.commentLike.createMany({
+      data: [{ commentId, userId }],
+      skipDuplicates: true,
+    });
+    const comment = await transaction.comment.update({
+      where: { id: commentId },
+      data: created.count > 0 ? { likeCount: { increment: 1 } } : {},
+      select: { likeCount: true },
+    });
+    return {
+      liked: true,
+      likeCount: comment.likeCount,
+      changed: created.count > 0,
+    };
+  }
+
+  async unlike(commentId: string, userId: string) {
+    return this.prisma.$transaction(async (transaction) => {
+      const deleted = await transaction.commentLike.deleteMany({
+        where: { commentId, userId },
+      });
+      const comment = await transaction.comment.update({
+        where: { id: commentId },
+        data: deleted.count > 0 ? { likeCount: { decrement: 1 } } : {},
+        select: { likeCount: true },
+      });
+      return {
+        liked: false,
+        likeCount: comment.likeCount,
+        changed: deleted.count > 0,
+      };
+    });
+  }
+
+  /** Which of these comments the viewer has liked. */
+  async findLikedCommentIds(
+    commentIds: string[],
+    userId: string | undefined,
+  ): Promise<Set<string>> {
+    if (!userId || commentIds.length === 0) {
+      return new Set();
+    }
+
+    const likes = await this.prisma.commentLike.findMany({
+      where: { userId, commentId: { in: commentIds } },
+      select: { commentId: true },
+    });
+    return new Set(likes.map((like) => like.commentId));
+  }
+
   /** The live post each comment sits on, so a notification can link to it; a deleted comment still resolves, a deleted post does not. */
   async findPostIdsByCommentIds(
     commentIds: string[],
