@@ -42,6 +42,12 @@ class Tokenizer:
 
 
 class ChunkingTests(unittest.TestCase):
+    def test_30000th_codepoint_is_covered_with_unchanged_windows(self):
+        text = "a" * 29999 + "z"
+        chunks = prepare_chunks(Tokenizer(len(text)), text, 256)
+        self.assertEqual(chunks[-1]["input_ids"][-2], 29999)
+        self.assertLessEqual(max(len(chunk["input_ids"]) for chunk in chunks), 256)
+
     def test_complete_deterministic_overlap_and_last_token(self):
         for length in (0, 254, 255, 444, 445, 1000, token_budget(MAX_POST_CODEPOINTS)):
             tokenizer = Tokenizer(length)
@@ -56,8 +62,8 @@ class ChunkingTests(unittest.TestCase):
                 self.assertEqual(chunk["input_ids"][1:65], reconstructed[-64:])
                 reconstructed.extend(chunk["input_ids"][65:-1])
             self.assertEqual(reconstructed, tokenizer.tokens)
-        self.assertEqual(max_chunks(MAX_POST_CODEPOINTS, 254), 428)
-        self.assertEqual(max_chunks(MAX_COMMENT_CODEPOINTS, 254), 421)
+        self.assertEqual(max_chunks(MAX_POST_CODEPOINTS, 254), 638)
+        self.assertEqual(max_chunks(MAX_COMMENT_CODEPOINTS, 254), 632)
 
     def test_invalid_bounds_and_missing_tail_fail_instead_of_partial_success(self):
         for text in ("a" * (MAX_POST_CODEPOINTS + 1), "\0", "\ud800", None):

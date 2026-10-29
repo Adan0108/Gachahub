@@ -5,13 +5,13 @@ from uuid import NAMESPACE_URL, uuid5
 from app.infrastructure.http.backend_client import ModerationInputClient
 from app.classifiers.base import Classifier
 from app.contracts.moderation import (AnalysisRequestedPayload, ClassifierOutput, FailedResult, ModerationInputResponse,
-                        ModerationResultEvent, PostInput, SuccessResult, parse_request, snapshot_hash)
+                        ModerationResultEvent, PostInput, SuccessResult, TEXT_INPUT_SCHEMA_VERSION, parse_request, snapshot_hash)
 from app.core.errors import Cancelled, QuarantineRequired
 from app.classifiers.model_profile import FIXTURE_PROFILE, HUGGINGFACE_PROFILE
 
 
 def verify_identity(request: AnalysisRequestedPayload, resolved: ModerationInputResponse):
-    if request.inputSchemaVersion != 1 or request.classifierProfile not in {FIXTURE_PROFILE, HUGGINGFACE_PROFILE}:
+    if request.inputSchemaVersion != TEXT_INPUT_SCHEMA_VERSION or request.classifierProfile not in {FIXTURE_PROFILE, HUGGINGFACE_PROFILE}:
         raise QuarantineRequired("UNSUPPORTED_INPUT")
     for field in AnalysisRequestedPayload.model_fields:
         if getattr(request, field) != getattr(resolved, field):
@@ -32,7 +32,7 @@ class JobProcessor:
         except (ValueError, UnicodeError):
             raise QuarantineRequired("REQUEST_CONTRACT") from None
         request = event.payload
-        if request.inputSchemaVersion != 1 or request.classifierProfile != self.classifier_profile:
+        if request.inputSchemaVersion != TEXT_INPUT_SCHEMA_VERSION or request.classifierProfile != self.classifier_profile:
             raise QuarantineRequired("UNSUPPORTED_INPUT")
         resolved = self.backend.get_analysis_input(request.analysisJobId, cancelled)
         verify_identity(request, resolved)

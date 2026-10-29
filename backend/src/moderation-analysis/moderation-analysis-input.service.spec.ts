@@ -29,6 +29,26 @@ describe('immutable moderation input API service', () => {
     moderationAnalysis: { findUnique },
   } as unknown as PrismaService);
   beforeEach(() => findUnique.mockReset());
+  it.each([20000, 20001, 30000, 30001])(
+    'validates schema-1 content boundary %i',
+    async (length) => {
+      const input = { ...fixture().inputSnapshot, content: 'x'.repeat(length) };
+      findUnique.mockResolvedValue({
+        ...fixture(),
+        inputSnapshot: input,
+        snapshotHash: hashTextInput(input),
+      });
+      if (length > 30000)
+        await expect(service.getInput('job')).rejects.toMatchObject({
+          status: 500,
+        });
+      else
+        await expect(service.getInput('job')).resolves.toMatchObject({
+          inputSchemaVersion: 1,
+          input,
+        });
+    },
+  );
   it('returns only stored immutable text and bounded job identity', async () => {
     findUnique.mockResolvedValue(fixture());
     const response = await service.getInput('job');
@@ -79,7 +99,7 @@ describe('immutable moderation input API service', () => {
     { snapshotHash: `sha256:${'a'.repeat(64)}` },
     { targetType: 'COMMENT' },
     {
-      inputSnapshot: { ...fixture().inputSnapshot, content: 'x'.repeat(20001) },
+      inputSnapshot: { ...fixture().inputSnapshot, content: 'x'.repeat(30001) },
     },
     { inputSnapshot: { ...fixture().inputSnapshot, title: '' } },
     { inputSnapshot: { ...fixture().inputSnapshot, reporterId: 'private' } },
@@ -94,7 +114,7 @@ describe('immutable moderation input API service', () => {
     const input = {
       type: 'POST' as const,
       title: 'a'.repeat(299) + ' ',
-      content: 'x\u0001'.repeat(10000),
+      content: '\u0001'.repeat(30000),
     };
     findUnique.mockResolvedValue({
       ...fixture(),

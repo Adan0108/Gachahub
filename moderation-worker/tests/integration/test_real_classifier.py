@@ -9,6 +9,20 @@ from tests.unit.test_classifier import LABELS
 
 @unittest.skipUnless(os.environ.get("RUN_REAL_MODEL_TESTS") == "1", "opt-in real model download/inference")
 class RealModelTests(unittest.TestCase):
+    def test_full_30000_post_tail_is_inferred_with_per_label_max(self):
+        from unittest.mock import patch
+        text = "T" * 300 + "\n\n" + "a " * 14985 + "I will kill you tonight.".ljust(30, "!")
+        self.assertEqual(len(text), 30302)
+        with patch.object(self.classifier, "_chunk_scores", wraps=self.classifier._chunk_scores) as score:
+            output = self.classifier.classify(text)
+            chunks = score.call_args.args[0]
+            tokens = self.classifier.tokenizer(text, add_special_tokens=False)["input_ids"]
+            self.assertEqual(chunks[-1]["input_ids"][-2], tokens[-1])
+            self.assertGreater(len(chunks), 1)
+        # Explicitly compare all seven MAX outputs to the same window inference.
+        expected = self.classifier._chunk_scores(chunks).amax(dim=0).tolist()
+        self.assertEqual([entry.score for entry in output.labels], expected)
+
     @classmethod
     def setUpClass(cls):
         import torch
@@ -86,18 +100,18 @@ class RealModelTests(unittest.TestCase):
 
     def test_canonical_equivalents_have_identical_real_scores(self):
         import unicodedata
-        from app.contracts.moderation import normalize_text
+        from app.contracts.moderation import MAX_CONTENT_CODEPOINTS, normalize_text
         text = "Cảm ơn bạn 😀\nHướng dẫn rất hữu ích."
         baseline = self.classifier.classify(text)
         for variant in (unicodedata.normalize("NFD", text), " \t" + text + "\n ",
                         text.replace("\n", "\r\n"), text.replace("\n", "\r")):
-            self.assertEqual(self.classifier.classify(normalize_text(variant, 20000)), baseline)
+            self.assertEqual(self.classifier.classify(normalize_text(variant, MAX_CONTENT_CODEPOINTS)), baseline)
 
     def test_actual_tokenizer_work_bound_and_title_tail_coverage(self):
         from app.classifiers.chunking import MAX_POST_CODEPOINTS, prepare_chunks
         # Unicode scalar with byte fallback: exercise the expansion bound, not just Latin words.
         chunks = prepare_chunks(self.classifier.tokenizer, "\U0010ffff" * MAX_POST_CODEPOINTS, 256)
-        self.assertLessEqual(len(chunks), 428)
+        self.assertLessEqual(len(chunks), 638)
         text = "T" * 300 + "\n\n" + "guide " * 3000 + "I will kill you tonight."
         chunks = prepare_chunks(self.classifier.tokenizer, text, 256)
         self.assertGreater(len(chunks), 1)

@@ -1,5 +1,8 @@
 # Stage 2C / 2E moderation worker
 
+For a developer walkthrough connecting reports, this worker, durable policy jobs
+and case API freshness, see the [moderation pipeline guide](../backend/docs/moderation-pipeline.md).
+
 NestJS owns PostgreSQL and all moderation state. The stateless Python process
 reads requests from Kafka, fetches the stored text snapshot through authenticated
 HTTP, verifies identity and its SHA-256 hash, runs the selected local classifier, then
@@ -129,15 +132,21 @@ The response selects only analysis identity, target identity and the stored inpu
 it never loads live content, reporter identities, complaint details, emails, media
 or parent context. POST has `{type,title,content}`, COMMENT `{type,content}`.
 The API and worker reject unsupported schema/profile, extra fields, invalid text,
-more than 300 title or 20,000 content Unicode code points and responses over 256 KiB.
+more than 300 title or 30,000 content Unicode code points under input schema 1,
+and responses over 256 KiB. Only this one input schema is supported.
 Requests/results are bounded to 32 KiB. A full truncated prefix may end in whitespace:
 Stage 2A trims before truncating; readers must not trim it again.
 
-Fingerprint protocol is unchanged: SHA-256 of UTF-8 compact JSON with fixed key
+Fingerprint serialization is unchanged: SHA-256 of UTF-8 compact JSON with fixed key
 order `inputSchemaVersion,input`, then POST `type,title,content` or COMMENT
 `type,content`, no trailing newline. Python matches JSON.stringify escaping and
 ECMAScript trim semantics for source test vectors; stored content is hashed
 verbatim, never re-normalized before hashing. Both API and worker recompute hashes.
+Canonical hashes always use inputSchemaVersion=1. There are no version-dependent
+validators or hash arguments. Before restarting this development change, follow
+the approval-only processing reset/reanalysis procedure in the pipeline guide;
+never retain old successful results after changing their snapshot/hash.
+Kafka envelope version, topics, delivery, model and policy remain unchanged.
 The worker compares every request identity field, including target ID/type, schema
 version and profile, before classifying. The shared vectors cover Vietnamese/NFC,
 emoji, null/empty title, empty content, controls, quotes, backslash, Unicode

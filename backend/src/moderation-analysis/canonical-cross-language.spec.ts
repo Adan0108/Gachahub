@@ -38,7 +38,7 @@ describe('shared TypeScript/Python canonical fingerprint vectors', () => {
     } as ReportTargetSnapshot;
     const computed = canonicalTextInput(snapshot);
     expect(computed.inputSnapshot).toEqual(vector.input);
-    expect(computed.snapshotHash).toBe(vector.snapshotHash);
+    expect(hashTextInput(vector.input)).toBe(vector.snapshotHash);
     expect(
       JSON.stringify({ inputSchemaVersion: 1, input: computed.inputSnapshot }),
     ).toBe(vector.serialized);
@@ -52,5 +52,34 @@ describe('shared TypeScript/Python canonical fingerprint vectors', () => {
           }
         : { content: vector.input.content, type: 'COMMENT' as const };
     expect(hashTextInput(reordered)).toBe(vector.snapshotHash);
+    expect(computed.snapshotHash).toBe(vector.snapshotHash);
   });
+});
+
+const boundaries = JSON.parse(
+  readFileSync(
+    resolve(
+      __dirname,
+      '../../../moderation-worker/tests/fixtures/canonical-boundaries-v1.json',
+    ),
+    'utf8',
+  ),
+) as Array<{
+  type: 'POST' | 'COMMENT';
+  codepoint: string;
+  length: number;
+  retained: number;
+  snapshotHash: string;
+}>;
+it.each(boundaries)('shared v1 $type boundary $length codepoints', (vector) => {
+  const computed = canonicalTextInput({
+    targetType: vector.type,
+    title: '',
+    content: vector.codepoint.repeat(vector.length),
+  });
+  expect(computed.inputSchemaVersion).toBe(1);
+  expect(Array.from(computed.inputSnapshot.content)).toHaveLength(
+    vector.retained,
+  );
+  expect(computed.snapshotHash).toBe(vector.snapshotHash);
 });

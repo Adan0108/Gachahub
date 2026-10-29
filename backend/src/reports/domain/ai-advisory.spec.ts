@@ -1,4 +1,7 @@
-import { canonicalTextInput } from '../../moderation-analysis/canonical-text-input';
+import {
+  canonicalTextInput,
+  hashTextInput,
+} from '../../moderation-analysis/canonical-text-input';
 import { getModerationPolicyClassifierProfile } from '../../moderation-policy/moderation-policy.profiles';
 import { projectAiAdvisory, type AdvisoryAnalysisRow } from './ai-advisory';
 
@@ -49,6 +52,36 @@ function analysis(
 }
 
 describe('pure case AI advisory', () => {
+  it('freshness includes edits after codepoint 20,000 up to 30,000', () => {
+    const full = { ...source, content: 'a'.repeat(29999) + 'b' };
+    const input = canonicalTextInput(full);
+    const candidate = analysis({ ...input });
+    expect(
+      projectAiAdvisory(item, { ...target, source: full }, candidate).state,
+    ).toBe('CURRENT');
+    expect(
+      projectAiAdvisory(
+        item,
+        { ...target, source: { ...full, content: 'a'.repeat(30000) } },
+        candidate,
+      ).state,
+    ).toBe('CONTENT_CHANGED');
+    const oldInput = {
+      ...input.inputSnapshot,
+      content: full.content.slice(0, 20000),
+    };
+    expect(
+      projectAiAdvisory(
+        item,
+        { ...target, source: full },
+        analysis({
+          inputSchemaVersion: 1,
+          inputSnapshot: oldInput,
+          snapshotHash: hashTextInput(oldInput),
+        }),
+      ).state,
+    ).toBe('CONTENT_CHANGED');
+  });
   it('returns the exact compact CURRENT contract and no private evidence', () => {
     expect(projectAiAdvisory(item, target, analysis())).toEqual({
       state: 'CURRENT',

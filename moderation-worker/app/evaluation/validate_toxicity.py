@@ -11,7 +11,7 @@ from unittest.mock import Mock
 from uuid import NAMESPACE_URL, uuid5
 
 from app.classifiers.model_profile import HUGGINGFACE_PROFILE, MODEL_MAX_LENGTH, MODEL_NAME, MODEL_REVISION
-from app.contracts.moderation import ModerationInputResponse, ModerationResultEvent, PostInput, normalize_text, snapshot_hash
+from app.contracts.moderation import MAX_CONTENT_CODEPOINTS, TEXT_INPUT_SCHEMA_VERSION, ModerationInputResponse, ModerationResultEvent, PostInput, normalize_text, snapshot_hash
 from app.evaluation.toxicity_reference import FIXTURE, LABELS, relative_observations, samples, coverage_samples, validate_output
 from app.classifiers.chunking import prepare_chunks
 from app.processing.job_processor import JobProcessor
@@ -26,10 +26,10 @@ def memory():
 
 def process_sample(classifier, sample):
     snapshot = PostInput(type="POST", title=normalize_text(sample.get("title", ""), 300) or None,
-                         content=normalize_text(sample["text"], 20000))
+                         content=normalize_text(sample["text"], MAX_CONTENT_CODEPOINTS))
     identity = dict(analysisJobId="reference-" + sample["id"], caseId="reference-case", generation=1,
                     targetType="POST", targetId="reference-post", snapshotHash=snapshot_hash(snapshot),
-                    inputSchemaVersion=1, classifierProfile=HUGGINGFACE_PROFILE)
+                    inputSchemaVersion=TEXT_INPUT_SCHEMA_VERSION, classifierProfile=HUGGINGFACE_PROFILE)
     backend = Mock()
     backend.get_analysis_input.return_value = ModerationInputResponse(**identity, input=snapshot)
     request = dict(eventId=str(uuid5(NAMESPACE_URL, sample["id"])), type="moderation.analysis.requested", version=1,

@@ -1,5 +1,9 @@
 # Stage 2A: text analysis requests
 
+For the current report-to-worker-to-policy-to-advisory call chain, start with the
+[moderation pipeline walkthrough](../../docs/moderation-pipeline.md). Stage labels
+below explain the component history; later stages extend the original behavior.
+
 `ReportsRepository.create` owns the transaction and case lock. The scheduler
 copies text from the already captured Report evidence, reuses an existing
 `(caseId, snapshotHash, classifierProfile)` job, or inserts a job and publishes
@@ -8,9 +12,9 @@ Generation is the indexed maximum for that case plus one, allocated under its
 lock; `(caseId, generation)` is also unique. Unique conflicts roll back and use
 the repository's existing fresh-transaction retry. No broker work occurs here.
 
-Input schema 1 contains exactly `{type:"POST",title:string|null,content:string}`
+Current input schema 1 contains exactly `{type:"POST",title:string|null,content:string}`
 or `{type:"COMMENT",content:string}`. Normalize strings to Unicode NFC, replace
-CRLF and CR with LF, trim edges, and retain at most 300 title / 20,000 content
+CRLF and CR with LF, trim edges, and retain at most 300 title / 30,000 content
 Unicode code points. Interior whitespace remains significant. Bounds define
 the analyzed prefix: suffix-only changes outside the bounds intentionally dedupe.
 Empty titles become null. Empty text remains representable; there is no inference
@@ -22,9 +26,17 @@ with fixed property order `{inputSchemaVersion:1,input:...}`; POST order is
 The exact stored input is the fingerprinted input. Future cross-language readers
 must follow this ordering and JSON escaping rather than hashing arbitrary JSON.
 
+Development uses one schema version with the 30,000-content limit and no
+historical compatibility path. Reset only moderation processing state and rerun
+inference before restarting this change; see the walkthrough's approval-only
+commands. Never change an old hash while retaining its successful result.
+Product validation remains 30,000 characters for posts and 2,000 for comments;
+the shared canonical ceiling does not enlarge either request DTO.
+
 `moderation-text-v1` is a centralized identity for a future immutable classifier
 and preprocessing bundle, not a configured model. Never repoint it to different
-models; introduce a new profile. There is no manual reanalysis path yet.
+models; introduce a new profile. There is no public reanalysis API; use the
+walkthrough's approval-only development reset/reanalysis procedure when needed.
 
 Stage 2E preserves that profile for FixtureClassifier and adds the immutable
 `toxicity-mmbert-small-v1` bundle. `MODERATION_CLASSIFIER_PROFILE` selects which
@@ -87,7 +99,10 @@ before opening a transaction; raw payloads and parser errors are never logged.
 
 Stored result contains acceptedEventId, completedAt and either normalized output
 or errorCode. Closed cases and earlier generations retain historical results.
-No case fields, audit/action records, content, reports, risk or policy are changed.
+Stage 2D.3 additionally enqueues missing `moderation-policy-v1` work in the same
+transaction when a winning PENDING -> SUCCEEDED update is accepted. FAILED results
+enqueue nothing. Policy evaluation runs later; no case fields, audit/action
+records, content, reports or legacy case risk fields are changed by ingestion.
 
 Run focused tests from backend (DATABASE_URL and KAFKA_BROKERS come from .env):
 

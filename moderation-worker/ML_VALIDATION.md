@@ -7,8 +7,8 @@ Model: `Horizon-Labs/multilingual-toxicity-small`, immutable revision `01adcc628
 - POST input is canonical title + two newlines + content; COMMENT input is content alone. The title participates once in the ordered token stream, rather than consuming space in every window.
 - Each window has 256 model tokens, including the pinned tokenizer's two special tokens: 254 payload tokens, 64-token overlap, 190-token advance. Window reconstruction must exactly match the complete token stream.
 - Long inputs use batches of four and **per-label MAX**. MEAN can dilute a localized harmful segment and is evaluated only as a comparison. Short inputs retain the former tokenizer/model path.
-- Canonical limits are 300 title and 20,000 content codepoints. The verified tokenizer expansion bound gives at most 428 POST windows / 107 forwards and 421 COMMENT windows / 106 forwards. Invalid bounds, coverage or batch output fail the analysis; no tail is silently dropped.
-- The seven labels, model/profile identity, canonical JSON/hash/version, result identity, Kafka contracts, policy thresholds and schema are unchanged. Historical successful analyses are not automatically recomputed.
+- Input schema 1 limits are 300 title and 30,000 content codepoints. The verified tokenizer expansion bound gives at most 638 POST windows / 160 forwards and 632 COMMENT windows / 158 forwards. The shared COMMENT work ceiling is conservative; product comments still allow only 2,000 characters. Invalid bounds, coverage or batch output fail the analysis; no tail is silently dropped.
+- The seven labels, model/profile identity, JSON serialization, result identity, Kafka contracts and policy thresholds are unchanged. Canonical hashes use only inputSchemaVersion=1 and the 30,000-content bound. Development processing state must be reset and inference rerun before reuse; no old-result hash rewrite or schema compatibility path is supported.
 
 ## Reusable checks
 

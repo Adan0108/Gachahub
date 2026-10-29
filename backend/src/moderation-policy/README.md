@@ -1,5 +1,8 @@
 # Moderation policy: foundation, pure rules and durable execution
 
+For an end-to-end introduction and runtime file map, see the
+[moderation pipeline walkthrough](../../docs/moderation-pipeline.md).
+
 Stage 2D.1 defines schema/contracts and the production classifier registry.
 Stage 2D.2 adds pure classifier-score to advisory mapping through
 `ModerationPolicyService.evaluate(input)`. Pure evaluation has no injected infrastructure,

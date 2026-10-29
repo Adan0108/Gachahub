@@ -47,7 +47,30 @@ describe('existing moderation text boundaries (characterization only)', () => {
       ).length,
     ).toBeGreaterThan(0);
     expect(
-      normalizeAnalysisText('😀'.repeat(20001), MAX_ANALYSIS_CONTENT_LENGTH),
-    ).toBe('😀'.repeat(20000));
+      normalizeAnalysisText('😀'.repeat(30001), MAX_ANALYSIS_CONTENT_LENGTH),
+    ).toBe('😀'.repeat(30000));
   });
+  it.each([20000, 20001, 30000, 30001])(
+    'matches POST product boundary at %i characters',
+    (length) => {
+      for (const dtoClass of [CreatePostDto, UpdatePostDto]) {
+        const errors = validateSync(
+          plainToInstance(dtoClass, { content: '😀'.repeat(length) }),
+        );
+        expect(errors.some((error) => error.property === 'content')).toBe(
+          length > 30000,
+        );
+      }
+      expect(
+        validateSync(
+          plainToInstance(CreateCommentDto, { content: '😀'.repeat(2000) }),
+        ),
+      ).toEqual([]);
+      expect(
+        validateSync(
+          plainToInstance(CreateCommentDto, { content: '😀'.repeat(2001) }),
+        ).length,
+      ).toBeGreaterThan(0);
+    },
+  );
 });

@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 
 MAX_EVENT_BYTES = 32 * 1024
 MAX_INPUT_BYTES = 256 * 1024
+TEXT_INPUT_SCHEMA_VERSION = 1
+MAX_CONTENT_CODEPOINTS = 30000
 Identifier = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 Fingerprint = Annotated[str, StringConstraints(pattern=r"^sha256:[a-f0-9]{64}$")]
 Generation = Annotated[int, Field(ge=1, le=2147483647)]
@@ -65,7 +67,7 @@ class PostInput(Contract):
     @field_validator("content")
     @classmethod
     def content_bound(cls, content):
-        return validate_text(content, 20000)
+        return validate_text(content, MAX_CONTENT_CODEPOINTS)
 
 
 class CommentInput(Contract):
@@ -75,7 +77,7 @@ class CommentInput(Contract):
     @field_validator("content")
     @classmethod
     def content_bound(cls, content):
-        return validate_text(content, 20000)
+        return validate_text(content, MAX_CONTENT_CODEPOINTS)
 
 
 TextInput = Annotated[PostInput | CommentInput, Field(discriminator="type")]
@@ -87,7 +89,7 @@ def snapshot_hash(snapshot: PostInput | CommentInput) -> str:
     if isinstance(snapshot, PostInput):
         content["title"] = snapshot.title
     content["content"] = snapshot.content
-    raw = json.dumps({"inputSchemaVersion": 1, "input": content}, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    raw = json.dumps({"inputSchemaVersion": TEXT_INPUT_SCHEMA_VERSION, "input": content}, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -127,7 +129,6 @@ class AnalysisRequestedEvent(Contract):
 
 class ModerationInputResponse(AnalysisRequestedPayload):
     input: TextInput
-
 
 class ModelIdentity(Contract):
     name: Annotated[str, StringConstraints(min_length=1, max_length=128)]

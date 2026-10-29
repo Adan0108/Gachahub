@@ -18,9 +18,9 @@ export function configuredTextClassifierProfile(): string {
   return profile;
 }
 export const MAX_ANALYSIS_TITLE_LENGTH = 300;
-export const MAX_ANALYSIS_CONTENT_LENGTH = 20_000;
+export const MAX_ANALYSIS_CONTENT_LENGTH = 30_000;
 
-// Version 1: NFC, CRLF/CR -> LF, trim edges, then truncate by Unicode code
+// Development schema 1: NFC, CRLF/CR -> LF, trim edges, then truncate by Unicode code
 // points. Interior whitespace is preserved. Bounds define the analyzed prefix;
 // changes beyond it intentionally do not schedule another analysis.
 export function normalizeAnalysisText(value: string, limit: number): string {

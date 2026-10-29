@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from app.classifiers.model_profile import MODEL_NAME, MODEL_REVISION
-from app.contracts.moderation import ClassifierOutput
+from app.contracts.moderation import MAX_CONTENT_CODEPOINTS, ClassifierOutput
 
 LABELS = ("toxicity", "severe_toxicity", "obscene", "threat", "insult", "identity_attack", "sexual_explicit")
 FIXTURE = Path(__file__).resolve().parents[2] / "tests/fixtures/toxicity-reference-v1.json"
@@ -31,7 +31,7 @@ def samples():
             ("long_start", toxic + repeated_prefix(neutral, 18000)),
             ("long_middle", repeated_prefix(neutral, 9000) + toxic + repeated_prefix(neutral, 9000)),
             ("long_end", repeated_prefix(neutral, 18000) + toxic),
-            ("canonical_max", repeated_prefix(neutral, 20000)),
+            ("canonical_max", repeated_prefix(neutral, MAX_CONTENT_CODEPOINTS)),
         ):
             row = dict(id=f"{category}-{language}", category=category, cohort="long", language=language, text=text)
             if category == "canonical_max":

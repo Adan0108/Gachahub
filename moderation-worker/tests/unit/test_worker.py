@@ -12,7 +12,7 @@ from app.infrastructure.http.backend_client import ModerationInputClient
 from app.classifiers.fixture import FixtureClassifier
 from app.core.config import Settings
 from app.contracts.moderation import (AnalysisRequestedEvent, CommentInput, ModerationInputResponse, PostInput,
-                           MAX_INPUT_BYTES, normalize_text, parse_request, snapshot_hash)
+                           MAX_CONTENT_CODEPOINTS, MAX_INPUT_BYTES, normalize_text, parse_request, snapshot_hash)
 from app.core.errors import Cancelled, DeliveryFailure, QuarantineRequired, SecurityFailure
 from app.infrastructure.kafka.consumer import Worker
 from app.infrastructure.kafka.producer import ConfirmedPublisher
@@ -45,6 +45,47 @@ def processor(classifier=None):
 
 
 class ContractsTests(unittest.TestCase):
+    def test_shared_v1_content_boundaries_and_http_size(self):
+        vectors = json.loads((Path(__file__).parents[1] / "fixtures" / "canonical-boundaries-v1.json").read_text(encoding="utf-8"))
+        for row in vectors:
+            with self.subTest(type=row["type"], length=row["length"]):
+                cls = PostInput if row["type"] == "POST" else CommentInput
+                data = dict(type=row["type"], content=normalize_text(row["codepoint"] * row["length"], 30000))
+                if row["type"] == "POST":
+                    data["title"] = None
+                parsed = cls.model_validate(data)
+                self.assertEqual(len(parsed.content), row["retained"])
+                self.assertEqual(snapshot_hash(parsed), row["snapshotHash"])
+                if row["length"] == 30001:
+                    with self.assertRaises(ValidationError):
+                        cls.model_validate({**data, "content": row["codepoint"] * 30001})
+        worst = {**resolved(), "input": {"type": "POST", "title": "\u0001" * 300, "content": "\u0001" * 30000}}
+        self.assertLess(len(json.dumps(worst).encode()), MAX_INPUT_BYTES)
+
+    def test_full_30000_content_reaches_classifier(self):
+        content = "a" * 29999 + "z"
+        response = ModerationInputResponse.model_validate({**resolved(),
+            "input": {"type": "POST", "title": None, "content": content}})
+        fingerprint = snapshot_hash(response.input)
+        response = response.model_copy(update={"snapshotHash": fingerprint})
+        event = request()
+        event["payload"]["snapshotHash"] = fingerprint
+        backend, classifier = Mock(), Mock(wraps=FixtureClassifier())
+        backend.get_analysis_input.return_value = response
+        output = JobProcessor(backend, classifier).process(json.dumps(event).encode(), Event())
+        self.assertEqual(output.payload.status, "SUCCEEDED")
+        classifier.classify.assert_called_once_with(content)
+
+    def test_unsupported_schema_never_calls_backend(self):
+        for version in (2, 3):
+            event = request()
+            event["payload"]["inputSchemaVersion"] = version
+            proc = processor()
+            with self.assertRaises(QuarantineRequired) as caught:
+                proc.process(json.dumps(event).encode(), Event())
+            self.assertEqual(caught.exception.reason, "UNSUPPORTED_INPUT")
+            proc.backend.get_analysis_input.assert_not_called()
+
     def test_shared_hash_vectors(self):
         vectors = []
         for filename in ("canonical-text-v1.json", "canonical-text-health-v1.json"):
@@ -52,7 +93,7 @@ class ContractsTests(unittest.TestCase):
         for vector in vectors:
             with self.subTest(vector["name"]):
                 source = vector["source"]
-                input_data = {"type": source["type"], "content": normalize_text(source["content"], 20000)}
+                input_data = {"type": source["type"], "content": normalize_text(source["content"], 30000)}
                 if source["type"] == "POST":
                     input_data["title"] = normalize_text(source["title"] or "", 300) or None
                 self.assertEqual(input_data, vector["input"])
@@ -98,8 +139,8 @@ class ContractsTests(unittest.TestCase):
             verify_identity(payload, ModerationInputResponse.model_validate(tampered))
 
     def test_snapshot_bounds_unicode_and_prefix(self):
-        PostInput(type="POST", title="a"*299+" ", content="\U0001f600"*20000)
-        for content in ["x"*20001, "bad\0text", "bad\ud800", " noncanonical", "cafe\u0301"]:
+        PostInput(type="POST", title="a"*299+" ", content="\U0001f600"*MAX_CONTENT_CODEPOINTS)
+        for content in ["x"*30001, "bad\0text", "bad\ud800", " noncanonical", "cafe\u0301"]:
             with self.assertRaises(ValidationError):
                 CommentInput(type="COMMENT", content=content)
 

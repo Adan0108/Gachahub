@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import Mock
 
 from pydantic import ValidationError
-from app.contracts.moderation import CommentInput, PostInput, normalize_text, snapshot_hash
+from app.contracts.moderation import MAX_CONTENT_CODEPOINTS, CommentInput, PostInput, normalize_text, snapshot_hash
 from app.evaluation.toxicity_reference import LABELS, samples, validate_output
 from app.evaluation.validate_toxicity import process_sample
 from app.classifiers.model_profile import MODEL_NAME, MODEL_REVISION
@@ -18,11 +18,11 @@ class ToxicityReferenceTests(unittest.TestCase):
         self.assertGreaterEqual(len({r["category"] for r in rows}), 30)
         for row in rows:
             snapshot = PostInput(type="POST", title=normalize_text(row.get("title", ""), 300) or None,
-                                 content=normalize_text(row["text"], 20000))
-            self.assertLessEqual(len(snapshot.content), 20000)
+                                 content=normalize_text(row["text"], MAX_CONTENT_CODEPOINTS))
+            self.assertLessEqual(len(snapshot.content), MAX_CONTENT_CODEPOINTS)
         for language in ("en", "vi"):
             maximum = next(r for r in rows if r["id"] == f"canonical_max-{language}")
-            self.assertEqual(len(normalize_text(maximum["text"], 20000)), 20000)
+            self.assertEqual(len(normalize_text(maximum["text"], MAX_CONTENT_CODEPOINTS)), MAX_CONTENT_CODEPOINTS)
 
     def test_evaluation_contract_catches_wrong_labels_and_identity(self):
         output = {"model": {"name": MODEL_NAME, "revision": MODEL_REVISION},
@@ -37,7 +37,7 @@ class ToxicityReferenceTests(unittest.TestCase):
         text = "Tiếng Việt: cảm ơn bạn 😀\nDòng thứ hai."
         variants = [text, unicodedata.normalize("NFD", text), text.replace("\n", "\r\n"),
                     text.replace("\n", "\r"), " \t\ufeff" + text + "\n "]
-        snapshots = [CommentInput(type="COMMENT", content=normalize_text(v, 20000)) for v in variants]
+        snapshots = [CommentInput(type="COMMENT", content=normalize_text(v, MAX_CONTENT_CODEPOINTS)) for v in variants]
         self.assertEqual(len({snapshot_hash(s) for s in snapshots}), 1)
         self.assertTrue(all(s.content == text for s in snapshots))
         with self.assertRaises(ValidationError):

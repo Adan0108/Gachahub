@@ -1,12 +1,13 @@
 """Deterministic work limits for the pinned BPE/metaspace tokenizer."""
 import json
 import math
+from app.contracts.moderation import MAX_CONTENT_CODEPOINTS
 
 WINDOW_OVERLAP = 64
 CHUNK_BATCH_SIZE = 4
 # Canonical POST: title + two newlines + content. COMMENT: content only.
-MAX_POST_CODEPOINTS = 300 + 2 + 20000
-MAX_COMMENT_CODEPOINTS = 20000
+MAX_POST_CODEPOINTS = 300 + 2 + MAX_CONTENT_CODEPOINTS
+MAX_COMMENT_CODEPOINTS = MAX_CONTENT_CODEPOINTS
 
 
 def token_budget(codepoints):
