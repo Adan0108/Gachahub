@@ -45,9 +45,15 @@ model User {
   interests    UserInterest[]
   postSaves    PostSave[]
   commentLikes CommentLike[]
-  wallet       UserWallet?
-  ledgerEntries LedgerEntry[]
-  dailyEarnings DailyEarning[]
+  wallet                      UserWallet?
+  ledgerEntries               LedgerEntry[]
+  dailyEarnings               DailyEarning[]
+  countedInteractionsGiven    CountedInteraction[]   @relation("CountedInteractionActor")
+  countedInteractionsReceived CountedInteraction[]   @relation("CountedInteractionOwner")
+  reputationGivenDaily        DailyGiverReputation[] @relation("DailyGiverReputationGiver")
+  reputationReceivedDaily     DailyGiverReputation[] @relation("DailyGiverReputationOwner")
+  cosmetics                   UserCosmetic[]
+  equippedCosmetics           EquippedCosmetic[]
 
   followers            UserFollow[]           @relation("UserFollowers")
   following            UserFollow[]           @relation("UserFollowing")
@@ -1220,6 +1226,10 @@ enum AuditAction {
   CHAT_CHANNEL_UPDATED
   CHAT_MESSAGE_REMOVED
   WALLET_ADJUSTED
+  COSMETIC_CREATED
+  COSMETIC_UPDATED
+  COSMETIC_DEACTIVATED
+  COSMETIC_GRANTED
 }
 
 enum AuditTargetType {
@@ -1231,6 +1241,7 @@ enum AuditTargetType {
   GAME
   CHANNEL
   CHAT_MESSAGE
+  COSMETIC
 }
 
 // Append-only record of moderator/admin actions. actorId and gameId are SetNull so the trail
@@ -1671,11 +1682,13 @@ enum LedgerReason {
   REVOKED
   RESTORED
   ADMIN_ADJUST
+  TAKEDOWN_REFUND
 }
 
 enum EconomySource {
   POST
   COMMENT
+  COSMETIC
 }
 
 enum InteractionKind {
@@ -1761,7 +1774,12 @@ model DailyGiverReputation {
   day        DateTime @db.Date
   reputation Int      @default(0)
 
+  owner User @relation("DailyGiverReputationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  giver User @relation("DailyGiverReputationGiver", fields: [giverId], references: [id], onDelete: Cascade)
+
   @@id([ownerId, giverId, day])
+  @@index([giverId])
+  @@index([day])
   @@map("daily_giver_reputation")
 }
 
@@ -1774,7 +1792,83 @@ model CountedInteraction {
   ownerId    String
   createdAt  DateTime        @default(now())
 
+  actor User @relation("CountedInteractionActor", fields: [actorId], references: [id], onDelete: Cascade)
+  owner User @relation("CountedInteractionOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
   @@id([kind, targetType, targetId, actorId])
   @@index([kind, targetType, targetId])
+  @@index([actorId])
+  @@index([ownerId])
   @@map("counted_interactions")
+}
+
+// Cosmetics: see docs/plans/economy-and-cosmetics.md Section 6 & 11.
+
+enum CosmeticSlot {
+  FRAME
+  PROFILE_BACKGROUND
+  MINI_BACKGROUND
+  BANNER
+}
+
+enum Rarity {
+  DUST
+  GLINT
+  GLIMMER
+  RADIANT
+  PRISMATIC
+}
+
+enum CosmeticSource {
+  PULL
+  SPARK
+  ADMIN
+}
+
+model CosmeticItem {
+  id          String       @id @default(cuid())
+  slug        String       @unique
+  name        String
+  description String
+  slot        CosmeticSlot
+  rarity      Rarity
+  animated    Boolean      @default(false)
+  assetUrl    String?
+  presetId    String?
+  active      Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+
+  ownedBy    UserCosmetic[]
+  equippedBy EquippedCosmetic[]
+
+  @@index([slot, active])
+  @@map("cosmetic_items")
+}
+
+model UserCosmetic {
+  userId     String
+  itemId     String
+  source     CosmeticSource
+  acquiredAt DateTime       @default(now())
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  item CosmeticItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@id([userId, itemId])
+  @@index([itemId])
+  @@map("user_cosmetics")
+}
+
+model EquippedCosmetic {
+  userId     String
+  slot       CosmeticSlot
+  itemId     String
+  equippedAt DateTime     @default(now())
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  item CosmeticItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@id([userId, slot])
+  @@index([itemId])
+  @@map("equipped_cosmetics")
 }
