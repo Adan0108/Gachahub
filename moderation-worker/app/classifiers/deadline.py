@@ -1,6 +1,8 @@
 """A reusable local inference process with a real, parent-enforced deadline."""
 import multiprocessing
+import time
 from threading import Lock
+from app.core.errors import Cancelled
 
 from app.contracts.moderation import ClassifierOutput
 
@@ -43,26 +45,43 @@ class DeadlineClassifier:
         self._connection = None
         self._start()
 
-    def _start(self):
+    def _wait(self, timeout, cancelled=None):
+        deadline = time.monotonic() + timeout
+        while True:
+            if cancelled is not None and cancelled.is_set():
+                self.close()
+                raise Cancelled()
+            remaining = max(0, deadline - time.monotonic())
+            if self._connection.poll(min(0.05, remaining)):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+
+    def _start(self, cancelled=None):
         parent, child = self._context.Pipe()
         self._connection = parent
         self._process = self._context.Process(target=_serve, args=(child, self.factory, self.args), daemon=True)
         self._process.start()
         child.close()
         try:
-            if not parent.poll(self.startup_timeout) or parent.recv()[0] != "ready":
+            if not self._wait(self.startup_timeout, cancelled) or parent.recv()[0] != "ready":
                 raise RuntimeError("Classifier startup failed")
         except (EOFError, OSError, RuntimeError):
             self.close()
             raise RuntimeError("Classifier startup failed") from None
 
     def classify(self, text):
+        return self.classify_cancellable(text, None)
+
+    def classify_cancellable(self, text, cancelled):
         with self._lock:
+            if cancelled is not None and cancelled.is_set():
+                raise Cancelled()
             if self._process is None:
-                self._start()
+                self._start(cancelled)
             try:
                 self._connection.send(text)
-                if not self._connection.poll(self.timeout):
+                if not self._wait(self.timeout, cancelled):
                     self.close()
                     raise TimeoutError("Classifier deadline exceeded")
                 kind, output = self._connection.recv()

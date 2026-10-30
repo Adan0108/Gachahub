@@ -92,6 +92,16 @@ it("keeps allegations, confirmed findings and user risk distinct", async () => {
   expect(screen.getByText(/Reports alone do not increase/)).toBeVisible();
   expect(screen.getByText(/Reports are allegations, not confirmed violations/)).toBeVisible();
 });
+it("keeps an expired sanction in history without offering to revoke or adjust it", async () => {
+  vi.mocked(api.getCaseEnforcement).mockResolvedValue({
+    ...overview,
+    sanctions: [{ ...sanction, status: "EXPIRED", effectiveStatus: "EXPIRED" }],
+  });
+  mount(<EnforcementPanel actorId="actor" caseId="case" />);
+  await screen.findByText("Restrictions and warnings");
+  expect(screen.queryByRole("button", { name: "Revoke restriction" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Adjust duration" })).not.toBeInTheDocument();
+});
 it("never offers permanent or unsupported sanctions, including a stale server response", async () => {
   vi.mocked(api.getCaseEnforcement).mockResolvedValue({
     ...overview,

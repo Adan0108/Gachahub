@@ -1,7 +1,6 @@
-import { ModerationReadinessController } from './readiness.controller';
-import { KafkaModule } from '../kafka/kafka.module';
 import { Global, Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
+import { RequestOriginInterceptor } from '../common/security/request-origin.interceptor';
 import { OutboxModule } from '../outbox/outbox.module';
 import { PostsRepository } from '../posts/posts.repository';
 import { CommentsRepository } from '../comments/comments.repository';
@@ -16,13 +15,10 @@ import { SanctionExpirationService } from './expiration.service';
 
 @Global()
 @Module({
-  imports: [OutboxModule, KafkaModule],
-  controllers: [
-    EnforcementController,
-    MyModerationController,
-    ModerationReadinessController,
-  ],
+  imports: [OutboxModule],
+  controllers: [EnforcementController, MyModerationController],
   providers: [
+    { provide: APP_INTERCEPTOR, useClass: RequestOriginInterceptor },
     EnforcementService,
     PostsRepository,
     CommentsRepository,

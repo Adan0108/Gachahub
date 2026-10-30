@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
+import { io, type Socket } from 'socket.io-client';
 
 const enabled = process.env.RUN_MODERATION_ENFORCEMENT_LIVE === '1';
 type Account = { id: string; cookie: string };
@@ -22,6 +23,7 @@ type Account = { id: string; cookie: string };
       const response = await fetch(base + path, {
         method,
         headers: {
+          origin: 'http://localhost:5173',
           ...(account ? { cookie: account.cookie } : {}),
           ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
         },
@@ -421,11 +423,195 @@ type Account = { id: string; cookie: string };
               { reason: 'Controlled verification finished' },
             )
           ).status,
-        ).toBe(201);
+        ).toBe(days === 1 ? 409 : 201);
         expect((await request(subject, `/posts/${postId}`)).status).toBe(200);
       }
     });
 
+    it('blocks community chat mutations and live delivery to an already subscribed banned socket', async () => {
+      const subject = await create(),
+        member = await create(),
+        admin = await create('ADMIN');
+      const gameId = randomUUID(),
+        slug = `audit-chat-${randomUUID()}`,
+        channelId = randomUUID();
+      await db.query(
+        'INSERT INTO games(id,name,slug,"updatedAt") VALUES ($1,$2,$3,now())',
+        [gameId, 'Audit chat', slug],
+      );
+      for (const account of [subject, member])
+        await db.query(
+          'INSERT INTO game_members(id,"gameId","userId","updatedAt") VALUES ($1,$2,$3,now())',
+          [randomUUID(), gameId, account.id],
+        );
+      await db.query(
+        'INSERT INTO game_channels(id,"gameId",slug,name,"updatedAt") VALUES ($1,$2,$3,$4,now())',
+        [channelId, gameId, 'audit', 'Audit chat'],
+      );
+      const post = await request(subject, '/posts', {
+        gameId,
+        type: 'GENERAL',
+        title: 'Audit chat case',
+        content: 'Fictional dialogue for contextual review',
+      });
+      const postId = (post.value as { id: string }).id;
+      expect(
+        (
+          await request(member, '/reports', {
+            targetType: 'POST',
+            targetId: postId,
+            reasonCode: 'HARASSMENT',
+          })
+        ).status,
+      ).toBe(201);
+      const caseId = (
+        await db.query<{ id: string }>(
+          'SELECT id FROM moderation_cases WHERE "targetId"=$1',
+          [postId],
+        )
+      ).rows[0].id;
+      const root = `/games/${slug}/chat`,
+        scope = `?gameSlug=${slug}`;
+      const message = await request(
+        subject,
+        `${root}/channels/${channelId}/messages`,
+        { content: 'Allowed before restriction' },
+      );
+      expect(message.status).toBe(201);
+      const messageId = (message.value as { id: string }).id;
+      const sockets: Socket[] = [];
+      const join = async (account: Account) => {
+        const socket = io(base, {
+          transports: ['websocket'],
+          reconnection: false,
+          extraHeaders: {
+            Cookie: account.cookie,
+            Origin: 'http://localhost:5173',
+          },
+        });
+        sockets.push(socket);
+        await new Promise<void>((resolve, reject) => {
+          socket.once('connect', resolve);
+          socket.once('connect_error', reject);
+        });
+        expect(
+          await socket
+            .timeout(10000)
+            .emitWithAck('community:join', { slug, channelId }),
+        ).toEqual({ ok: true });
+        return socket;
+      };
+      try {
+        const banned = await join(subject),
+          observer = await join(member);
+        const hostile = io(base, {
+          transports: ['websocket'],
+          reconnection: false,
+          extraHeaders: {
+            Cookie: subject.cookie,
+            Origin: 'https://untrusted.example',
+          },
+        });
+        sockets.push(hostile);
+        const hostileConnected = await new Promise<boolean>((resolve) => {
+          hostile.once('connect', () => resolve(true));
+          hostile.once('connect_error', () => resolve(false));
+        });
+        expect(hostileConnected).toBe(false);
+        let leaked = 0;
+        banned.on('community:activity', () => leaked++);
+        for (const type of ['COMMUNITY_RESTRICTION', 'COMMUNITY_BAN']) {
+          const issued = await request(
+            admin,
+            `/moderation/enforcement/cases/${caseId}/sanctions${scope}`,
+            {
+              type,
+              durationDays: 1,
+              reason: 'Explicit temporary audit fixture decision',
+              requestKey: randomUUID(),
+            },
+          );
+          expect(issued.status).toBe(201);
+          expect(
+            (
+              await request(subject, `${root}/channels/${channelId}/messages`, {
+                content: 'Prohibited write',
+              })
+            ).status,
+          ).toBe(403);
+          expect(
+            (
+              await request(
+                subject,
+                `${root}/messages/${messageId}`,
+                { content: 'Prohibited edit' },
+                'PATCH',
+              )
+            ).status,
+          ).toBe(403);
+          expect(
+            (
+              await request(
+                subject,
+                `${root}/messages/${messageId}/reactions`,
+                { emoji: '\u{1f44d}' },
+              )
+            ).status,
+          ).toBe(403);
+          expect(
+            (await request(subject, `${root}/channels/${channelId}/messages`))
+              .status,
+          ).toBe(type === 'COMMUNITY_BAN' ? 403 : 200);
+          if (type === 'COMMUNITY_BAN') {
+            const delivered = new Promise<void>((resolve) =>
+              observer.once('community:activity', () => resolve()),
+            );
+            expect(
+              (
+                await request(
+                  member,
+                  `${root}/channels/${channelId}/messages`,
+                  { content: 'Positive control live event' },
+                )
+              ).status,
+            ).toBe(201);
+            await Promise.race([
+              delivered,
+              new Promise((_, reject) =>
+                setTimeout(
+                  () => reject(new Error('Allowed socket missed activity')),
+                  10000,
+                ),
+              ),
+            ]);
+            expect(leaked).toBe(0);
+          }
+          expect(
+            (
+              await request(
+                admin,
+                `/moderation/enforcement/sanctions/${(issued.value as { id: string }).id}/revoke${scope}`,
+                { reason: 'Audit fixture verification finished' },
+              )
+            ).status,
+          ).toBe(201);
+        }
+        const csrf = await fetch(
+          base + `${root}/channels/${channelId}/messages`,
+          {
+            method: 'POST',
+            headers: {
+              cookie: subject.cookie,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({ content: 'Originless cookie write' }),
+          },
+        );
+        expect(csrf.status).toBe(403);
+      } finally {
+        sockets.forEach((socket) => socket.disconnect());
+      }
+    });
     it('enforces community restrictions through writes, direct reads and aggregate feed hydration', async () => {
       const subject = await create();
       const community = await create();

@@ -64,6 +64,7 @@ const enabled = process.env.RUN_MODERATION_ENFORCEMENT_DB === '1';
       for (const name of [
         '20261030120200_enforcement_visibility_guards',
         '20261030120300_require_temporary_sanction_expiration',
+        '20261030130000_moderation_corrected_findings',
       ]) {
         await db.$executeRawUnsafe(
           readFileSync(
@@ -126,7 +127,11 @@ const enabled = process.env.RUN_MODERATION_ENFORCEMENT_DB === '1';
       });
       caseId = item.id;
       const active = await db.moderationSanction.findMany({
-        where: { subjectId: actors.author, status: 'ACTIVE' },
+        where: {
+          subjectId: actors.author,
+          status: 'ACTIVE',
+          OR: [{ type: 'WARNING' }, { expiresAt: { gt: new Date() } }],
+        },
       });
       for (const row of active)
         await service.revoke(
@@ -579,6 +584,150 @@ const enabled = process.env.RUN_MODERATION_ENFORCEMENT_DB === '1';
       expect(
         (await db.post.findUniqueOrThrow({ where: { id: postId } })).status,
       ).toBe('PUBLISHED');
+    });
+    it('allows a corrected finding after reversal while retaining both histories', async () => {
+      const original = await service.confirm(actors.platform, caseId, {
+        category: 'VIOLENCE',
+        severity: 'CRITICAL',
+        reason,
+      });
+      await service.reverseViolation(actors.platform, original.id, reason);
+      const corrected = await service.confirm(actors.platform, caseId, {
+        category: 'VIOLENCE',
+        severity: 'MINOR',
+        reason,
+      });
+      expect(corrected.id).not.toBe(original.id);
+      expect(await db.moderationViolation.count({ where: { caseId } })).toBe(2);
+      expect(
+        await db.moderationViolation.count({
+          where: { caseId, reversedAt: null },
+        }),
+      ).toBe(1);
+    });
+    it('keeps case authorization and content changes in one transaction', async () => {
+      const transactions = jest.spyOn(db, '$transaction');
+      try {
+        await service.contentForCase(actors.platform, caseId, true, reason);
+        expect(transactions).toHaveBeenCalledTimes(1);
+      } finally {
+        transactions.mockRestore();
+      }
+    });
+    it('refuses an appeal reviewer who materially adjusted the sanction', async () => {
+      const record = await service.sanction(actors.platform, caseId, {
+        type: 'PLATFORM_SUSPENSION',
+        durationDays: 1,
+        reason,
+        requestKey: randomUUID(),
+      });
+      await service.adjust(actors.reviewer, record.id, {
+        durationDays: 30,
+        reason,
+      });
+      const appeal = await service.appeal(
+        actors.author,
+        record.id,
+        'Please review this adjusted decision independently',
+      );
+      expect(
+        (await service.appeals(actors.reviewer)).items.find(
+          (a) => a.id === appeal.id,
+        )?.canReview,
+      ).toBe(false);
+      await expect(
+        service.reviewAppeal(actors.reviewer, appeal.id, {
+          decision: 'REJECTED',
+          reason,
+        }),
+      ).rejects.toThrow('independently');
+    });
+    it('preserves expiration when an historical appeal is accepted', async () => {
+      const record = await service.sanction(actors.platform, caseId, {
+        type: 'PLATFORM_SUSPENSION',
+        durationDays: 1,
+        reason,
+        requestKey: randomUUID(),
+      });
+      await db.moderationSanction.update({
+        where: { id: record.id },
+        data: {
+          startsAt: new Date(Date.now() - 3 * 86400000),
+          expiresAt: new Date(Date.now() - 86400000),
+        },
+      });
+      const appeal = await service.appeal(
+        actors.author,
+        record.id,
+        'Please correct the historical account finding',
+      );
+      await service.reviewAppeal(actors.reviewer, appeal.id, {
+        decision: 'ACCEPTED',
+        reason,
+      });
+      expect(
+        (
+          await db.moderationSanction.findUniqueOrThrow({
+            where: { id: record.id },
+          })
+        ).status,
+      ).toBe('EXPIRED');
+      await expect(
+        service.adjust(actors.admin, record.id, { durationDays: 30, reason }),
+      ).rejects.toThrow();
+    });
+    it('releases a suspended moderator assigned cases without changing unrelated cases', async () => {
+      const post = await db.post.create({
+        data: {
+          authorId: actors.platform,
+          title: 'Staff decision fixture',
+          content: 'Context',
+        },
+      });
+      const staffCase = await db.moderationCase.create({
+        data: { targetType: 'POST', targetId: post.id },
+      });
+      await db.moderationCase.update({
+        where: { id: caseId },
+        data: { assignedModeratorId: actors.platform, status: 'IN_REVIEW' },
+      });
+      await service.sanction(actors.admin, staffCase.id, {
+        type: 'PLATFORM_SUSPENSION',
+        durationDays: 1,
+        reason,
+        requestKey: randomUUID(),
+      });
+      try {
+        expect(
+          await db.moderationCase.findUniqueOrThrow({ where: { id: caseId } }),
+        ).toMatchObject({ assignedModeratorId: null, status: 'OPEN' });
+      } finally {
+        await db.moderationSanction.updateMany({
+          where: { caseId: staffCase.id },
+          data: { status: 'REVOKED', revokedAt: new Date() },
+        });
+      }
+    });
+    it('sends one effective hide and one restoration notice across layered scopes', async () => {
+      const count = () =>
+        db.outboxEvent.count({
+          where: {
+            type: 'moderation.notice',
+            payload: { path: ['recipientId'], equals: actors.author },
+          },
+        });
+      const before = await count();
+      await service.contentForCase(
+        actors.community,
+        caseId,
+        true,
+        reason,
+        slug,
+      );
+      await service.contentForCase(actors.platform, caseId, true, reason);
+      expect(await count()).toBe(before + 1);
+      await service.contentForCase(actors.platform, caseId, false, reason);
+      expect(await count()).toBe(before + 2);
     });
     it('rolls back sanction, audit and notification together when the outbox insert fails', async () => {
       const broken = new EnforcementService(

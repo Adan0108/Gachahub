@@ -22,11 +22,13 @@ import { MarkCommunityReadDto } from './dto/mark-community-read.dto';
 import { QueryCommunityMessagesDto } from './dto/query-community-messages.dto';
 import { SearchCommunityMembersDto } from './dto/search-community-members.dto';
 import { SendCommunityMessageDto } from './dto/send-community-message.dto';
+import { CommunitySanctionBoundary } from '../moderation-enforcement/community-sanction-boundary';
 
 /** Chat rooms of one game community; only its members, moderators and admins get in. */
 @ApiTags('Community chat')
 @ApiCookieAuth('better-auth.session_token')
 @Controller('games/:gameSlug/chat')
+@CommunitySanctionBoundary()
 export class CommunityChatController {
   constructor(
     private readonly channels: CommunityChannelsService,

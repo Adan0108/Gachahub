@@ -79,7 +79,7 @@ export class CommunityMessagingService {
     dto: SendCommunityMessageDto,
     userId: string | undefined,
   ) {
-    const scope = await this.access.scope(slug, userId);
+    const scope = await this.access.scope(slug, userId, true);
     const { user, game, canModerate } = scope;
     const channel = await this.access.channelIn(game.id, channelId);
     const mediaIds = dto.mediaUploadIds ?? [];
@@ -169,7 +169,7 @@ export class CommunityMessagingService {
       );
       if ('waitMs' in saved) throwSlowMode(saved.waitMs);
 
-      this.realtime.changed(channel.id, saved.created.id);
+      await this.realtime.changed(channel.id, saved.created.id);
       return await this.presenter.one(scope, saved.created);
     } catch (error) {
       // Two sends with one client id at once: the loser gets the winner's message.

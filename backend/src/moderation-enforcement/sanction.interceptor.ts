@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { SanctionAccessService } from './sanction-access.service';
 import { WsException } from '@nestjs/websockets';
+import { COMMUNITY_SANCTION_BOUNDARY } from './community-sanction-boundary';
 
 /** Runs after authentication guards. No cached state: existing sessions obey live expiry. */
 @Injectable()
@@ -24,22 +25,19 @@ export class SanctionInterceptor implements NestInterceptor {
         headers: { origin?: string };
       }>();
       if (request.user?.id) {
-        if (
-          !['GET', 'HEAD', 'OPTIONS'].includes(request.method) &&
-          request.headers.origin &&
-          ![
-            process.env.FRONTEND_URL || 'http://localhost:5173',
-            process.env.BETTER_AUTH_URL || 'http://localhost:3000',
-          ].includes(request.headers.origin)
-        )
-          throw new ForbiddenException('Request origin is not trusted');
         const path = request.path;
         // Notices and appeals remain available during a temporary suspension.
         const recovery =
           (path === '/users/me' && request.method === 'GET') ||
           /^\/me\/moderation(?:\/|$)/.test(path) ||
           path.startsWith('/notifications');
-        if (!recovery)
+        const communityBoundary =
+          typeof context.getClass === 'function' &&
+          Reflect.getMetadata(
+            COMMUNITY_SANCTION_BOUNDARY,
+            context.getClass(),
+          ) === true;
+        if (!recovery && !communityBoundary)
           await this.access.assertAllowed(
             request.user.id,
             !['GET', 'HEAD', 'OPTIONS'].includes(request.method),

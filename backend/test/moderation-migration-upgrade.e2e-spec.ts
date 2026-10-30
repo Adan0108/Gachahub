@@ -102,7 +102,11 @@ const enabled = process.env.RUN_MODERATION_MIGRATION_TESTS === '1';
         for (const entry of readdirSync(resolve(root, 'prisma/migrations'), {
           withFileTypes: true,
         })) {
-          if (entry.isDirectory() && entry.name.startsWith('20261030'))
+          if (
+            entry.isDirectory() &&
+            entry.name.startsWith('20261030') &&
+            entry.name < '20261030130000'
+          )
             cpSync(
               resolve(root, 'prisma/migrations', entry.name),
               join(migrations, entry.name),
@@ -110,6 +114,39 @@ const enabled = process.env.RUN_MODERATION_MIGRATION_TESTS === '1';
             );
         }
         deploy();
+        await fixture.query(
+          `INSERT INTO moderation_cases(id,"targetType","targetId","updatedAt") VALUES ('upgrade-case','POST','upgrade-visible',now())`,
+        );
+        await fixture.query(
+          `INSERT INTO moderation_violations(id,"incidentKey","caseId","subjectId",scope,category,severity,reason) VALUES ('upgrade-finding','upgrade-incident','upgrade-case','upgrade-author','PLATFORM','VIOLENCE','CRITICAL','Original human finding')`,
+        );
+        cpSync(
+          resolve(
+            root,
+            'prisma/migrations/20261030130000_moderation_corrected_findings',
+          ),
+          join(migrations, '20261030130000_moderation_corrected_findings'),
+          { recursive: true },
+        );
+        deploy();
+        await expect(
+          fixture.query(
+            `INSERT INTO moderation_violations(id,"incidentKey","caseId","subjectId",scope,category,severity,reason) VALUES ('upgrade-duplicate','upgrade-incident','upgrade-case','upgrade-author','PLATFORM','VIOLENCE','MINOR','Not a correction')`,
+          ),
+        ).rejects.toThrow();
+        await fixture.query(
+          `UPDATE moderation_violations SET "reversedAt"=now() WHERE id='upgrade-finding'`,
+        );
+        await fixture.query(
+          `INSERT INTO moderation_violations(id,"incidentKey","caseId","subjectId",scope,category,severity,reason) VALUES ('upgrade-corrected','upgrade-incident','upgrade-case','upgrade-author','PLATFORM','VIOLENCE','MINOR','Corrected human finding')`,
+        );
+        expect(
+          (
+            await fixture.query(
+              `SELECT count(*)::int AS n FROM moderation_violations WHERE "caseId"='upgrade-case'`,
+            )
+          ).rows,
+        ).toEqual([{ n: 2 }]);
         expect(
           (
             await fixture.query(

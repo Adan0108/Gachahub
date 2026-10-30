@@ -12,6 +12,7 @@ import { OutboxEventPublisher } from '../outbox/outbox-event.publisher';
 import { lockModerationActor } from '../common/moderation/lock-moderation-actor';
 import { PostsRepository } from '../posts/posts.repository';
 import { CommentsRepository } from '../comments/comments.repository';
+import { releaseModeratorCases } from '../common/moderation/release-moderator-cases';
 import {
   computeUserRisk,
   durationPolicy,
@@ -237,143 +238,165 @@ export class EnforcementService {
     caseId?: string,
   ) {
     reason = this.reason(reason);
-    return this.db.$transaction(async (tx) => {
-      const context = await this.context(tx, actorId, gameSlug);
-      // Content row locks also serialize against author deletion and other visibility changes.
-      if (targetType === 'POST')
-        await tx.$queryRaw`SELECT id FROM posts WHERE id=${targetId} FOR UPDATE`;
-      else
-        await tx.$queryRaw`SELECT id FROM comments WHERE id=${targetId} FOR UPDATE`;
-      const target =
-        targetType === 'POST'
-          ? await tx.post.findUnique({
-              where: { id: targetId },
-              select: {
-                authorId: true,
-                status: true,
-                deletedAt: true,
-                gameId: true,
-              },
-            })
-          : await tx.comment.findUnique({
-              where: { id: targetId },
-              select: {
-                authorId: true,
-                status: true,
-                deletedAt: true,
-                postId: true,
-                post: { select: { gameId: true } },
-              },
-            });
-      if (!target || target.deletedAt || target.status === 'DELETED')
-        throw new NotFoundException(
-          'Deleted content cannot be restored or moderated',
-        );
-      const gameId = 'gameId' in target ? target.gameId : target.post.gameId;
-      if (context.scope === 'COMMUNITY' && gameId !== context.gameId)
-        throw new NotFoundException('Content unavailable in this community');
-      if (caseId) {
-        const item = await tx.moderationCase.findUnique({
-          where: { id: caseId },
-        });
-        if (
-          !item ||
-          item.targetType !== targetType ||
-          item.targetId !== targetId ||
-          item.gameId !== gameId
-        )
-          throw new BadRequestException('Case does not match the target');
-      }
-      const active = await tx.contentEnforcement.findMany({
-        where: { targetType, targetId, revokedAt: null },
+    return this.db.$transaction(async (tx) =>
+      this.contentInTransaction(
+        tx,
+        await this.context(tx, actorId, gameSlug),
+        actorId,
+        targetType,
+        targetId,
+        hidden,
+        reason,
+        caseId,
+      ),
+    );
+  }
+  private async contentInTransaction(
+    tx: Tx,
+    context: Context,
+    actorId: string,
+    targetType: 'POST' | 'COMMENT',
+    targetId: string,
+    hidden: boolean,
+    reason: string,
+    caseId?: string,
+  ) {
+    // Content row locks also serialize against author deletion and other visibility changes.
+    if (targetType === 'POST')
+      await tx.$queryRaw`SELECT id FROM posts WHERE id=${targetId} FOR UPDATE`;
+    else
+      await tx.$queryRaw`SELECT id FROM comments WHERE id=${targetId} FOR UPDATE`;
+    const target =
+      targetType === 'POST'
+        ? await tx.post.findUnique({
+            where: { id: targetId },
+            select: {
+              authorId: true,
+              status: true,
+              deletedAt: true,
+              gameId: true,
+            },
+          })
+        : await tx.comment.findUnique({
+            where: { id: targetId },
+            select: {
+              authorId: true,
+              status: true,
+              deletedAt: true,
+              postId: true,
+              post: { select: { gameId: true } },
+            },
+          });
+    if (!target || target.deletedAt || target.status === 'DELETED')
+      throw new NotFoundException(
+        'Deleted content cannot be restored or moderated',
+      );
+    const gameId = 'gameId' in target ? target.gameId : target.post.gameId;
+    if (context.scope === 'COMMUNITY' && gameId !== context.gameId)
+      throw new NotFoundException('Content unavailable in this community');
+    if (caseId) {
+      const item = await tx.moderationCase.findUnique({
+        where: { id: caseId },
       });
-      if (hidden) {
-        if (!['PUBLISHED', 'HIDDEN'].includes(target.status))
-          throw new BadRequestException(
-            'Only published or already hidden content is eligible',
-          );
-        if (!active.some((record) => record.scope === context.scope)) {
-          const record = await tx.contentEnforcement.create({
-            data: {
-              targetType,
-              targetId,
-              subjectId: target.authorId,
-              actorId,
-              scope: context.scope,
-              gameId,
-              caseId,
-              reason,
-            },
-          });
-          await this.audit(
-            tx,
-            actorId,
-            'CONTENT_HIDDEN',
-            record.id,
-            reason,
-            { status: target.status },
-            {
-              status: 'HIDDEN',
-              scope: context.scope,
-              targetType,
-              targetId,
-              caseId: caseId ?? null,
-            },
-          );
-          await this.notice(tx, target.authorId, actorId, record.id);
-        }
-      } else {
-        if (
-          active.some((record) => record.scope === 'PLATFORM') &&
-          context.scope !== 'PLATFORM'
-        )
-          throw new ForbiddenException(
-            'A platform restriction must be reviewed by platform staff',
-          );
-        for (const record of active) {
-          await tx.contentEnforcement.update({
-            where: { id: record.id },
-            data: { revokedAt: new Date() },
-          });
-          await this.audit(
-            tx,
-            actorId,
-            'CONTENT_RESTORED',
-            record.id,
-            reason,
-            { status: 'HIDDEN' },
-            { status: 'PUBLISHED', targetType, targetId },
-          );
-          await this.notice(tx, target.authorId, actorId, record.id);
-        }
-        if (!active.length && target.status === 'HIDDEN')
-          throw new ConflictException(
-            'This legacy restriction requires platform review',
-          );
-      }
-      const to = hidden ? 'HIDDEN' : 'PUBLISHED';
-      if (target.status !== to) {
-        const changed =
-          targetType === 'POST'
-            ? await this.posts.transitionStatus(tx, {
-                id: targetId,
-                gameId,
-                from: target.status,
-                to,
-              })
-            : await this.comments.transitionStatus(tx, {
-                id: targetId,
-                postId: 'postId' in target ? target.postId : '',
-                from: target.status as 'PUBLISHED' | 'HIDDEN',
-                to,
-              });
-        if (!changed)
-          throw new ConflictException(
-            'Content changed while it was being reviewed',
-          );
-      }
-      return { targetId, targetType, status: to };
+      if (
+        !item ||
+        item.targetType !== targetType ||
+        item.targetId !== targetId ||
+        item.gameId !== gameId
+      )
+        throw new BadRequestException('Case does not match the target');
+    }
+    const active = await tx.contentEnforcement.findMany({
+      where: { targetType, targetId, revokedAt: null },
     });
+    if (hidden) {
+      if (!['PUBLISHED', 'HIDDEN'].includes(target.status))
+        throw new BadRequestException(
+          'Only published or already hidden content is eligible',
+        );
+      if (!active.some((record) => record.scope === context.scope)) {
+        const record = await tx.contentEnforcement.create({
+          data: {
+            targetType,
+            targetId,
+            subjectId: target.authorId,
+            actorId,
+            scope: context.scope,
+            gameId,
+            caseId,
+            reason,
+          },
+        });
+        await this.audit(
+          tx,
+          actorId,
+          'CONTENT_HIDDEN',
+          record.id,
+          reason,
+          { status: target.status },
+          {
+            status: 'HIDDEN',
+            scope: context.scope,
+            targetType,
+            targetId,
+            caseId: caseId ?? null,
+          },
+        );
+        if (!active.length && target.status !== 'HIDDEN')
+          await this.notice(tx, target.authorId, actorId, record.id);
+      }
+    } else {
+      if (
+        active.some((record) => record.scope === 'PLATFORM') &&
+        context.scope !== 'PLATFORM'
+      )
+        throw new ForbiddenException(
+          'A platform restriction must be reviewed by platform staff',
+        );
+      for (const record of active) {
+        await tx.contentEnforcement.update({
+          where: { id: record.id },
+          data: { revokedAt: new Date() },
+        });
+        await this.audit(
+          tx,
+          actorId,
+          'CONTENT_RESTORED',
+          record.id,
+          reason,
+          { status: 'HIDDEN' },
+          { status: 'PUBLISHED', targetType, targetId },
+        );
+      }
+      if (active.length && target.status === 'HIDDEN')
+        await this.notice(tx, target.authorId, actorId, active[0].id);
+      if (!active.length && target.status === 'HIDDEN')
+        throw new ConflictException(
+          'This legacy restriction requires platform review',
+        );
+    }
+    const to = hidden ? 'HIDDEN' : 'PUBLISHED';
+    if (target.status !== to) {
+      const changed =
+        targetType === 'POST'
+          ? await this.posts.transitionStatus(tx, {
+              id: targetId,
+              gameId,
+              from: target.status,
+              to,
+            })
+          : await this.comments.transitionStatus(tx, {
+              id: targetId,
+              postId: 'postId' in target ? target.postId : '',
+              from: target.status as 'PUBLISHED' | 'HIDDEN',
+              to,
+            });
+      if (!changed)
+        throw new ConflictException(
+          'Content changed while it was being reviewed',
+        );
+    }
+    return { targetId, targetType, status: to };
   }
   async contentForCase(
     actorId: string,
@@ -382,25 +405,21 @@ export class EnforcementService {
     reason: string,
     gameSlug?: string,
   ) {
-    const item = await this.db.$transaction(
-      async (tx) =>
-        (
-          await this.caseTarget(
-            tx,
-            caseId,
-            await this.context(tx, actorId, gameSlug),
-          )
-        ).item,
-    );
-    return this.content(
-      actorId,
-      item.targetType,
-      item.targetId,
-      hidden,
-      reason,
-      gameSlug,
-      caseId,
-    );
+    reason = this.reason(reason);
+    return this.db.$transaction(async (tx) => {
+      const context = await this.context(tx, actorId, gameSlug);
+      const { item } = await this.caseTarget(tx, caseId, context);
+      return this.contentInTransaction(
+        tx,
+        context,
+        actorId,
+        item.targetType,
+        item.targetId,
+        hidden,
+        reason,
+        caseId,
+      );
+    });
   }
   async confirm(
     actorId: string,
@@ -429,7 +448,7 @@ export class EnforcementService {
         )
         .digest('hex');
       const existing = await tx.moderationViolation.findFirst({
-        where: { OR: [{ caseId }, { incidentKey }] },
+        where: { reversedAt: null, OR: [{ caseId }, { incidentKey }] },
       });
       if (existing) {
         if (
@@ -603,6 +622,12 @@ export class EnforcementService {
         },
         select: PUBLIC_SANCTION,
       });
+      if (dto.type !== 'WARNING')
+        await releaseModeratorCases(
+          tx,
+          target.authorId,
+          context.scope === 'COMMUNITY' ? { gameId: context.gameId! } : {},
+        );
       await this.audit(
         tx,
         actorId,
@@ -647,6 +672,13 @@ export class EnforcementService {
     return this.db.$transaction(async (tx) => {
       const { record } = await this.scopedSanction(tx, actorId, id, gameSlug);
       if (record.status === 'REVOKED') return { id, status: record.status };
+      if (
+        record.status === 'EXPIRED' ||
+        (record.expiresAt && record.expiresAt <= new Date())
+      )
+        throw new ConflictException(
+          'Expired restrictions remain in history and may be appealed',
+        );
       await this.revokeTx(tx, actorId, record, reason);
       return { id, status: 'REVOKED' };
     });
@@ -654,9 +686,32 @@ export class EnforcementService {
   private async revokeTx(
     tx: Tx,
     actorId: string,
-    record: { id: string; subjectId: string; status: string },
+    record: {
+      id: string;
+      subjectId: string;
+      status: string;
+      expiresAt?: Date | null;
+    },
     reason: string,
   ) {
+    if (record.status === 'REVOKED' || record.status === 'EXPIRED') return;
+    if (record.expiresAt && record.expiresAt <= new Date()) {
+      await tx.moderationSanction.update({
+        where: { id: record.id },
+        data: { status: 'EXPIRED' },
+      });
+      await this.audit(
+        tx,
+        actorId,
+        'SANCTION_EXPIRED',
+        record.id,
+        'The scheduled restriction ended',
+        { status: record.status },
+        { status: 'EXPIRED' },
+      );
+      await this.notice(tx, record.subjectId, actorId, record.id);
+      return;
+    }
     await tx.moderationSanction.update({
       where: { id: record.id },
       data: { status: 'REVOKED', revokedAt: new Date() },
@@ -861,11 +916,22 @@ export class EnforcementService {
           sanction: { select: { ...PUBLIC_SANCTION, actorId: true } },
         },
       });
+      const adjustments = await tx.moderationDecisionAudit.findMany({
+        where: {
+          actorId,
+          action: 'SANCTION_ADJUSTED',
+          entityId: { in: rows.map((row) => row.sanctionId) },
+        },
+        select: { entityId: true },
+      });
+      const adjusted = new Set(adjustments.map((row) => row.entityId));
       return {
         items: rows.slice(0, 50).map((row) => ({
           ...row,
           canReview:
-            row.status === 'PENDING' && row.sanction.actorId !== actorId,
+            row.status === 'PENDING' &&
+            row.sanction.actorId !== actorId &&
+            !adjusted.has(row.sanctionId),
         })),
         nextCursor: rows.length > 50 ? rows[49].id : null,
       };
@@ -887,7 +953,12 @@ export class EnforcementService {
         appeal.sanctionId,
         gameSlug,
       );
-      if (record.actorId === actorId)
+      if (
+        record.actorId === actorId ||
+        (await tx.moderationDecisionAudit.count({
+          where: { actorId, entityId: record.id, action: 'SANCTION_ADJUSTED' },
+        }))
+      )
         throw new ForbiddenException(
           'Another moderator must independently review this appeal',
         );

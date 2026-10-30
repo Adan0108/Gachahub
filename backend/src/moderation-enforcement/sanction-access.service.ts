@@ -4,15 +4,25 @@ import { PrismaService } from '../prisma/prisma.service';
 @Injectable()
 export class SanctionAccessService {
   constructor(private readonly db: PrismaService) {}
-  async blockedReaders(userIds: string[]) {
+  async blockedReaders(userIds: string[], gameId?: string) {
     if (!userIds.length) return new Set<string>();
     const now = new Date();
     const rows = await this.db.moderationSanction.findMany({
       where: {
         subjectId: { in: userIds },
-        scope: 'PLATFORM',
         status: 'ACTIVE',
-        type: 'PLATFORM_SUSPENSION',
+        OR: [
+          { scope: 'PLATFORM', type: 'PLATFORM_SUSPENSION' },
+          ...(gameId
+            ? [
+                {
+                  scope: 'COMMUNITY' as const,
+                  gameId,
+                  type: 'COMMUNITY_BAN' as const,
+                },
+              ]
+            : []),
+        ],
         startsAt: { lte: now },
         expiresAt: { gt: now },
       },
