@@ -18,6 +18,8 @@ import { QueryModerationCasesDto } from '../dto/query-moderation-cases.dto';
 import { QueryCaseReportsDto } from '../dto/query-case-reports.dto';
 import { ResolveModerationCaseDto } from '../dto/resolve-moderation-case.dto';
 import { decodeEvidenceCursor } from '../domain/report-evidence-pagination';
+import type { Prisma } from '../../generated/prisma/client';
+import { projectAiAdvisory } from '../domain/ai-advisory';
 import {
   ReportsRepository,
   type CaseTransitionContext,
@@ -60,7 +62,9 @@ export class ReportModerationService {
 
   async getCaseForPlatform(userId: string, caseId: string) {
     await this.authorizePlatform(userId);
-    return this.caseDetail(await this.loadCase(caseId));
+    return this.reportsRepository.readSnapshot(async (tx) =>
+      this.caseDetail(await this.loadCase(caseId, tx), tx),
+    );
   }
 
   async listCaseReportsForPlatform(
@@ -86,9 +90,16 @@ export class ReportModerationService {
   }
 
   async getCaseForGame(gameSlug: string, userId: string, caseId: string) {
-    return this.caseDetail(
-      await this.authorizeGameCase(gameSlug, userId, caseId),
+    const gameId = await this.gameModeratorsService.resolveModeratableGameId(
+      gameSlug,
+      userId,
     );
+    return this.reportsRepository.readSnapshot(async (tx) => {
+      const item = await this.loadCase(caseId, tx);
+      if (item.gameId !== gameId)
+        throw new NotFoundException('Moderation case not found');
+      return this.caseDetail(item, tx);
+    });
   }
 
   async listCaseReportsForGame(
@@ -280,28 +291,62 @@ export class ReportModerationService {
     const cursor =
       query.cursor === undefined ? undefined : decodeCaseCursor(query.cursor);
     if (cursor === null) throw new BadRequestException('Invalid case cursor');
-    return this.reportsRepository.findModerationCases({
-      gameId,
-      ...(query.view ? { view: query.view, moderatorId } : {}),
-      status: query.status,
-      targetType: query.targetType,
-      limit: query.limit ?? 20,
-      cursor,
-    });
+    return this.reportsRepository.readSnapshot((tx) =>
+      this.reportsRepository.findModerationCases(
+        {
+          gameId,
+          ...(query.view ? { view: query.view, moderatorId } : {}),
+          status: query.status,
+          targetType: query.targetType,
+          limit: query.limit ?? 20,
+          cursor,
+        },
+        tx,
+      ),
+    );
   }
 
-  private async caseDetail(moderationCase: CaseDetail) {
-    const [target, evidence, reasons] = await Promise.all([
+  private async caseDetail(
+    moderationCase: CaseDetail,
+    tx: Prisma.TransactionClient,
+  ) {
+    const [target, evidence, reasons, analyses] = await Promise.all([
       this.reportsRepository.findCaseTarget(
         moderationCase.targetType,
         moderationCase.targetId,
+        tx,
       ),
-      this.reportsRepository.findReportsByCaseId(moderationCase.id, 20),
-      this.reportsRepository.findCaseReasonSummaries([moderationCase.id]),
+      this.reportsRepository.findReportsByCaseId(
+        moderationCase.id,
+        20,
+        undefined,
+        tx,
+      ),
+      this.reportsRepository.findCaseReasonSummaries([moderationCase.id], tx),
+      this.reportsRepository.findLatestAdvisoryAnalyses(
+        [moderationCase.id],
+        tx,
+      ),
     ]);
     return {
       ...moderationCase,
       ...target,
+      aiAdvisory: projectAiAdvisory(
+        moderationCase,
+        {
+          targetState: target.targetState,
+          source: !target.target
+            ? null
+            : target.target.targetType === 'POST'
+              ? {
+                  targetType: 'POST',
+                  title: target.target.title,
+                  content: target.target.content,
+                }
+              : { targetType: 'COMMENT', content: target.target.content },
+        },
+        analyses.get(moderationCase.id),
+      ),
       evidence,
       reasonSummary: reasons.get(moderationCase.id) ?? [],
     };
@@ -321,9 +366,10 @@ export class ReportModerationService {
     );
   }
 
-  private async loadCase(caseId: string) {
-    const moderationCase =
-      await this.reportsRepository.findModerationCaseById(caseId);
+  private async loadCase(caseId: string, tx?: Prisma.TransactionClient) {
+    const moderationCase = await (tx
+      ? this.reportsRepository.findModerationCaseById(caseId, tx)
+      : this.reportsRepository.findModerationCaseById(caseId));
     if (!moderationCase)
       throw new NotFoundException('Moderation case not found');
     return moderationCase;

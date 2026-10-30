@@ -170,12 +170,8 @@ it.each(["POST", "COMMENT"])(
       postId: "parent",
       post: { status: "PUBLISHED", visibility: "PUBLIC", id: "parent" },
     };
-    vi.spyOn(api, "hideContent").mockImplementation(async () => {
-      record = { ...record, target: { ...record.target, status: "HIDDEN" } };
-      return {};
-    });
-    vi.spyOn(api, "restoreContent").mockImplementation(async () => {
-      record = { ...record, target: { ...record.target, status: "PUBLISHED" } };
+    vi.spyOn(api, "decideCaseContent").mockImplementation(async (_id, body) => {
+      record = { ...record, target: { ...record.target, status: body.hidden ? "HIDDEN" : "PUBLISHED" } };
       return {};
     });
     mount(<CaseDetail caseId="case-1" />);
@@ -186,24 +182,20 @@ it.each(["POST", "COMMENT"])(
     fireEvent.click(
       screen.getByRole("button", { name: targetType === "POST" ? "Hide post" : "Hide comment" }),
     );
-    expect(api.hideContent).not.toHaveBeenCalled();
+    expect(api.decideCaseContent).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Enforcement reason"), { target: { value: "Reviewed content policy concern" } });
     fireEvent.click(screen.getByRole("button", { name: "Hide content" }));
     await waitFor(() =>
-      expect(api.hideContent).toHaveBeenCalledWith({
-        id: "post",
-        type: targetType,
-        gameSlug: "game-a",
-      }),
+      expect(api.decideCaseContent).toHaveBeenCalledWith("case-1", { hidden: true, reason: "Reviewed content policy concern" }, ""),
     );
     expect(await screen.findByText("Content status: Hidden")).toBeVisible();
     expect(screen.queryByRole("link", { name: "Open in context" })).not.toBeInTheDocument();
     expect(screen.getByText("Historical text")).toBeInTheDocument();
     expect(api.resolvePlatformCase).not.toHaveBeenCalled();
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: targetType === "POST" ? "Restore post" : "Restore comment",
-      }),
-    );
+    const restoreButton = screen.getByRole("button", { name: targetType === "POST" ? "Restore post" : "Restore comment" });
+    await waitFor(() => expect(restoreButton).toBeEnabled(), { timeout: 5000 });
+    fireEvent.click(restoreButton);
+    fireEvent.change(screen.getByLabelText("Enforcement reason"), { target: { value: "Review supports restoration" } });
     fireEvent.click(screen.getByRole("button", { name: "Restore content" }));
     expect(await screen.findByText("Content status: Visible")).toBeVisible();
   },
@@ -255,14 +247,11 @@ it("warns before replacing an existing assignee and does not mutate on cancel", 
   );
 });
 
-it("does not offer a personal content visibility action to a platform moderator", async () => {
+it("offers the authorized platform content action without granting account ban privileges", async () => {
   record.target.status = "PUBLISHED";
   record.target.visibility = "PUBLIC";
   mount(<CaseDetail caseId="case-1" />);
-  expect(
-    await screen.findByText("An Admin must change visibility of content outside a community."),
-  ).toBeVisible();
-  expect(screen.queryByRole("button", { name: "Hide post" })).not.toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "Hide post" })).toBeVisible();
 });
 
 beforeEach(() => {

@@ -1,3 +1,4 @@
+import { ModerationAnalysisScheduler } from '../moderation-analysis/moderation-analysis-scheduler.service';
 import { decodeCaseCursor } from './domain/case-cursor';
 jest.mock('../prisma/prisma.service', () => ({ PrismaService: class {} }));
 import { ConflictException } from '@nestjs/common';
@@ -55,7 +56,12 @@ describe('ReportsRepository creation retry boundaries', () => {
     $executeRaw: jest.fn(),
   };
   const prisma = { $transaction: jest.fn() };
-  const repository = new ReportsRepository(prisma as unknown as PrismaService);
+  const repository = new ReportsRepository(
+    prisma as unknown as PrismaService,
+    {
+      scheduleIfNeeded: jest.fn().mockResolvedValue(undefined),
+    } as unknown as ModerationAnalysisScheduler,
+  );
   const unique = () =>
     new Prisma.PrismaClientKnownRequestError('unique conflict', {
       code: 'P2002',
@@ -152,7 +158,12 @@ describe('ReportsRepository direct case transitions', () => {
   };
   const prisma = { $transaction: jest.fn() };
   const audit = jest.fn();
-  const repository = new ReportsRepository(prisma as unknown as PrismaService);
+  const repository = new ReportsRepository(
+    prisma as unknown as PrismaService,
+    {
+      scheduleIfNeeded: jest.fn().mockResolvedValue(undefined),
+    } as unknown as ModerationAnalysisScheduler,
+  );
   beforeEach(() => {
     jest.resetAllMocks();
     prisma.$transaction.mockImplementation(
@@ -256,6 +267,37 @@ describe('ReportsRepository direct case transitions', () => {
   });
 });
 
+describe('ReportsRepository read snapshots', () => {
+  it('sets READ ONLY before contributing reads and preserves database failures', async () => {
+    const execute = jest
+      .fn<Promise<number>, [TemplateStringsArray]>()
+      .mockResolvedValue(0);
+    const tx = { $executeRaw: execute } as unknown as Prisma.TransactionClient;
+    const transaction = jest.fn(
+      async (read: (db: Prisma.TransactionClient) => Promise<unknown>) =>
+        read(tx),
+    );
+    const repository = new ReportsRepository(
+      { $transaction: transaction } as unknown as PrismaService,
+      {} as ModerationAnalysisScheduler,
+    );
+    const failure = new Error('Database read failed');
+    await expect(
+      repository.readSnapshot((db) => {
+        expect(db).toBe(tx);
+        expect(execute).toHaveBeenCalledTimes(1);
+        expect(execute.mock.calls[0][0].join('')).toBe(
+          'SET TRANSACTION READ ONLY',
+        );
+        return Promise.reject(failure);
+      }),
+    ).rejects.toBe(failure);
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    });
+  });
+});
+
 describe('ReportsRepository native case reads', () => {
   const prisma = {
     moderationCase: {
@@ -271,7 +313,12 @@ describe('ReportsRepository native case reads', () => {
       Promise.all(queries),
     ),
   };
-  const repository = new ReportsRepository(prisma as unknown as PrismaService);
+  const repository = new ReportsRepository(
+    prisma as unknown as PrismaService,
+    {
+      scheduleIfNeeded: jest.fn().mockResolvedValue(undefined),
+    } as unknown as ModerationAnalysisScheduler,
+  );
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.$transaction.mockImplementation((queries: Promise<unknown>[]) =>
@@ -284,8 +331,26 @@ describe('ReportsRepository native case reads', () => {
     prisma.report.groupBy.mockResolvedValue([]);
     prisma.$queryRaw.mockResolvedValue([]);
   });
-  it.each([20, 50])(
-    'enriches %i cases with one target batch and one reason aggregation',
+  it('binds case IDs and the active policy version instead of interpolating SQL', async () => {
+    const hostileId = "case'); DELETE FROM moderation_cases; --";
+    await repository.findLatestAdvisoryAnalyses([hostileId, 'second']);
+    const [sql] = prisma.$queryRaw.mock.calls[0] as [Prisma.Sql];
+    expect(sql.text).not.toContain(hostileId);
+    expect(sql.values).toEqual(['moderation-policy-v1', hostileId, 'second']);
+    expect(sql.text).toContain('ORDER BY generation DESC LIMIT 1');
+    expect(sql.text).not.toMatch(/status\s*=/i);
+  });
+  it('skips empty advisory batches and propagates database failures', async () => {
+    expect(await repository.findLatestAdvisoryAnalyses([])).toEqual(new Map());
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    const failure = new Error('Database unavailable');
+    prisma.$queryRaw.mockRejectedValueOnce(failure);
+    await expect(repository.findLatestAdvisoryAnalyses(['case'])).rejects.toBe(
+      failure,
+    );
+  });
+  it.each([20, 50, 100])(
+    'enriches %i cases with one target batch, one reason aggregation and one advisory batch',
     async (size) => {
       const items = Array.from({ length: size }, (_, i) => ({
         id: `case-${i}`,
@@ -299,7 +364,7 @@ describe('ReportsRepository native case reads', () => {
       });
       expect(prisma.moderationCase.findMany).toHaveBeenCalledTimes(1);
       expect(prisma.moderationCase.count).not.toHaveBeenCalled();
-      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
       expect(prisma.report.groupBy).toHaveBeenCalledTimes(1);
       expect(prisma.report.groupBy).toHaveBeenCalledWith({
         by: ['caseId', 'reasonCode'],

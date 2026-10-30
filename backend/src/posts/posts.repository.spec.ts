@@ -130,7 +130,11 @@ describe('PostsRepository - Latest feed', () => {
 
     expect(calls[0]?.[0]).toMatchObject({
       where: {
-        AND: [where, { id: { in: ['post-1', 'post-2'] } }],
+        AND: [
+          where,
+          { AND: expect.any(Array) as unknown[] },
+          { id: { in: ['post-1', 'post-2'] } },
+        ],
       },
       include: {
         postSaves: { where: { userId: 'user-1' }, select: { userId: true } },
@@ -308,7 +312,8 @@ describe('PostsRepository optional game lifecycle', () => {
         content: 'Personal',
         status: status as never,
       });
-      expect(tx.post.create.mock.calls[0][0].data).not.toHaveProperty('game');
+      const creation = tx.post.create.mock.calls[0] as [{ data: object }];
+      expect(creation[0].data).not.toHaveProperty('game');
       expect(tx.game.update).not.toHaveBeenCalled();
     },
   );

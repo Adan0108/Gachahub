@@ -486,7 +486,7 @@ export class NotificationService {
    * This can later be relaxed for system/moderation notifications.
    */
   private validateActor(type: NotificationType, actorId?: string | null) {
-    if (!actorId) {
+    if (!actorId && type !== NotificationType.MODERATION_NOTICE) {
       throw new BadRequestException(`actorId is required for ${type}`);
     }
   }
@@ -499,6 +499,12 @@ export class NotificationService {
     entityType: NotificationEntityType,
   ) {
     switch (type) {
+      case NotificationType.MODERATION_NOTICE:
+        if (entityType !== NotificationEntityType.MODERATION_ACTION)
+          throw new BadRequestException(
+            'Moderation notice must target a moderation action',
+          );
+        return;
       case NotificationType.POST_LIKED:
         if (entityType !== NotificationEntityType.POST) {
           throw new BadRequestException('POST_LIKED must target a POST');

@@ -18,13 +18,13 @@ describe("admin users API", () => {
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
-        json: async () => ({ id: "user-1", status: "BANNED" }),
+        json: async () => ({ id: "user-1", status: "ACTIVE" }),
       });
     vi.stubGlobal("fetch", fetchMock);
     const { api } = await import("../lib/api");
 
     await api.listAdminUsers({ status: "ACTIVE", search: "rover" });
-    await api.setUserStatus("user-1", { status: "BANNED", reason: "Repeated abuse" });
+    await api.setUserStatus("user-1", { status: "ACTIVE", reason: "Legacy account review" });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -36,7 +36,7 @@ describe("admin users API", () => {
       "http://localhost:3000/admin/users/user-1/status",
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ status: "BANNED", reason: "Repeated abuse" }),
+        body: JSON.stringify({ status: "ACTIVE", reason: "Legacy account review" }),
       }),
     );
   });

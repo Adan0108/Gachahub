@@ -34,6 +34,8 @@ import { ReportModerationService } from './report-moderation.service';
 
 describe('ReportModerationService', () => {
   const reportsRepository = {
+    readSnapshot: jest.fn(),
+    findLatestAdvisoryAnalyses: jest.fn(),
     findModerationCases: jest.fn(),
     findModerationCaseById: jest.fn(),
     findReportsByCaseId: jest.fn(),
@@ -56,6 +58,10 @@ describe('ReportModerationService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    reportsRepository.readSnapshot.mockImplementation(
+      (read: (db: Prisma.TransactionClient) => unknown) => read(tx),
+    );
+    reportsRepository.findLatestAdvisoryAnalyses.mockResolvedValue(new Map());
     reportsRepository.findCaseReasonSummaries.mockResolvedValue(new Map());
     gameModeratorsService.resolveGameId.mockResolvedValue('game-1');
     gameModeratorsService.resolveModeratableGameId.mockResolvedValue('game-1');
@@ -122,6 +128,7 @@ describe('ReportModerationService', () => {
         expect(reportsRepository.findReportsByCaseId).toHaveBeenCalledWith(
           'case',
           20,
+          undefined,
         );
         expect(prisma.user.findUnique).toHaveBeenCalledWith(
           expect.objectContaining({ where: { id: 'actor' } }),
@@ -145,13 +152,16 @@ describe('ReportModerationService', () => {
           }),
         }),
       ).toEqual({ items: [moderationCase], nextCursor: 'next' });
-      expect(reportsRepository.findModerationCases).toHaveBeenCalledWith({
-        gameId: undefined,
-        status: undefined,
-        targetType: undefined,
-        limit: 20,
-        cursor: { id: cursor.id, lastReportedAt: cursor.createdAt },
-      });
+      expect(reportsRepository.findModerationCases).toHaveBeenCalledWith(
+        {
+          gameId: undefined,
+          status: undefined,
+          targetType: undefined,
+          limit: 20,
+          cursor: { id: cursor.id, lastReportedAt: cursor.createdAt },
+        },
+        tx,
+      );
       await expect(
         service.listCasesForPlatform('actor', { cursor: 'bad' }),
       ).rejects.toThrow('Invalid case cursor');
@@ -200,13 +210,16 @@ describe('ReportModerationService', () => {
           targetType: 'POST',
           limit: 10,
         });
-        expect(reportsRepository.findModerationCases).toHaveBeenCalledWith({
-          gameId,
-          cursor: undefined,
-          status: 'OPEN',
-          targetType: 'POST',
-          limit: 10,
-        });
+        expect(reportsRepository.findModerationCases).toHaveBeenCalledWith(
+          {
+            gameId,
+            cursor: undefined,
+            status: 'OPEN',
+            targetType: 'POST',
+            limit: 10,
+          },
+          tx,
+        );
         expect(
           gameModeratorsService.resolveModeratableGameId,
         ).not.toHaveBeenCalled();
@@ -310,13 +323,16 @@ describe('ReportModerationService', () => {
     });
     it('scopes game list/detail/evidence to authorized exact game', async () => {
       await service.listCasesForGame('slug', 'actor', { status: 'OPEN' });
-      expect(reportsRepository.findModerationCases).toHaveBeenCalledWith({
-        gameId: 'game-1',
-        cursor: undefined,
-        status: 'OPEN',
-        targetType: undefined,
-        limit: 20,
-      });
+      expect(reportsRepository.findModerationCases).toHaveBeenCalledWith(
+        {
+          gameId: 'game-1',
+          cursor: undefined,
+          status: 'OPEN',
+          targetType: undefined,
+          limit: 20,
+        },
+        tx,
+      );
       await service.getCaseForGame('slug', 'actor', 'case');
       await service.listCaseReportsForGame('slug', 'actor', 'case', {
         limit: 2,

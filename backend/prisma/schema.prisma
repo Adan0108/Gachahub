@@ -9,6 +9,15 @@ datasource db {
 }
 
 model User {
+  enforcementRecords ContentEnforcement[] @relation("EnforcementSubject")
+  enforcementActions ContentEnforcement[] @relation("EnforcementActor")
+  violations ModerationViolation[] @relation("ViolationSubject")
+  violationDecisions ModerationViolation[] @relation("ViolationActor")
+  sanctions ModerationSanction[] @relation("SanctionSubject")
+  sanctionsIssued ModerationSanction[] @relation("SanctionActor")
+  moderationDecisionAudits ModerationDecisionAudit[]
+  appealsReviewed ModerationAppeal[]
+
   id            String   @id
   name          String
   email         String
@@ -45,15 +54,15 @@ model User {
   interests    UserInterest[]
   postSaves    PostSave[]
   commentLikes CommentLike[]
-  wallet                      UserWallet?
-  ledgerEntries               LedgerEntry[]
-  dailyEarnings               DailyEarning[]
-  countedInteractionsGiven    CountedInteraction[]   @relation("CountedInteractionActor")
-  countedInteractionsReceived CountedInteraction[]   @relation("CountedInteractionOwner")
-  reputationGivenDaily        DailyGiverReputation[] @relation("DailyGiverReputationGiver")
-  reputationReceivedDaily     DailyGiverReputation[] @relation("DailyGiverReputationOwner")
-  cosmetics                   UserCosmetic[]
-  equippedCosmetics           EquippedCosmetic[]
+  wallet       UserWallet?
+  ledgerEntries LedgerEntry[]
+  dailyEarnings DailyEarning[]
+  cosmetics UserCosmetic[]
+  equippedCosmetics EquippedCosmetic[]
+  dailyReputationReceived DailyGiverReputation[] @relation("DailyReputationOwner")
+  dailyReputationGiven DailyGiverReputation[] @relation("DailyReputationGiver")
+  countedInteractionsGiven CountedInteraction[] @relation("CountedInteractionActor")
+  countedInteractionsReceived CountedInteraction[] @relation("CountedInteractionOwner")
 
   followers            UserFollow[]           @relation("UserFollowers")
   following            UserFollow[]           @relation("UserFollowing")
@@ -196,6 +205,10 @@ enum GameStatus {
 }
 
 model Game {
+  enforcementRecords ContentEnforcement[]
+  violations ModerationViolation[]
+  sanctions ModerationSanction[]
+
   id          String     @id @default(cuid())
   name        String
   slug        String     @unique
@@ -1124,6 +1137,10 @@ model Report {
 }
 
 model ModerationCase {
+  enforcementRecords ContentEnforcement[]
+  confirmedViolation ModerationViolation?
+  sanctions ModerationSanction[]
+
   id         String           @id @default(cuid())
   targetType ReportTargetType
   targetId   String
@@ -1233,6 +1250,7 @@ enum AuditAction {
 }
 
 enum AuditTargetType {
+  COSMETIC
   POST
   COMMENT
   REPORT // Historical audit targets remain readable.
@@ -1241,7 +1259,6 @@ enum AuditTargetType {
   GAME
   CHANNEL
   CHAT_MESSAGE
-  COSMETIC
 }
 
 // Append-only record of moderator/admin actions. actorId and gameId are SetNull so the trail
@@ -1271,6 +1288,7 @@ model AuditLog {
 }
 
 enum NotificationType {
+  MODERATION_NOTICE
   POST_LIKED
   POST_COMMENTED
   COMMENT_REPLIED
@@ -1286,6 +1304,7 @@ enum NotificationType {
 }
 
 enum NotificationEntityType {
+  MODERATION_ACTION
   POST
   COMMENT
   MESSAGE
@@ -1774,8 +1793,8 @@ model DailyGiverReputation {
   day        DateTime @db.Date
   reputation Int      @default(0)
 
-  owner User @relation("DailyGiverReputationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  giver User @relation("DailyGiverReputationGiver", fields: [giverId], references: [id], onDelete: Cascade)
+  owner User @relation("DailyReputationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  giver User @relation("DailyReputationGiver", fields: [giverId], references: [id], onDelete: Cascade)
 
   @@id([ownerId, giverId, day])
   @@index([giverId])
@@ -1802,8 +1821,145 @@ model CountedInteraction {
   @@map("counted_interactions")
 }
 
-// Cosmetics: see docs/plans/economy-and-cosmetics.md Section 6 & 11.
 
+enum EnforcementScope {
+  COMMUNITY
+  PLATFORM
+}
+
+enum ViolationSeverity {
+  MINOR
+  MODERATE
+  SEVERE
+  CRITICAL
+}
+
+enum SanctionType {
+  WARNING
+  COMMUNITY_RESTRICTION
+  COMMUNITY_BAN
+  PLATFORM_SUSPENSION
+}
+
+enum SanctionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+enum AppealStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+model ContentEnforcement {
+  id String @id @default(cuid())
+  targetType ReportTargetType
+  targetId String
+  subjectId String
+  actorId String?
+  scope EnforcementScope
+  gameId String?
+  caseId String?
+  reason String @db.VarChar(1000)
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+  subject User @relation("EnforcementSubject", fields: [subjectId], references: [id], onDelete: Restrict)
+  actor User? @relation("EnforcementActor", fields: [actorId], references: [id], onDelete: SetNull)
+  game Game? @relation(fields: [gameId], references: [id], onDelete: Restrict)
+  case ModerationCase? @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  sanctions ModerationSanction[]
+  @@index([targetType, targetId, revokedAt])
+  @@index([subjectId, createdAt])
+  @@index([caseId, createdAt])
+  @@map("content_enforcements")
+}
+
+model ModerationViolation {
+  incidentKey String @unique
+  id String @id @default(cuid())
+  caseId String @unique
+  subjectId String
+  actorId String?
+  scope EnforcementScope
+  gameId String?
+  category ReportReason
+  severity ViolationSeverity
+  reason String @db.VarChar(1000)
+  createdAt DateTime @default(now())
+  reversedAt DateTime?
+  subject User @relation("ViolationSubject", fields: [subjectId], references: [id], onDelete: Restrict)
+  actor User? @relation("ViolationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  case ModerationCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  game Game? @relation(fields: [gameId], references: [id], onDelete: Restrict)
+  sanctions ModerationSanction[]
+  @@index([subjectId, scope, gameId, reversedAt, createdAt])
+  @@map("moderation_violations")
+}
+
+model ModerationSanction {
+  id String @id @default(cuid())
+  subjectId String
+  actorId String?
+  type SanctionType
+  scope EnforcementScope
+  gameId String?
+  caseId String?
+  violationId String?
+  enforcementId String?
+  reason String @db.VarChar(1000)
+  startsAt DateTime @default(now())
+  expiresAt DateTime?
+  status SanctionStatus @default(ACTIVE)
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  requestKey String @unique
+  requestHash String
+  subject User @relation("SanctionSubject", fields: [subjectId], references: [id], onDelete: Restrict)
+  actor User? @relation("SanctionActor", fields: [actorId], references: [id], onDelete: SetNull)
+  game Game? @relation(fields: [gameId], references: [id], onDelete: Restrict)
+  case ModerationCase? @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  violation ModerationViolation? @relation(fields: [violationId], references: [id], onDelete: Restrict)
+  enforcement ContentEnforcement? @relation(fields: [enforcementId], references: [id], onDelete: Restrict)
+  appeal ModerationAppeal?
+  @@index([subjectId, scope, gameId, status, expiresAt])
+  @@index([status, expiresAt])
+  @@index([subjectId, createdAt, id])
+  @@map("moderation_sanctions")
+}
+
+model ModerationAppeal {
+  id String @id @default(cuid())
+  sanctionId String @unique
+  statement String @db.VarChar(2000)
+  status AppealStatus @default(PENDING)
+  reviewerId String?
+  decisionReason String? @db.VarChar(1000)
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  sanction ModerationSanction @relation(fields: [sanctionId], references: [id], onDelete: Restrict)
+  reviewer User? @relation(fields: [reviewerId], references: [id], onDelete: SetNull)
+  @@index([status, createdAt, id])
+  @@map("moderation_appeals")
+}
+
+model ModerationDecisionAudit {
+  id String @id @default(cuid())
+  actorId String?
+  action String @db.VarChar(64)
+  entityId String
+  reason String @db.VarChar(1000)
+  previousState Json
+  resultingState Json
+  createdAt DateTime @default(now())
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  @@index([entityId, createdAt])
+  @@map("moderation_decision_audits")
+}
+
+// Definitions matching the existing shared cosmetics migration.
 enum CosmeticSlot {
   FRAME
   PROFILE_BACKGROUND
@@ -1826,19 +1982,18 @@ enum CosmeticSource {
 }
 
 model CosmeticItem {
-  id          String       @id @default(cuid())
-  slug        String       @unique
-  name        String
+  id String @id
+  slug String @unique
+  name String
   description String
-  slot        CosmeticSlot
-  rarity      Rarity
-  animated    Boolean      @default(false)
-  assetUrl    String?
-  presetId    String?
-  active      Boolean      @default(true)
-  createdAt   DateTime     @default(now())
-
-  ownedBy    UserCosmetic[]
+  slot CosmeticSlot
+  rarity Rarity
+  animated Boolean @default(false)
+  assetUrl String?
+  presetId String?
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  owners UserCosmetic[]
   equippedBy EquippedCosmetic[]
 
   @@index([slot, active])
@@ -1846,12 +2001,11 @@ model CosmeticItem {
 }
 
 model UserCosmetic {
-  userId     String
-  itemId     String
-  source     CosmeticSource
-  acquiredAt DateTime       @default(now())
-
-  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  itemId String
+  source CosmeticSource
+  acquiredAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   item CosmeticItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
   @@id([userId, itemId])
@@ -1860,12 +2014,11 @@ model UserCosmetic {
 }
 
 model EquippedCosmetic {
-  userId     String
-  slot       CosmeticSlot
-  itemId     String
-  equippedAt DateTime     @default(now())
-
-  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  slot CosmeticSlot
+  itemId String
+  equippedAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   item CosmeticItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
   @@id([userId, slot])

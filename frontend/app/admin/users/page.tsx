@@ -6,7 +6,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import Link from "next/link";
 import type { UserRecord } from "../../../lib/pageTypes";
-import { FiRotateCcw, FiSearch, FiSlash } from "react-icons/fi";
+import { FiRotateCcw, FiSearch } from "react-icons/fi";
 import { AdminActionDialog } from "../../../components/admin/AdminActionDialog";
 import { AdminPagination } from "../../../components/admin/AdminPagination";
 import { AdminQueryBoundary } from "../../../components/admin/AdminQueryBoundary";
@@ -19,31 +19,19 @@ import { queries, queryKeys } from "../../../lib/queries";
 import { USER_STATUS_CLASS } from "../../../lib/admin/statusTone";
 
 const MODES = {
-  restrict: {
-    title: (user: UserRecord) => `Restrict ${user.name}?`,
-    description: "The user loses access immediately. Record a clear reason for the audit history.",
-    confirmLabel: "Restrict user",
-    pendingLabel: "Restricting...",
-    tone: "danger",
-    reasonLabel: "Reason *",
-    reasonPlaceholder: "Reason recorded for moderators and audit logs",
-    reasonRequired: true,
-    showRestrictionPicker: true,
-  },
   reactivate: {
     title: (user: UserRecord) => `Reactivate ${user.name}?`,
-    description: "The user regains access immediately.",
+    description: "Clear the legacy account status. Any active temporary sanctions still apply.",
     confirmLabel: "Reactivate user",
     pendingLabel: "Reactivating...",
     tone: "primary",
     reasonLabel: "Reason (optional)",
     reasonPlaceholder: "Optional context for the audit record",
     reasonRequired: false,
-    showRestrictionPicker: false,
   },
 };
 
-const STATUS_LABEL = { SUSPENDED: "suspended", BANNED: "banned", ACTIVE: "reactivated" };
+const STATUS_LABEL = { ACTIVE: "reactivated" };
 
 export default function AdminUsersPage() {
   const { notice, showNotice } = useToast(2400);
@@ -52,11 +40,10 @@ export default function AdminUsersPage() {
       (filters, page) => queries.adminUsers(filters.status, filters.search, page),
       { prefix: queryKeys.adminUsers.all },
     );
-  // { user, nextStatus: "SUSPENDED" | "BANNED" | "ACTIVE" } - one target for both restrict and
-  // reactivate, since both are just api.setUserStatus with a different nextStatus.
+  // Legacy status recovery remains available; new restrictions require a timed case decision.
   const [target, setTarget] = useState<{
     user: UserRecord;
-    nextStatus: Exclude<UserRecord["status"], "DELETED">;
+    nextStatus: "ACTIVE";
   } | null>(null);
   const [reason, setReason] = useState("");
 
@@ -74,15 +61,11 @@ export default function AdminUsersPage() {
   if (session.isLoading || !session.isAdmin)
     return <AdminState kind="loading" title="Checking admin access" />;
 
-  const openRestrict = (user: UserRecord) => {
-    setTarget({ user, nextStatus: "SUSPENDED" });
-    setReason("");
-  };
   const openReactivate = (user: UserRecord) => {
     setTarget({ user, nextStatus: "ACTIVE" });
     setReason("");
   };
-  const mode = target ? MODES[target!.nextStatus === "ACTIVE" ? "reactivate" : "restrict"] : null;
+  const mode = target ? MODES.reactivate : null;
 
   return (
     <AdminShell user={session.user}>
@@ -90,7 +73,7 @@ export default function AdminUsersPage() {
         <div>
           <span className="admin-eyebrow">Accounts</span>
           <h1>User management</h1>
-          <p>Inspect account standing and apply restrictions.</p>
+          <p>Inspect account standing. Temporary restrictions are managed from moderation cases.</p>
         </div>
         <span className="admin-page-count">{meta?.total ?? 0} members</span>
       </div>
@@ -190,17 +173,17 @@ export default function AdminUsersPage() {
                           Manage moderation access
                         </Link>
                       )}
-                      {user.status === "ACTIVE" ? (
-                        <button
-                          aria-label={`Restrict ${user.name}`}
-                          className="admin-icon-button admin-icon-danger"
-                          disabled={user.role === "ADMIN"}
-                          onClick={() => openRestrict(user)}
-                          type="button"
+                      {user.status === "ACTIVE" && user.role !== "ADMIN" && (
+                        <Link
+                          className="admin-button admin-button-secondary"
+                          href="/moderation/cases"
                         >
-                          <FiSlash />
-                        </button>
-                      ) : user.status !== "DELETED" && user.role !== "ADMIN" ? (
+                          Review temporary sanctions
+                        </Link>
+                      )}
+                      {user.status !== "ACTIVE" &&
+                      user.status !== "DELETED" &&
+                      user.role !== "ADMIN" ? (
                         <button
                           aria-label={`Reactivate ${user.name}`}
                           className="admin-icon-button"
@@ -233,23 +216,6 @@ export default function AdminUsersPage() {
           onConfirm={() => statusMutation.mutate()}
         >
           <div className="admin-dialog-fields">
-            {mode.showRestrictionPicker ? (
-              <label>
-                <span>Restriction</span>
-                <select
-                  onChange={(event) =>
-                    setTarget((current) => ({
-                      ...current!,
-                      nextStatus: event.target.value as Exclude<UserRecord["status"], "DELETED">,
-                    }))
-                  }
-                  value={target!.nextStatus}
-                >
-                  <option value="SUSPENDED">Suspend</option>
-                  <option value="BANNED">Ban</option>
-                </select>
-              </label>
-            ) : null}
             <label>
               <span>{mode.reasonLabel}</span>
               <>

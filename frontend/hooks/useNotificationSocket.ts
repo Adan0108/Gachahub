@@ -15,7 +15,13 @@ export function useNotificationSocket() {
       return undefined;
     }
 
-    const refresh = () => queryClient.invalidateQueries({ queryKey: queryKeys.notifications });
+    const refresh = (notice?: { type?: string }) => {
+      if (notice?.type === "MODERATION_NOTICE") {
+        void queryClient.invalidateQueries({ queryKey: ["moderation"] });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.currentUser });
+      }
+      return queryClient.invalidateQueries({ queryKey: queryKeys.notifications });
+    };
 
     socket.on("notification:new", refresh);
 

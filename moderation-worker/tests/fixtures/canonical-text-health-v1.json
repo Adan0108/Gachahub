@@ -1,0 +1,62 @@
+[
+  {
+    "name": "Vietnamese health NFC",
+    "source": {
+      "type": "POST",
+      "title": " Tiêu đề 😀 ",
+      "content": "Tiếng Việt: cảm ơn bạn 😀\nDòng thứ hai."
+    },
+    "input": {
+      "type": "POST",
+      "title": "Tiêu đề 😀",
+      "content": "Tiếng Việt: cảm ơn bạn 😀\nDòng thứ hai."
+    },
+    "serialized": "{\"inputSchemaVersion\":1,\"input\":{\"type\":\"POST\",\"title\":\"Tiêu đề 😀\",\"content\":\"Tiếng Việt: cảm ơn bạn 😀\\nDòng thứ hai.\"}}",
+    "snapshotHash": "sha256:35ad464cc4c2c02d97c235a6aeeae5bba55f63ee4e994542223cf499366db65d"
+  },
+  {
+    "name": "Vietnamese health NFD",
+    "source": {
+      "type": "POST",
+      "title": " Tiêu đề 😀 ",
+      "content": "Tiếng Việt: cảm ơn bạn 😀\nDòng thứ hai."
+    },
+    "input": {
+      "type": "POST",
+      "title": "Tiêu đề 😀",
+      "content": "Tiếng Việt: cảm ơn bạn 😀\nDòng thứ hai."
+    },
+    "serialized": "{\"inputSchemaVersion\":1,\"input\":{\"type\":\"POST\",\"title\":\"Tiêu đề 😀\",\"content\":\"Tiếng Việt: cảm ơn bạn 😀\\nDòng thứ hai.\"}}",
+    "snapshotHash": "sha256:35ad464cc4c2c02d97c235a6aeeae5bba55f63ee4e994542223cf499366db65d"
+  },
+  {
+    "name": "Vietnamese health CRLF",
+    "source": {
+      "type": "POST",
+      "title": " Tiêu đề 😀 ",
+      "content": "Tiếng Việt: cảm ơn bạn 😀\r\nDòng thứ hai."
+    },
+    "input": {
+      "type": "POST",
+      "title": "Tiêu đề 😀",
+      "content": "Tiếng Việt: cảm ơn bạn 😀\nDòng thứ hai."
+    },
+    "serialized": "{\"inputSchemaVersion\":1,\"input\":{\"type\":\"POST\",\"title\":\"Tiêu đề 😀\",\"content\":\"Tiếng Việt: cảm ơn bạn 😀\\nDòng thứ hai.\"}}",
+    "snapshotHash": "sha256:35ad464cc4c2c02d97c235a6aeeae5bba55f63ee4e994542223cf499366db65d"
+  },
+  {
+    "name": "Vietnamese health CR and trim",
+    "source": {
+      "type": "POST",
+      "title": " Tiêu đề 😀 ",
+      "content": " \t﻿Tiếng Việt: cảm ơn bạn 😀\rDòng thứ hai.\n "
+    },
+    "input": {
+      "type": "POST",
+      "title": "Tiêu đề 😀",
+      "content": "Tiếng Việt: cảm ơn bạn 😀\nDòng thứ hai."
+    },
+    "serialized": "{\"inputSchemaVersion\":1,\"input\":{\"type\":\"POST\",\"title\":\"Tiêu đề 😀\",\"content\":\"Tiếng Việt: cảm ơn bạn 😀\\nDòng thứ hai.\"}}",
+    "snapshotHash": "sha256:35ad464cc4c2c02d97c235a6aeeae5bba55f63ee4e994542223cf499366db65d"
+  }
+]

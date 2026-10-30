@@ -8,7 +8,7 @@ import { PrismaClient } from '../../src/generated/prisma/client';
 import { TRANSACTION_OPTIONS } from '../../src/prisma/prisma.service';
 
 /** Test-only schema: never deploy checkout migrations over an unrelated shared DB history. */
-export async function isolatedCaseDatabase() {
+export async function isolatedCaseDatabase(onQuery?: (query: string) => void) {
   const schema = `case_test_${randomUUID().replaceAll('-', '')}`;
   if (!/^case_test_[a-f0-9]{32}$/.test(schema))
     throw new Error('Invalid test schema');
@@ -37,6 +37,9 @@ export async function isolatedCaseDatabase() {
     .split(';')
     .filter(
       (statement) =>
+        !/moderation_analyses|ModerationAnalysisStatus|moderation_policy_evaluations|ModerationPolicy/.test(
+          statement,
+        ) &&
         !statement.includes(
           'CREATE INDEX "moderation_cases_lastReportedAt_id_idx"',
         ) &&
@@ -58,6 +61,20 @@ export async function isolatedCaseDatabase() {
     await admin.query(`CREATE SCHEMA "${schema}"`);
     await admin.query(`SET LOCAL search_path TO "${schema}", public`);
     await admin.query(ddl);
+    // Prisma's schema diff cannot express the Game deletion trigger/check.
+    // Reuse that migration's custom SQL after its schema-modeled FK changes.
+    const personalPostMigration = readFileSync(
+      resolve(
+        root,
+        'prisma/migrations/20261015050000_make_post_game_optional/migration.sql',
+      ),
+      'utf8',
+    );
+    await admin.query(
+      personalPostMigration
+        .slice(personalPostMigration.indexOf('CREATE FUNCTION'))
+        .replace(/COMMIT;\s*$/, ''),
+    );
     await admin.query(
       readFileSync(
         resolve(
@@ -81,7 +98,35 @@ export async function isolatedCaseDatabase() {
       readFileSync(
         resolve(
           root,
+          'prisma/migrations/20261021000000_moderation_analysis_requests/migration.sql',
+        ),
+        'utf8',
+      ),
+    );
+    await admin.query(
+      readFileSync(
+        resolve(
+          root,
           'prisma/migrations/20261021100000_case_review_fixes/migration.sql',
+        ),
+        'utf8',
+      ),
+    );
+    await admin.query(
+      readFileSync(
+        resolve(
+          root,
+          'prisma/migrations/20261022042915_moderation_analysis_results/migration.sql',
+        ),
+        'utf8',
+      ),
+    );
+    // Apply the real policy migration so custom CHECK constraints are tested too.
+    await admin.query(
+      readFileSync(
+        resolve(
+          root,
+          'prisma/migrations/20261028000000_add_moderation_policy_evaluations/migration.sql',
         ),
         'utf8',
       ),
@@ -102,7 +147,9 @@ export async function isolatedCaseDatabase() {
   const prisma = new PrismaClient({
     adapter: new PrismaPg({ connectionString: url.toString() }, { schema }),
     transactionOptions: TRANSACTION_OPTIONS,
+    log: [{ level: 'query', emit: 'event' }],
   });
+  if (onQuery) prisma.$on('query', (event) => onQuery(event.query));
   Object.assign(prisma, {
     onModuleInit: () => prisma.$connect(),
     onModuleDestroy: () => prisma.$disconnect(),

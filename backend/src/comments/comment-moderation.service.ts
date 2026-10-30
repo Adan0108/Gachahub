@@ -1,3 +1,5 @@
+import { Optional } from '@nestjs/common';
+import { EnforcementService } from '../moderation-enforcement/enforcement.service';
 import {
   BadRequestException,
   ConflictException,
@@ -12,7 +14,6 @@ import type { CommentAuditAction } from '../audit-log/audit-log.types';
 import { GameModeratorsService } from '../game-moderators/game-moderators.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { EconomyService } from '../economy/economy.service';
 import { CommentsRepository } from './comments.repository';
 import { resolvePagination, toPaginated } from '../common/utils/paginated';
 
@@ -36,7 +37,7 @@ export class CommentModerationService {
     private readonly gameModeratorsService: GameModeratorsService,
     private readonly auditLogService: AuditLogService,
     private readonly prisma: PrismaService,
-    private readonly economy: EconomyService,
+    @Optional() private readonly enforcement?: EnforcementService,
   ) {}
 
   async hideAsModerator(
@@ -123,6 +124,24 @@ export class CommentModerationService {
     auditAction: CommentAuditAction;
     rejectionMessage: string;
   }) {
+    if (this.enforcement) {
+      await this.enforcement.content(
+        params.moderatorId,
+        'COMMENT',
+        params.commentId,
+        params.to === 'HIDDEN',
+        params.to === 'HIDDEN'
+          ? 'Content hidden by moderator'
+          : 'Content restored by moderator',
+        params.gameSlug,
+      );
+      const comment = await this.commentsRepository.findByIdForModeration(
+        params.commentId,
+      );
+      if (!comment) throw new NotFoundException('Comment not found');
+      const { post, ...rest } = comment;
+      return { ...rest, postId: post.id };
+    }
     const {
       gameSlug,
       commentId,
@@ -190,12 +209,6 @@ export class CommentModerationService {
         },
         tx,
       );
-
-      if (to === CommentStatus.HIDDEN) {
-        await this.economy.revokeForContent(tx, 'COMMENT', commentId);
-      } else {
-        await this.economy.restoreForContent(tx, 'COMMENT', commentId);
-      }
 
       return result;
     });

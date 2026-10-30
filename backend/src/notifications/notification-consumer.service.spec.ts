@@ -126,7 +126,8 @@ describe('NotificationConsumerService', () => {
         .mockResolvedValue(undefined);
       const runSpy = jest.spyOn(consumer, 'run').mockResolvedValue(undefined);
 
-      await service.onModuleInit();
+      service.onModuleInit();
+      await service['startup'].waitForAttempt();
 
       expect(connectSpy).toHaveBeenCalledTimes(1);
       expect(subscribeSpy).toHaveBeenCalledWith({

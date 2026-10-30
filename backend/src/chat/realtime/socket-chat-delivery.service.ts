@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { SanctionAccessService } from '../../moderation-enforcement/sanction-access.service';
 import { userRoom } from '../../websocket/socket.util';
 import { SocketRegistry } from '../../websocket/socket-registry.service';
 import {
@@ -23,7 +24,10 @@ type ChatSocketEventName =
 // real ChatDeliveryPort now, was noop before, ChatService untouched either way
 @Injectable()
 export class SocketChatDeliveryService implements ChatDeliveryPort {
-  constructor(private readonly socketRegistry: SocketRegistry) {}
+  constructor(
+    private readonly socketRegistry: SocketRegistry,
+    @Optional() private readonly sanctions?: SanctionAccessService,
+  ) {}
 
   publishMessageCreated(event: ChatMessageCreatedEvent): Promise<void> {
     // recipientUserIds stay out, it leaks who else got this batch
@@ -103,17 +107,17 @@ export class SocketChatDeliveryService implements ChatDeliveryPort {
   }
 
   // offline recipient just doesnt get it, no queue no retry, REST covers that case
-  private emitToRecipients(
+  private async emitToRecipients(
     eventName: ChatSocketEventName,
     recipientUserIds: string[],
     payload: unknown,
   ): Promise<void> {
+    const blocked = await this.sanctions?.blockedReaders(recipientUserIds);
     for (const recipientUserId of recipientUserIds) {
+      if (blocked?.has(recipientUserId)) continue;
       this.socketRegistry.server
         ?.to(userRoom(recipientUserId))
         .emit(eventName, payload);
     }
-
-    return Promise.resolve(); // nothing to await, just satisfy the interface
   }
 }

@@ -1,3 +1,5 @@
+import { Optional } from '@nestjs/common';
+import { EnforcementService } from '../../moderation-enforcement/enforcement.service';
 import {
   BadRequestException,
   ConflictException,
@@ -12,7 +14,6 @@ import type { PostAuditAction } from '../../audit-log/audit-log.types';
 import { GameModeratorsService } from '../../game-moderators/game-moderators.service';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { PrismaService } from '../../prisma/prisma.service';
-import { EconomyService } from '../../economy/economy.service';
 import { formatPost } from '../post.mapper';
 import { PostsRepository } from '../posts.repository';
 import { resolvePagination, toPaginated } from '../../common/utils/paginated';
@@ -31,7 +32,7 @@ export class PostModerationService {
     private readonly gameModeratorsService: GameModeratorsService,
     private readonly auditLogService: AuditLogService,
     private readonly prisma: PrismaService,
-    private readonly economy: EconomyService,
+    @Optional() private readonly enforcement?: EnforcementService,
   ) {}
 
   async hideAsModerator(gameSlug: string, postId: string, moderatorId: string) {
@@ -132,6 +133,21 @@ export class PostModerationService {
     auditAction: PostAuditAction;
     rejectionMessage: string;
   }) {
+    if (this.enforcement) {
+      await this.enforcement.content(
+        params.moderatorId,
+        'POST',
+        params.postId,
+        params.to === 'HIDDEN',
+        params.to === 'HIDDEN'
+          ? 'Content hidden by moderator'
+          : 'Content restored by moderator',
+        params.gameSlug,
+      );
+      const post = await this.postsRepository.findById(params.postId);
+      if (!post) throw new NotFoundException('Post not found');
+      return formatPost(post);
+    }
     const {
       gameSlug,
       postId,
@@ -184,12 +200,6 @@ export class PostModerationService {
         },
         tx,
       );
-
-      if (to === PostStatus.HIDDEN) {
-        await this.economy.revokeForContent(tx, 'POST', postId);
-      } else {
-        await this.economy.restoreForContent(tx, 'POST', postId);
-      }
 
       return result;
     });

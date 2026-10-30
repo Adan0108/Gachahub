@@ -1,3 +1,4 @@
+import { AI_ADVISORY_DESCRIPTION } from '../domain/ai-advisory';
 import { AssignCaseDto } from '../dto/assign-case.dto';
 import { QueryCaseAssigneesDto } from '../dto/query-case-assignees.dto';
 import { ResolveModerationCaseDto } from '../dto/resolve-moderation-case.dto';
@@ -59,7 +60,7 @@ export class PlatformCaseModerationController {
   @ApiOperation({
     summary: 'List moderation cases. ADMIN / PLATFORM_MODERATOR only.',
     description:
-      'One row per ModerationCase; multiple user Reports are evidence inside that case. Native statuses: OPEN, IN_REVIEW, RESOLVED, DISMISSED. scope defaults to all; platform filters gameId=null (also deleted games); game requires gameSlug. Other scopes reject gameSlug. Omitted status includes all statuses. Ordered lastReportedAt DESC, id DESC; cursor pagination only; limit defaults 20 (max 100). Counts preserve historical complaints and distinct reporters; deleting a reporter keeps the evidence with a null reporter.',
+      'One row per ModerationCase; multiple user Reports are evidence inside that case. Native statuses: OPEN, IN_REVIEW, RESOLVED, DISMISSED. scope defaults to all; platform filters gameId=null (also deleted games); game requires gameSlug. Other scopes reject gameSlug. Omitted status defaults to active cases; view=history selects closed cases. Ordered lastReportedAt DESC, id DESC; cursor pagination only; limit defaults 20 (max 100). Counts preserve historical complaints and distinct reporters; deleting a reporter keeps the evidence with a null reporter.',
   })
   @ApiQuery({
     name: 'limit',
@@ -68,7 +69,8 @@ export class PlatformCaseModerationController {
   })
   @ApiOkResponse({
     description:
-      'items: case id, targetType, targetId, gameId/game, native status, reportCount, uniqueReporterCount, currentRiskScore/currentRiskLevel, assignedModeratorId/assignedModerator, resolvedById/resolvedBy, resolvedAt, createdAt, updatedAt, lastReportedAt. Assigned moderator summaries also include username/role; other user summaries contain id/name/image; game contains id/name/slug. No reports, snapshot, full target body or resolutionNote. Response is {items,nextCursor}; nextCursor is null at the end. Lightweight targetPreview is {title (max 160), excerpt (max 240), thumbnailUrl (one image), author {id,name,username,image}} or null; targetState is available/deleted/missing. reasonSummary is [{reasonCode,count}], grouped from surviving evidence, count DESC then reasonCode ASC (at most 10 enum reasons). No reports[] or full content/media/storage fields. Cursor encodes the exclusive {lastReportedAt,id} boundary. Stable lastReportedAt DESC,id DESC; evidence remains in detail.',
+      'items: case id, targetType, targetId, gameId/game, native status, reportCount, uniqueReporterCount, currentRiskScore/currentRiskLevel, assignedModeratorId/assignedModerator, resolvedById/resolvedBy, resolvedAt, createdAt, updatedAt, lastReportedAt. Assigned moderator summaries also include username/role; other user summaries contain id/name/image; game contains id/name/slug. No reports, snapshot, full target body or resolutionNote. Response is {items,nextCursor}; nextCursor is null at the end. Lightweight targetPreview is {title (max 160), excerpt (max 240), thumbnailUrl (one image), author {id,name,username,image}} or null; targetState is available/deleted/missing. reasonSummary is [{reasonCode,count}], grouped from surviving evidence, count DESC then reasonCode ASC (at most 10 enum reasons). No reports[] or full content/media/storage fields. Cursor encodes the exclusive {lastReportedAt,id} boundary. Stable lastReportedAt DESC,id DESC; evidence remains in detail.' +
+      AI_ADVISORY_DESCRIPTION,
   })
   @ApiNotFoundResponse({ description: 'Unknown gameSlug.' })
   list(@Session() session: UserSession, @Query() query: QueryPlatformCasesDto) {
@@ -91,7 +93,8 @@ export class PlatformCaseModerationController {
   })
   @ApiOkResponse({
     description:
-      'Case detail plus aggregate reasonSummary and target (explicit POST/COMMENT projection), targetState, and evidence { items, nextCursor }. Evidence items: id, reporter {id,name,image}, reasonCode, details, createdAt, snapshot|null. Snapshot version 1 allowlists targetType/targetId, authorId, content, title, status, visibility, postId, parentId and up to 20 media entries (url/mediaType/altText). Unknown/malformed snapshots are null. Raw targetSnapshot JSON and storage identifiers are excluded. Follow nextCursor using GET /moderation/cases/:caseId/reports.',
+      'Case detail plus aggregate reasonSummary and target (explicit POST/COMMENT projection), targetState, and evidence { items, nextCursor }. Evidence items: id, reporter {id,name,image}, reasonCode, details, createdAt, snapshot|null. Snapshot version 1 allowlists targetType/targetId, authorId, content, title, status, visibility, postId, parentId and up to 20 media entries (url/mediaType/altText). Unknown/malformed snapshots are null. Raw targetSnapshot JSON and storage identifiers are excluded. Follow nextCursor using GET /moderation/cases/:caseId/reports.' +
+      AI_ADVISORY_DESCRIPTION,
   })
   @ApiNotFoundResponse({
     description:

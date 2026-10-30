@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AiAdvisory } from "./AiAdvisory";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useModerationAccess } from "../../hooks/admin/useModerationAccess";
@@ -182,6 +183,7 @@ function ScopedCaseQueue({
                   <tr key={item.id}>
                     <td data-label="Content">
                       <ContentPreview item={item} />
+                      <AiAdvisory value={item.aiAdvisory} compact />
                     </td>
                     <td data-label="Why reported">
                       <ReasonSummary reasons={item.reasonSummary} compact />
@@ -202,11 +204,6 @@ function ScopedCaseQueue({
                       {item.assignedModerator?.name || "Unassigned"}
                       {item.assignedModerator && (
                         <small>{moderatorRoleLabel(item.assignedModerator, item.game)}</small>
-                      )}
-                      {item.currentRiskLevel && (
-                        <small className="case-risk">
-                          Risk: {item.currentRiskLevel.toLowerCase()}
-                        </small>
                       )}
                     </td>
                     <td data-label="Last reported">

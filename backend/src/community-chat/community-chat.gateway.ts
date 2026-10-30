@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, UseInterceptors } from '@nestjs/common';
+import { SanctionInterceptor } from '../moderation-enforcement/sanction.interceptor';
 import {
   ConnectedSocket,
   MessageBody,
@@ -17,6 +18,7 @@ interface RoomPayload {
 
 /** Lets a member's socket listen to a room; the same access check as reading it. */
 @Injectable()
+@UseInterceptors(SanctionInterceptor)
 @WebSocketGateway(websocketGatewayOptions)
 export class CommunityChatGateway {
   private readonly logger = new Logger(CommunityChatGateway.name);

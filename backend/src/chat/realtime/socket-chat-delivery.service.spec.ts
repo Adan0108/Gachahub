@@ -55,6 +55,21 @@ describe('SocketChatDeliveryService', () => {
     expect(emit).toHaveBeenCalledTimes(2);
   });
 
+  it('withholds chat payloads from existing sockets under a full platform restriction', async () => {
+    const emit = jest.fn();
+    const to = jest.fn().mockReturnValue({ emit });
+    registry.server = { to } as unknown as Server;
+    const sanctions = {
+      blockedReaders: jest.fn().mockResolvedValue(new Set(['user-2'])),
+    };
+    service = new SocketChatDeliveryService(registry, sanctions as never);
+    await service.publishMessageCreated(event);
+    expect(sanctions.blockedReaders).toHaveBeenCalledWith(['user-2', 'user-3']);
+    expect(to).not.toHaveBeenCalledWith('user:user-2');
+    expect(to).toHaveBeenCalledWith('user:user-3');
+    expect(emit).toHaveBeenCalledTimes(1);
+  });
+
   it('still emits when shouldNotify is false, muting only gates the client-side badge', async () => {
     const emit = jest.fn();
     const to = jest.fn().mockReturnValue({ emit });
