@@ -122,6 +122,25 @@ describe('formatActivityEntries', () => {
 
     expect(result.targetName).toBeNull();
   });
+  it('preserves cosmetic audit identity without inventing a display name', () => {
+    const [result] = formatActivityEntries(
+      [
+        entry({
+          targetType: 'COSMETIC',
+          action: 'COSMETIC_GRANTED',
+          targetId: 'cosmetic-1',
+        }),
+      ],
+      new Map(),
+    );
+
+    expect(result).toMatchObject({
+      targetType: 'COSMETIC',
+      action: 'COSMETIC_GRANTED',
+      targetId: 'cosmetic-1',
+      targetName: null,
+    });
+  });
   it('renders native case audit target metadata without a Report lookup', () => {
     const result = formatActivityEntries(
       [

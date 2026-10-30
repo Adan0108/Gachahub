@@ -81,6 +81,9 @@ function resolveTargetName(
     case AuditTargetType.CHAT_MESSAGE:
       // A message has no title of its own; the room it was in is the useful context.
       return null;
+    case AuditTargetType.COSMETIC:
+      // Cosmetic audit metadata has no established name snapshot; retain the ID fallback.
+      return null;
     default: {
       const exhaustiveCheck: never = entry.targetType;
       return exhaustiveCheck;
