@@ -24,10 +24,12 @@ import Image from "next/image";
 import { ReasonSummary, reasonLabel } from "./CaseSummary";
 import { ModeratorPicker } from "./ModeratorPicker";
 import type { ModeratorCandidate } from "./ModeratorPicker";
+import { AiAdvisory } from "./AiAdvisory";
+import type { AiAdvisory as AiAdvisoryPayload } from "../../lib/ai-advisory";
 import { AvatarFace } from "../AvatarFace";
 
-// Case payloads come straight from the moderation API, which is untyped.
-type CaseItem = any;
+// The remaining case payload is untyped in the existing moderation API client.
+type CaseItem = Record<string, any> & { aiAdvisory?: AiAdvisoryPayload | null };
 type CaseAction = "claim" | "assign" | "resolve" | "dismiss";
 type CaseActionInput = { action: CaseAction; resolutionNote?: string; assigneeId?: string };
 type RecordProps = { item: CaseItem; gameSlug: string; actorId?: string; actorRole?: string | null };
@@ -201,6 +203,7 @@ function CaseRecord({ item, gameSlug, actorId, actorRole }: RecordProps) {
                 <h2 id="case-reasons-title">Why users reported this</h2>
                 <ReasonSummary reasons={item.reasonSummary} />
               </section>
+              <AiAdvisory value={item.aiAdvisory} />
               <CaseEvidence
                 key={`${item.id}:${item.evidence?.nextCursor || "end"}`}
                 actorId={actorId}
@@ -238,15 +241,6 @@ function CaseRecord({ item, gameSlug, actorId, actorRole }: RecordProps) {
                     </small>
                   )}
                 </dd>
-                {(item.currentRiskLevel || item.currentRiskScore != null) && (
-                  <>
-                    <dt>Risk</dt>
-                    <dd>
-                      {item.currentRiskLevel?.toLowerCase()}
-                      {item.currentRiskScore != null && ` (${item.currentRiskScore})`}
-                    </dd>
-                  </>
-                )}
               </dl>
               <h3>Decision</h3>
               <dl className="case-facts">
