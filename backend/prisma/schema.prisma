@@ -44,6 +44,10 @@ model User {
   comments     Comment[]
   interests    UserInterest[]
   postSaves    PostSave[]
+  commentLikes CommentLike[]
+  wallet       UserWallet?
+  ledgerEntries LedgerEntry[]
+  dailyEarnings DailyEarning[]
 
   followers            UserFollow[]           @relation("UserFollowers")
   following            UserFollow[]           @relation("UserFollowing")
@@ -1035,6 +1039,8 @@ model Comment {
 
   content String
   status  CommentStatus @default(PUBLISHED)
+  /// Cached count of CommentLike rows, kept in step by the like/unlike transaction.
+  likeCount Int @default(0)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1045,6 +1051,7 @@ model Comment {
 
   parent  Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies Comment[] @relation("CommentReplies")
+  likes   CommentLike[]
 
   @@index([postId, createdAt])
   @@index([authorId])
@@ -1212,6 +1219,7 @@ enum AuditAction {
   CHAT_CHANNEL_CREATED
   CHAT_CHANNEL_UPDATED
   CHAT_MESSAGE_REMOVED
+  WALLET_ADJUSTED
 }
 
 enum AuditTargetType {
@@ -1622,4 +1630,151 @@ model ModerationPolicyEvaluation {
   @@index([analysisId])
   // SQL migration additionally enforces output/status consistency and value bounds.
   @@map("moderation_policy_evaluations")
+}
+
+model CommentLike {
+  commentId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([commentId, userId])
+  @@index([userId, createdAt])
+  @@map("comment_likes")
+}
+
+// Economy: see docs/plans/economy-and-cosmetics.md. Balances are a cache of the ledger; every change writes a LedgerEntry in the same transaction.
+
+enum Currency {
+  REPUTATION
+  SHARDS
+  PRISMS
+}
+
+enum ReputationRank {
+  STARGAZER
+  METEOR
+  COMET
+  NOVA
+  SUPERNOVA
+  GALAXY
+}
+
+enum LedgerReason {
+  DAILY_CHECKIN
+  LIKE_RECEIVED
+  COMMENT_RECEIVED
+  LIKE_MILESTONE
+  COMMENT_WRITTEN
+  REVOKED
+  RESTORED
+  ADMIN_ADJUST
+}
+
+enum EconomySource {
+  POST
+  COMMENT
+}
+
+enum InteractionKind {
+  LIKE
+  COMMENT
+}
+
+/// Why an award was taken back: its post/comment was hidden, or the person who gave it was banned.
+enum RevokeCause {
+  CONTENT
+  ACTOR
+}
+
+model UserWallet {
+  userId        String         @id
+  reputation    Int            @default(0)
+  shards        Int            @default(0)
+  prisms        Int            @default(0)
+  /// Reputation from awards in the last 90 days that are not revoked; decides the rank.
+  reputation90d Int            @default(0)
+  rank          ReputationRank @default(STARGAZER)
+  rankUpdatedAt DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([reputation90d])
+  @@map("user_wallets")
+}
+
+model LedgerEntry {
+  id             String         @id @default(cuid())
+  userId         String
+  currency       Currency
+  delta          Int
+  balanceAfter   Int
+  reason         LedgerReason
+  sourceType     EconomySource?
+  sourceId       String?
+  /// The person whose like/comment caused the award (not a foreign key: it must survive their account).
+  actorId        String?
+  /// REVOKED/RESTORED rows: the award they undo or redo.
+  awardId        String?
+  /// Award rows only: set while the award is taken back.
+  revokedAt      DateTime?
+  revokedCause   RevokeCause?
+  /// What the revoke actually took; less than delta when the balance was lower. RESTORED gives exactly this back.
+  revokedAmount  Int?
+  idempotencyKey String         @unique
+  metadata       Json?
+  createdAt      DateTime       @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, currency, createdAt])
+  @@index([actorId])
+  @@index([sourceType, sourceId])
+  @@map("ledger_entries")
+}
+
+/// One row per user per economy day (UTC+7): what they earned today, for caps and the reputation steps.
+model DailyEarning {
+  userId          String
+  day             DateTime @db.Date
+  baseShards      Int      @default(0)
+  creditedShards  Int      @default(0)
+  likesCounted    Int      @default(0)
+  commentsCounted Int      @default(0)
+  repFromLikes    Int      @default(0)
+  repFromComments Int      @default(0)
+  commentsWritten Int      @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, day])
+  @@map("daily_earnings")
+}
+
+/// Reputation one person gave one author on one day; capped so a few accounts can't pump someone.
+model DailyGiverReputation {
+  ownerId    String
+  giverId    String
+  day        DateTime @db.Date
+  reputation Int      @default(0)
+
+  @@id([ownerId, giverId, day])
+  @@map("daily_giver_reputation")
+}
+
+/// A like or comment that counted for the economy, once per person per target ever. Milestones count these.
+model CountedInteraction {
+  kind       InteractionKind
+  targetType EconomySource
+  targetId   String
+  actorId    String
+  ownerId    String
+  createdAt  DateTime        @default(now())
+
+  @@id([kind, targetType, targetId, actorId])
+  @@index([kind, targetType, targetId])
+  @@map("counted_interactions")
 }
