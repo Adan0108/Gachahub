@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import UserProfilePage from "../app/user/[id]/page";
 import { ProfileView } from "../components/profile/ProfileView";
-import { compactCount, joinedLabel, profileToShow } from "../lib/profile/profileView";
+import { accountAge, compactCount, joinedLabel, profileToShow } from "../lib/profile/profileView";
 
 const mocks = vi.hoisted(() => ({
   // Swapped per test, signed out included.
@@ -92,6 +92,14 @@ describe("profile helpers", () => {
     expect(compactCount(undefined, "en")).toBe("0");
     expect(joinedLabel("2026-03-05T00:00:00.000Z", "en")).toBe("Joined March 2026");
     expect(joinedLabel("nonsense")).toBe("");
+  });
+
+  it("says how old an account is in its largest whole unit", () => {
+    const now = Date.parse("2026-10-28T00:00:00.000Z");
+    expect(accountAge("2026-10-27T00:00:00.000Z", now)).toBe("1 day");
+    expect(accountAge("2026-08-01T00:00:00.000Z", now)).toBe("2 months");
+    expect(accountAge("2024-10-01T00:00:00.000Z", now)).toBe("2 years");
+    expect(accountAge("nonsense", now)).toBe("");
   });
 });
 

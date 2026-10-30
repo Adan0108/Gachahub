@@ -41,6 +41,15 @@ export function joinedLabel(createdAt: string | undefined, locale?: string) {
   return `Joined ${new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(date)}`;
 }
 
+/** How long ago the account was made, in the largest whole unit: "3 days", "5 months", "2 years". */
+export function accountAge(createdAt: string | undefined, now = Date.now()): string {
+  const made = Date.parse(createdAt ?? "");
+  if (Number.isNaN(made)) return "";
+  const days = Math.max(0, Math.floor((now - made) / 86_400_000));
+  const [count, unit] = days >= 365 ? [Math.floor(days / 365), "year"] : days >= 30 ? [Math.floor(days / 30), "month"] : [days, "day"];
+  return `${count} ${unit}${count === 1 ? "" : "s"}`;
+}
+
 /** 1,240 -> "1.2K", for the counts under a name. */
 export function compactCount(value: number | undefined, locale?: string) {
   return new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(

@@ -4406,6 +4406,11 @@
   }
 }
 
+/* Same side padding as the feed, so the full-width picture (margin -16px) lines up with the card edge everywhere. */
+.post.post-feed-card {
+  padding-inline: 16px;
+}
+
 .post.post-feed-card .post-content-link {
   grid-column: 2;
   grid-row: 1;

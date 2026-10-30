@@ -200,3 +200,402 @@
 .post-comment-author a:hover b {
   text-decoration: underline;
 }
+
+/* Profile page: a cover with the avatar sitting on its bottom edge, then posts beside a details column. */
+.profile-v2 {
+  display: grid;
+  gap: 16px;
+}
+
+/* The header card and the columns under it sit in one wrapper, so the page gap does not reach them. */
+.profile-v2-body {
+  display: grid;
+  gap: 16px;
+}
+
+.profile-card {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+}
+
+.profile-cover {
+  position: relative;
+  display: grid;
+  height: 170px;
+  background: var(--panel2);
+}
+
+.profile-cover > .art {
+  height: 100%;
+}
+
+.profile-cover-actions {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-cover-actions .profile-icon-button {
+  width: 34px;
+  height: 34px;
+  background: color-mix(in srgb, var(--panel), transparent 15%);
+}
+
+.profile-cover-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 7px 12px;
+  background: color-mix(in srgb, var(--panel), transparent 15%);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.profile-cover-edit:hover {
+  border-color: var(--purple);
+}
+
+.profile-identity-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 32px;
+  padding: 0 24px 20px;
+}
+
+.profile-identity {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Half on the cover, half on the card below; raised so the cover does not paint over it. */
+.profile-card-avatar {
+  position: relative;
+  z-index: 1;
+  width: 112px;
+  height: 112px;
+  margin-top: -56px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  border: 4px solid var(--panel);
+  border-radius: 50%;
+  background: var(--panel2);
+}
+
+.profile-card-avatar > .art {
+  width: 100%;
+  height: 100%;
+  font-size: 40px;
+}
+
+.profile-identity h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.profile-identity h1 + .profile-handle {
+  margin-top: -3px;
+}
+
+.profile-identity .profile-handle,
+.profile-identity .follows-you {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.profile-card-bio {
+  max-width: 60ch;
+  margin: 6px 0 0;
+  color: var(--muted-strong);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.profile-v2 .profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.profile-icon-button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.profile-icon-button:hover {
+  border-color: var(--purple);
+}
+
+.profile-card-stats {
+  display: flex;
+  gap: 28px;
+}
+
+.profile-card-stats > div,
+.profile-card-stats > button {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text);
+}
+
+.profile-card-stats > button {
+  cursor: pointer;
+}
+
+.profile-card-stats > button:hover span {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.profile-card-stats b {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.profile-card-stats span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Posts line up with the tabs above them, not the old inset. */
+.profile-v2 .profile-posts {
+  padding: 0;
+}
+
+.profile-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  align-items: start;
+  gap: 16px;
+}
+
+.profile-main-column {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.profile-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 6px;
+  background: var(--panel);
+}
+
+.profile-tabs button {
+  position: relative;
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 14px;
+  background: none;
+  color: var(--muted);
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.profile-tabs button.active {
+  background: color-mix(in srgb, var(--purple), transparent 82%);
+  color: var(--text);
+}
+
+.profile-soon-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  vertical-align: middle;
+}
+
+.profile-empty,
+.profile-about-panel {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 36px 20px;
+  background: var(--panel);
+  color: var(--muted);
+  text-align: center;
+}
+
+.profile-empty b {
+  color: var(--text);
+}
+
+.profile-empty svg {
+  font-size: 24px;
+}
+
+.profile-about-panel {
+  justify-items: start;
+  padding: 20px;
+  text-align: left;
+}
+
+.profile-about-panel p {
+  margin: 0;
+  color: var(--muted-strong);
+  white-space: pre-wrap;
+}
+
+.profile-side {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-side-card {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+.profile-soon-card {
+  cursor: pointer;
+}
+
+.profile-soon-card:hover {
+  border-color: color-mix(in srgb, var(--purple), var(--line) 40%);
+}
+
+.profile-side-card h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 15px;
+}
+
+.profile-soon-tag {
+  margin-left: auto;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--panel2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.profile-facts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.profile-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profile-facts dt {
+  color: var(--muted);
+}
+
+.profile-facts dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Made-up values: dashed and dimmed, so nobody reads them as real numbers. */
+.profile-placeholder {
+  color: var(--muted);
+  letter-spacing: 0.08em;
+}
+
+.profile-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.profile-chips .profile-placeholder {
+  border: 1px dashed var(--line);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.profile-badges {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.profile-badges li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .profile-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .profile-cover {
+    height: 120px;
+  }
+
+  .profile-identity-row {
+    padding: 0 16px 16px;
+  }
+
+  .profile-card-avatar {
+    width: 88px;
+    height: 88px;
+    margin-top: -44px;
+  }
+
+  .profile-card-stats {
+    width: 100%;
+    justify-content: space-around;
+  }
+}
