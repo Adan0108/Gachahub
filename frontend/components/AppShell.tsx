@@ -12,6 +12,7 @@ import { mustOnboard } from "../lib/username";
 import { useDeviceIdentity } from "../hooks/chat/useDeviceIdentity";
 import { useAppSocket } from "../hooks/useAppSocket";
 import { useChatSocket } from "../hooks/chat/useChatSocket";
+import { useWaitingChats } from "../hooks/chat/useWaitingChats";
 import { useNotificationSocket } from "../hooks/useNotificationSocket";
 import { usePresenceSocket } from "../hooks/presence/usePresenceSocket";
 import { BrandMark } from "./BrandMark";
@@ -39,6 +40,7 @@ function Sidebar({
   closeButtonRef: Ref<HTMLButtonElement>;
 }) {
   const pathname = usePathname();
+  const waitingChats = useWaitingChats();
 
   return (
     <>
@@ -59,17 +61,19 @@ function Sidebar({
             const active = exact
               ? pathname === href
               : pathname === href || pathname.startsWith(match || href);
+            const hasWaiting = href === "/chat" && waitingChats > 0;
             return (
               <Link
                 aria-current={active ? "page" : undefined}
                 key={href}
                 href={href}
                 onClick={close}
-                className={active ? "active" : ""}
+                className={`${active ? "active" : ""} ${hasWaiting ? "has-waiting" : ""}`.trim()}
               >
                 {active && <span className="sr-only">Current page:</span>}
                 <Icon />
                 <span>{label}</span>
+                {hasWaiting && <span className="sr-only">, unread chats waiting</span>}
               </Link>
             );
           })}
@@ -146,7 +150,9 @@ export function AppShell({
       document.body.style.overflow = "hidden";
       menuCloseButtonRef.current?.focus();
       const closeOnEscape = (event: KeyboardEvent) => {
-        if (event.key === "Escape") setMenu(false);
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        setMenu(false);
       };
       window.addEventListener("keydown", closeOnEscape);
       return () => {

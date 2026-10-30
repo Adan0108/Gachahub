@@ -642,10 +642,25 @@
   font-size: 18px;
 }
 
+.notification-list .notification-row > div {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.notification-list b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .notification-list small {
+  display: -webkit-box;
   margin-top: 4px;
+  overflow: hidden;
   color: var(--muted);
   line-height: 1.45;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .notification-list time {
@@ -1624,6 +1639,35 @@
   font-size: 15px;
 }
 
+.chat-icon-button {
+  position: relative;
+}
+
+/* Messages with something waiting: a red dot where the active page's dot sits, replacing it. */
+.side-nav a.has-waiting:after,
+.side-nav a.active.has-waiting:after {
+  content: "";
+  flex: none;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: #ef4444 !important;
+  box-shadow: none;
+}
+
+/* A small red dot: on the corner of a button, or beside a menu item with .inline. */
+.chat-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+}
+
 .chat-icon-button:hover {
   border-color: var(--purple);
   color: var(--text);
@@ -2069,6 +2113,12 @@
   background: color-mix(in srgb, var(--purple), transparent 88%);
 }
 
+/* A key press after clicking a row (Escape, say) shows focus: a purple border like the row's own, not the browser's white box. */
+.chat-conversation-open:focus-visible {
+  outline: none;
+  border-color: var(--purple);
+}
+
 /* The three-dot button takes the place of the unread count and mute icon while the row is hovered or focused. */
 .chat-row-more {
   position: absolute;
@@ -2168,6 +2218,12 @@
   min-width: 0;
 }
 
+.chat-conversation-open > span:nth-child(2) > b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-conversation-list .chat-list-preview {
   min-width: 0;
   font-size: 12.5px;
@@ -2201,18 +2257,23 @@
   background: currentColor;
 }
 
-.chat-sidebar-search-hint {
-  margin: 6px 16px 0;
-  color: var(--muted);
-  font-size: 11px;
-}
-
 .chat-search-results.stale {
   opacity: 0.5;
 }
 
 .chat-search-more {
   margin: 8px 16px 0;
+}
+
+.chat-load-older-conversations {
+  justify-self: center;
+  margin: 8px 16px;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--chat-radius);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
 }
 
 .chat-search-more button {
@@ -3067,6 +3128,68 @@
   font-size: 11px;
 }
 
+/* Above the first message you had not read when the chat opened. */
+.chat-new-line {
+  position: relative;
+  align-self: stretch;
+  flex: none;
+  margin: 8px 0;
+  border-top: 1px solid var(--danger, #e5484d);
+}
+
+.chat-new-line span {
+  position: absolute;
+  top: -8px;
+  right: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--danger, #e5484d);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.chat-unread-bar {
+  position: absolute;
+  top: 0;
+  right: 12px;
+  left: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 0 0 8px 8px;
+  background: var(--purple);
+  box-shadow: 0 6px 18px #00000040;
+}
+
+.chat-unread-bar button {
+  border: 0;
+  padding: 6px 12px;
+  background: transparent;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chat-unread-bar-jump {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-unread-bar button:hover,
+.chat-unread-bar button:focus-visible {
+  text-decoration: underline;
+}
+
 .chat-message-time-wrap {
   position: relative;
   display: flex;
@@ -3143,6 +3266,14 @@
 
 .chat-message.mine p {
   color: rgba(255, 255, 255, 0.92);
+}
+
+/* Purple disappears on the blue bubble */
+.chat-message.mine .mention {
+  padding: 0 3px;
+  color: #fff;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .chat-message.mine small {
@@ -3907,6 +4038,8 @@
 }
 
 .chat-composer {
+  /* the @ suggestion list opens above it */
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -4732,6 +4865,21 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.chat-info-name {
+  max-width: 100%;
+  justify-content: center;
+}
+
+.chat-info-name b {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  text-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .chat-info-name button,

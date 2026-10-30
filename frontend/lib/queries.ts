@@ -9,6 +9,8 @@ function asItemsList(data: any) {
   const items = Array.isArray(data) ? data : data?.items || [];
   return { items, meta: { total: items.length } };
 }
+// Unpinned conversations per inbox page; every pinned one comes with the first.
+export const INBOX_PAGE_SIZE = 50;
 export const queryKeys = {
   health: ["health"],
   home: (search: any) => ["home", { search }],
@@ -31,6 +33,8 @@ export const queryKeys = {
   },
   moderatedGames: ["moderated-games"],
   currentUser: ["current-user"],
+  wallet: ["wallet"],
+  walletLedger: ["wallet", "ledger"],
   bannerOptions: ["profile-banner-options"],
   myPosts: ["posts", "mine"],
   posts: (search: any) => ["posts", { search }],
@@ -158,6 +162,16 @@ export const queries = {
     retry: false,
     staleTime: 30000,
   }),
+  wallet: () => ({
+    queryKey: queryKeys.wallet,
+    queryFn: ({ signal }: any) => api.getWallet({ signal }),
+    staleTime: 15000,
+  }),
+  walletLedger: () => ({
+    queryKey: queryKeys.walletLedger,
+    queryFn: ({ signal }: any) => api.getWalletLedger({ signal }),
+    staleTime: 15000,
+  }),
   bannerOptions: () => ({
     queryKey: queryKeys.bannerOptions,
     queryFn: ({ signal }: any) => api.getBannerOptions({ signal }),
@@ -279,7 +293,7 @@ export const queries = {
   // retry/queue if a socket was briefly disconnected.
   chatConversations: () => ({
     queryKey: queryKeys.chatConversations,
-    queryFn: api.getChatConversations,
+    queryFn: () => api.getChatConversations({ limit: INBOX_PAGE_SIZE }),
     retry: 1,
     staleTime: 10000,
     refetchInterval: 15000,
@@ -308,11 +322,32 @@ export const queries = {
     retry: 1,
     staleTime: 15_000,
   }),
+  // The inbox past its first page. Keyed by where it starts, so a first page that moved never
+  // leaves a gap; under chatConversations, so anything that refreshes the inbox refreshes these too.
+  chatOlderConversations: (start: { updatedAt: string; id: string } | null) => ({
+    queryKey: [...queryKeys.chatConversations, "older", start?.id ?? null],
+    queryFn: ({ pageParam }: any) =>
+      api.getChatConversations({
+        limit: INBOX_PAGE_SIZE,
+        beforeUpdatedAt: pageParam.updatedAt,
+        beforeId: pageParam.id,
+      }),
+    initialPageParam: start as { updatedAt: string; id: string },
+    getNextPageParam: (lastPage: any[]) => {
+      const last = lastPage.at(-1);
+      return lastPage.length >= INBOX_PAGE_SIZE && last
+        ? { updatedAt: last.updatedAt, id: last.id }
+        : undefined;
+    },
+    retry: 1,
+    staleTime: 10000,
+  }),
   chatArchivedConversations: () => ({
     queryKey: queryKeys.chatArchivedConversations,
     queryFn: api.getArchivedChatConversations,
     retry: 1,
     staleTime: 10000,
+    refetchInterval: 15000,
   }),
   chatRequests: () => ({
     queryKey: queryKeys.chatRequests,

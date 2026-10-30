@@ -8,7 +8,7 @@ import type {
 } from '../contract/types';
 
 /** A membership change this device verified itself, kept to show in the thread. */
-export type MembershipEventKind = 'joined' | 'left' | 'device-added';
+export type MembershipEventKind = 'joined' | 'left';
 
 export interface MembershipEvent {
   /** Stable per commit and person, so re-applying the same commit never duplicates it. */
@@ -40,7 +40,7 @@ function groupByUser(devices: DeviceIdentity[]): Map<UserId, DeviceIdentity[]> {
   return byUser;
 }
 
-/** What a verified commit means for people: a first device is a join, a last device gone is a leave, and any further device of someone already in is a new sign-in */
+/** What a verified commit means for people: a first device is a join, a last device gone is a leave. Another device of someone already in is no news to the chat. */
 export function deriveMembershipEvents(input: DeriveInput): MembershipEvent[] {
   const { conversationId, epoch, at, change, leavesAfter, ownDeviceId } = input;
   if (!leavesAfter) return [];
@@ -65,7 +65,6 @@ export function deriveMembershipEvents(input: DeriveInput): MembershipEvent[] {
     const before = devicesAfter(userId) - devices.length + (removed.get(userId)?.length ?? 0);
     const others = devices.filter((device) => device.deviceId !== ownDeviceId);
     if (before === 0 && others[0]) events.push(event('joined', others[0]));
-    else if (before > 0) events.push(...others.map((device) => event('device-added', device)));
   }
   for (const [userId, devices] of removed) {
     if (devicesAfter(userId) === 0) events.push(event('left', devices[0]!));

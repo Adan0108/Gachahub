@@ -7,6 +7,8 @@ export const COMMUNITY_MAX_IMAGES = 4;
 export const COMMUNITY_COUNTER_FROM_CHARS = 1800;
 /** Same window as the server: authors can edit for this long. */
 export const COMMUNITY_EDIT_WINDOW_MS = 15 * 60 * 1000;
+// Mirrors CommunityChatRateLimiterService: 5 messages per 5 s per room; moderators are exempt.
+export const COMMUNITY_SEND_LIMIT = 5;
 /** Messages by one person closer together than this share one name and picture. */
 export const COMMUNITY_GROUP_WINDOW_MS = 5 * 60 * 1000;
 

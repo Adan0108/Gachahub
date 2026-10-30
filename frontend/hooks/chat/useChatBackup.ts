@@ -9,10 +9,12 @@ import { backupHoldsKeyKey, backupStatusKey } from '../../lib/backup/backupQuery
 import type { RestoreProgress, RestoreResult } from '../../lib/backup/backupRestore';
 import {
   cancelBackupDeletion,
+  isRestorePending,
   disableBackup,
   enableBackup,
   onBackupDisabledElsewhere,
   resumeBackup,
+  resumeRestore,
   restoreOnThisDevice,
   scheduleBackupDeletion,
   type BackupStatus,
@@ -51,7 +53,17 @@ export function useChatBackup(userId: string | undefined) {
     gcTime: Infinity,
     retry: false,
   });
-  const refresh = () => queryClient.invalidateQueries({ queryKey: statusKey });
+  // True while a restore on this device was started but never finished, even though it now holds the key.
+  const restorePending = useQuery({
+    queryKey: [...holdsKeyKey, 'restorePending'],
+    queryFn: isRestorePending,
+    enabled: Boolean(userId),
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+  // Exact: the key check sits under the status key, and re-running it against the status from before
+  // a change would read "backup off" and wipe the key this browser holds.
+  const refresh = () => queryClient.invalidateQueries({ queryKey: statusKey, exact: true });
 
   const [disabledElsewhere, setDisabledElsewhere] = useState(false);
   useEffect(
@@ -59,7 +71,7 @@ export function useChatBackup(userId: string | undefined) {
       onBackupDisabledElsewhere(() => {
         setDisabledElsewhere(true);
         queryClient.removeQueries({ queryKey: backupHoldsKeyKey(userId) });
-        void queryClient.invalidateQueries({ queryKey: backupStatusKey(userId) });
+        void queryClient.invalidateQueries({ queryKey: backupStatusKey(userId), exact: true });
       }),
     [queryClient, userId],
   );
@@ -93,11 +105,12 @@ export function useChatBackup(userId: string | undefined) {
       if (!pendingKey || !userId) throw new Error('No recovery key to save');
       await enableBackup(userId, pendingKey.raw);
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       setDisabledElsewhere(false);
       replacePending(null);
+      // Status first, for the same reason as `refresh`.
+      await refresh();
       queryClient.removeQueries({ queryKey: holdsKeyKey });
-      return refresh();
     },
     // Most likely another device turned it on first; the fresh status says so.
     onError: refresh,
@@ -132,17 +145,16 @@ export function useChatBackup(userId: string | undefined) {
 
   const [restoreState, setRestoreState] = useState<RestoreState>({ status: 'idle' });
 
-  const restore = useCallback(
-    async (recoveryKeyText: string) => {
-      if (!userId || !status.data) return;
-      let rawKey: Uint8Array | undefined;
+  // Shared by a first restore and a resume: progress, outcome and the follow-up refresh.
+  const runRestoreFlow = useCallback(
+    async (start: (options: Parameters<typeof resumeRestore>[1]) => Promise<RestoreResult | 'wrong-key'>) => {
+      if (!userId) return;
       try {
-        rawKey = await parseRecoveryKey(recoveryKeyText);
         const controller = new AbortController();
         abortRef.current = controller;
         const empty = { processed: 0, restored: 0, skipped: 0, failed: 0 };
         setRestoreState({ status: 'running', progress: empty });
-        const outcome = await restoreOnThisDevice(userId, rawKey, status.data, {
+        const outcome = await start({
           signal: controller.signal,
           onProgress: (progress) => setRestoreState({ status: 'running', progress }),
         });
@@ -152,8 +164,8 @@ export function useChatBackup(userId: string | undefined) {
         }
         setRestoreState({ status: 'done', result: outcome });
         setDisabledElsewhere(false);
+        await queryClient.invalidateQueries({ queryKey: backupStatusKey(userId), exact: true });
         queryClient.removeQueries({ queryKey: backupHoldsKeyKey(userId) });
-        await queryClient.invalidateQueries({ queryKey: backupStatusKey(userId) });
       } catch (error) {
         const message = recoveryKeyMessage(
           error,
@@ -161,10 +173,37 @@ export function useChatBackup(userId: string | undefined) {
         );
         setRestoreState({ status: 'error', message });
       } finally {
+        // Stopped or failed runs leave the unfinished mark; a finished one clears it.
+        void queryClient.invalidateQueries({ queryKey: [...backupHoldsKeyKey(userId), 'restorePending'] });
+      }
+    },
+    [userId, queryClient],
+  );
+
+  const restore = useCallback(
+    async (recoveryKeyText: string) => {
+      if (!userId || !status.data) return;
+      let rawKey: Uint8Array | undefined;
+      try {
+        rawKey = await parseRecoveryKey(recoveryKeyText);
+        const key = rawKey;
+        await runRestoreFlow((options) => restoreOnThisDevice(userId, key, status.data!, options));
+      } catch (error) {
+        setRestoreState({
+          status: 'error',
+          message: recoveryKeyMessage(error, "Couldn't finish restoring. Check your connection and try again."),
+        });
+      } finally {
         rawKey?.fill(0);
       }
     },
-    [userId, status.data, queryClient],
+    [userId, status.data, runRestoreFlow],
+  );
+
+  // For a device that already holds the key: carries on where an interrupted restore stopped.
+  const resumeInterruptedRestore = useCallback(
+    () => runRestoreFlow((options) => resumeRestore(userId!, options)),
+    [userId, runRestoreFlow],
   );
 
   const cancelRestore = useCallback(() => abortRef.current?.abort(), []);
@@ -184,6 +223,8 @@ export function useChatBackup(userId: string | undefined) {
     cancelDeletion,
     restoreState,
     restore,
+    restorePending: restorePending.data === true,
+    resumeInterruptedRestore,
     cancelRestore,
     resetRestore,
   };

@@ -8,7 +8,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import type { Server } from 'socket.io';
-import { userRoom } from '../../websocket/socket.util';
+import { hasLiveSession, userRoom } from '../../websocket/socket.util';
 import { websocketGatewayOptions } from '../../websocket/websocket-gateway.options';
 import type { AppSocket } from '../../websocket/websocket.gateway';
 import { DiscordLoggerService } from '../../common/discord/discord-logger.service';
@@ -100,6 +100,8 @@ export class ChatTypingGateway implements OnGatewayDisconnect {
 
     if (
       !userId ||
+      // An expired login's socket is closed at expiry; this covers the moment before that.
+      !hasLiveSession(socket) ||
       !payload?.conversationId ||
       typeof payload.conversationId !== 'string'
     ) {

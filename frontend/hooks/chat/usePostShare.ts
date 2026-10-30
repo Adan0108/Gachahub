@@ -71,7 +71,8 @@ export function usePostShare() {
     queryClient.invalidateQueries({ queryKey: queryKeys.chatConversations });
     queryClient.invalidateQueries({ queryKey: queryKeys.chatRequests });
 
-    if (created.recipientState === "PENDING") return { requested: true };
+    // No message back: the chat already existed (past the loaded pages), so the post goes straight in.
+    if (created.recipientState === "PENDING" && created.message !== null) return { requested: true };
     return { conversationId: created.conversationId, recipientIds: [person.id] };
   };
 

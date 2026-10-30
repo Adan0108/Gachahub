@@ -16,7 +16,7 @@ import {
 import { floatingPortal, floatingStyle, useFloatingPosition } from "../../hooks/chat/useFloatingPosition";
 import { useMenuDismiss } from "../../hooks/chat/useMenuDismiss";
 import { api } from "../../lib/api";
-import { activeMembers, myParticipant } from "../../lib/chat/chatDisplay";
+import { activeMembers, idsInGroup, myParticipant } from "../../lib/chat/chatDisplay";
 import type { ChatConversation, ChatParticipant } from "../../lib/chat/chatDisplay";
 import type { UserSearchResult } from "../../hooks/chat/useUserSearch";
 import { AddPeopleDialog } from "./AddPeopleDialog";
@@ -128,6 +128,7 @@ export function GroupMembersSection({
   const me = myParticipant(conversation, currentUserId);
   const isOwner = me?.role === "OWNER";
   const canManage = isOwner || me?.role === "ADMIN";
+  const canAdd = Boolean(me);
   const canLeave = !isOwner || members.length <= 1;
 
   const addMembers = useMutation({
@@ -164,6 +165,9 @@ export function GroupMembersSection({
 
   const itemsFor = (participant: ChatParticipant) => {
     const items: MenuItem[] = [];
+    if (participant.state === "PENDING") {
+      return [{ id: "remove", icon: <FiUserMinus aria-hidden="true" />, label: "Cancel invite", danger: true }];
+    }
     const hasSafety = Boolean(safety[participant.userId]?.pairNumber);
     if (hasSafety) {
       items.push({
@@ -227,7 +231,10 @@ export function GroupMembersSection({
       mutation: leave,
     },
   };
-  const dialog = confirming ? dialogs[confirming.kind] : undefined;
+  // Your role can change while a dialog is open (someone else demotes you): one you may no longer use closes.
+  const stillAllowed =
+    confirming?.kind === "remove" ? canManage : confirming?.kind === "owner" ? isOwner : true;
+  const dialog = confirming && stillAllowed ? dialogs[confirming.kind] : undefined;
 
   const confirm = () => {
     if (!confirming) return;
@@ -255,7 +262,7 @@ export function GroupMembersSection({
         onToggle={onToggleOpen}
       />
 
-      {isOpen && canManage && (
+      {isOpen && canAdd && (
         <button
           aria-haspopup="dialog"
           className="chat-info-row"
@@ -266,10 +273,10 @@ export function GroupMembersSection({
         </button>
       )}
 
-      {isAdding && canManage && (
+      {isAdding && canAdd && (
         <AddPeopleDialog
           error={addMembers.error as Error | null}
-          excludeIds={conversation.participants.map((participant: ChatParticipant) => participant.userId)}
+          excludeIds={idsInGroup(conversation)}
           isPending={addMembers.isPending}
           onAdd={(people) => addMembers.mutate(people)}
           onClose={() => {
@@ -285,7 +292,7 @@ export function GroupMembersSection({
           .filter((participant: ChatParticipant) => participant.state !== "DECLINED")
           .map((participant: ChatParticipant) => {
             const isSelf = participant.userId === currentUserId;
-            const items = !isSelf && participant.state === "ACTIVE" ? itemsFor(participant) : [];
+            const items = !isSelf && (participant.state === "ACTIVE" || (participant.state === "PENDING" && canManage)) ? itemsFor(participant) : [];
             return (
               <li className="chat-info-member" key={participant.userId}>
                 <MemberAvatar isSelf={isSelf} participant={participant} />

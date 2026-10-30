@@ -12,6 +12,8 @@ export interface UserProfile {
   followsYou?: boolean;
   isBlockedByMe?: boolean;
   isPrivate?: boolean;
+  reputation?: number;
+  rank?: string;
 }
 
 /** Your own account, as far as a profile needs it. */

@@ -60,6 +60,12 @@ export type ChatReceiptsUpdatedEvent = {
   | { kind: 'read'; upToMessageId: string; at: Date }
 );
 
+/** A group's details changed (name, photo, members, roles): its members' lists should refetch. */
+export interface ChatConversationUpdatedEvent {
+  conversationId: string;
+  recipientUserIds: string[];
+}
+
 /**
  * Port for chat delivery side effects.
  *
@@ -75,4 +81,7 @@ export interface ChatDeliveryPort {
   publishReactionRemoved(event: ChatMessageActionEvent): Promise<void>;
   publishRequestAccepted(event: ChatRequestAcceptedEvent): Promise<void>;
   publishReceiptsUpdated(event: ChatReceiptsUpdatedEvent): Promise<void>;
+  publishConversationUpdated(
+    event: ChatConversationUpdatedEvent,
+  ): Promise<void>;
 }

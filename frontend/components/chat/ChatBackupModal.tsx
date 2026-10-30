@@ -160,6 +160,34 @@ function ScheduleDeletion({ backup }: BackupProps) {
   );
 }
 
+/** For a device that already holds the key: finishes a restore that was stopped or failed, and shows how it ended. */
+function FinishRestore({ backup }: BackupProps) {
+  const { restorePending, restoreState: state } = backup;
+  const isRunning = state.status === "running";
+  if (!restorePending && state.status === "idle") return null;
+
+  return (
+    <>
+      <RestoreStatus state={state} />
+      {restorePending && (
+        <div className="group-settings-footer">
+          {!isRunning && (
+            <small>Your history was not fully restored on this device.</small>
+          )}
+          <button disabled={isRunning} onClick={backup.resumeInterruptedRestore} type="button">
+            {isRunning ? "Restoring..." : "Finish restoring history"}
+          </button>
+          {isRunning && (
+            <button className="device-cancel" onClick={backup.cancelRestore} type="button">
+              Stop
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 function EnabledStep({ backup }: BackupProps) {
   const { status, turnOff } = backup;
   const [confirming, setConfirming] = useState(false);
@@ -169,6 +197,7 @@ function EnabledStep({ backup }: BackupProps) {
   return (
     <div className="group-member-list">
       <DeletionBanner backup={backup} holdsKey />
+      <FinishRestore backup={backup} />
       <small>
         Backup is on. {status.data.blobCount} {status.data.blobCount === 1 ? "message" : "messages"}{" "}
         saved ({formatBytes(status.data.bytesUsed)}). New messages are backed up from this device
@@ -196,6 +225,33 @@ function EnabledStep({ backup }: BackupProps) {
         )}
       </div>
     </div>
+  );
+}
+
+function RestoreStatus({ state }: { state: ChatBackup["restoreState"] }) {
+  return (
+    <>
+      {state.status === "running" && (
+        <small>
+          Restored {state.progress.restored} messages ({state.progress.skipped} already here)...
+        </small>
+      )}
+      {state.status === "error" && <small className="post-action-error">{state.message}</small>}
+      {state.status === "done" && (
+        <>
+          <small>
+            {state.result.cancelled ? "Stopped. " : "Done. "}Restored {state.result.restored}{" "}
+            {state.result.restored === 1 ? "message" : "messages"}
+            {state.result.failed > 0 ? `, ${state.result.failed} could not be read` : ""}.
+          </small>
+          <div className="group-settings-footer">
+            <button onClick={() => window.location.reload()} type="button">
+              Reload to show history
+            </button>
+          </div>
+        </>
+      )}
+    </>
   );
 }
 
@@ -239,26 +295,7 @@ function RestoreStep({ backup, onClose }: BackupProps & { onClose: () => void })
           </div>
         </>
       )}
-      {state.status === "running" && (
-        <small>
-          Restored {state.progress.restored} messages ({state.progress.skipped} already here)...
-        </small>
-      )}
-      {state.status === "error" && <small className="post-action-error">{state.message}</small>}
-      {state.status === "done" && (
-        <>
-          <small>
-            {state.result.cancelled ? "Stopped. " : "Done. "}Restored {state.result.restored}{" "}
-            {state.result.restored === 1 ? "message" : "messages"}
-            {state.result.failed > 0 ? `, ${state.result.failed} could not be read` : ""}.
-          </small>
-          <div className="group-settings-footer">
-            <button onClick={() => window.location.reload()} type="button">
-              Reload to show history
-            </button>
-          </div>
-        </>
-      )}
+      <RestoreStatus state={state} />
       {state.status !== "done" && (
         <div className="group-settings-footer">
           <button className="device-cancel" disabled={isRunning} onClick={onClose} type="button">

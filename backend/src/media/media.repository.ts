@@ -85,7 +85,12 @@ export class MediaRepository {
     });
   }
 
-  markUploaded(params: {
+  /**
+   * Moves an upload from INITIATED to UPLOADED, and returns it; null when it is no longer
+   * INITIATED, because cleanup claimed it or another confirmation finished first. Writing by id
+   * alone would put a row cleanup already claimed back to UPLOADED.
+   */
+  async markUploaded(params: {
     id: string;
     assetId: string;
     secureUrl: string;
@@ -97,9 +102,10 @@ export class MediaRepository {
     duration?: number;
     responseSignature: string;
   }) {
-    return this.prisma.mediaUpload.update({
+    const { count } = await this.prisma.mediaUpload.updateMany({
       where: {
         id: params.id,
+        status: 'INITIATED',
       },
       data: {
         status: 'UPLOADED',
@@ -115,6 +121,8 @@ export class MediaRepository {
         uploadedAt: new Date(),
       },
     });
+
+    return count === 0 ? null : this.findById(params.id);
   }
 
   markDeleted(id: string) {

@@ -78,6 +78,10 @@ export const backendRoutes = {
   userFollowing: (userId: any) => `/users/${encodePathParam(userId)}/following`,
   postComments: (postId: any) => `/posts/${encodePathParam(postId)}/comments`,
   commentReplies: (commentId: any) => `/comments/${encodePathParam(commentId)}/replies`,
+  commentLike: (commentId: string) => `/comments/${encodePathParam(commentId)}/like`,
+  wallet: "/wallet",
+  walletLedger: "/wallet/ledger",
+  walletCheckIn: "/wallet/check-in",
   reports: "/reports",
   notifications: "/notifications",
   notificationsUnreadCount: "/notifications/unread-count",
@@ -599,6 +603,7 @@ function encryptedMessagePayload({
   clientMessageId,
   replyToId,
   media,
+  mentionUserIds,
 }: any) {
   return {
     ciphertext,
@@ -606,6 +611,7 @@ function encryptedMessagePayload({
     ...(contentType ? { contentType } : {}),
     ...(clientMessageId ? { clientMessageId } : {}),
     ...(replyToId ? { replyToId } : {}),
+    ...(mentionUserIds?.length ? { mentionUserIds } : {}),
     ...(media?.length ? { media } : {}),
   };
 }
@@ -735,6 +741,12 @@ export const api = {
   getGameFeed: (gameSlug: any, query: any = {}, options: any = {}) =>
     api.getFeedCollection(backendRoutes.gameFeed(gameSlug), query, options),
   likePost: (postId: any) => mutation(backendRoutes.postLike(postId)),
+  likeComment: (commentId: string) => mutation(backendRoutes.commentLike(commentId)),
+  unlikeComment: (commentId: string) =>
+    mutation(backendRoutes.commentLike(commentId), undefined, { method: "DELETE" }),
+  getWallet: (options: any = {}) => request(backendRoutes.wallet, options),
+  getWalletLedger: (options: any = {}) => request(backendRoutes.walletLedger, options),
+  checkIn: () => mutation(backendRoutes.walletCheckIn),
   deletePost: (postId: string) =>
     mutation(backendRoutes.post(postId), undefined, { method: "DELETE" }),
   unlikePost: (postId: any) =>
@@ -901,7 +913,8 @@ export const api = {
       undefined,
       { method: "PATCH" },
     ),
-  getChatConversations: () => request(backendRoutes.chatConversations),
+  // One inbox page: `limit` newest, after `beforeUpdatedAt`/`beforeId` when given (pinned ones come on the first).
+  getChatConversations: (page: any = {}) => request(withQuery(backendRoutes.chatConversations, page)),
   getArchivedChatConversations: () => request(backendRoutes.chatArchivedConversations),
   /** @param {{ limit?: number, cursor?: string }} [query] @param {{ signal?: AbortSignal }} [options] */
   getNotifications: (query: any = {}, options: any = {}) =>

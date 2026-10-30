@@ -155,11 +155,10 @@ describe('MlsHandshakesService', () => {
       await expect(
         service.submitHandshake('user-1', 'conv-1', dto),
       ).rejects.toMatchObject({
-        response: {
-          handshake: {
-            membershipDeclared: true,
-            addedDevices: [{ deviceId: 'device-4' }],
-          },
+        outcome: 'conflict',
+        handshake: {
+          membershipDeclared: true,
+          addedDevices: [{ deviceId: 'device-4' }],
         },
       });
     });

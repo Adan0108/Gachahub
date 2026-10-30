@@ -7,6 +7,7 @@ import {
 import { AuditLogService } from '../audit-log/audit-log.service';
 import type { UserModerationAuditAction } from '../audit-log/audit-log.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { EconomyService } from '../economy/economy.service';
 import { SessionTerminator } from '../auth/session-terminator.service';
 import { UserRole, UserStatus } from '../generated/prisma/client';
 import { ADMIN_SETTABLE_USER_STATUSES } from './dto/update-user-status.dto';
@@ -39,6 +40,7 @@ export class UserModerationService {
     private readonly auditLogService: AuditLogService,
     private readonly sessionTerminator: SessionTerminator,
     private readonly prisma: PrismaService,
+    private readonly economy: EconomyService,
   ) {}
 
   async listForAdmin(query: QueryUsersAdminDto) {
@@ -106,6 +108,13 @@ export class UserModerationService {
 
       if (toStatus !== UserStatus.ACTIVE) {
         await releaseModeratorCases(tx, userId);
+      }
+
+      // A ban takes back what this person's likes and comments earned others; lifting it gives it back.
+      if (toStatus === UserStatus.BANNED) {
+        await this.economy.revokeForActor(tx, userId);
+      } else if (user.status === UserStatus.BANNED) {
+        await this.economy.restoreForActor(tx, userId);
       }
 
       await this.auditLogService.recordOrThrow(

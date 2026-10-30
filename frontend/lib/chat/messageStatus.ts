@@ -33,7 +33,7 @@ export function statusOf(message: StatusMessage, otherUserIds: string[]): Messag
 export interface ReceiptDisplay {
   /** The message to put Sent / Delivered / Seen under: your newest, and only while nobody has written after it. */
   statusFor: Map<string, MessageStatus>;
-  /** For each message, who has read up to exactly there (groups only): each person sits under the last message of yours they read. */
+  /** For each message, who has read up to exactly there (groups only): each person sits under the last message they read, whoever sent it. */
   readersAt: Map<string, string[]>;
 }
 
@@ -56,10 +56,8 @@ export function receiptDisplay(
     for (const otherId of otherUserIds) {
       const lastRead = [...shown]
         .reverse()
-        .find(
-          (message) =>
-            message.senderId === userId &&
-            (message.receipts ?? []).some((receipt) => receipt.userId === otherId && hasRead(receipt)),
+        .find((message) =>
+          (message.receipts ?? []).some((receipt) => receipt.userId === otherId && hasRead(receipt)),
         );
       if (lastRead) readersAt.set(lastRead.id, [...(readersAt.get(lastRead.id) ?? []), otherId]);
     }

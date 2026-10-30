@@ -30,6 +30,7 @@ export function useConversationPreviews(
 ) {
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const loadedIds = useRef(new Set<string>());
+  const unsentIds = useRef(new Set<string>());
   // The newest edited preview per message, so a slower read of the original cannot put the old text back.
   const editedLines = useRef(new Map<string, string | null>());
 
@@ -47,18 +48,22 @@ export function useConversationPreviews(
     };
 
     for (const message of lastMessages) {
-      if (loadedIds.current.has(message.id)) continue;
-      loadedIds.current.add(message.id);
-
+      // Checked before the loaded shortcut: a message already previewed can be unsent afterwards.
       if (message.status === "DELETED") {
-        remember(message.id, unsentPreview({ mine: mineById.get(message.id) ?? false }));
+        editedLines.current.delete(message.id);
+        if (!unsentIds.current.has(message.id)) {
+          unsentIds.current.add(message.id);
+          remember(message.id, unsentPreview({ mine: mineById.get(message.id) ?? false }));
+        }
         continue;
       }
+      if (loadedIds.current.has(message.id)) continue;
+      loadedIds.current.add(message.id);
 
       plaintextStore
         .get(message.id)
         .then((saved) => {
-          if (cancelled || !saved) {
+          if (cancelled || !saved || unsentIds.current.has(message.id)) {
             // Not decrypted on this device yet; try again if it shows up in a later pass.
             loadedIds.current.delete(message.id);
             return;

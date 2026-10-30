@@ -15,6 +15,7 @@ import {
   type ProfileOwner,
   type UserProfile,
 } from "../../lib/profile/profileView";
+import { rankName } from "../../lib/economy";
 import { Art } from "../Art";
 import { AvatarFace } from "../AvatarFace";
 import { PostList } from "../PostList";
@@ -206,6 +207,14 @@ export function ProfileView({
                 <div>
                   <dt>Account age</dt>
                   <dd>{accountAge(profile.createdAt) || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Rank</dt>
+                  <dd>{rankName(profile.rank)}</dd>
+                </div>
+                <div>
+                  <dt>Reputation</dt>
+                  <dd>{(profile.reputation ?? 0).toLocaleString()}</dd>
                 </div>
               </dl>
             </section>

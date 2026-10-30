@@ -1,4 +1,8 @@
-import { EpochConflictError, GroupStateUnavailableError } from '../contract/errors';
+import {
+  EpochConflictError,
+  GroupCreationLostError,
+  GroupStateUnavailableError,
+} from '../contract/errors';
 import type { SyncEngine } from '../sync/syncEngine';
 import type { ConversationId, UserId } from '../contract/types';
 
@@ -40,6 +44,12 @@ export async function ensureConversationGroup(
       : [recipientUserId];
     await syncEngine.seedNewGroupWithMembers(conversationId, recipientUserIds);
   } catch (error) {
+    // The other person made this chat at the same moment and their group won: ours is gone,
+    // and the one to use is theirs, which they added this device to.
+    if (error instanceof GroupCreationLostError) {
+      await joinTheirGroup(syncEngine, conversationId, error);
+      return;
+    }
     // An EpochConflictError means the commit lost the race, NOT that
     // adding the recipient was rejected - SyncEngine.submitMembershipChange
     // already caught local state up to the winning commit and persisted it
@@ -59,6 +69,30 @@ export async function ensureConversationGroup(
       // recipient.
       await syncEngine.forgetConversation(conversationId);
     }
+    throw error;
+  }
+}
+
+/** Joins the group that won: from the Welcome sent to this device, or failing that by joining it directly. */
+async function joinTheirGroup(
+  syncEngine: SyncEngine,
+  conversationId: ConversationId,
+  lost: GroupCreationLostError,
+): Promise<void> {
+  await syncEngine.processPendingWelcomes();
+  if (!(await hasGroup(syncEngine, conversationId))) {
+    await syncEngine.recoverMissingGroup(conversationId);
+  }
+  // Still nothing: the send fails now and a retry finds the Welcome once it arrives
+  if (!(await hasGroup(syncEngine, conversationId))) throw lost;
+}
+
+async function hasGroup(syncEngine: SyncEngine, conversationId: ConversationId): Promise<boolean> {
+  try {
+    await syncEngine.getCurrentEpoch(conversationId);
+    return true;
+  } catch (error) {
+    if (error instanceof GroupStateUnavailableError) return false;
     throw error;
   }
 }

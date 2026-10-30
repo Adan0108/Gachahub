@@ -13,6 +13,14 @@ export class EpochConflictError extends Error {
   }
 }
 
+/** Two people created the same chat at once and the other one's group won: this device's brand-new group was dropped, and theirs is the one to join. */
+export class GroupCreationLostError extends Error {
+  constructor(public readonly conversationId: ConversationId) {
+    super(`Another member created conversation ${conversationId} first`);
+    this.name = 'GroupCreationLostError';
+  }
+}
+
 export class CredentialMismatchError extends Error {
   constructor(message: string) {
     super(message);

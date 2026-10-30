@@ -11,9 +11,13 @@ import { maskReceiptsForViewer } from './receipt.mapper';
 import { BlocksService } from '../blocks/blocks.service';
 import { ChatMembershipService } from './membership/chat-membership.service';
 import { ChatHistoryFetchRateLimiterService } from './chat-history-fetch-rate-limiter.service';
+import { QueryChatConversationsDto } from './dto/query-chat-conversations.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
 import { CHAT_DELIVERY_PORT } from './ports/chat-delivery.port';
 import type { ChatDeliveryPort } from './ports/chat-delivery.port';
+
+/** Someone still being added to the group (JOINING) already sees the chat, though they cannot send yet. */
+const INBOX_STATES = ['ACTIVE', 'JOINING'] as const;
 
 /**
  * Inbox listing, per-conversation settings, and read/delivery receipts.
@@ -40,19 +44,51 @@ export class ChatInboxService {
    * Only ACTIVE participant records are returned here.
    * Pending stranger messages are listed separately.
    */
-  async listConversations(userId: string) {
-    const conversations = await this.chatRepository.findInboxConversations(
-      userId,
-      'ACTIVE',
-    );
+  async listConversations(
+    userId: string,
+    page: QueryChatConversationsDto = {},
+  ) {
+    const conversations = await this.findInboxPage(userId, page);
 
     const summaries = await this.toConversationSummaries(conversations, userId);
 
     return summaries.sort((a, b) => {
       if (a.pinnedAt && !b.pinnedAt) return -1;
       if (!a.pinnedAt && b.pinnedAt) return 1;
-      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      // Same order as the pages: newest first, then by id, so paging never skips or repeats one.
+      return (
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() ||
+        (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)
+      );
     });
+  }
+
+  /**
+   * The conversations of one inbox page. Without a limit, the whole inbox. The first page is every
+   * pinned conversation, which always sorts on top, plus the newest unpinned ones; later pages are
+   * unpinned only, after the given conversation.
+   */
+  private async findInboxPage(userId: string, page: QueryChatConversationsDto) {
+    // QueryChatConversationsDto guarantees a whole cursor, and a limit with it.
+    const { limit, beforeUpdatedAt, beforeId } = page;
+    if (!limit) {
+      return this.chatRepository.findInboxConversations(userId, INBOX_STATES);
+    }
+
+    const before =
+      beforeUpdatedAt && beforeId
+        ? { updatedAt: new Date(beforeUpdatedAt), id: beforeId }
+        : undefined;
+    const [pinned, unpinned] = await Promise.all([
+      before
+        ? []
+        : this.chatRepository.findPinnedInboxConversations(userId, INBOX_STATES),
+      this.chatRepository.findUnpinnedInboxPage(userId, INBOX_STATES, {
+        limit,
+        before,
+      }),
+    ]);
+    return [...pinned, ...unpinned];
   }
 
   /**
@@ -123,22 +159,25 @@ export class ChatInboxService {
 
     const limit = query.limit;
 
+    let before: { id: string; createdAt: Date } | undefined;
     if (query.beforeMessageId) {
       this.historyFetchRateLimiter.assertNotRateLimited(userId, conversationId);
 
-      const cursorMessage =
-        await this.chatRepository.findSentMessageInConversation(
-          query.beforeMessageId,
-          conversationId,
-        );
-      if (!cursorMessage) {
+      // Any message of this conversation is a valid boundary: a page can end on an edit,
+      // and the boundary may be deleted before the next page is asked for.
+      const position = await this.chatRepository.findMessagePosition(
+        query.beforeMessageId,
+        conversationId,
+      );
+      if (!position) {
         throw new BadRequestException('Invalid pagination cursor');
       }
+      before = position;
     }
 
     const messages = await this.chatRepository.findMessages({
       conversationId,
-      beforeMessageId: query.beforeMessageId,
+      before,
       limit,
     });
     const nextBeforeMessageId = messages.at(-1)?.id ?? null;
@@ -569,6 +608,8 @@ export class ChatInboxService {
       // Branch on this, not notificationLevel: an expired mute keeps NOTHING in the row forever.
       isMuted: isViewer ? isNotificationMuted(participant) : null,
       user: participant.user,
+      // Every invite or add, oldest first: the chat says "invited" at the invite, "joined" at the accept.
+      rounds: participant.rounds,
       isBlockedByMe: blockedUserIds.has(participant.userId),
     };
   }

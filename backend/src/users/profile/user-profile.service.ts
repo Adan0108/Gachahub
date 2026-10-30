@@ -17,7 +17,7 @@ export class UserProfileService {
   ) {}
 
   async getPublicProfile(userId: string, viewerId?: string) {
-    const user = await this.prisma.user.findFirst({
+    const found = await this.prisma.user.findFirst({
       where: { id: userId, status: 'ACTIVE' },
       select: {
         id: true,
@@ -27,12 +27,21 @@ export class UserProfileService {
         bannerPresetId: true,
         bio: true,
         createdAt: true,
+        wallet: { select: { reputation: true, rank: true } },
       },
     });
 
-    if (!user) {
+    if (!found) {
       throw new NotFoundException('User not found');
     }
+
+    // Rank and Reputation are public standing, shown even on a private profile.
+    const { wallet, ...rest } = found;
+    const user = {
+      ...rest,
+      reputation: wallet?.reputation ?? 0,
+      rank: wallet?.rank ?? 'STARGAZER',
+    };
 
     const isOther = Boolean(viewerId) && viewerId !== userId;
     const [isBlockedByMe, relation, canView] = await Promise.all([

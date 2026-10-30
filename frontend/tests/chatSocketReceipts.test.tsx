@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatSocket } from "../hooks/chat/useChatSocket";
 import { queryKeys } from "../lib/queries";
+import { messageDeletedSignal } from "../lib/chat/messageDeletedSignal";
 
 const mocks = vi.hoisted(() => ({
   handlers: {} as Record<string, (payload: any) => void>,
@@ -206,5 +207,57 @@ describe("useChatSocket receipts events", () => {
 
     expect(client.getQueryData<{ items: any[]; meta?: unknown }>(KEY)!).toBeUndefined();
     expect(invalidate).not.toHaveBeenCalled();
+  });
+});
+
+// #102: the cached copy must say deleted before the refetch, or one pushed out of the window moves to older history as it was.
+describe("useChatSocket message deletes", () => {
+  beforeEach(() => {
+    mocks.handlers = {};
+  });
+
+  it("marks the message deleted in the cached thread at once, then fetches the thread fresh", () => {
+    const { client, invalidate } = setup({
+      items: [
+        { id: "m1", senderId: "bob", createdAt: AT, status: "SENT" },
+        { id: "m2", senderId: "bob", createdAt: AT, status: "SENT" },
+      ],
+    });
+
+    mocks.handlers["message:deleted"]!({ conversationId: "c1", messageId: "m1" });
+
+    const items = client.getQueryData<{ items: any[] }>(KEY)!.items;
+    expect(items.map((item) => item.status)).toEqual(["DELETED", "SENT"]);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: KEY });
+  });
+
+  it("tells older history outside the cache about the delete", () => {
+    const heard: string[][] = [];
+    const stop = messageDeletedSignal.subscribe((conversationId, messageId) =>
+      heard.push([conversationId, messageId]),
+    );
+    setup();
+
+    mocks.handlers["message:deleted"]!({ conversationId: "c1", messageId: "m1" });
+
+    expect(heard).toEqual([["c1", "m1"]]);
+    stop();
+  });
+});
+
+// CFI-002: someone changed a group's roles or members; open lists refetch without a reload
+describe("useChatSocket conversation:updated", () => {
+  beforeEach(() => {
+    mocks.handlers = {};
+  });
+
+  it("refetches the conversation list and requests", () => {
+    const { invalidate } = setup();
+
+    mocks.handlers["conversation:updated"]!({ conversationId: "c1" });
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.chatConversations });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.chatRequests });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.chatArchivedConversations });
   });
 });

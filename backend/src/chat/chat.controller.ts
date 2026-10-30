@@ -19,6 +19,7 @@ import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { ChatMessagingService } from './chat-messaging.service';
 import { ChatGroupPhotoService } from './chat-group-photo.service';
 import { ChatGroupService } from './chat-group.service';
+import { GroupChangeNotifier } from './group-change-notifier.service';
 import { ChatInboxService } from './chat-inbox.service';
 import { ChatEmotesService } from './chat-emotes.service';
 import { ChatMessageActionsService } from './chat-message-actions.service';
@@ -30,6 +31,7 @@ import { CreateGroupChatDto } from './dto/create-group-chat.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
 import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
 import { MarkMessagesDeliveredDto } from './dto/mark-messages-delivered.dto';
+import { QueryChatConversationsDto } from './dto/query-chat-conversations.dto';
 import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
 import { ReactToMessageDto } from './dto/react-to-message.dto';
 import { SendMessageDto } from './dto/send-message.dto';
@@ -61,6 +63,7 @@ export class ChatController {
     private readonly chatEmotesService: ChatEmotesService,
     private readonly chatMessageEditService: ChatMessageEditService,
     private readonly chatReceiptsService: ChatReceiptsService,
+    private readonly groupChanges: GroupChangeNotifier,
   ) {}
 
   /**
@@ -96,8 +99,11 @@ export class ChatController {
   @ApiOperation({
     summary: 'List accepted chat conversations for the current user',
   })
-  listConversations(@Session() session: UserSession) {
-    return this.chatInboxService.listConversations(session.user.id);
+  listConversations(
+    @Session() session: UserSession,
+    @Query() query: QueryChatConversationsDto,
+  ) {
+    return this.chatInboxService.listConversations(session.user.id, query);
   }
 
   /**
@@ -202,10 +208,12 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: UpdateGroupChatDto,
   ) {
-    return this.chatGroupService.updateGroupChat(
-      session.user.id,
-      conversationId,
-      dto,
+    return this.groupChanges.after(conversationId, () =>
+      this.chatGroupService.updateGroupChat(
+        session.user.id,
+        conversationId,
+        dto,
+      ),
     );
   }
 
@@ -218,10 +226,8 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: UpdateGroupPhotoDto,
   ) {
-    return this.chatGroupPhotoService.update(
-      session.user.id,
-      conversationId,
-      dto,
+    return this.groupChanges.after(conversationId, () =>
+      this.chatGroupPhotoService.update(session.user.id, conversationId, dto),
     );
   }
 
@@ -232,7 +238,9 @@ export class ChatController {
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
   ) {
-    return this.chatGroupPhotoService.remove(session.user.id, conversationId);
+    return this.groupChanges.after(conversationId, () =>
+      this.chatGroupPhotoService.remove(session.user.id, conversationId),
+    );
   }
 
   /**
@@ -253,10 +261,12 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: UpdateGroupMembersDto,
   ) {
-    return this.chatGroupService.addGroupMembers(
-      session.user.id,
-      conversationId,
-      dto,
+    return this.groupChanges.after(conversationId, () =>
+      this.chatGroupService.addGroupMembers(
+        session.user.id,
+        conversationId,
+        dto,
+      ),
     );
   }
 
@@ -278,10 +288,12 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: UpdateGroupMembersDto,
   ) {
-    return this.chatGroupService.removeGroupMembers(
-      session.user.id,
-      conversationId,
-      dto,
+    return this.groupChanges.after(conversationId, () =>
+      this.chatGroupService.removeGroupMembers(
+        session.user.id,
+        conversationId,
+        dto,
+      ),
     );
   }
 
@@ -303,10 +315,12 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: TransferGroupOwnershipDto,
   ) {
-    return this.chatGroupService.transferGroupOwnership(
-      session.user.id,
-      conversationId,
-      dto,
+    return this.groupChanges.after(conversationId, () =>
+      this.chatGroupService.transferGroupOwnership(
+        session.user.id,
+        conversationId,
+        dto,
+      ),
     );
   }
 
@@ -333,11 +347,13 @@ export class ChatController {
     @Param('userId') userId: string,
     @Body() dto: UpdateGroupMemberRoleDto,
   ) {
-    return this.chatGroupService.updateGroupMemberRole(
-      session.user.id,
-      conversationId,
-      userId,
-      dto,
+    return this.groupChanges.after(conversationId, () =>
+      this.chatGroupService.updateGroupMemberRole(
+        session.user.id,
+        conversationId,
+        userId,
+        dto,
+      ),
     );
   }
 
@@ -358,7 +374,9 @@ export class ChatController {
     @Session() session: UserSession,
     @Param('conversationId') conversationId: string,
   ) {
-    return this.chatGroupService.leaveGroup(session.user.id, conversationId);
+    return this.groupChanges.after(conversationId, () =>
+      this.chatGroupService.leaveGroup(session.user.id, conversationId),
+    );
   }
 
   /**

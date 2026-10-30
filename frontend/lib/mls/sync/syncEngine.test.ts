@@ -9,7 +9,6 @@ import {
   EpochConflictError,
   GroupStateUnavailableError,
   MembershipMismatchError,
-  NoEncryptableMembersError,
   StaleWelcomeError,
 } from '../contract/errors';
 import { UnreadableRecordError } from '../storage/mlsEncryptedStore';
@@ -320,16 +319,16 @@ describe('SyncEngine', () => {
       );
     });
 
-    it('refuses to seed a group with nobody to add, instead of silently leaving it at epoch 0', async () => {
+    it('still sends the first Commit when nobody can be added, so the group starts with this device alone', async () => {
       const { api } = await import('../../api');
       const alice = await setUpDevice('user-alice');
       await alice.engine.createGroup('conv-1');
       await mockClaims({});
 
-      await expect(alice.engine.seedNewGroupWithMembers('conv-1', [])).rejects.toThrow(
-        NoEncryptableMembersError,
-      );
-      expect(api.submitMlsHandshake).not.toHaveBeenCalled();
+      await alice.engine.seedNewGroupWithMembers('conv-1', ['user-bob']);
+
+      expect(api.submitMlsHandshake).toHaveBeenCalledTimes(1);
+      expect(await alice.engine.getCurrentEpoch('conv-1')).toBe(1);
     });
 
     it('seeds a group for a single member the same way seedNewGroup does', async () => {
@@ -1981,6 +1980,50 @@ describe('SyncEngine', () => {
       );
       expect(bob.engine.groupProblems.get('conv-1')).toEqual({ kind: 'refused-commit' });
       await expect(bob.engine.getCurrentEpoch('conv-1')).resolves.toBe(1);
+    });
+  });
+
+  // #98: a decrypted message must never be lost between using up its key and saving the text
+  describe('keeping a decrypted message (real MLS, injected storage faults)', () => {
+    async function bobReceives(body: string) {
+      const alice = await setUpDevice('user-alice');
+      const bob = await setUpDevice('user-bob');
+      const aliceSession = await alice.engine.createGroup('conv-1');
+      const addBob = await aliceSession.stageCommit({ added: [await offerFor(bob)], removed: [] });
+      await aliceSession.commitAccepted();
+      await saveSession(bob, await bob.factory.joinFromWelcome('conv-1', addBob.welcome!.welcomeBytes));
+      const wireBytes = await aliceSession.encrypt({ v: 1, type: 'text', body });
+      return { bob, wireBytes };
+    }
+
+    it('can decrypt the message again when keeping its text failed', async () => {
+      const { bob, wireBytes } = await bobReceives('first try fails');
+      const kept: string[] = [];
+
+      await expect(
+        bob.engine.processIncoming('conv-1', wireBytes, () => Promise.reject(new Error('disk full'))),
+      ).rejects.toThrow('disk full');
+      await expect(
+        bob.engine.processIncoming('conv-1', wireBytes, async (message) => {
+          kept.push((message.envelope as { body: string }).body);
+        }),
+      ).resolves.toMatchObject({ kind: 'application' });
+
+      expect(kept).toEqual(['first try fails']);
+    });
+
+    it('has already kept the text when the tab dies while saving the advanced ratchet', async () => {
+      const { bob, wireBytes } = await bobReceives('survives the crash');
+      const kept: string[] = [];
+      vi.spyOn(bob.storage, 'save').mockRejectedValue(new Error('tab died'));
+
+      await expect(
+        bob.engine.processIncoming('conv-1', wireBytes, async (message) => {
+          kept.push((message.envelope as { body: string }).body);
+        }),
+      ).rejects.toThrow('tab died');
+
+      expect(kept).toEqual(['survives the crash']);
     });
   });
 

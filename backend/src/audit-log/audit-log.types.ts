@@ -71,6 +71,14 @@ export type UserModerationAuditMetadata = {
   reason?: string;
 };
 
+/** Stored shape of `metadata` for an admin balance correction. Rows are permanent - change by adding optional keys only. */
+export type WalletAuditMetadata = {
+  currency: 'REPUTATION' | 'SHARDS' | 'PRISMS';
+  delta: number;
+  reason: string;
+  ledgerEntryId: string;
+};
+
 /** Stored shape of `metadata` for game entries. Rows are permanent - change by adding optional keys only. */
 export type GameAuditMetadata = { reason?: string };
 
@@ -133,6 +141,11 @@ export type AuditEntry = AuditEntryBase &
         action: ChatChannelAuditAction;
         targetType: 'CHANNEL';
         metadata: ChatChannelAuditMetadata;
+      }
+    | {
+        action: 'WALLET_ADJUSTED';
+        targetType: 'USER';
+        metadata: WalletAuditMetadata;
       }
     | {
         action: 'CHAT_MESSAGE_REMOVED';

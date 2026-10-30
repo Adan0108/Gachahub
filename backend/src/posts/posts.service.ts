@@ -22,6 +22,8 @@ import { EventPublisherPort } from '../domain-events/event-publisher.port';
 import { MentionsService } from '../mentions/mentions.service';
 import { PrismaService } from '../prisma/prisma.service';
 
+import { EconomyService } from '../economy/economy.service';
+
 @Injectable()
 export class PostsService {
   constructor(
@@ -32,6 +34,7 @@ export class PostsService {
     private readonly eventPublisher: EventPublisherPort,
     private readonly prisma: PrismaService,
     private readonly mentions: MentionsService,
+    private readonly economy: EconomyService,
   ) {}
 
   async findAll(query: QueryPostsDto, userId?: string) {
@@ -500,6 +503,13 @@ ${dto.content?.trim() ?? existingPost.content}`,
       );
 
       if (likeResult.changed) {
+        await this.economy.recordLike(transaction, {
+          targetType: 'POST',
+          targetId: postId,
+          ownerId: post.authorId,
+          likerId: userId,
+        });
+
         await this.eventPublisher.publish(
           {
             type: 'post.liked',

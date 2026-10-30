@@ -5,6 +5,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { api } from "../../lib/api";
 import { withOptimisticReaction, type ReactionChoice } from "../../lib/chat/chatReactions";
 import {
+  COMMUNITY_SEND_LIMIT,
   hasMessage,
   messagesOf,
   olderPageParam,
@@ -15,6 +16,7 @@ import {
 } from "../../lib/community/communityChat";
 import { queries, queryKeys } from "../../lib/queries";
 import { useSharedSocket } from "../../lib/socket/sharedSocket";
+import { useSendCooldown } from "../chat/useSendCooldown";
 import { useCurrentUser } from "../useCurrentUser";
 
 const PAGE_SIZE = 50;
@@ -36,7 +38,7 @@ export type PendingCommunityMessage = {
   error: string | null;
   createdAt: string;
 };
-type ApiError = Error & { status?: number };
+type ApiError = Error & { status?: number; retryAfterSeconds?: number };
 
 /**
  * One community's chat room: its messages (newest page first, older ones on demand), sending with
@@ -50,6 +52,11 @@ export function useCommunityChat(slug: string, { enabled = true }: { enabled?: b
   // One room per community for now; the API already lists several.
   const channel = channelsQuery.data?.channels?.[0] ?? null;
   const channelId = channel?.id;
+  const canModerate = Boolean(channelsQuery.data?.canModerate);
+  const { tryConsume, noteRateLimited, isCoolingDown, secondsLeft } = useSendCooldown(
+    COMMUNITY_SEND_LIMIT,
+    channelId ?? "",
+  );
   // Memoized: a new array every render would restart every effect that depends on it.
   const messagesKey = useMemo(() => queryKeys.communityMessages(slug, channelId), [slug, channelId]);
   const canLoad = enabled && Boolean(channelId);
@@ -220,6 +227,8 @@ export function useCommunityChat(slug: string, { enabled = true }: { enabled?: b
         setPending((list) => list.filter((item) => item.clientId !== entry.clientId));
         queryClient.invalidateQueries({ queryKey: queryKeys.communityChannels(slug) });
       } catch (error) {
+        const { status, retryAfterSeconds } = (error ?? {}) as ApiError;
+        if (status === 429) noteRateLimited(retryAfterSeconds, channelId ?? "");
         setPending((list) =>
           list.map((item) =>
             item.clientId === entry.clientId
@@ -233,11 +242,12 @@ export function useCommunityChat(slug: string, { enabled = true }: { enabled?: b
         );
       }
     },
-    [slug, channelId, putMessage, queryClient, uploadImages],
+    [slug, channelId, putMessage, queryClient, uploadImages, noteRateLimited],
   );
 
   const send = useCallback(
     (content: string, replyTo?: CommunityMessage | null, files: File[] = []) => {
+      if (!canModerate && !tryConsume()) return Promise.resolve();
       const entry: PendingCommunityMessage = {
         clientId: crypto.randomUUID(),
         content,
@@ -251,13 +261,13 @@ export function useCommunityChat(slug: string, { enabled = true }: { enabled?: b
       setPending((list) => [...list, entry]);
       return sendNow(entry);
     },
-    [sendNow],
+    [sendNow, canModerate, tryConsume],
   );
 
   const retry = useCallback(
     (clientId: string) => {
       const entry = pending.find((item) => item.clientId === clientId);
-      if (!entry) return undefined;
+      if (!entry || (!canModerate && !tryConsume())) return undefined;
       setPending((list) =>
         list.map((item) =>
           item.clientId === clientId ? { ...item, status: "sending" as const, error: null } : item,
@@ -265,7 +275,7 @@ export function useCommunityChat(slug: string, { enabled = true }: { enabled?: b
       );
       return sendNow(entry);
     },
-    [pending, sendNow],
+    [pending, sendNow, canModerate, tryConsume],
   );
 
   const discard = useCallback(
@@ -326,7 +336,8 @@ export function useCommunityChat(slug: string, { enabled = true }: { enabled?: b
 
   return {
     channel,
-    canModerate: Boolean(channelsQuery.data?.canModerate),
+    canModerate,
+    sendCooldownSeconds: !canModerate && isCoolingDown ? secondsLeft : 0,
     messages: messagesOf(history.data),
     pending,
     isLoading: channelsQuery.isLoading || (canLoad && history.isLoading),

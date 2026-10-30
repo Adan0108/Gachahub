@@ -15,6 +15,7 @@ import {
   ValidatorConstraintInterface,
 } from 'class-validator';
 import { ChatMessageContentType } from '../../generated/prisma/client';
+import { MAX_MENTIONS_PER_TEXT } from '../../mentions/mention-parser';
 import { ChatMediaReferenceDto } from './chat-media-reference.dto';
 
 // Matches ciphertext's MaxLength(20000); encryptionMeta has no per-field cap of its own.
@@ -91,6 +92,19 @@ export class EncryptedMessagePayloadDto {
   @IsString()
   @MaxLength(120)
   replyToId?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    maxItems: MAX_MENTIONS_PER_TEXT,
+    description:
+      'Users the encrypted text @mentions; the server cannot read the text, so the client names them.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_MENTIONS_PER_TEXT)
+  @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  mentionUserIds?: string[];
 
   @ApiPropertyOptional({
     type: [ChatMediaReferenceDto],

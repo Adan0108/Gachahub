@@ -30,7 +30,10 @@ export function AttachmentLightbox({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
       if (event.key === "ArrowLeft") onNavigate(-1);
       if (event.key === "ArrowRight") onNavigate(1);
     };

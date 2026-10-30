@@ -131,7 +131,7 @@ describe("NotificationBell", () => {
     renderBell();
     await openDrawer();
 
-    expect(await screen.findByText("Mado sent 7 messages")).toBeInTheDocument();
+    expect(await screen.findByText("Mado sent 7 messages in Squad")).toBeInTheDocument();
     expect(screen.getByText("Squad")).toBeInTheDocument();
     expect(screen.getByText("Sora")).toBeInTheDocument();
     expect(screen.getByText("sent you a message")).toBeInTheDocument();

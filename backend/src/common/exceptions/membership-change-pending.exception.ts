@@ -12,7 +12,7 @@ export const MEMBERSHIP_CHANGE_PENDING = 'MEMBERSHIP_CHANGE_PENDING';
 export class MembershipChangePendingException extends ConflictException {
   constructor() {
     super({
-      message: 'A member is being removed - finish that change before sending',
+      message: 'The members of this chat are changing - finish that change before sending',
       code: MEMBERSHIP_CHANGE_PENDING,
     });
   }

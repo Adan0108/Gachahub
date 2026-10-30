@@ -19,9 +19,16 @@ describe('ChatTypingGateway', () => {
     sockets: { adapter: { rooms: Map<string, Set<string>> } };
   };
 
+  // A login that has not expired.
+  const LIVE = Number.MAX_SAFE_INTEGER;
+
   const makeSocket = (overrides: Record<string, unknown> = {}) => ({
     id: 'socket-1',
-    data: {} as { userId?: string; authReady?: Promise<void> },
+    data: {} as {
+      userId?: string;
+      authReady?: Promise<void>;
+      sessionExpiresAt?: number;
+    },
     ...overrides,
   });
 
@@ -52,7 +59,9 @@ describe('ChatTypingGateway', () => {
         'user-2',
         'user-3',
       ]);
-      const socket = makeSocket({ data: { userId: 'user-1' } });
+      const socket = makeSocket({
+        data: { userId: 'user-1', sessionExpiresAt: LIVE },
+      });
 
       await gateway.handleTypingStart(socket as any, {
         conversationId: 'conversation-1',
@@ -73,7 +82,9 @@ describe('ChatTypingGateway', () => {
       chatMessageActionsService.getTypingRecipients.mockResolvedValue([
         'user-2',
       ]);
-      const socket = makeSocket({ data: { userId: 'user-1' } });
+      const socket = makeSocket({
+        data: { userId: 'user-1', sessionExpiresAt: LIVE },
+      });
 
       await gateway.handleTypingStop(socket as any, {
         conversationId: 'conversation-1',
@@ -115,6 +126,7 @@ describe('ChatTypingGateway', () => {
       // Simulates WebsocketGateway.handleConnection's async auth finishing just after this
       // handler started, but before it gave up on socket.data.userId.
       socket.data.userId = 'user-1';
+      socket.data.sessionExpiresAt = LIVE;
       resolveAuth();
       await call;
 
@@ -125,6 +137,22 @@ describe('ChatTypingGateway', () => {
         conversationId: 'conversation-1',
         userId: 'user-1',
       });
+    });
+
+    // #100: a socket can outlive its login for a moment before the expiry recheck closes it.
+    it('drops typing from a socket whose login has expired', async () => {
+      const socket = makeSocket({
+        data: { userId: 'user-1', sessionExpiresAt: Date.now() - 1 },
+      });
+
+      await gateway.handleTypingStart(socket as any, {
+        conversationId: 'conversation-1',
+      });
+
+      expect(
+        chatMessageActionsService.getTypingRecipients,
+      ).not.toHaveBeenCalled();
+      expect(server.emit).not.toHaveBeenCalled();
     });
 
     it('still does nothing if authReady settles without ever setting a userId', async () => {
@@ -141,7 +169,9 @@ describe('ChatTypingGateway', () => {
     });
 
     it('does nothing when the payload has no conversationId', async () => {
-      const socket = makeSocket({ data: { userId: 'user-1' } });
+      const socket = makeSocket({
+        data: { userId: 'user-1', sessionExpiresAt: LIVE },
+      });
 
       await gateway.handleTypingStart(socket as any, {} as any);
 
@@ -155,7 +185,9 @@ describe('ChatTypingGateway', () => {
       chatMessageActionsService.getTypingRecipients.mockResolvedValue([
         'user-2',
       ]);
-      const socket = makeSocket({ data: { userId: 'user-1' } });
+      const socket = makeSocket({
+        data: { userId: 'user-1', sessionExpiresAt: LIVE },
+      });
 
       await gateway.handleTypingStart(socket as any, {
         conversationId: 'conversation-1',
@@ -176,7 +208,9 @@ describe('ChatTypingGateway', () => {
   describe('handleDisconnect', () => {
     it('clears the typing throttle state when the user has no other sockets left', () => {
       const clearUserSpy = jest.spyOn(chatTypingService, 'clearUser');
-      const socket = makeSocket({ data: { userId: 'user-1' } });
+      const socket = makeSocket({
+        data: { userId: 'user-1', sessionExpiresAt: LIVE },
+      });
 
       gateway.handleDisconnect(socket as any);
 
@@ -189,7 +223,9 @@ describe('ChatTypingGateway', () => {
         'user:user-1',
         new Set(['other-socket-id']),
       );
-      const socket = makeSocket({ data: { userId: 'user-1' } });
+      const socket = makeSocket({
+        data: { userId: 'user-1', sessionExpiresAt: LIVE },
+      });
 
       gateway.handleDisconnect(socket as any);
 

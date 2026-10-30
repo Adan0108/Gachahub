@@ -3,6 +3,8 @@
 import { useCallback, useRef, useState } from "react";
 import type { RefObject, UIEvent } from "react";
 
+type RevealOptions = { gapPx: number; behavior?: ScrollBehavior; onlyIfAbove?: boolean };
+
 // Further than this from the very bottom counts as "reading older messages": no following, arrow shown.
 const NEAR_BOTTOM_PX = 48;
 
@@ -41,5 +43,27 @@ export function useStickToBottom(containerRef: RefObject<HTMLElement | null>) {
     if (nearBottomRef.current) scrollToBottom();
   }, [scrollToBottom]);
 
-  return { onScroll, scrollToBottom, followIfNearBottom, showJumpToBottom: !atBottom };
+  /**
+   * Scrolls so `element` sits `gapPx` below the top of the list, and stops following new content.
+   * `onlyIfAbove` leaves the list alone when the element is already that low or lower.
+   */
+  const revealAtTop = useCallback(
+    (
+      element: HTMLElement,
+      { gapPx, behavior = "auto", onlyIfAbove = false }: RevealOptions,
+    ) => {
+      const list = containerRef.current;
+      if (!list) return;
+      const offset = element.getBoundingClientRect().top - list.getBoundingClientRect().top;
+      if (onlyIfAbove && offset >= gapPx) return;
+      // Before the scroll event says so: a decrypt finishing this frame must not pull you back down.
+      nearBottomRef.current = false;
+      const top = list.scrollTop + offset - gapPx;
+      if (list.scrollTo) list.scrollTo({ top, behavior });
+      else list.scrollTop = top;
+    },
+    [containerRef],
+  );
+
+  return { onScroll, scrollToBottom, followIfNearBottom, revealAtTop, showJumpToBottom: !atBottom };
 }

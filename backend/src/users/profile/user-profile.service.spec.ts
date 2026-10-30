@@ -62,6 +62,8 @@ describe('UserProfileService', () => {
 
     expect(profile).toEqual({
       ...fields,
+      reputation: 0,
+      rank: 'STARGAZER',
       isBlockedByMe: true,
       isFollowing: true,
       followsYou: true,

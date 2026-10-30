@@ -1,3 +1,4 @@
+import type { EconomyService } from '../economy/economy.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -168,6 +169,14 @@ describe('PostsService', () => {
       eventPublisherPort as EventPublisherPort,
       prisma as unknown as PrismaService,
       mentions as unknown as MentionsService,
+      {
+        recordLike: jest.fn(),
+        recordComment: jest.fn(),
+        revokeForContent: jest.fn(),
+        restoreForContent: jest.fn(),
+        revokeForActor: jest.fn(),
+        restoreForActor: jest.fn(),
+      } as unknown as EconomyService,
     );
   });
 

@@ -45,7 +45,7 @@ const groupName = (notification: Notification) =>
   notification.conversation?.title || "Unnamed group";
 const messages = (count = 1) => (count > 1 ? `${count} messages` : "a message");
 
-/** Per type: the sentence (it counts stacked messages; in a group the row's title is the group, so the sentence leaves it out), and where it leads (`href` returning null = nowhere to go, on purpose). */
+/** Per type: the sentence (it counts stacked messages; in a group the sentence names the group too, under the group's own title), and where it leads (`href` returning null = nowhere to go, on purpose). */
 const NOTIFICATION_KINDS: Record<string, NotificationKind> = {
   POST_LIKED: { action: () => "liked your post", href: postHref },
   POST_COMMENTED: { action: () => "commented on your post", href: postHref },
@@ -62,17 +62,21 @@ const NOTIFICATION_KINDS: Record<string, NotificationKind> = {
   MESSAGE_RECEIVED: {
     action: (notification) =>
       isGroup(notification)
-        ? `sent ${messages(notification.count)}`
+        ? `sent ${messages(notification.count)} in ${groupName(notification)}`
         : `sent you ${messages(notification.count)}`,
     href: chatHref,
   },
-  MESSAGE_REPLIED: { action: () => "replied to your message", href: chatHref },
+  MESSAGE_REPLIED: {
+    action: (notification) =>
+      isGroup(notification) ? `replied to your message in ${groupName(notification)}` : "replied to your message",
+    href: chatHref,
+  },
   GROUP_ADDED: {
-    action: (notification) => (isGroup(notification) ? "added you" : "added you to a group"),
+    action: (notification) => (isGroup(notification) ? `added you to ${groupName(notification)}` : "added you to a group"),
     href: chatHref,
   },
   GROUP_INVITE_PENDING: {
-    action: (notification) => (isGroup(notification) ? "invited you" : "invited you to a group"),
+    action: (notification) => (isGroup(notification) ? `invited you to ${groupName(notification)}` : "invited you to a group"),
     href: chatHref,
   },
 };

@@ -5,7 +5,16 @@ import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
 import type { Ref } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FiLogOut, FiMenu, FiMoon, FiPlus, FiSettings, FiSun, FiUser } from "react-icons/fi";
+import {
+  FiHexagon,
+  FiLogOut,
+  FiMenu,
+  FiMoon,
+  FiPlus,
+  FiSettings,
+  FiSun,
+  FiUser,
+} from "react-icons/fi";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { useDismiss } from "../hooks/useDismiss";
 import { useMyPresence, useOfflineExpiryNotice } from "../hooks/presence/useMyPresence";
@@ -42,6 +51,7 @@ export function Topbar({
   const accountMenuRef = useRef(null);
   const health = useQuery(queries.health());
   const { user, isAuthenticated, isLoading: isSessionLoading } = useCurrentUser();
+  const wallet = useQuery({ ...queries.wallet(), enabled: isAuthenticated });
   const apiStatus = health.isSuccess ? "connected" : health.isError ? "offline" : "checking";
   const initials = (user?.name || user?.email || "User")
     .split(/\s+/)
@@ -112,6 +122,15 @@ export function Topbar({
           </Link>
         )}
         {isSessionLoading && <span className="auth-session-placeholder" aria-hidden="true" />}
+        {isAuthenticated && wallet.data && (
+          <Link
+            aria-label={`${wallet.data.shards} Shards, open wallet`}
+            className="wallet-chip"
+            href="/wallet"
+          >
+            <FiHexagon aria-hidden="true" /> {wallet.data.shards.toLocaleString()}
+          </Link>
+        )}
         {isAuthenticated && (
           <NotificationBell
             onClose={closeNotifications}
@@ -153,6 +172,9 @@ export function Topbar({
                 <ModerationNavigation user={user} onNavigate={closeAccountMenu} />
                 <Link href="/profile" onClick={() => setAccountOpen(false)} role="menuitem">
                   <FiUser /> View profile
+                </Link>
+                <Link href="/wallet" onClick={() => setAccountOpen(false)} role="menuitem">
+                  <FiHexagon /> Wallet
                 </Link>
                 <Link href="/settings" onClick={() => setAccountOpen(false)} role="menuitem">
                   <FiSettings /> Settings

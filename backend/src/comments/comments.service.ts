@@ -14,6 +14,7 @@ import { resolvePagination, toPaginated } from '../common/utils/paginated';
 import { EventPublisherPort } from '../domain-events/event-publisher.port';
 import { PrismaService } from '../prisma/prisma.service';
 import { MentionsService } from '../mentions/mentions.service';
+import { EconomyService } from '../economy/economy.service';
 
 @Injectable()
 export class CommentsService {
@@ -24,6 +25,7 @@ export class CommentsService {
     private readonly eventPublisher: EventPublisherPort,
     private readonly prisma: PrismaService,
     private readonly mentions: MentionsService,
+    private readonly economy: EconomyService,
   ) {}
 
   async findByPost(postId: string, query: PaginationQueryDto, userId?: string) {
@@ -36,14 +38,17 @@ export class CommentsService {
       limit,
     });
 
-    const mentioned = await this.commentsRepository.findMentionedUsernames(
-      result.items.map((comment) => comment.id),
-    );
+    const ids = result.items.map((comment) => comment.id);
+    const [mentioned, liked] = await Promise.all([
+      this.commentsRepository.findMentionedUsernames(ids),
+      this.commentsRepository.findLikedCommentIds(ids, userId),
+    ]);
 
     return toPaginated(
-      result.items.map((comment) =>
-        this.formatComment(comment, mentioned.get(comment.id)),
-      ),
+      result.items.map((comment) => ({
+        ...this.formatComment(comment, mentioned.get(comment.id)),
+        likedByCurrentUser: liked.has(comment.id),
+      })),
       { page, limit, total: result.total },
     );
   }
@@ -73,14 +78,17 @@ export class CommentsService {
       limit,
     });
 
-    const mentioned = await this.commentsRepository.findMentionedUsernames(
-      result.items.map((comment) => comment.id),
-    );
+    const ids = result.items.map((comment) => comment.id);
+    const [mentioned, liked] = await Promise.all([
+      this.commentsRepository.findMentionedUsernames(ids),
+      this.commentsRepository.findLikedCommentIds(ids, userId),
+    ]);
 
     return toPaginated(
-      result.items.map((comment) =>
-        this.formatComment(comment, mentioned.get(comment.id)),
-      ),
+      result.items.map((comment) => ({
+        ...this.formatComment(comment, mentioned.get(comment.id)),
+        likedByCurrentUser: liked.has(comment.id),
+      })),
       { page, limit, total: result.total },
     );
   }
@@ -126,6 +134,13 @@ export class CommentsService {
         },
         transaction,
       );
+
+      await this.economy.recordComment(transaction, {
+        commentId: createdComment.id,
+        postId,
+        postOwnerId: post.authorId,
+        commenterId: userId,
+      });
 
       return createdComment;
     });
@@ -192,6 +207,13 @@ export class CommentsService {
         transaction,
       );
 
+      await this.economy.recordComment(transaction, {
+        commentId: createdReply.id,
+        postId: parent.postId,
+        postOwnerId: post.authorId,
+        commenterId: userId,
+      });
+
       return createdReply;
     });
 
@@ -202,6 +224,52 @@ export class CommentsService {
     );
 
     return this.formatComment(reply);
+  }
+
+  async like(commentId: string, userId: string) {
+    const comment = await this.ensureCommentCanBeLiked(commentId, userId);
+
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const likeResult = await this.commentsRepository.like(
+        transaction,
+        commentId,
+        userId,
+      );
+
+      if (likeResult.changed) {
+        await this.economy.recordLike(transaction, {
+          targetType: 'COMMENT',
+          targetId: commentId,
+          ownerId: comment.authorId,
+          likerId: userId,
+        });
+      }
+
+      return likeResult;
+    });
+
+    return { liked: result.liked, likeCount: result.likeCount };
+  }
+
+  async unlike(commentId: string, userId: string) {
+    await this.ensureCommentCanBeLiked(commentId, userId);
+
+    const result = await this.commentsRepository.unlike(commentId, userId);
+
+    return { liked: result.liked, likeCount: result.likeCount };
+  }
+
+  /** Same reach as reading it: a deleted or hidden comment, or one on a post you cannot see, is "not found". */
+  private async ensureCommentCanBeLiked(commentId: string, userId: string) {
+    const comment = await this.commentsRepository.findById(commentId);
+
+    if (!comment || comment.deletedAt || comment.status === 'HIDDEN') {
+      throw new NotFoundException('Comment not found');
+    }
+
+    await this.ensurePostCanBeViewed(comment.postId, userId);
+
+    return comment;
   }
 
   async update(commentId: string, dto: UpdateCommentDto, userId: string) {

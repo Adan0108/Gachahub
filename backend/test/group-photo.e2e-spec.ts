@@ -27,7 +27,15 @@ describe('Group photo uploads (real database)', () => {
       data: { id: owner, name: 'Owner', email: `${owner}@example.invalid` },
     });
     conversationId = (
-      await db.chatConversation.create({ data: { type: 'GROUP', title: 'G' } })
+      await db.chatConversation.create({
+        data: {
+          type: 'GROUP',
+          title: 'G',
+          participants: {
+            create: { userId: owner, role: 'OWNER', state: 'ACTIVE' },
+          },
+        },
+      })
     ).id;
   });
 
@@ -111,7 +119,7 @@ describe('Group photo uploads (real database)', () => {
       where: { id: conversationId },
     });
 
-    const result = await repository.clear(conversationId);
+    const result = await repository.clear(conversationId, owner);
 
     expect(result.previousUploadId).toBe(before.photoMediaUploadId);
     expect(result.conversation).toMatchObject({
