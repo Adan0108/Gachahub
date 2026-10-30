@@ -1,43 +1,23 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { AuditLogService } from '../audit-log/audit-log.service';
-import type { UserModerationAuditAction } from '../audit-log/audit-log.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { SessionTerminator } from '../auth/session-terminator.service';
 import { UserRole, UserStatus } from '../generated/prisma/client';
-import { ADMIN_SETTABLE_USER_STATUSES } from './dto/update-user-status.dto';
 import { QueryUsersAdminDto } from './dto/query-users-admin.dto';
 import { UsersRepository } from './users.repository';
-import { releaseModeratorCases } from '../common/moderation/release-moderator-cases';
 import { resolvePagination, toPaginated } from '../common/utils/paginated';
 
-type AdminSettableUserStatus = (typeof ADMIN_SETTABLE_USER_STATUSES)[number];
-
-const AUDIT_ACTION_BY_STATUS: Record<
-  AdminSettableUserStatus,
-  UserModerationAuditAction
-> = {
-  BANNED: 'USER_BANNED',
-  SUSPENDED: 'USER_SUSPENDED',
-  ACTIVE: 'USER_REACTIVATED',
-};
-
-/**
- * Admin actions on user accounts: listing, and changing status (ban /
- * suspend / reactivate). Never deletes a row - see the schema comment on
- * User.status and BACKLOG's account-moderation note: a banned user's past
- * messages/posts must stay visible to others, so only status ever changes.
- */
+/** Lists preserved legacy states and supports audited reactivation only. */
 @Injectable()
 export class UserModerationService {
   constructor(
     private readonly usersRepository: UsersRepository,
     private readonly auditLogService: AuditLogService,
-    private readonly sessionTerminator: SessionTerminator,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -55,22 +35,21 @@ export class UserModerationService {
     return toPaginated(result.items, { page, limit, total: result.total });
   }
 
-  /**
-   * Status and audit entry commit together (privilege change - no status
-   * change without a record, same reasoning as moderator assignment).
-   * Ending sessions runs only after that commits: it's the one step here
-   * that's allowed to fail without undoing the moderation action, so it
-   * must never be able to swallow the audit write with it.
-   */
+  /** Legacy reactivation and audit commit together. Temporary sanctions remain separate. */
   async setStatus(
     userId: string,
-    toStatus: AdminSettableUserStatus,
+    toStatus: UserStatus,
     actorId: string,
     reason?: string,
   ) {
     if (userId === actorId) {
       throw new ForbiddenException('You cannot change your own account status');
     }
+
+    if (toStatus !== UserStatus.ACTIVE)
+      throw new BadRequestException(
+        'MVP restrictions must use an explicit temporary case sanction of 1-30 days',
+      );
 
     const user = await this.usersRepository.findForModeration(userId);
 
@@ -104,13 +83,9 @@ export class UserModerationService {
         );
       }
 
-      if (toStatus !== UserStatus.ACTIVE) {
-        await releaseModeratorCases(tx, userId);
-      }
-
       await this.auditLogService.recordOrThrow(
         {
-          action: AUDIT_ACTION_BY_STATUS[toStatus],
+          action: 'USER_REACTIVATED',
           actorId,
           targetId: userId,
           targetType: 'USER',
@@ -124,10 +99,6 @@ export class UserModerationService {
 
       return result;
     });
-
-    if (toStatus !== UserStatus.ACTIVE) {
-      await this.sessionTerminator.endAllForUser(userId);
-    }
 
     return updated;
   }

@@ -1,3 +1,4 @@
+import { kafkaClientConfig } from './kafka-client.config';
 import {
   Injectable,
   Logger,
@@ -31,23 +32,7 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
   }
 
   constructor() {
-    const brokers = process.env.KAFKA_BROKERS?.split(',')
-      .map((broker) => broker.trim())
-      .filter(Boolean);
-
-    const clientId = process.env.KAFKA_CLIENT_ID ?? 'gachahub-backend';
-
-    if (!brokers || brokers.length === 0) {
-      throw new Error('KAFKA_BROKERS is missing');
-    }
-
-    const kafka = new Kafka({
-      clientId,
-      brokers,
-      retry: {
-        retries: 8,
-      },
-    });
+    const kafka = new Kafka(kafkaClientConfig());
 
     this.producer = kafka.producer();
     this.startup = new KafkaBackgroundStart(

@@ -73,9 +73,24 @@ export class UsersService {
    * happens to expire - the same staleness AdminGuard already works around for role/status.
    */
   async getMe(userId: string) {
+    const now = new Date();
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: ME_SELECT,
+      select: {
+        ...ME_SELECT,
+        // Own effective restrictions only; never expose staff or request metadata.
+        sanctions: {
+          where: {
+            scope: 'PLATFORM',
+            status: 'ACTIVE',
+            type: { not: 'WARNING' },
+            startsAt: { lte: now },
+            expiresAt: { gt: now },
+          },
+          select: { type: true, expiresAt: true },
+          take: 4,
+        },
+      },
     });
 
     if (!user) {

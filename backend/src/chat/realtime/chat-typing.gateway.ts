@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, UseInterceptors } from '@nestjs/common';
+import { SanctionInterceptor } from '../../moderation-enforcement/sanction.interceptor';
 import {
   ConnectedSocket,
   MessageBody,
@@ -27,6 +28,7 @@ interface TypingPayload {
  * distinct namespace is set here, so it shares the same underlying server.
  */
 @Injectable()
+@UseInterceptors(SanctionInterceptor)
 @WebSocketGateway(websocketGatewayOptions)
 export class ChatTypingGateway implements OnGatewayDisconnect {
   @WebSocketServer()

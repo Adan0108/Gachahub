@@ -5,14 +5,14 @@ import { AppShell } from "../components/AppShell";
 import type { ComponentProps } from "react";
 import type { Topbar } from "../components/Topbar";
 
-const mocks = vi.hoisted(() => ({ pathname: "/explore", waiting: 0 }));
+const mocks = vi.hoisted(() => ({ pathname: "/explore", waiting: 0, user: null as null | { id: string; sanctions: { type: string; expiresAt: null }[] }, refetch: vi.fn() }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => mocks.pathname,
   useRouter: () => ({ replace: vi.fn() }),
 }));
 vi.mock("../hooks/useCurrentUser", () => ({
-  useCurrentUser: () => ({ user: null, isAuthenticated: false, isLoading: false }),
+  useCurrentUser: () => ({ user: mocks.user, isAuthenticated: Boolean(mocks.user), isLoading: false, refetch: mocks.refetch }),
 }));
 vi.mock("../hooks/useTheme", () => ({
   useTheme: () => ({ theme: "dark", toggleTheme: vi.fn() }),
@@ -36,6 +36,7 @@ describe("AppShell navigation", () => {
   beforeEach(() => {
     mocks.pathname = "/explore";
     mocks.waiting = 0;
+    mocks.user = null;
     document.body.style.overflow = "";
   });
 
@@ -52,6 +53,19 @@ describe("AppShell navigation", () => {
     );
     expect(document.querySelector("#main-content")).toHaveAttribute("tabindex", "-1");
     expect(screen.getByRole("link", { name: /Explore/ })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("directs a fully suspended account to recovery and keeps the appeal page usable", () => {
+    mocks.user = { id: "me", sanctions: [{ type: "PLATFORM_SUSPENSION", expiresAt: null }] };
+    const shell = () => <AppShell><p>Recovery content</p></AppShell>;
+    const view = render(shell());
+    expect(screen.getByRole("heading", { name: "Account access restricted" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View notices and appeals" })).toHaveAttribute("href", "/account/moderation");
+    expect(screen.queryByText("Recovery content")).not.toBeInTheDocument();
+    mocks.pathname = "/account/moderation";
+    view.rerender(shell());
+    expect(screen.getByText("Recovery content")).toBeInTheDocument();
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
   });
 
   it("shows a dot on Messages while chats or requests are waiting, and none when nothing is", () => {

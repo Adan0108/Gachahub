@@ -9,6 +9,15 @@ datasource db {
 }
 
 model User {
+  enforcementRecords ContentEnforcement[] @relation("EnforcementSubject")
+  enforcementActions ContentEnforcement[] @relation("EnforcementActor")
+  violations ModerationViolation[] @relation("ViolationSubject")
+  violationDecisions ModerationViolation[] @relation("ViolationActor")
+  sanctions ModerationSanction[] @relation("SanctionSubject")
+  sanctionsIssued ModerationSanction[] @relation("SanctionActor")
+  moderationDecisionAudits ModerationDecisionAudit[]
+  appealsReviewed ModerationAppeal[]
+
   id            String   @id
   name          String
   email         String
@@ -190,6 +199,10 @@ enum GameStatus {
 }
 
 model Game {
+  enforcementRecords ContentEnforcement[]
+  violations ModerationViolation[]
+  sanctions ModerationSanction[]
+
   id          String     @id @default(cuid())
   name        String
   slug        String     @unique
@@ -1118,6 +1131,10 @@ model Report {
 }
 
 model ModerationCase {
+  enforcementRecords ContentEnforcement[]
+  confirmedViolation ModerationViolation?
+  sanctions ModerationSanction[]
+
   id         String           @id @default(cuid())
   targetType ReportTargetType
   targetId   String
@@ -1260,6 +1277,7 @@ model AuditLog {
 }
 
 enum NotificationType {
+  MODERATION_NOTICE
   POST_LIKED
   POST_COMMENTED
   COMMENT_REPLIED
@@ -1275,6 +1293,7 @@ enum NotificationType {
 }
 
 enum NotificationEntityType {
+  MODERATION_ACTION
   POST
   COMMENT
   MESSAGE
@@ -1777,4 +1796,142 @@ model CountedInteraction {
   @@id([kind, targetType, targetId, actorId])
   @@index([kind, targetType, targetId])
   @@map("counted_interactions")
+}
+
+
+enum EnforcementScope {
+  COMMUNITY
+  PLATFORM
+}
+
+enum ViolationSeverity {
+  MINOR
+  MODERATE
+  SEVERE
+  CRITICAL
+}
+
+enum SanctionType {
+  WARNING
+  COMMUNITY_RESTRICTION
+  COMMUNITY_BAN
+  PLATFORM_SUSPENSION
+}
+
+enum SanctionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+enum AppealStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+model ContentEnforcement {
+  id String @id @default(cuid())
+  targetType ReportTargetType
+  targetId String
+  subjectId String
+  actorId String?
+  scope EnforcementScope
+  gameId String?
+  caseId String?
+  reason String @db.VarChar(1000)
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+  subject User @relation("EnforcementSubject", fields: [subjectId], references: [id], onDelete: Restrict)
+  actor User? @relation("EnforcementActor", fields: [actorId], references: [id], onDelete: SetNull)
+  game Game? @relation(fields: [gameId], references: [id], onDelete: Restrict)
+  case ModerationCase? @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  sanctions ModerationSanction[]
+  @@index([targetType, targetId, revokedAt])
+  @@index([subjectId, createdAt])
+  @@index([caseId, createdAt])
+  @@map("content_enforcements")
+}
+
+model ModerationViolation {
+  incidentKey String @unique
+  id String @id @default(cuid())
+  caseId String @unique
+  subjectId String
+  actorId String?
+  scope EnforcementScope
+  gameId String?
+  category ReportReason
+  severity ViolationSeverity
+  reason String @db.VarChar(1000)
+  createdAt DateTime @default(now())
+  reversedAt DateTime?
+  subject User @relation("ViolationSubject", fields: [subjectId], references: [id], onDelete: Restrict)
+  actor User? @relation("ViolationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  case ModerationCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  game Game? @relation(fields: [gameId], references: [id], onDelete: Restrict)
+  sanctions ModerationSanction[]
+  @@index([subjectId, scope, gameId, reversedAt, createdAt])
+  @@map("moderation_violations")
+}
+
+model ModerationSanction {
+  id String @id @default(cuid())
+  subjectId String
+  actorId String?
+  type SanctionType
+  scope EnforcementScope
+  gameId String?
+  caseId String?
+  violationId String?
+  enforcementId String?
+  reason String @db.VarChar(1000)
+  startsAt DateTime @default(now())
+  expiresAt DateTime?
+  status SanctionStatus @default(ACTIVE)
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  requestKey String @unique
+  requestHash String
+  subject User @relation("SanctionSubject", fields: [subjectId], references: [id], onDelete: Restrict)
+  actor User? @relation("SanctionActor", fields: [actorId], references: [id], onDelete: SetNull)
+  game Game? @relation(fields: [gameId], references: [id], onDelete: Restrict)
+  case ModerationCase? @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  violation ModerationViolation? @relation(fields: [violationId], references: [id], onDelete: Restrict)
+  enforcement ContentEnforcement? @relation(fields: [enforcementId], references: [id], onDelete: Restrict)
+  appeal ModerationAppeal?
+  @@index([subjectId, scope, gameId, status, expiresAt])
+  @@index([status, expiresAt])
+  @@index([subjectId, createdAt, id])
+  @@map("moderation_sanctions")
+}
+
+model ModerationAppeal {
+  id String @id @default(cuid())
+  sanctionId String @unique
+  statement String @db.VarChar(2000)
+  status AppealStatus @default(PENDING)
+  reviewerId String?
+  decisionReason String? @db.VarChar(1000)
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  sanction ModerationSanction @relation(fields: [sanctionId], references: [id], onDelete: Restrict)
+  reviewer User? @relation(fields: [reviewerId], references: [id], onDelete: SetNull)
+  @@index([status, createdAt, id])
+  @@map("moderation_appeals")
+}
+
+model ModerationDecisionAudit {
+  id String @id @default(cuid())
+  actorId String?
+  action String @db.VarChar(64)
+  entityId String
+  reason String @db.VarChar(1000)
+  previousState Json
+  resultingState Json
+  createdAt DateTime @default(now())
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  @@index([entityId, createdAt])
+  @@map("moderation_decision_audits")
 }

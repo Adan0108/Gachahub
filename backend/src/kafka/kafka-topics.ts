@@ -18,6 +18,7 @@ export function resolveDomainEventTopic(type: DomainEventType): KafkaTopic {
     case 'comment.created':
       return KAFKA_TOPICS.POSTS;
 
+    case 'moderation.notice':
     case 'user.followed':
     case 'user.mentioned':
       return KAFKA_TOPICS.SOCIAL;

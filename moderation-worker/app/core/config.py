@@ -16,6 +16,8 @@ class Settings(BaseModel):
     classifier_model_name: str = MODEL_NAME
     classifier_model_revision: str = MODEL_REVISION
     classifier_max_length: int = MODEL_MAX_LENGTH
+    classifier_timeout_seconds: float = Field(default=90, ge=1, le=120)
+    classifier_startup_timeout_seconds: float = Field(default=120, ge=1, le=120)
     backend_base_url: str
     moderation_worker_token: SecretStr
     kafka_brokers: str = Field(min_length=1)

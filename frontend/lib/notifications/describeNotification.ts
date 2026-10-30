@@ -47,6 +47,7 @@ const messages = (count = 1) => (count > 1 ? `${count} messages` : "a message");
 
 /** Per type: the sentence (it counts stacked messages; in a group the sentence names the group too, under the group's own title), and where it leads (`href` returning null = nowhere to go, on purpose). */
 const NOTIFICATION_KINDS: Record<string, NotificationKind> = {
+  MODERATION_NOTICE: { action: () => "updated your moderation notices", href: () => "/account/moderation" },
   POST_LIKED: { action: () => "liked your post", href: postHref },
   POST_COMMENTED: { action: () => "commented on your post", href: postHref },
   COMMENT_REPLIED: { action: () => "replied to your comment", href: postHref },
@@ -83,6 +84,7 @@ const NOTIFICATION_KINDS: Record<string, NotificationKind> = {
 
 /** A group's row is headed by the group and shows its photo, with the sender named in the sentence; every other row is headed by who did it. */
 export function describeNotification(notification: Notification) {
+  if (notification.type === "MODERATION_NOTICE") return { actor: "GachaHub", title: "Moderation notice", image: null, action: "A moderation decision about your account was updated", href: "/account/moderation" };
   const kind = NOTIFICATION_KINDS[notification.type];
   const actor = notification.actor?.name || "Someone";
   const verb = kind?.action(notification) ?? "sent you a notification";

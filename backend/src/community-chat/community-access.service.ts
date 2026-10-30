@@ -2,11 +2,13 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { loadActiveUser } from '../common/guards/active-user.util';
 import { GameModeratorsRepository } from '../game-moderators/game-moderators.repository';
 import { PrismaService } from '../prisma/prisma.service';
 import { CommunityChatRepository } from './community-chat.repository';
+import { SanctionAccessService } from '../moderation-enforcement/sanction-access.service';
 
 /** Who is asking and what they may do in this community. */
 export type CommunityScope = Awaited<
@@ -20,6 +22,7 @@ export class CommunityAccessService {
     private readonly repository: CommunityChatRepository,
     private readonly prisma: PrismaService,
     private readonly moderators: GameModeratorsRepository,
+    @Optional() private readonly sanctions?: SanctionAccessService,
   ) {}
 
   /** Refuses anyone who is not an active member, moderator or admin of an active community. */
@@ -29,6 +32,7 @@ export class CommunityAccessService {
     if (!game || game.status !== 'ACTIVE') {
       throw new NotFoundException('Community not found');
     }
+    await this.sanctions?.assertAllowed(user.id, false, game.id);
 
     const [membership, moderator] = await Promise.all([
       this.repository.findMembership(game.id, user.id),

@@ -27,9 +27,9 @@ class FactoryTests(unittest.TestCase):
         self.assertEqual(classifier.classify("").model.name, "fixture-text")
 
     def test_huggingface_selected_with_pinned_settings(self):
-        with patch("app.classifiers.huggingface.HuggingFaceClassifier") as constructor:
+        with patch("app.classifiers.deadline.DeadlineClassifier") as constructor:
             self.assertIs(create_classifier(settings(classifier_backend="huggingface")), constructor.return_value)
-        constructor.assert_called_once_with(MODEL_NAME, MODEL_REVISION, MODEL_MAX_LENGTH)
+        constructor.assert_called_once_with(HuggingFaceClassifier, (MODEL_NAME, MODEL_REVISION, MODEL_MAX_LENGTH), 90, 120)
 
     def test_immutable_profile_settings(self):
         self.assertEqual(settings(classifier_backend="huggingface").classifier_profile, HUGGINGFACE_PROFILE)

@@ -19,6 +19,7 @@ def main() -> int:
     consumer = None
     publisher = None
     worker = None
+    classifier = None
     try:
         settings = Settings.from_env()
         # Download/load before creating Kafka clients or consuming requests.
@@ -39,6 +40,8 @@ def main() -> int:
         # No exception messages/stacks: HTTP errors can contain URLs or private bodies.
         log_event("worker_failed_request_uncommitted", level=logging.ERROR)
     finally:
+        if classifier is not None and hasattr(classifier, "close"):
+            classifier.close()
         if backend:
             backend.close()
         if worker is None:

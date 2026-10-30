@@ -1,3 +1,4 @@
+import { kafkaClientConfig } from '../kafka/kafka-client.config';
 import {
   Injectable,
   Logger,
@@ -17,14 +18,7 @@ export class ModerationResultConsumer implements OnModuleInit, OnModuleDestroy {
   private readonly startup: KafkaBackgroundStart;
 
   constructor(private readonly results: ModerationResultService) {
-    const brokers = process.env.KAFKA_BROKERS?.split(',')
-      .map((b) => b.trim())
-      .filter(Boolean);
-    if (!brokers?.length) throw new Error('KAFKA_BROKERS is missing');
-    this.consumer = new Kafka({
-      clientId: process.env.KAFKA_CLIENT_ID ?? 'gachahub-backend',
-      brokers,
-    }).consumer({
+    this.consumer = new Kafka(kafkaClientConfig()).consumer({
       groupId:
         process.env.KAFKA_MODERATION_RESULTS_GROUP_ID ??
         'gachahub-moderation-results',

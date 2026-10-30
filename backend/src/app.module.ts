@@ -1,3 +1,4 @@
+import { EnforcementModule } from './moderation-enforcement/enforcement.module';
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from '@thallesp/nestjs-better-auth';
@@ -47,6 +48,7 @@ import { ModerationResultsModule } from './moderation-analysis/moderation-result
     ScheduleModule.forRoot(),
 
     CommonModule,
+    EnforcementModule,
     CloudinaryModule,
     PrismaModule,
     RedisModule,

@@ -55,6 +55,12 @@ describe("AdminUsersPage status-based actions", () => {
       meta: { page: 1, limit: 20, total: 1, totalPages: 1 },
     });
     renderPage();
+    expect(await screen.findByRole("link", { name: "Review temporary sanctions" })).toHaveAttribute(
+      "href",
+      "/moderation/cases",
+    );
+    expect(screen.queryByRole("button", { name: /restrict/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Ban" })).not.toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "Manage moderation access" })).toHaveAttribute(
       "href",
       "/admin/moderators?search=%40rover",
@@ -97,13 +103,14 @@ describe("AdminUsersPage status-based actions", () => {
     expect(screen.queryByRole("button", { name: /reactivate rover/i })).not.toBeInTheDocument();
   });
 
-  it("disables Restrict for an active admin row", async () => {
+  it("offers no legacy restriction control for an active admin row", async () => {
     mocks.listAdminUsers.mockResolvedValue({
       items: [{ ...baseUser, role: "ADMIN", status: "ACTIVE" }],
       meta: { page: 1, limit: 20, total: 1, totalPages: 1 },
     });
     renderPage();
 
-    expect(await screen.findByRole("button", { name: /restrict rover/i })).toBeDisabled();
+    await screen.findByText("Rover");
+    expect(screen.queryByRole("button", { name: /restrict rover/i })).not.toBeInTheDocument();
   });
 });

@@ -46,13 +46,18 @@ class JobProcessor:
         try:
             output = ClassifierOutput.model_validate(self.classifier.classify(text))
             failure = False
+            failure_code = "CLASSIFIER_ERROR"
+        except TimeoutError:
+            failure = True
+            failure_code = "CLASSIFIER_TIMEOUT"
         except Exception:
             # Stage 2B allows bounded uppercase machine codes, not a closed enum.
             failure = True
+            failure_code = "CLASSIFIER_ERROR"
         if cancelled.is_set():
             raise Cancelled()
         completed = datetime.now(timezone.utc).isoformat()
-        payload = (FailedResult(**identity, status="FAILED", errorCode="CLASSIFIER_ERROR", completedAt=completed)
+        payload = (FailedResult(**identity, status="FAILED", errorCode=failure_code, completedAt=completed)
                    if failure else SuccessResult(**identity, status="SUCCEEDED", output=output, completedAt=completed))
         event_id = uuid5(NAMESPACE_URL, "gachahub:moderation.result:" + request.analysisJobId + ":" +
                          request.snapshotHash + ":" + request.classifierProfile)

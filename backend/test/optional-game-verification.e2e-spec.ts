@@ -305,7 +305,9 @@ describe('Optional-game comprehensive API/integration verification', () => {
           ? null
           : (req.headers['x-test-user'] ?? author);
       req.user = id ? { id } : null;
-      req.session = id ? { user: { id } } : null;
+      req.session = id
+        ? { user: { id }, session: { id: `fixture-session-${id}` } }
+        : null;
       next();
     });
     const reflector = new Reflector();

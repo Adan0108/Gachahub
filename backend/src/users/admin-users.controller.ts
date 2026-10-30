@@ -30,7 +30,8 @@ export class AdminUsersController {
 
   @Patch(':userId/status')
   @ApiOperation({
-    summary: 'Ban, suspend, or reactivate a user account. Admin only.',
+    summary:
+      'Reactivate a legacy account status. New restrictions require temporary case sanctions. Admin only.',
   })
   updateStatus(
     @Session() session: UserSession,

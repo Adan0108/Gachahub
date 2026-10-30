@@ -1,3 +1,4 @@
+import { kafkaClientConfig } from '../kafka/kafka-client.config';
 import {
   Injectable,
   Logger,
@@ -140,18 +141,7 @@ export class NotificationConsumerService
     private readonly prisma: PrismaService,
     private readonly socketNotificationDeliveryService: SocketNotificationDeliveryService,
   ) {
-    const brokers = process.env.KAFKA_BROKERS?.split(',')
-      .map((broker) => broker.trim())
-      .filter(Boolean);
-
-    if (!brokers || brokers.length === 0) {
-      throw new Error('KAFKA_BROKERS is missing');
-    }
-
-    const kafka = new Kafka({
-      clientId: process.env.KAFKA_CLIENT_ID ?? 'gachahub-backend',
-      brokers,
-    });
+    const kafka = new Kafka(kafkaClientConfig());
 
     this.consumer = kafka.consumer({
       groupId:
@@ -312,6 +302,31 @@ export class NotificationConsumerService
     transaction: Prisma.TransactionClient,
   ): Promise<NotificationRecord[]> {
     switch (event.type) {
+      case 'moderation.notice': {
+        const payload = event.payload as {
+          recipientId?: unknown;
+          actorId?: unknown;
+          entityId?: unknown;
+        };
+        if (
+          typeof payload?.recipientId !== 'string' ||
+          typeof payload.entityId !== 'string' ||
+          !(payload.actorId === null || typeof payload.actorId === 'string')
+        )
+          throw new PermanentEventError('Invalid moderation notice payload');
+        const notification = await this.notificationService.createNotification(
+          {
+            recipientId: payload.recipientId,
+            actorId: payload.actorId,
+            type: 'MODERATION_NOTICE',
+            entityType: 'MODERATION_ACTION',
+            entityId: payload.entityId,
+          },
+          transaction,
+        );
+        return notification ? [notification] : [];
+      }
+
       case 'post.liked': {
         const notification = await this.handlePostLiked(event, transaction);
         return notification ? [notification] : [];

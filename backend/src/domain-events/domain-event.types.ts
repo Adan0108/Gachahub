@@ -1,4 +1,5 @@
 export const DOMAIN_EVENT_TYPES = {
+  MODERATION_NOTICE: 'moderation.notice',
   MODERATION_ANALYSIS_REQUESTED: 'moderation.analysis.requested',
   POST_LIKED: 'post.liked',
   COMMENT_CREATED: 'comment.created',
@@ -29,6 +30,7 @@ export type ChatParticipantAddedState = 'ACTIVE' | 'JOINING' | 'PENDING';
  * notification-specific enums.
  */
 export interface DomainEventPayloadMap {
+  'moderation.notice': { recipientId: string; actorId: string | null; entityId: string };
   'moderation.analysis.requested': {
     analysisJobId: string;
     caseId: string;

@@ -15,4 +15,5 @@ if os.environ.get("LIVE_TEST_FAIL_COMMIT"):
         def commit(self, **_kwargs):
             raise RuntimeError("Test fault after acknowledged publication")
     entry.create_consumer = FailBeforeCommit
-raise SystemExit(entry.main())
+if __name__ == "__main__":
+    raise SystemExit(entry.main())

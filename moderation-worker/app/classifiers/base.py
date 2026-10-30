@@ -14,7 +14,10 @@ def create_classifier(settings) -> Classifier:
         return FixtureClassifier()
     if settings.classifier_backend == "huggingface":
         from app.classifiers.huggingface import HuggingFaceClassifier
+        from app.classifiers.deadline import DeadlineClassifier
 
-        return HuggingFaceClassifier(settings.classifier_model_name, settings.classifier_model_revision,
-                                    settings.classifier_max_length)
+        return DeadlineClassifier(HuggingFaceClassifier,
+                                  (settings.classifier_model_name, settings.classifier_model_revision,
+                                   settings.classifier_max_length), settings.classifier_timeout_seconds,
+                                  settings.classifier_startup_timeout_seconds)
     raise ValueError("Unsupported classifier backend")

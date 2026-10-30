@@ -1,4 +1,17 @@
 /* Case workspace and the affected moderation/admin review surfaces. */
+.enforcement-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr)); gap: 16px; margin: 22px 0; }
+.enforcement-stats dt { font-size: 12px; color: var(--muted-strong); line-height: 1.5; }
+.enforcement-stats dd { margin: 6px 0 0; font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
+.enforcement-records { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.enforcement-records > li { min-width: 0; overflow-wrap: anywhere; }
+.enforcement-records > li:not(.admin-panel) { padding: 16px 0; border-bottom: 1px solid var(--line); }
+.enforcement-records p { line-height: 1.65; }
+.enforcement-records time, .enforcement-records small { color: var(--muted-strong); font-size: 12px; }
+.enforcement-records .case-button { margin-top: 10px; }
+.enforcement-controls { margin: 20px 0; }
+.enforcement-checkbox { display: flex; align-items: flex-start; gap: 12px; line-height: 1.6; }
+.moderation-workspace .enforcement-checkbox input { width: 20px; height: 20px; min-height: 20px; flex-shrink: 0; margin-top: 3px; }
+.page.user-moderation-page { width: min(1200px, calc(100vw - 44px)); margin-inline: auto; padding-top: 32px; padding-bottom: 48px; }
 .case-ai-panel {
   min-width: 0;
   margin-bottom: 18px;

@@ -24,6 +24,7 @@ import Image from "next/image";
 import { ReasonSummary, reasonLabel } from "./CaseSummary";
 import { ModeratorPicker } from "./ModeratorPicker";
 import type { ModeratorCandidate } from "./ModeratorPicker";
+import { EnforcementPanel } from "./EnforcementPanel";
 import { AiAdvisory } from "./AiAdvisory";
 import type { AiAdvisory as AiAdvisoryPayload } from "../../lib/ai-advisory";
 import { AvatarFace } from "../AvatarFace";
@@ -197,13 +198,14 @@ function CaseRecord({ item, gameSlug, actorId, actorRole }: RecordProps) {
                 ) : (
                   <p>You can still review what users reported below.</p>
                 )}
-                <CaseContentActions item={item} actorId={actorId} actorRole={actorRole} />
+                <CaseContentActions item={item} actorId={actorId} actorRole={actorRole} gameSlug={gameSlug} />
               </section>
               <section className="admin-panel case-content" aria-labelledby="case-reasons-title">
                 <h2 id="case-reasons-title">Why users reported this</h2>
                 <ReasonSummary reasons={item.reasonSummary} />
               </section>
               <AiAdvisory value={item.aiAdvisory} />
+              <EnforcementPanel key={`${item.id}:${gameSlug}`} caseId={item.id} actorId={actorId} gameSlug={gameSlug} />
               <CaseEvidence
                 key={`${item.id}:${item.evidence?.nextCursor || "end"}`}
                 actorId={actorId}
@@ -397,10 +399,11 @@ function contentVisibility(item: CaseItem) {
       : "Unavailable";
 }
 
-function CaseContentActions({ item, actorId, actorRole }: Omit<RecordProps, "gameSlug">) {
+function CaseContentActions({ item, actorId, actorRole, gameSlug }: RecordProps) {
   const client = useQueryClient();
   const [action, setAction] = useState<"hide" | "restore" | null>(null);
   const [notice, setNotice] = useState("");
+  const [enforcementReason, setEnforcementReason] = useState("");
   const live = item.targetState === "available" && item.target;
   const hidden = live && item.target.status === "HIDDEN";
   const parent = item.targetType === "COMMENT" ? item.target?.post : item.target;
@@ -415,11 +418,9 @@ function CaseContentActions({ item, actorId, actorRole }: Omit<RecordProps, "gam
   const canChange =
     live &&
     ["PUBLISHED", "HIDDEN"].includes(item.target.status) &&
-    (item.game?.slug || (actorRole === "ADMIN" && !item.gameId));
-  const descriptor = { id: item.targetId, type: item.targetType, gameSlug: item.game?.slug };
+    (item.game?.slug || (["ADMIN", "PLATFORM_MODERATOR"].includes(actorRole || "") && !item.gameId));
   const mutation = useMutation({
-    mutationFn: () =>
-      action === "hide" ? api.hideContent(descriptor) : api.restoreContent(descriptor),
+    mutationFn: () => api.decideCaseContent(item.id, { hidden: action === "hide", reason: enforcementReason.trim() }, gameSlug),
     onSuccess: async () => {
       setNotice(
         action === "hide"
@@ -462,6 +463,7 @@ function CaseContentActions({ item, actorId, actorRole }: Omit<RecordProps, "gam
           disabled={mutation.isPending}
           onClick={() => {
             mutation.reset();
+            setEnforcementReason("");
             setAction(hidden ? "restore" : "hide");
           }}
         >
@@ -485,10 +487,11 @@ function CaseContentActions({ item, actorId, actorRole }: Omit<RecordProps, "gam
           pendingLabel="Updating visibility..."
           tone={action === "hide" ? "danger" : "primary"}
           pending={mutation.isPending}
+          confirmDisabled={enforcementReason.trim().length < 3}
           error={mutation.error ? moderationError(mutation.error) : undefined}
           onClose={() => setAction(null)}
           onConfirm={() => mutation.mutate()}
-        />
+        ><label>Enforcement reason<textarea aria-label="Enforcement reason" maxLength={1000} minLength={3} required value={enforcementReason} onChange={(event) => setEnforcementReason(event.target.value)} /></label></AdminActionDialog>
       )}
     </div>
   );
