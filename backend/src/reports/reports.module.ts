@@ -10,9 +10,12 @@ import { ReportRateLimiterService } from './infrastructure/report-rate-limiter.s
 import { ReportsController } from './reports.controller';
 import { ReportsRepository } from './reports.repository';
 import { ReportsService } from './reports.service';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
+import { ModerationAnalysisScheduler } from '../moderation-analysis/moderation-analysis-scheduler.service';
 
 @Module({
   imports: [
+    DomainEventsModule,
     CommonModule,
     GameModeratorsModule,
     PostVisibilityModule,
@@ -24,6 +27,7 @@ import { ReportsService } from './reports.service';
     GameCaseModerationController,
   ],
   providers: [
+    ModerationAnalysisScheduler,
     ReportsService,
     ReportModerationService,
     ReportsRepository,

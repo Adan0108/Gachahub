@@ -1,3 +1,4 @@
+import { kafkaClientConfig } from '../kafka/kafka-client.config';
 import {
   Injectable,
   Logger,
@@ -16,6 +17,7 @@ import type {
   Prisma,
 } from '../generated/prisma/client';
 import { KAFKA_TOPICS } from '../kafka/kafka-topics';
+import { KafkaBackgroundStart } from '../kafka/kafka-background-start';
 import { MAX_MENTIONS_PER_TEXT } from '../mentions/mention-parser';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from './notification.service';
@@ -122,8 +124,6 @@ function asChatParticipantAddedPayload(
   return candidate as ChatParticipantAddedPayload;
 }
 
-const STARTUP_MAX_ATTEMPTS = 5;
-const STARTUP_RETRY_DELAY_MS = 2_000;
 const NOTIFICATION_CONSUMER = 'notifications';
 
 @Injectable()
@@ -133,6 +133,7 @@ export class NotificationConsumerService
   private readonly logger = new Logger(NotificationConsumerService.name);
 
   private readonly consumer: Consumer;
+  private readonly startup: KafkaBackgroundStart;
 
   constructor(
     private readonly notificationService: NotificationService,
@@ -140,31 +141,25 @@ export class NotificationConsumerService
     private readonly prisma: PrismaService,
     private readonly socketNotificationDeliveryService: SocketNotificationDeliveryService,
   ) {
-    const brokers = process.env.KAFKA_BROKERS?.split(',')
-      .map((broker) => broker.trim())
-      .filter(Boolean);
-
-    if (!brokers || brokers.length === 0) {
-      throw new Error('KAFKA_BROKERS is missing');
-    }
-
-    const kafka = new Kafka({
-      clientId: process.env.KAFKA_CLIENT_ID ?? 'gachahub-backend',
-      brokers,
-    });
+    const kafka = new Kafka(kafkaClientConfig());
 
     this.consumer = kafka.consumer({
       groupId:
         process.env.KAFKA_NOTIFICATION_GROUP_ID ?? 'gachahub-notifications',
     });
+    this.startup = new KafkaBackgroundStart(
+      () => this.startConsumer(),
+      () => this.consumer.disconnect(),
+      this.logger,
+    );
   }
 
   /**
    * Starts the Kafka notification consumer when the NestJS module
    * has finished initializing.
    */
-  async onModuleInit(): Promise<void> {
-    await this.startConsumer();
+  onModuleInit(): void {
+    this.startup.start();
   }
 
   /**
@@ -173,7 +168,7 @@ export class NotificationConsumerService
    */
   async onModuleDestroy(): Promise<void> {
     try {
-      await this.consumer.disconnect();
+      await this.startup.stop();
 
       this.logger.log('Notification Kafka consumer disconnected');
     } catch (error) {
@@ -193,48 +188,16 @@ export class NotificationConsumerService
    * be immediately available when the backend starts.
    */
   private async startConsumer(): Promise<void> {
-    for (let attempt = 1; attempt <= STARTUP_MAX_ATTEMPTS; attempt++) {
-      try {
-        await this.consumer.connect();
-
-        await this.consumer.subscribe({
-          topics: [KAFKA_TOPICS.POSTS, KAFKA_TOPICS.SOCIAL, KAFKA_TOPICS.CHAT],
-        });
-
-        await this.consumer.run({
-          eachMessage: async (payload) => {
-            await this.handleMessage(payload);
-          },
-        });
-
-        this.logger.log('Notification Kafka consumer started');
-
-        return;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-
-        this.logger.warn(
-          `Kafka consumer startup failed (${attempt}/${STARTUP_MAX_ATTEMPTS}): ${message}`,
-        );
-
-        /*
-         * Reset the connection before attempting another startup.
-         */
-        try {
-          await this.consumer.disconnect();
-        } catch {
-          // Ignore disconnect failure during startup recovery.
-        }
-
-        if (attempt === STARTUP_MAX_ATTEMPTS) {
-          this.logger.error('Notification Kafka consumer failed to start');
-
-          throw error;
-        }
-
-        await this.delay(STARTUP_RETRY_DELAY_MS);
-      }
-    }
+    await this.consumer.connect();
+    await this.consumer.subscribe({
+      topics: [KAFKA_TOPICS.POSTS, KAFKA_TOPICS.SOCIAL, KAFKA_TOPICS.CHAT],
+    });
+    await this.consumer.run({
+      eachMessage: async (payload) => {
+        await this.handleMessage(payload);
+      },
+    });
+    this.logger.log('Notification Kafka consumer started');
   }
 
   /** Parses and processes one Kafka message; permanent failures are logged and skipped, transient ones rethrown so Kafka retries. */
@@ -339,6 +302,31 @@ export class NotificationConsumerService
     transaction: Prisma.TransactionClient,
   ): Promise<NotificationRecord[]> {
     switch (event.type) {
+      case 'moderation.notice': {
+        const payload = event.payload as {
+          recipientId?: unknown;
+          actorId?: unknown;
+          entityId?: unknown;
+        };
+        if (
+          typeof payload?.recipientId !== 'string' ||
+          typeof payload.entityId !== 'string' ||
+          !(payload.actorId === null || typeof payload.actorId === 'string')
+        )
+          throw new PermanentEventError('Invalid moderation notice payload');
+        const notification = await this.notificationService.createNotification(
+          {
+            recipientId: payload.recipientId,
+            actorId: payload.actorId,
+            type: 'MODERATION_NOTICE',
+            entityType: 'MODERATION_ACTION',
+            entityId: payload.entityId,
+          },
+          transaction,
+        );
+        return notification ? [notification] : [];
+      }
+
       case 'post.liked': {
         const notification = await this.handlePostLiked(event, transaction);
         return notification ? [notification] : [];
@@ -617,15 +605,5 @@ export class NotificationConsumerService
       },
       transaction,
     );
-  }
-
-  /**
-   * Waits for the requested duration before another Kafka startup
-   * attempt is made.
-   */
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => {
-      setTimeout(resolve, ms);
-    });
   }
 }

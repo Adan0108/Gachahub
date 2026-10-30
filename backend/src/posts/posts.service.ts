@@ -21,6 +21,7 @@ import { resolvePagination, toPaginated } from '../common/utils/paginated';
 import { EventPublisherPort } from '../domain-events/event-publisher.port';
 import { MentionsService } from '../mentions/mentions.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { communityAccessWhere } from '../post-visibility/visibility-where';
 
 @Injectable()
 export class PostsService {
@@ -38,6 +39,7 @@ export class PostsService {
     const { page, limit, skip } = resolvePagination(query);
 
     const where: Prisma.PostWhereInput = {
+      ...communityAccessWhere(userId),
       status: 'PUBLISHED',
       visibility: 'PUBLIC',
       deletedAt: null,

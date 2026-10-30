@@ -1,3 +1,4 @@
+import { ModerationAnalysisScheduler } from '../src/moderation-analysis/moderation-analysis-scheduler.service';
 import { isolatedCaseDatabase } from './support/isolated-case-database';
 jest.mock('@thallesp/nestjs-better-auth', () => {
   const common =
@@ -113,6 +114,7 @@ describe('Personal posts API (development database)', () => {
         PostSaveService,
         PostSaveRepository,
         ReportsRepository,
+        ModerationAnalysisScheduler,
         ContentModerationService,
         {
           provide: FollowsService,

@@ -37,7 +37,7 @@ export class CommunityActionsService {
     dto: EditCommunityMessageDto,
     userId: string | undefined,
   ) {
-    const scope = await this.access.scope(slug, userId);
+    const scope = await this.access.scope(slug, userId, true);
     const message = await this.access.messageIn(scope.game.id, messageId);
 
     if (message.authorId !== scope.user.id) {
@@ -73,7 +73,7 @@ export class CommunityActionsService {
             })
         : undefined,
     );
-    this.realtime.changed(message.channelId, message.id);
+    await this.realtime.changed(message.channelId, message.id);
     return this.presenter.one(scope, updated);
   }
 
@@ -84,7 +84,7 @@ export class CommunityActionsService {
     dto: DeleteCommunityMessageDto,
     userId: string | undefined,
   ) {
-    const scope = await this.access.scope(slug, userId);
+    const scope = await this.access.scope(slug, userId, true);
     const message = await this.access.messageIn(scope.game.id, messageId);
 
     const isOwn = message.authorId === scope.user.id;
@@ -99,7 +99,7 @@ export class CommunityActionsService {
       scope.user.id,
       reason,
     );
-    this.realtime.changed(message.channelId, message.id);
+    await this.realtime.changed(message.channelId, message.id);
     // Pictures are not kept as evidence: the files are destroyed, a failure is retried hourly
     await Promise.all(
       message.media.map((item) =>
@@ -116,7 +116,7 @@ export class CommunityActionsService {
     dto: ReactToMessageDto,
     userId: string | undefined,
   ) {
-    const { user, game } = await this.access.scope(slug, userId);
+    const { user, game } = await this.access.scope(slug, userId, true);
     const message = await this.access.messageIn(game.id, messageId);
     if (message.deletedAt) {
       throw new BadRequestException('This message was removed');
@@ -134,16 +134,16 @@ export class CommunityActionsService {
       emoji: dto.emoji,
       emoteId: dto.emoteId,
     });
-    this.realtime.changed(message.channelId, message.id);
+    await this.realtime.changed(message.channelId, message.id);
     return this.reactionsOf(message.id);
   }
 
   async unreact(slug: string, messageId: string, userId: string | undefined) {
-    const { user, game } = await this.access.scope(slug, userId);
+    const { user, game } = await this.access.scope(slug, userId, true);
     const message = await this.access.messageIn(game.id, messageId);
 
     await this.repository.deleteReaction(message.id, user.id);
-    this.realtime.changed(message.channelId, message.id);
+    await this.realtime.changed(message.channelId, message.id);
     return this.reactionsOf(message.id);
   }
 

@@ -683,6 +683,7 @@ describe('FeedService - For You', () => {
     expect(postsRepository.findForYouManyByIds).toHaveBeenCalledWith(
       ['post-1'],
       {
+        AND: expect.any(Array) as unknown[],
         status: 'PUBLISHED',
         deletedAt: null,
         authorId: { not: 'user-1' },

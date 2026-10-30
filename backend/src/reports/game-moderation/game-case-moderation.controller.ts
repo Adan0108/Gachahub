@@ -1,3 +1,4 @@
+import { AI_ADVISORY_DESCRIPTION } from '../domain/ai-advisory';
 import { AssignCaseDto } from '../dto/assign-case.dto';
 import { QueryCaseAssigneesDto } from '../dto/query-case-assignees.dto';
 import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
@@ -56,12 +57,13 @@ export class GameCaseModerationController {
   })
   @ApiOkResponse({
     description:
-      '{items,nextCursor}: native case summaries with game/user summaries, stored counters, risk, assignment/resolution timestamps. nextCursor is null at the end; evidence and target bodies are excluded. Lightweight targetPreview is {title (max 160), excerpt (max 240), thumbnailUrl (one image), author {id,name,username,image}} or null; targetState is available/deleted/missing. reasonSummary is [{reasonCode,count}], grouped from surviving evidence, count DESC then reasonCode ASC (at most 10 enum reasons). No reports[] or full content/media/storage fields. Cursor encodes the exclusive {createdAt,id} boundary. Stable lastReportedAt DESC,id DESC; evidence remains in detail.',
+      '{items,nextCursor}: native case summaries with game/user summaries, stored counters, risk, assignment/resolution timestamps. nextCursor is null at the end; evidence and target bodies are excluded. Lightweight targetPreview is {title (max 160), excerpt (max 240), thumbnailUrl (one image), author {id,name,username,image}} or null; targetState is available/deleted/missing. reasonSummary is [{reasonCode,count}], grouped from surviving evidence, count DESC then reasonCode ASC (at most 10 enum reasons). No reports[] or full content/media/storage fields. Cursor encodes the exclusive {lastReportedAt,id} boundary. Stable lastReportedAt DESC,id DESC; evidence remains in detail.' +
+      AI_ADVISORY_DESCRIPTION,
   })
   @ApiOperation({
     summary: 'List case workflows in this exact game.',
     description:
-      'One case per row; native OPEN/IN_REVIEW/RESOLVED/DISMISSED statuses. Cursor-only DB-side createdAt DESC,id DESC pagination; limit defaults to 20 (maximum 100). Stored reportCount/uniqueReporterCount may exceed surviving evidence after reporter deletion. No reports collection or snapshot in list.',
+      'One case per row; native OPEN/IN_REVIEW/RESOLVED/DISMISSED statuses. Cursor-only DB-side lastReportedAt DESC,id DESC pagination; limit defaults to 20 (maximum 100). Stored reportCount/uniqueReporterCount may exceed surviving evidence after reporter deletion. No reports collection or snapshot in list.',
   })
   @ApiQuery({
     name: 'limit',
@@ -83,7 +85,8 @@ export class GameCaseModerationController {
   @Get(':caseId')
   @ApiOkResponse({
     description:
-      'Case fields plus resolutionNote, aggregate reasonSummary, target, targetState, evidence {items,nextCursor}. Snapshot projection is allowlisted; missing targets remain readable.',
+      'Case fields plus resolutionNote, aggregate reasonSummary, target, targetState, evidence {items,nextCursor}. Snapshot projection is allowlisted; missing targets remain readable.' +
+      AI_ADVISORY_DESCRIPTION,
   })
   @ApiParam({
     name: 'caseId',
@@ -116,7 +119,7 @@ export class GameCaseModerationController {
   @ApiOperation({
     summary: 'Read bounded complaint evidence for this game case.',
     description:
-      'limit default 20/max 100; opaque cursor uses exclusive lastReportedAt DESC,id DESC boundary. Returns {items,nextCursor}; raw targetSnapshot is excluded.',
+      'limit default 20/max 100; opaque cursor uses exclusive createdAt DESC,id DESC boundary. Returns {items,nextCursor}; raw targetSnapshot is excluded.',
   })
   reports(
     @Param('gameSlug') gameSlug: string,

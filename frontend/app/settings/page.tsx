@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { GameRecord } from "../../lib/pageTypes";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -60,6 +61,7 @@ export default function SettingsPage() {
         <div>
           <span className="eyebrow">Your account</span>
           <h1>Settings</h1>
+          <Link href="/account/moderation">Your moderation notices and appeals</Link>
           <p>Choose what appears in your feed and manage your account preferences.</p>
         </div>
       </header>

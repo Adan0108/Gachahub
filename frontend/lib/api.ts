@@ -1,3 +1,4 @@
+import type { EnforcementOverview, SanctionPage, AppealPage } from "./enforcement";
 import { mockCategories, mockGames, posts } from "./mockData";
 export const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000"
@@ -835,6 +836,17 @@ export const api = {
   searchPlatformModeratorCandidates: (q: any, options: any = {}) => request(withQuery('/platform-moderators/candidates', { q }), options),
   grantPlatformModerator: (userId: any) => mutation(`/platform-moderators/${encodeURIComponent(userId)}`, undefined),
   revokePlatformModerator: (userId: any) => mutation(`/platform-moderators/${encodeURIComponent(userId)}`, undefined, { method: 'DELETE' }),
+  getCaseEnforcement: (caseId: string, gameSlug = "", options: any = {}): Promise<EnforcementOverview> => request(withQuery(`/moderation/enforcement/cases/${encodeURIComponent(caseId)}`, { gameSlug: gameSlug || undefined }), options),
+  decideCaseContent: (caseId: string, body: { hidden: boolean; reason: string }, gameSlug = "") => mutation(withQuery(`/moderation/enforcement/cases/${encodeURIComponent(caseId)}/content`, { gameSlug: gameSlug || undefined }), body),
+  confirmCaseViolation: (caseId: string, body: { category: string; severity: string; reason: string }, gameSlug = "") => mutation(withQuery(`/moderation/enforcement/cases/${encodeURIComponent(caseId)}/violations`, { gameSlug: gameSlug || undefined }), body),
+  issueCaseSanction: (caseId: string, body: Record<string, unknown>, gameSlug = "") => mutation(withQuery(`/moderation/enforcement/cases/${encodeURIComponent(caseId)}/sanctions`, { gameSlug: gameSlug || undefined }), body),
+  revokeSanction: (id: string, reason: string, gameSlug = "") => mutation(withQuery(`/moderation/enforcement/sanctions/${encodeURIComponent(id)}/revoke`, { gameSlug: gameSlug || undefined }), { reason }),
+  adjustSanction: (id: string, durationDays: number, reason: string, gameSlug = "") => mutation(withQuery(`/moderation/enforcement/sanctions/${encodeURIComponent(id)}`, { gameSlug: gameSlug || undefined }), { durationDays, reason }, { method: "PATCH" }),
+  reverseViolation: (id: string, reason: string, gameSlug = "") => mutation(withQuery(`/moderation/enforcement/violations/${encodeURIComponent(id)}/reverse`, { gameSlug: gameSlug || undefined }), { reason }),
+  getMyModeration: (cursor?: string, options: any = {}, contentCursor?: string): Promise<SanctionPage> => request(withQuery("/me/moderation", { cursor, contentCursor }), options),
+  submitModerationAppeal: (id: string, statement: string) => mutation(`/me/moderation/sanctions/${encodeURIComponent(id)}/appeal`, { statement }),
+  listModerationAppeals: (gameSlug = "", cursor?: string, options: any = {}): Promise<AppealPage> => request(withQuery("/moderation/enforcement/appeals", { gameSlug: gameSlug || undefined, cursor }), options),
+  reviewModerationAppeal: (id: string, body: Record<string, unknown>, gameSlug = "") => mutation(withQuery(`/moderation/enforcement/appeals/${encodeURIComponent(id)}/review`, { gameSlug: gameSlug || undefined }), body),
   listPlatformCases: ({ cursor, limit, status, targetType, scope, gameSlug, view }: any = {}, options: any = {}) =>
     request(withQuery(backendRoutes.platformCases, { cursor, limit, status, targetType, scope, gameSlug, view }), options),
   getPlatformCase: (caseId: any, options: any = {}) => request(backendRoutes.platformCase(caseId), options),
@@ -857,7 +869,7 @@ export const api = {
   dismissGameCase: (gameSlug: any, caseId: any, { resolutionNote }: any = {}) => mutation(`${backendRoutes.gameCase(gameSlug, caseId)}/dismiss`, { resolutionNote }, { method: "PATCH" }),
   listAdminUsers: (query: any = {}, options: any = {}) =>
     request(withQuery(backendRoutes.adminUsers, query), options),
-  setUserStatus: (userId: any, { status, reason }: any) =>
+  setUserStatus: (userId: string, { status, reason }: { status: "ACTIVE"; reason?: string }) =>
     mutation(backendRoutes.adminUserStatus(userId), { status, reason }, { method: "PATCH" }),
   listAdminContent: (query: any = {}, options: any = {}) =>
     request(withQuery(backendRoutes.adminContent, query), options),

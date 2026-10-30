@@ -1,5 +1,8 @@
 # Moderation queue contract and query bounds
 
+For the full report/worker/policy flow and freshness-state decision order, see the
+[moderation pipeline walkthrough](moderation-pipeline.md).
+
 Both `GET /moderation/cases` and `GET /games/:gameSlug/moderation/cases` use the
 same repository enrichment. Existing authorization and workflow rules still apply.
 
@@ -18,10 +21,13 @@ reasonSummary: Array<{ reasonCode: ReportReason; count: number }>;
 
 Deleted/missing targets have a null preview and an explicit state. Comments inherit
 their post's deletion state. A thumbnail is the first HTTP(S) image by sortOrder/id;
-videos and unusable URLs are skipped. Text is bounded inside PostgreSQL. The list
-contains no reports collection, snapshots, full content, media collection or storage
+videos and unusable URLs are skipped. Public preview text is bounded inside
+PostgreSQL; full current title/content are loaded privately for canonical freshness
+hashing. The list contains no reports collection, snapshots, full content, media collection or storage
 identifiers. Detail returns the current target separately and includes the same
-reason aggregation alongside its bounded evidence page.
+reason aggregation alongside its bounded evidence page. Stage 2D.4 adds the same
+compact `aiAdvisory` union to case list/detail; only CURRENT carries policy output.
+Legacy case risk fields are not populated from this projection.
 
 Reasons are grouped from surviving complaints for the current case IDs only, then
 ordered by count descending and reason code ascending. There are at most ten groups
@@ -30,8 +36,8 @@ surviving evidence after account deletion; reads do not rewrite them.
 
 ## Query measurements
 
-Focused Prisma SQL logging against development PostgreSQL measured the repository
-with populated game, assignee and resolver relations:
+Before Stage 2D.4, focused Prisma SQL logging against development PostgreSQL
+measured the repository with populated game, assignee and resolver relations:
 
 | Operation | 20 rows | 50 rows |
 | --- | ---: | ---: |
@@ -41,13 +47,19 @@ with populated game, assignee and resolver relations:
 | Report GROUP BY caseId/reasonCode | 1 | 1 |
 | Total | 6 | 6 |
 
-These counts exclude fixed authentication/scope checks. Empty relations can reduce
-the number of relation reads. Preview media uses an indexed lateral lookup with
+Those historical counts exclude fixed authentication/scope checks and the new
+advisory query/transaction overhead. Current nonempty pages add exactly one batched
+highest-generation/active-policy query. The Stage 2D.4 PostgreSQL/HTTP regression
+fixture measures 11 total SQL statements at 20, 50 and 100 cases, including its
+authorization, relation and read-only transaction statements; different populated
+relations/scopes can change fixed overhead. All freshness contributors share one
+REPEATABLE READ, READ ONLY transaction. Empty relations can reduce the number of
+relation reads. Preview media uses an indexed lateral lookup with
 LIMIT 1 inside the single SQL statement; it does not create client round trips.
 The report caseId index supports restricting aggregation to the current page.
 There are no per-case repository calls, and the browser queue uses one list request
 without detail/evidence requests per row. Repository tests enforce one preview
-batch and one reason aggregation for both 20 and 50 cases.
+batch, one reason aggregation and one advisory batch for 20, 50 and 100 cases.
 
 ## Pagination
 
@@ -67,9 +79,10 @@ the same envelope:
 | `/moderation/cases/:caseId/reports` | none; evidence stays scoped to caseId |
 | `/games/:gameSlug/moderation/cases/:caseId/reports` | none; exact game and case |
 
-The cursor encodes `{createdAt,id}`. Ordering is createdAt DESC, id DESC with an
-exclusive tuple boundary and limit+1 lookahead. The boundary row need not survive
-for its cursor to remain usable. Changing filters starts a new traversal; filters
+Case cursors encode `{lastReportedAt,id}` and order by lastReportedAt DESC, id DESC.
+Evidence cursors encode `{createdAt,id}` and order by createdAt DESC, id DESC.
+Both use an exclusive tuple boundary and limit+1 lookahead. The boundary row need
+not survive for its cursor to remain usable. Changing filters starts a new traversal; filters
 and authorization apply to every request. Limits default to 20 and are capped at
 100. Numbered pages, pagination modes and total-count metadata are not supported
 by these native endpoints. Unrelated legacy endpoints retain their own contracts.

@@ -12,7 +12,7 @@ async function bootstrap() {
   });
 
   app.enableCors({
-    origin: appConfig.frontendUrl,
+    origin: appConfig.trustedOrigins,
     credentials: true,
   });
 

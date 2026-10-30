@@ -1,3 +1,4 @@
+import { EnforcementModule } from './moderation-enforcement/enforcement.module';
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from '@thallesp/nestjs-better-auth';
@@ -33,6 +34,7 @@ import { LinkPreviewsModule } from './link-previews/link-previews.module';
 import { ReportsModule } from './reports/reports.module';
 import { ChatBackupModule } from './chat-backup/chat-backup.module';
 import { MlsRetentionModule } from './mls-retention/mls-retention.module';
+import { ModerationResultsModule } from './moderation-analysis/moderation-results.module';
 /**
  * Root application module.
  *
@@ -46,6 +48,7 @@ import { MlsRetentionModule } from './mls-retention/mls-retention.module';
     ScheduleModule.forRoot(),
 
     CommonModule,
+    EnforcementModule,
     CloudinaryModule,
     PrismaModule,
     RedisModule,
@@ -72,6 +75,7 @@ import { MlsRetentionModule } from './mls-retention/mls-retention.module';
     FollowsModule,
     FeedModule,
     ReportsModule,
+    ModerationResultsModule,
     LinkPreviewsModule,
     ContentModerationModule,
     AuditLogQueryModule,

@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { FiFileText, FiMessageCircle } from "react-icons/fi";
+import type { AiAdvisory } from "../../lib/ai-advisory";
 
 export type CaseReason = { reasonCode: string; count: number };
 export type CasePreviewItem = {
@@ -19,7 +20,7 @@ export type CaseListItem = CasePreviewItem & {
   reasonSummary?: CaseReason[];
   uniqueReporterCount: number;
   assignedModerator?: { id: string; name?: string | null; role?: string | null } | null;
-  currentRiskLevel?: string | null;
+  aiAdvisory?: AiAdvisory | null;
   lastReportedAt: string;
 };
 

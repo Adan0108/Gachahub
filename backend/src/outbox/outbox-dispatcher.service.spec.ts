@@ -22,7 +22,7 @@ describe('OutboxDispatcherService', () => {
     markFailed: jest.fn(),
     markForRetry: jest.fn(),
   };
-  const kafka = { publish: jest.fn() };
+  const kafka = { publish: jest.fn(), isConnected: true };
   const dispatch = (service: OutboxDispatcherService) =>
     (service as unknown as { dispatch: () => Promise<void> }).dispatch();
 
@@ -30,12 +30,24 @@ describe('OutboxDispatcherService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    kafka.isConnected = true;
     repository.recoverStaleProcessing.mockResolvedValue({ count: 0 });
     repository.claim.mockResolvedValue(true);
     service = new OutboxDispatcherService(
       repository as unknown as OutboxRepository,
       kafka as unknown as KafkaProducerService,
     );
+  });
+
+  it('does not claim events or spend retries while Kafka is disconnected', async () => {
+    kafka.isConnected = false;
+
+    await dispatch(service);
+
+    expect(repository.recoverStaleProcessing).toHaveBeenCalledTimes(1);
+    expect(repository.findReady).not.toHaveBeenCalled();
+    expect(repository.claim).not.toHaveBeenCalled();
+    expect(kafka.publish).not.toHaveBeenCalled();
   });
 
   it('keeps sending while full batches keep coming, in one tick', async () => {

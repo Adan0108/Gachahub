@@ -174,6 +174,7 @@ describe('FeedService - Latest', () => {
 
     expect(postsRepository.findLatestPage).toHaveBeenCalledWith({
       where: {
+        AND: expect.any(Array) as unknown[],
         status: 'PUBLISHED',
         deletedAt: null,
         OR: [

@@ -101,7 +101,7 @@ function Sidebar({
   );
 }
 
-export function AppShell({
+function AppShellContents({
   children,
   initialTheme = "dark",
 }: {
@@ -177,7 +177,7 @@ export function AppShell({
     );
   }
 
-  const platformCaseRoute = pathname.startsWith("/moderation/cases");
+  const platformCaseRoute = (pathname.startsWith("/moderation/cases") || pathname.startsWith("/moderation/appeals"));
   const privilegedGameRoute = pathname.startsWith("/moderator") &&
     ["ADMIN", "PLATFORM_MODERATOR"].includes(user?.role);
   if (admin || platformCaseRoute || privilegedGameRoute) return children;
@@ -205,4 +205,33 @@ export function AppShell({
       {process.env.NODE_ENV !== "production" && <DevToolsPanel />}
     </div>
   );
+}
+
+// Recovery works without write-oriented chat/device bootstrap or the normal app shell.
+export function AppShell({ children, initialTheme = "dark" }: { children: ReactNode; initialTheme?: Theme }) {
+  const pathname = usePathname();
+  const { user, isLoading, refetch } = useCurrentUser();
+  const restrictions = user?.sanctions as { type: string; expiresAt: string | null }[] | undefined;
+  const fullRestriction = restrictions?.some((s) =>
+    s.type === "PLATFORM_SUSPENSION",
+  );
+  // Refresh after expiry even when the reconciliation job is delayed.
+  useEffect(() => {
+    if (!restrictions?.length) return;
+    const expirations = restrictions.flatMap((s) => s.expiresAt ? [Date.parse(s.expiresAt)] : []);
+    const interval = setInterval(() => { void refetch(); }, 60000);
+    const delay = expirations.length ? Math.max(1000, Math.min(...expirations) - Date.now() + 500) : Infinity;
+    const timer = delay <= 2147483647 ? setTimeout(() => { void refetch(); }, delay) : undefined;
+    return () => { clearInterval(interval); if (timer) clearTimeout(timer); };
+  }, [restrictions, refetch]);
+  if (pathname === "/account/moderation") return <>{children}</>;
+  if (isLoading) return <main className="moderation-page" aria-busy="true">Loading your account…</main>;
+  if (fullRestriction && !["/login", "/register"].includes(pathname)) return (
+    <main className="moderation-page">
+      <h1>Account access restricted</h1>
+      <p>Your moderation notices explain the decision, its duration and how to appeal.</p>
+      <Link href="/account/moderation">View notices and appeals</Link>
+    </main>
+  );
+  return <AppShellContents initialTheme={initialTheme}>{children}</AppShellContents>;
 }

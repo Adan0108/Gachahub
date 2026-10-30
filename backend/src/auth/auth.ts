@@ -1,7 +1,12 @@
+import { trustedApplicationOrigins } from '../common/security/request-origin.interceptor';
 import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { betterAuth } from 'better-auth';
-import { APIError } from 'better-auth/api';
+import {
+  APIError,
+  createAuthMiddleware,
+  getSessionFromCtx,
+} from 'better-auth/api';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { createClient, type RedisClientType } from 'redis';
 import { PrismaClient } from '../generated/prisma/client';
@@ -44,6 +49,40 @@ const sessionStorage = new RedisSessionStorage(
 );
 
 export const auth = betterAuth({
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      // Better Auth owns these routes outside Nest's HTTP interceptors.
+      // Login, logout and password recovery remain available for account safety.
+      if (
+        ![
+          '/update-user',
+          '/change-email',
+          '/delete-user',
+          '/link-social',
+          '/unlink-account',
+        ].includes(ctx.path)
+      )
+        return;
+      const session = await getSessionFromCtx(ctx);
+      if (!session) return;
+      const now = new Date();
+      const blocked = await prisma.moderationSanction.count({
+        where: {
+          subjectId: session.user.id,
+          scope: 'PLATFORM',
+          status: 'ACTIVE',
+          type: { not: 'WARNING' },
+          startsAt: { lte: now },
+          expiresAt: { gt: now },
+        },
+      });
+      if (blocked)
+        throw new APIError('FORBIDDEN', {
+          message:
+            'Account restricted. Your moderation notices and appeals remain available.',
+        });
+    }),
+  },
   baseURL: process.env.BETTER_AUTH_URL || 'http://localhost:3000',
 
   database: prismaAdapter(prisma, {
@@ -102,5 +141,5 @@ export const auth = betterAuth({
     storeSessionInDatabase: true,
   },
 
-  trustedOrigins: [process.env.FRONTEND_URL || 'http://localhost:5173'],
+  trustedOrigins: trustedApplicationOrigins(),
 });

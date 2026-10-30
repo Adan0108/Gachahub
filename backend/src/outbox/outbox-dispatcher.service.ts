@@ -68,6 +68,10 @@ export class OutboxDispatcherService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.recoverStaleEvents();
 
+      // Do not exhaust durable outbox retries while initial broker connection
+      // is unavailable. The producer retries startup independently of HTTP.
+      if (!this.kafkaProducer.isConnected) return;
+
       for (let batch = 0; batch < MAX_BATCHES_PER_CYCLE; batch += 1) {
         const events = await this.outboxRepository.findReady(BATCH_SIZE);
 
