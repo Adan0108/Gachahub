@@ -208,8 +208,8 @@ type Account = { id: string; cookie: string };
             moderator,
             `/moderation/enforcement/appeals/${appealId}/review`,
             {
-              decision: 'ACCEPTED',
-              reason: 'Own decision review must be refused',
+              decision: 'REJECTED',
+              reason: 'Own decision rejection must be refused',
             },
           )
         ).status,

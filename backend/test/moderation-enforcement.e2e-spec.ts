@@ -428,7 +428,7 @@ const enabled = process.env.RUN_MODERATION_ENFORCEMENT_DB === '1';
       ).rejects.toThrow('already exists');
       await expect(
         service.reviewAppeal(actors.platform, appeal.id, {
-          decision: 'ACCEPTED',
+          decision: 'REJECTED',
           reason,
         }),
       ).rejects.toThrow('Another moderator');
@@ -630,17 +630,23 @@ const enabled = process.env.RUN_MODERATION_ENFORCEMENT_DB === '1';
         record.id,
         'Please review this adjusted decision independently',
       );
-      expect(
-        (await service.appeals(actors.reviewer)).items.find(
-          (a) => a.id === appeal.id,
-        )?.canReview,
-      ).toBe(false);
+      const reviewerAppeal = (await service.appeals(actors.reviewer)).items.find(
+        (a) => a.id === appeal.id,
+      );
+      expect(reviewerAppeal?.canReview).toBe(true);
+      expect(reviewerAppeal?.canReject).toBe(false);
       await expect(
         service.reviewAppeal(actors.reviewer, appeal.id, {
           decision: 'REJECTED',
           reason,
         }),
       ).rejects.toThrow('independently');
+      await expect(
+        service.reviewAppeal(actors.reviewer, appeal.id, {
+          decision: 'ACCEPTED',
+          reason,
+        }),
+      ).resolves.toMatchObject({ id: appeal.id, status: 'ACCEPTED' });
     });
     it('preserves expiration when an historical appeal is accepted', async () => {
       const record = await service.sanction(actors.platform, caseId, {

@@ -314,6 +314,11 @@ function ScopedAppealsQueue({
                   Review appeal
                 </button>
               )}
+              {appeal.status === "PENDING" && appeal.canReview && appeal.canReject === false && (
+                <p className="case-muted">
+                  You may accept this appeal to overturn your prior decision; another authorized moderator must review to reject it.
+                </p>
+              )}
               {appeal.status === "PENDING" && !appeal.canReview && (
                 <p className="case-muted">
                   Another authorized moderator must review this decision.
@@ -365,7 +370,8 @@ function ReviewAppeal({
   gameSlug: string;
   close: () => void;
 }) {
-  const [decision, setDecision] = useState("REJECTED");
+  const canReject = appeal.canReject !== false;
+  const [decision, setDecision] = useState(canReject ? "REJECTED" : "ACCEPTED");
   const [reason, setReason] = useState("");
   const [reverse, setReverse] = useState(false);
   const [restore, setRestore] = useState(false);
@@ -408,7 +414,7 @@ function ReviewAppeal({
           value={decision}
           onChange={(e) => setDecision(e.target.value)}
         >
-          <option value="REJECTED">Uphold original decision</option>
+          {canReject && <option value="REJECTED">Uphold original decision</option>}
           <option value="ACCEPTED">Accept appeal and revoke sanction</option>
         </select>
       </label>

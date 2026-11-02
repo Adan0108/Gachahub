@@ -127,6 +127,41 @@ export class EnforcementService {
       gameId: game?.id ?? null,
     };
   }
+  private canModerateAccount(
+    actor: { id: string; role: string },
+    subject: {
+      id: string;
+      role: string;
+      status?: string;
+      moderatedGames: { id: string }[];
+    },
+  ): boolean {
+    if (subject.id === actor.id) return false;
+    if (subject.status && subject.status === 'DELETED') return false;
+    if (subject.role === 'ADMIN') return false;
+    if (
+      actor.role !== 'ADMIN' &&
+      (subject.role !== 'USER' || subject.moderatedGames.length > 0)
+    )
+      return false;
+    return true;
+  }
+  private async adjustedSanctionIds(
+    tx: Tx,
+    actorId: string,
+    sanctionIds: string[],
+  ): Promise<Set<string>> {
+    if (sanctionIds.length === 0) return new Set();
+    const rows = await tx.moderationDecisionAudit.findMany({
+      where: {
+        actorId,
+        action: 'SANCTION_ADJUSTED',
+        entityId: { in: sanctionIds },
+      },
+      select: { entityId: true },
+    });
+    return new Set(rows.map((row) => row.entityId));
+  }
   private async subject(tx: Tx, context: Context, subjectId: string) {
     if (subjectId === context.actor.id)
       throw new ForbiddenException('You cannot sanction yourself');
@@ -134,6 +169,7 @@ export class EnforcementService {
     const user = await tx.user.findUnique({
       where: { id: subjectId },
       select: {
+        id: true,
         role: true,
         status: true,
         moderatedGames: { take: 1, select: { id: true } },
@@ -141,11 +177,7 @@ export class EnforcementService {
     });
     if (!user || user.status === 'DELETED')
       throw new NotFoundException('Account unavailable');
-    if (
-      user.role === 'ADMIN' ||
-      (context.actor.role !== 'ADMIN' &&
-        (user.role !== 'USER' || user.moderatedGames.length))
-    )
+    if (!this.canModerateAccount(context.actor, user))
       throw new ForbiddenException(
         'A more privileged staff member must review this account',
       );
@@ -913,26 +945,43 @@ export class EnforcementService {
         take: 51,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
         include: {
-          sanction: { select: { ...PUBLIC_SANCTION, actorId: true } },
+          sanction: {
+            select: {
+              ...PUBLIC_SANCTION,
+              actorId: true,
+              subject: {
+                select: {
+                  id: true,
+                  role: true,
+                  status: true,
+                  moderatedGames: { take: 1, select: { id: true } },
+                },
+              },
+            },
+          },
         },
       });
-      const adjustments = await tx.moderationDecisionAudit.findMany({
-        where: {
-          actorId,
-          action: 'SANCTION_ADJUSTED',
-          entityId: { in: rows.map((row) => row.sanctionId) },
-        },
-        select: { entityId: true },
-      });
-      const adjusted = new Set(adjustments.map((row) => row.entityId));
+      const adjusted = await this.adjustedSanctionIds(
+        tx,
+        actorId,
+        rows.map((row) => row.sanctionId),
+      );
       return {
-        items: rows.slice(0, 50).map((row) => ({
-          ...row,
-          canReview:
+        items: rows.slice(0, 50).map((row) => {
+          const { subject, ...sanction } = row.sanction;
+          const canReview =
             row.status === 'PENDING' &&
-            row.sanction.actorId !== actorId &&
-            !adjusted.has(row.sanctionId),
-        })),
+            this.canModerateAccount(context.actor, subject);
+          return {
+            ...row,
+            sanction,
+            canReview,
+            canReject:
+              canReview &&
+              sanction.actorId !== actorId &&
+              !adjusted.has(row.sanctionId),
+          };
+        }),
         nextCursor: rows.length > 50 ? rows[49].id : null,
       };
     });
@@ -954,13 +1003,14 @@ export class EnforcementService {
         gameSlug,
       );
       if (
-        record.actorId === actorId ||
-        (await tx.moderationDecisionAudit.count({
-          where: { actorId, entityId: record.id, action: 'SANCTION_ADJUSTED' },
-        }))
+        dto.decision !== 'ACCEPTED' &&
+        (record.actorId === actorId ||
+          (await this.adjustedSanctionIds(tx, actorId, [record.id])).has(
+            record.id,
+          ))
       )
         throw new ForbiddenException(
-          'Another moderator must independently review this appeal',
+          'Another moderator must independently review this appeal to reject it',
         );
       const fresh = await tx.moderationAppeal.findUniqueOrThrow({
         where: { id },
@@ -1270,11 +1320,7 @@ export class EnforcementService {
           history,
           permissions: {
             durationDays: durationPolicy(),
-            canSanction:
-              subject.id !== actorId &&
-              subject.role !== 'ADMIN' &&
-              (context.actor.role === 'ADMIN' ||
-                (subject.role === 'USER' && !subject.moderatedGames.length)),
+            canSanction: this.canModerateAccount(context.actor, subject),
             canConfirm: ['OPEN', 'IN_REVIEW'].includes(item.status),
             customDuration: context.actor.role === 'ADMIN',
             scope: context.scope,
