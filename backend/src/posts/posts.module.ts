@@ -1,3 +1,4 @@
+import { EconomyModule } from '../economy/economy.module';
 import { AdminPostModerationController } from './moderation/admin-post-moderation.controller';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { Module } from '@nestjs/common';
@@ -18,6 +19,7 @@ import { PostSaveRepository } from './save/post-save.repository';
 
 @Module({
   imports: [
+    EconomyModule,
     MediaModule,
     PostVisibilityModule,
     RecommendationModule,

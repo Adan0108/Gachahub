@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { RequestOriginInterceptor } from '../common/security/request-origin.interceptor';
 import { OutboxModule } from '../outbox/outbox.module';
+import { EconomyModule } from '../economy/economy.module';
 import { PostsRepository } from '../posts/posts.repository';
 import { CommentsRepository } from '../comments/comments.repository';
 import { EnforcementService } from './enforcement.service';
@@ -15,7 +16,7 @@ import { SanctionExpirationService } from './expiration.service';
 
 @Global()
 @Module({
-  imports: [OutboxModule],
+  imports: [OutboxModule, EconomyModule],
   controllers: [EnforcementController, MyModerationController],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: RequestOriginInterceptor },

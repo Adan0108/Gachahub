@@ -5,6 +5,7 @@ import { FieldLimit } from "./FieldLimit";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { EquippedCosmetic } from "../lib/cosmetics";
 
 export interface PostMediaRecord {
   id?: string;
@@ -18,10 +19,18 @@ export interface PostMediaRecord {
 interface CommentRecord {
   id: string;
   content: string;
-  author?: { name?: string; username?: string };
+  author?: {
+    id?: string;
+    name?: string;
+    username?: string;
+    image?: string | null;
+    equipped?: { frame?: EquippedCosmetic | null } | null;
+  };
   createdAt?: string;
   mentions?: string[];
   replyCount?: number;
+  likeCount?: number;
+  likedByCurrentUser?: boolean;
 }
 export interface PostRecord {
   id: string;
@@ -30,6 +39,7 @@ export interface PostRecord {
   author?: string;
   authorId?: string;
   authorImage?: string | null;
+  authorEquipped?: { frame?: EquippedCosmetic | null } | null;
   gameName?: string;
   time?: string;
   tag?: string;
@@ -70,6 +80,8 @@ import { AvatarFace } from "./AvatarFace";
 import { artTones, glyph } from "./constants";
 import { MentionInput } from "./MentionInput";
 import { MentionText } from "./MentionText";
+import { ProfileHoverTrigger } from "./profile/ProfileHoverCard";
+import "./profile/ProfileSocial.css";
 import { SharePostDialog } from "./SharePostDialog";
 
 function relativeTime(value?: string) {
@@ -83,6 +95,75 @@ function videoMimeType(format?: string) {
   if (!format) return undefined;
   const normalizedFormat = format.toLowerCase().replace(/^\./, "");
   return normalizedFormat === "mov" ? "video/quicktime" : `video/${normalizedFormat}`;
+}
+
+/** A comment's author: avatar with optional frame, name and handle, linking to their profile with hover card. */
+function CommentAuthor({ author }: { author?: CommentRecord["author"] }) {
+  const label = (
+    <>
+      <b>{author?.name || "GachaHub user"}</b>
+      {author?.username && <span className="post-comment-handle">@{author.username}</span>}
+    </>
+  );
+  return (
+    <ProfileHoverTrigger userId={author?.id}>
+      <span className="post-comment-author" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        {(author?.image || author?.equipped?.frame) && (
+          <span aria-hidden="true" style={{ width: 22, height: 22, display: "inline-flex" }}>
+            <AvatarFace
+              fallback={(author?.name || "G").charAt(0).toUpperCase()}
+              frame={author?.equipped?.frame ?? null}
+              image={author?.image}
+            />
+          </span>
+        )}
+        {author?.id ? <Link href={`/user/${encodeURIComponent(author.id)}`}>{label}</Link> : label}
+      </span>
+    </ProfileHoverTrigger>
+  );
+}
+
+/** Heart on a comment or reply; optimistic, rolls back if the server says no. */
+function CommentLikeButton({ comment }: { comment: CommentRecord }) {
+  const { isAuthenticated } = useCurrentUser();
+  const router = useRouter();
+  const [state, setState] = useState({
+    liked: Boolean(comment.likedByCurrentUser),
+    count: comment.likeCount ?? 0,
+  });
+  const toggle = useMutation({
+    mutationFn: (like: boolean) => (like ? api.likeComment(comment.id) : api.unlikeComment(comment.id)),
+    onMutate: (like) => {
+      const previous = state;
+      setState({ liked: like, count: Math.max(0, state.count + (like ? 1 : -1)) });
+      return previous;
+    },
+    onError: (_error, _like, previous) => {
+      if (previous) setState(previous);
+    },
+    onSuccess: (result: { liked: boolean; likeCount: number }) => {
+      setState({ liked: result.liked, count: result.likeCount });
+    },
+  });
+
+  return (
+    <button
+      aria-label={state.liked ? "Unlike comment" : "Like comment"}
+      aria-pressed={state.liked}
+      className={state.liked ? "comment-liked" : undefined}
+      disabled={toggle.isPending}
+      onClick={() => {
+        if (!isAuthenticated) {
+          router.push("/login");
+          return;
+        }
+        toggle.mutate(!state.liked);
+      }}
+      type="button"
+    >
+      <FiHeart /> {state.count > 0 ? state.count : "Like"}
+    </button>
+  );
 }
 
 function CommentItem({ comment, onReport }: { comment: CommentRecord; onReport: OpenReport }) {
@@ -122,18 +203,14 @@ function CommentItem({ comment, onReport }: { comment: CommentRecord; onReport: 
   return (
     <article className="post-comment">
       <div className="post-comment-head">
-        <span className="post-comment-author">
-          <b>{comment.author?.name || "GachaHub user"}</b>
-          {comment.author?.username && (
-            <span className="post-comment-handle">@{comment.author.username}</span>
-          )}
-        </span>
+        <CommentAuthor author={comment.author} />
         <small>{relativeTime(comment.createdAt)}</small>
       </div>
       <p>
         <MentionText content={comment.content} usernames={comment.mentions} />
       </p>
       <div className="post-comment-actions">
+        <CommentLikeButton comment={comment} />
         <button onClick={startReply} type="button">
           <FiCornerUpLeft /> Reply
         </button>
@@ -194,16 +271,12 @@ function CommentItem({ comment, onReport }: { comment: CommentRecord; onReport: 
           {replies.isError && <small className="post-action-error">Could not load replies.</small>}
           {(replies.data?.items || []).map((item: CommentRecord) => (
             <div className="post-reply" key={item.id}>
-              <span className="post-comment-author">
-                <b>{item.author?.name || "GachaHub user"}</b>
-                {item.author?.username && (
-                  <span className="post-comment-handle">@{item.author.username}</span>
-                )}
-              </span>
+              <CommentAuthor author={item.author} />
               <p>
                 <MentionText content={item.content} usernames={item.mentions} />
               </p>
               <div className="post-comment-actions">
+                <CommentLikeButton comment={item} />
                 <button
                   onClick={() =>
                     onReport("COMMENT", item.id, `reply by ${item.author?.name || "user"}`)
@@ -391,7 +464,10 @@ export function PostItem({
       followStatus.data?.following
         ? api.unfollowUser(post.authorId)
         : api.followUser(post.authorId),
-    onSuccess: (result) => queryClient.setQueryData(queryKeys.followStatus(post.authorId), result),
+    onSuccess: (result) => {
+      queryClient.setQueryData(queryKeys.followStatus(post.authorId), result);
+      queryClient.invalidateQueries({ queryKey: queryKeys.userProfile(post.authorId) });
+    },
   });
 
   const createComment = useMutation({
@@ -480,10 +556,19 @@ export function PostItem({
       {!detail && !isFeed && <span className="rank">{index + 1}</span>}
       <div className={`post-thumb art-${artTones[index % artTones.length]}`}>
         {isFeed ? (
-          <AvatarFace
-            fallback={(post.author || "G").charAt(0).toUpperCase()}
-            image={post.authorImage}
-          />
+          <ProfileHoverTrigger userId={post.authorId}>
+            <Link
+              aria-label={`${post.author}'s profile`}
+              className="post-author-link"
+              href={`/user/${encodeURIComponent(post.authorId ?? "")}`}
+            >
+              <AvatarFace
+                fallback={(post.author || "G").charAt(0).toUpperCase()}
+                frame={post.authorEquipped?.frame ?? null}
+                image={post.authorImage}
+              />
+            </Link>
+          </ProfileHoverTrigger>
         ) : (
           glyph.sparkle
         )}
@@ -492,7 +577,10 @@ export function PostItem({
         <b>{post.title || post.content?.slice(0, 100)}</b>
         <small>
           {post.gameName ? `${post.gameName} - ` : ""}
-          {post.author} - {post.time}
+          <ProfileHoverTrigger userId={post.authorId}>
+            <span>{post.author}</span>
+          </ProfileHoverTrigger>{" "}
+          - {post.time}
         </small>
       </Link>
       <div className="post-head-actions">

@@ -20,12 +20,12 @@ const focusableSelector = [
  * `modalRef` goes on the modal container; `triggerRef` is optional and, if
  * given, gets refocused when `isOpen` goes back to false.
  */
-export function useModalFocusTrap(
+export function useModalFocusTrap<Container extends HTMLElement = HTMLDivElement>(
   isOpen: boolean,
   onClose: () => void,
   triggerRef?: RefObject<HTMLElement | null>,
 ) {
-  const modalRef = useRef<HTMLDivElement | null>(null);
+  const modalRef = useRef<Container | null>(null);
   const wasOpenRef = useRef(false);
 
   useEffect(() => {

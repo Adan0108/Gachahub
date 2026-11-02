@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { EQUIPPED_FRAME_RELATION_SELECT } from '../cosmetics/cosmetic-starter-catalog';
 import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { claimUploadsForAttachment } from '../media/media.repository';
@@ -13,6 +14,7 @@ export const postInclude = {
       id: true,
       name: true,
       image: true,
+      equippedCosmetics: EQUIPPED_FRAME_RELATION_SELECT,
     },
   },
   game: {
@@ -132,6 +134,13 @@ export class PostsRepository {
   }
 
   // No optional visibility/status with a permissive default - a caller must state whose eyes these posts are for.
+  /** How many posts of this author anyone, or this viewer, may see. */
+  countPublicByAuthor(authorId: string, userId?: string) {
+    return this.prisma.post.count({
+      where: { authorId, ...viewablePostWhere(userId) },
+    });
+  }
+
   async findByAuthorId(
     authorId: string,
     params: {

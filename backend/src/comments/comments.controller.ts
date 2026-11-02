@@ -94,6 +94,35 @@ export class CommentsController {
     return this.commentsService.reply(commentId, dto, session.user.id);
   }
 
+  @Post('comments/:commentId/like')
+  @ApiCookieAuth('better-auth.session_token')
+  @ApiOperation({
+    summary: 'Like a comment',
+  })
+  @ApiParam({
+    name: 'commentId',
+    example: 'cmcomment123',
+  })
+  like(@Param('commentId') commentId: string, @Session() session: UserSession) {
+    return this.commentsService.like(commentId, session.user.id);
+  }
+
+  @Delete('comments/:commentId/like')
+  @ApiCookieAuth('better-auth.session_token')
+  @ApiOperation({
+    summary: 'Unlike a comment',
+  })
+  @ApiParam({
+    name: 'commentId',
+    example: 'cmcomment123',
+  })
+  unlike(
+    @Param('commentId') commentId: string,
+    @Session() session: UserSession,
+  ) {
+    return this.commentsService.unlike(commentId, session.user.id);
+  }
+
   @Patch('comments/:commentId')
   @ApiCookieAuth('better-auth.session_token')
   @ApiOperation({

@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { EconomyService } from '../src/economy/economy.service';
+import type { AuditLogService } from '../src/audit-log/audit-log.service';
 import { EnforcementService } from '../src/moderation-enforcement/enforcement.service';
 import { SanctionAccessService } from '../src/moderation-enforcement/sanction-access.service';
 import { SanctionExpirationService } from '../src/moderation-enforcement/expiration.service';
@@ -60,6 +62,9 @@ const enabled = process.env.RUN_MODERATION_ENFORCEMENT_DB === '1';
         new OutboxEventPublisher(new OutboxRepository(db)),
         new PostsRepository(db),
         new CommentsRepository(db),
+        new EconomyService(db, {
+          recordOrThrow: () => Promise.resolve(),
+        } as unknown as AuditLogService),
       );
       for (const name of [
         '20261030120200_enforcement_visibility_guards',
@@ -744,6 +749,9 @@ const enabled = process.env.RUN_MODERATION_ENFORCEMENT_DB === '1';
         } as unknown as OutboxEventPublisher,
         new PostsRepository(db),
         new CommentsRepository(db),
+        new EconomyService(db, {
+          recordOrThrow: () => Promise.resolve(),
+        } as unknown as AuditLogService),
       );
       await expect(
         broken.sanction(actors.platform, caseId, {

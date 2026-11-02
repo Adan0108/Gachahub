@@ -41,6 +41,11 @@ const AUDIT_ACTION_LABEL: Record<string, string> = {
   USER_BANNED: "User banned",
   USER_SUSPENDED: "User suspended",
   USER_REACTIVATED: "User reactivated",
+  WALLET_ADJUSTED: "Wallet adjusted",
+  COSMETIC_CREATED: "Cosmetic created",
+  COSMETIC_UPDATED: "Cosmetic updated",
+  COSMETIC_DEACTIVATED: "Cosmetic deactivated",
+  COSMETIC_GRANTED: "Cosmetic granted",
 };
 
 // Builds the activity line's subject from the backend's resolved data (targetName is a post
@@ -58,6 +63,8 @@ function describeTarget(item: AuditRecord) {
       return item.targetName || `Report ${item.targetId}`;
     case "USER":
       return item.targetName ? `User: ${item.targetName}` : `User ${item.targetId}`;
+    case "COSMETIC":
+      return item.targetName ? `Cosmetic: ${item.targetName}` : `Cosmetic ${item.targetId}`;
     default:
       return `${item.targetType} ${item.targetId}`;
   }

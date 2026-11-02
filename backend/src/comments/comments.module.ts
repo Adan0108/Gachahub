@@ -1,3 +1,4 @@
+import { EconomyModule } from '../economy/economy.module';
 import { AdminCommentModerationController } from './admin-comment-moderation.controller';
 import { Module } from '@nestjs/common';
 
@@ -15,6 +16,7 @@ import { MentionsModule } from '../mentions/mentions.module';
 
 @Module({
   imports: [
+    EconomyModule,
     PostVisibilityModule,
     RecommendationModule,
     GameModeratorsModule,

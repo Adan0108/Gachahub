@@ -23,6 +23,8 @@ import { MentionsService } from '../mentions/mentions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { communityAccessWhere } from '../post-visibility/visibility-where';
 
+import { EconomyService } from '../economy/economy.service';
+
 @Injectable()
 export class PostsService {
   constructor(
@@ -33,6 +35,7 @@ export class PostsService {
     private readonly eventPublisher: EventPublisherPort,
     private readonly prisma: PrismaService,
     private readonly mentions: MentionsService,
+    private readonly economy: EconomyService,
   ) {}
 
   async findAll(query: QueryPostsDto, userId?: string) {
@@ -179,6 +182,10 @@ export class PostsService {
       result.items.map((post) => formatPost(post)),
       { page, limit, total: result.total },
     );
+  }
+
+  countByAuthorPublic(authorId: string, userId?: string) {
+    return this.postsRepository.countPublicByAuthor(authorId, userId);
   }
 
   async findByAuthorPublic(
@@ -498,6 +505,13 @@ ${dto.content?.trim() ?? existingPost.content}`,
       );
 
       if (likeResult.changed) {
+        await this.economy.recordLike(transaction, {
+          targetType: 'POST',
+          targetId: postId,
+          ownerId: post.authorId,
+          likerId: userId,
+        });
+
         await this.eventPublisher.publish(
           {
             type: 'post.liked',

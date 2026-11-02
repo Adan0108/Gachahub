@@ -2,11 +2,11 @@
 
 import { FieldLimit } from "../../../components/FieldLimit";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import Link from "next/link";
 import type { UserRecord } from "../../../lib/pageTypes";
-import { FiRotateCcw, FiSearch } from "react-icons/fi";
+import { FiGift, FiRotateCcw, FiSearch } from "react-icons/fi";
 import { AdminActionDialog } from "../../../components/admin/AdminActionDialog";
 import { AdminPagination } from "../../../components/admin/AdminPagination";
 import { AdminQueryBoundary } from "../../../components/admin/AdminQueryBoundary";
@@ -15,6 +15,7 @@ import { AdminState } from "../../../components/admin/AdminState";
 import { useAdminList } from "../../../hooks/admin/useAdminList";
 import { useToast } from "../../../hooks/useToast";
 import { api } from "../../../lib/api";
+import { RARITY_META, type AdminCosmeticItem } from "../../../lib/cosmetics";
 import { queries, queryKeys } from "../../../lib/queries";
 import { USER_STATUS_CLASS } from "../../../lib/admin/statusTone";
 
@@ -47,6 +48,16 @@ export default function AdminUsersPage() {
   } | null>(null);
   const [reason, setReason] = useState("");
 
+  const [grantUser, setGrantUser] = useState<UserRecord | null>(null);
+  const [selectedItemId, setSelectedItemId] = useState("");
+  const [grantReason, setGrantReason] = useState("");
+
+  const cosmeticsCatalogQuery = useQuery({
+    ...queries.adminCosmetics({ active: "true" }),
+    enabled: Boolean(grantUser),
+  });
+  const catalogItems: AdminCosmeticItem[] = Array.isArray(cosmeticsCatalogQuery.data) ? cosmeticsCatalogQuery.data : cosmeticsCatalogQuery.data?.items ?? [];
+
   const statusMutation = useMutation({
     mutationFn: () =>
       api.setUserStatus(target!.user.id, { status: target!.nextStatus, reason: reason.trim() }),
@@ -55,6 +66,21 @@ export default function AdminUsersPage() {
       showNotice(`User ${STATUS_LABEL[target!.nextStatus]}`);
       setTarget(null);
       setReason("");
+    },
+  });
+
+  const grantCosmeticMutation = useMutation({
+    mutationFn: () =>
+      api.grantAdminUserCosmetic(
+        grantUser!.id,
+        selectedItemId,
+        grantReason.trim() || undefined,
+      ),
+    onSuccess: (res) => {
+      showNotice(res.alreadyOwned ? "User already owned that cosmetic" : "Cosmetic granted");
+      setGrantUser(null);
+      setSelectedItemId("");
+      setGrantReason("");
     },
   });
 
@@ -173,6 +199,21 @@ export default function AdminUsersPage() {
                           Manage moderation access
                         </Link>
                       )}
+                      {user.status !== "DELETED" && (
+                        <button
+                          aria-label={`Grant cosmetic to ${user.name}`}
+                          className="admin-icon-button"
+                          onClick={() => {
+                            setGrantUser(user);
+                            setSelectedItemId("");
+                            setGrantReason("");
+                          }}
+                          title="Grant cosmetic"
+                          type="button"
+                        >
+                          <FiGift />
+                        </button>
+                      )}
                       {user.status === "ACTIVE" && user.role !== "ADMIN" && (
                         <Link
                           className="admin-button admin-button-secondary"
@@ -229,6 +270,45 @@ export default function AdminUsersPage() {
                 />
                 <FieldLimit id="limit-frontendappadminuserspagetsx-0" value={reason} max={500} />
               </>
+            </label>
+          </div>
+        </AdminActionDialog>
+      ) : null}
+      {grantUser ? (
+        <AdminActionDialog
+          confirmDisabled={!selectedItemId}
+          confirmLabel="Grant cosmetic"
+          description={`Grant a cosmetic item to ${grantUser.name}.`}
+          error={(grantCosmeticMutation.error as Error)?.message}
+          onClose={() => setGrantUser(null)}
+          onConfirm={() => grantCosmeticMutation.mutate()}
+          pending={grantCosmeticMutation.isPending}
+          pendingLabel="Granting..."
+          title={`Grant cosmetic to ${grantUser.name}`}
+          tone="primary"
+        >
+          <div className="admin-dialog-fields">
+            <label>
+              <span>Cosmetic item *</span>
+              <select
+                onChange={(event) => setSelectedItemId(event.target.value)}
+                value={selectedItemId}
+              >
+                <option value="">Select a cosmetic...</option>
+                {catalogItems.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    [{item.slot}] {item.name} ({RARITY_META[item.rarity].stars})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Reason (optional)</span>
+              <input
+                onChange={(event) => setGrantReason(event.target.value)}
+                placeholder="Audit log note"
+                value={grantReason}
+              />
             </label>
           </div>
         </AdminActionDialog>

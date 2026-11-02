@@ -285,6 +285,16 @@
   margin-bottom: 4px;
 }
 
+/* Only there to disable every field while saving; the fields keep the dialog's own layout. */
+.profile-edit-fields {
+  display: contents;
+}
+
+.profile-edit-fields:disabled > * {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .profile-edit-modal input[type="file"] {
   display: none;
 }
@@ -425,4 +435,11 @@
 
 .profile-edit-modal .primary {
   margin-top: 24px;
+}
+
+/* Nothing to save yet, a picture still uploading, or a save under way: it must not look clickable. */
+.profile-edit-modal .primary:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+  cursor: not-allowed;
 }

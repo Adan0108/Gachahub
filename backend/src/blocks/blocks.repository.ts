@@ -77,21 +77,33 @@ export class BlocksRepository {
     });
   }
 
-  // upsert keeps blocking idempotent
-  create(blockerId: string, blockedId: string) {
-    return this.prisma.chatUserBlock.upsert({
-      where: {
-        blockerId_blockedId: {
+  // upsert keeps blocking idempotent; a block also ends any follow between the two, either way
+  async create(blockerId: string, blockedId: string) {
+    const [block] = await this.prisma.$transaction([
+      this.prisma.chatUserBlock.upsert({
+        where: {
+          blockerId_blockedId: {
+            blockerId,
+            blockedId,
+          },
+        },
+        create: {
           blockerId,
           blockedId,
         },
-      },
-      create: {
-        blockerId,
-        blockedId,
-      },
-      update: {},
-    });
+        update: {},
+      }),
+      this.prisma.userFollow.deleteMany({
+        where: {
+          OR: [
+            { followerId: blockerId, followingId: blockedId },
+            { followerId: blockedId, followingId: blockerId },
+          ],
+        },
+      }),
+    ]);
+
+    return block;
   }
 
   delete(blockerId: string, blockedId: string) {

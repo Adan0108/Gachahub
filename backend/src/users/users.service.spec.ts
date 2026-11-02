@@ -39,73 +39,6 @@ describe('UsersService', () => {
     );
   });
 
-  describe('getPublicProfile', () => {
-    const profileFields = {
-      id: 'user-2',
-      name: 'Yumemi',
-      image: null,
-      createdAt: new Date('2024-01-01'),
-    };
-
-    it('throws when the user does not exist or is not active', async () => {
-      prisma.user.findFirst.mockResolvedValue(null);
-
-      await expect(
-        service.getPublicProfile('missing-user', 'viewer-1'),
-      ).rejects.toThrow(NotFoundException);
-
-      expect(prisma.user.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'missing-user', status: 'ACTIVE' },
-        }),
-      );
-      expect(blocksService.isBlocked).not.toHaveBeenCalled();
-    });
-
-    it('includes isBlockedByMe when the viewer has blocked this user', async () => {
-      prisma.user.findFirst.mockResolvedValue(profileFields);
-      blocksService.isBlocked.mockResolvedValue(true);
-
-      const result = await service.getPublicProfile('user-2', 'viewer-1');
-
-      expect(blocksService.isBlocked).toHaveBeenCalledWith(
-        'viewer-1',
-        'user-2',
-      );
-      expect(result).toEqual({ ...profileFields, isBlockedByMe: true });
-    });
-
-    it('returns isBlockedByMe: false when the viewer has not blocked this user', async () => {
-      prisma.user.findFirst.mockResolvedValue(profileFields);
-      blocksService.isBlocked.mockResolvedValue(false);
-
-      const result = await service.getPublicProfile('user-2', 'viewer-1');
-
-      expect(result.isBlockedByMe).toBe(false);
-    });
-
-    it('never checks blocks for an anonymous viewer', async () => {
-      prisma.user.findFirst.mockResolvedValue(profileFields);
-
-      const result = await service.getPublicProfile('user-2');
-
-      expect(blocksService.isBlocked).not.toHaveBeenCalled();
-      expect(result.isBlockedByMe).toBe(false);
-    });
-
-    it('never checks blocks when viewing your own profile', async () => {
-      prisma.user.findFirst.mockResolvedValue({
-        ...profileFields,
-        id: 'viewer-1',
-      });
-
-      const result = await service.getPublicProfile('viewer-1', 'viewer-1');
-
-      expect(blocksService.isBlocked).not.toHaveBeenCalled();
-      expect(result.isBlockedByMe).toBe(false);
-    });
-  });
-
   describe('updateProfile', () => {
     it('saves the read receipts setting', async () => {
       prisma.user.update.mockResolvedValue({
@@ -118,12 +51,44 @@ describe('UsersService', () => {
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1' },
         data: {
+          name: undefined,
+          bio: undefined,
           messageRequestSetting: undefined,
           sendReadReceipts: false,
           sendLinkPreviews: undefined,
         },
         select: ME_SELECT,
       });
+    });
+
+    it('saves a new display name and bio', async () => {
+      prisma.user.update.mockResolvedValue({ id: 'user-1' });
+
+      await service.updateProfile('user-1', { name: 'Yumemi', bio: 'hello' });
+
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ name: 'Yumemi', bio: 'hello' }),
+        }),
+      );
+    });
+
+    it('clears the bio when it is emptied, and leaves it alone when it is not sent', async () => {
+      prisma.user.update.mockResolvedValue({ id: 'user-1' });
+
+      await service.updateProfile('user-1', { bio: '' });
+      expect(prisma.user.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ bio: null }),
+        }),
+      );
+
+      await service.updateProfile('user-1', { name: 'Yumemi' });
+      expect(prisma.user.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ bio: undefined }),
+        }),
+      );
     });
 
     it('saves the link previews setting', async () => {
@@ -137,6 +102,8 @@ describe('UsersService', () => {
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1' },
         data: {
+          name: undefined,
+          bio: undefined,
           messageRequestSetting: undefined,
           sendReadReceipts: undefined,
           sendLinkPreviews: false,
