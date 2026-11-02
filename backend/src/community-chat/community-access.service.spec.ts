@@ -34,6 +34,7 @@ describe('CommunityAccessService', () => {
       repository as never,
       prisma as never,
       moderators as never,
+      { assertAllowed: jest.fn() } as never,
     );
   });
 

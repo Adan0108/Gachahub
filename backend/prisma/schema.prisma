@@ -9,6 +9,15 @@ datasource db {
 }
 
 model User {
+  enforcementRecords ContentEnforcement[] @relation("EnforcementSubject")
+  enforcementActions ContentEnforcement[] @relation("EnforcementActor")
+  violations ModerationViolation[] @relation("ViolationSubject")
+  violationDecisions ModerationViolation[] @relation("ViolationActor")
+  sanctions ModerationSanction[] @relation("SanctionSubject")
+  sanctionsIssued ModerationSanction[] @relation("SanctionActor")
+  moderationDecisionAudits ModerationDecisionAudit[]
+  appealsReviewed ModerationAppeal[]
+
   id            String   @id
   name          String
   email         String
@@ -28,6 +37,8 @@ model User {
   // original casing kept for display. Null until the user completes onboarding.
   username              String?               @unique @db.Citext
   onboarded             Boolean               @default(false)
+  /// A short line about the person, shown on their profile.
+  bio                   String?               @db.VarChar(160)
   /// MediaUpload backing `image` (the avatar), so a replace can release the old Cloudinary asset.
   avatarMediaUploadId   String?               @unique
   avatarMediaUpload     MediaUpload?          @relation("UserAvatarUpload", fields: [avatarMediaUploadId], references: [id], onDelete: SetNull)
@@ -42,6 +53,16 @@ model User {
   comments     Comment[]
   interests    UserInterest[]
   postSaves    PostSave[]
+  commentLikes CommentLike[]
+  wallet       UserWallet?
+  ledgerEntries LedgerEntry[]
+  dailyEarnings DailyEarning[]
+  cosmetics UserCosmetic[]
+  equippedCosmetics EquippedCosmetic[]
+  dailyReputationReceived DailyGiverReputation[] @relation("DailyReputationOwner")
+  dailyReputationGiven DailyGiverReputation[] @relation("DailyReputationGiver")
+  countedInteractionsGiven CountedInteraction[] @relation("CountedInteractionActor")
+  countedInteractionsReceived CountedInteraction[] @relation("CountedInteractionOwner")
 
   followers            UserFollow[]           @relation("UserFollowers")
   following            UserFollow[]           @relation("UserFollowing")
@@ -184,6 +205,10 @@ enum GameStatus {
 }
 
 model Game {
+  enforcementRecords ContentEnforcement[]
+  violations ModerationViolation[]
+  sanctions ModerationSanction[]
+
   id          String     @id @default(cuid())
   name        String
   slug        String     @unique
@@ -1033,6 +1058,8 @@ model Comment {
 
   content String
   status  CommentStatus @default(PUBLISHED)
+  /// Cached count of CommentLike rows, kept in step by the like/unlike transaction.
+  likeCount Int @default(0)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1043,6 +1070,7 @@ model Comment {
 
   parent  Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies Comment[] @relation("CommentReplies")
+  likes   CommentLike[]
 
   @@index([postId, createdAt])
   @@index([authorId])
@@ -1096,8 +1124,9 @@ model Report {
 
   createdAt DateTime @default(now())
 
-  reporter User?          @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: SetNull)
-  case     ModerationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  reporter User?                @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: SetNull)
+  case     ModerationCase       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  analyses ModerationAnalysis[]
 
   // Reporter duplication is checked while holding the case row lock. Closed
   // cases allow re-reporting; no unconditional reporter/target unique constraint.
@@ -1108,6 +1137,10 @@ model Report {
 }
 
 model ModerationCase {
+  enforcementRecords ContentEnforcement[]
+  confirmedViolations ModerationViolation[]
+  sanctions ModerationSanction[]
+
   id         String           @id @default(cuid())
   targetType ReportTargetType
   targetId   String
@@ -1130,9 +1163,10 @@ model ModerationCase {
   updatedAt DateTime @updatedAt
 
   reports           Report[]
-  game              Game?    @relation(fields: [gameId], references: [id], onDelete: SetNull)
-  assignedModerator User?    @relation("ModerationCasesAssigned", fields: [assignedModeratorId], references: [id], onDelete: SetNull)
-  resolvedBy        User?    @relation("ModerationCasesResolved", fields: [resolvedById], references: [id], onDelete: SetNull)
+  analyses          ModerationAnalysis[]
+  game              Game?                @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  assignedModerator User?                @relation("ModerationCasesAssigned", fields: [assignedModeratorId], references: [id], onDelete: SetNull)
+  resolvedBy        User?                @relation("ModerationCasesResolved", fields: [resolvedById], references: [id], onDelete: SetNull)
 
   // Partial unique index moderation_cases_open_target_key in migration
   // 20261015060000: (targetType, targetId) WHERE status IN ('OPEN', 'IN_REVIEW').
@@ -1146,6 +1180,40 @@ model ModerationCase {
   @@index([targetType, targetId])
   @@index([assignedModeratorId])
   @@map("moderation_cases")
+}
+
+enum ModerationAnalysisStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+model ModerationAnalysis {
+  id                 String                   @id @default(cuid())
+  caseId             String
+  sourceReportId     String?
+  targetType         ReportTargetType
+  targetId           String
+  generation         Int
+  inputSchemaVersion Int
+  inputSnapshot      Json
+  snapshotHash       String
+  classifierProfile  String
+  status             ModerationAnalysisStatus @default(PENDING)
+
+  result Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  case              ModerationCase               @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  sourceReport      Report?                      @relation(fields: [sourceReportId], references: [id], onDelete: SetNull)
+  policyEvaluations ModerationPolicyEvaluation[]
+
+  @@unique([caseId, snapshotHash, classifierProfile])
+  @@unique([caseId, generation])
+  @@index([sourceReportId])
+  @@map("moderation_analyses")
 }
 
 enum AuditAction {
@@ -1174,9 +1242,15 @@ enum AuditAction {
   CHAT_CHANNEL_CREATED
   CHAT_CHANNEL_UPDATED
   CHAT_MESSAGE_REMOVED
+  WALLET_ADJUSTED
+  COSMETIC_CREATED
+  COSMETIC_UPDATED
+  COSMETIC_DEACTIVATED
+  COSMETIC_GRANTED
 }
 
 enum AuditTargetType {
+  COSMETIC
   POST
   COMMENT
   REPORT // Historical audit targets remain readable.
@@ -1214,6 +1288,7 @@ model AuditLog {
 }
 
 enum NotificationType {
+  MODERATION_NOTICE
   POST_LIKED
   POST_COMMENTED
   COMMENT_REPLIED
@@ -1229,6 +1304,7 @@ enum NotificationType {
 }
 
 enum NotificationEntityType {
+  MODERATION_ACTION
   POST
   COMMENT
   MESSAGE
@@ -1535,4 +1611,420 @@ model PostSave {
   @@index([userId, createdAt, postId])
   @@index([postId])
   @@map("post_saves")
+}
+
+enum ModerationPolicyEvaluationStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  UNSUPPORTED
+}
+
+enum ModerationPolicyRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model ModerationPolicyEvaluation {
+  id String @id @default(cuid())
+
+  analysisId String
+  analysis   ModerationAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  policyVersion String @db.VarChar(128)
+
+  status ModerationPolicyEvaluationStatus @default(PENDING)
+
+  riskLevel     ModerationPolicyRiskLevel?
+  priorityScore Int?
+  signals       Json?
+
+  /// Successful evaluation time; retry attempts use operational metadata instead.
+  evaluatedAt DateTime?
+
+  attemptCount   Int       @default(0)
+  nextAttemptAt  DateTime?
+  leaseExpiresAt DateTime?
+  leaseToken     String?
+
+  errorCode String? @db.VarChar(64)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([analysisId, policyVersion])
+  @@index([status, nextAttemptAt])
+  @@index([leaseExpiresAt])
+  @@index([analysisId])
+  // SQL migration additionally enforces output/status consistency and value bounds.
+  @@map("moderation_policy_evaluations")
+}
+
+model CommentLike {
+  commentId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([commentId, userId])
+  @@index([userId, createdAt])
+  @@map("comment_likes")
+}
+
+// Economy: see docs/plans/economy-and-cosmetics.md. Balances are a cache of the ledger; every change writes a LedgerEntry in the same transaction.
+
+enum Currency {
+  REPUTATION
+  SHARDS
+  PRISMS
+}
+
+enum ReputationRank {
+  STARGAZER
+  METEOR
+  COMET
+  NOVA
+  SUPERNOVA
+  GALAXY
+}
+
+enum LedgerReason {
+  DAILY_CHECKIN
+  LIKE_RECEIVED
+  COMMENT_RECEIVED
+  LIKE_MILESTONE
+  COMMENT_WRITTEN
+  REVOKED
+  RESTORED
+  ADMIN_ADJUST
+  TAKEDOWN_REFUND
+}
+
+enum EconomySource {
+  POST
+  COMMENT
+  COSMETIC
+}
+
+enum InteractionKind {
+  LIKE
+  COMMENT
+}
+
+/// Why an award was taken back: its post/comment was hidden, or the person who gave it was banned.
+enum RevokeCause {
+  CONTENT
+  ACTOR
+}
+
+model UserWallet {
+  userId        String         @id
+  reputation    Int            @default(0)
+  shards        Int            @default(0)
+  prisms        Int            @default(0)
+  /// Reputation from awards in the last 90 days that are not revoked; decides the rank.
+  reputation90d Int            @default(0)
+  rank          ReputationRank @default(STARGAZER)
+  rankUpdatedAt DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([reputation90d])
+  @@map("user_wallets")
+}
+
+model LedgerEntry {
+  id             String         @id @default(cuid())
+  userId         String
+  currency       Currency
+  delta          Int
+  balanceAfter   Int
+  reason         LedgerReason
+  sourceType     EconomySource?
+  sourceId       String?
+  /// The person whose like/comment caused the award (not a foreign key: it must survive their account).
+  actorId        String?
+  /// REVOKED/RESTORED rows: the award they undo or redo.
+  awardId        String?
+  /// Award rows only: set while the award is taken back.
+  revokedAt      DateTime?
+  revokedCause   RevokeCause?
+  /// What the revoke actually took; less than delta when the balance was lower. RESTORED gives exactly this back.
+  revokedAmount  Int?
+  idempotencyKey String         @unique
+  metadata       Json?
+  createdAt      DateTime       @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, currency, createdAt])
+  @@index([actorId])
+  @@index([sourceType, sourceId])
+  @@map("ledger_entries")
+}
+
+/// One row per user per economy day (UTC+7): what they earned today, for caps and the reputation steps.
+model DailyEarning {
+  userId          String
+  day             DateTime @db.Date
+  baseShards      Int      @default(0)
+  creditedShards  Int      @default(0)
+  likesCounted    Int      @default(0)
+  commentsCounted Int      @default(0)
+  repFromLikes    Int      @default(0)
+  repFromComments Int      @default(0)
+  commentsWritten Int      @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, day])
+  @@map("daily_earnings")
+}
+
+/// Reputation one person gave one author on one day; capped so a few accounts can't pump someone.
+model DailyGiverReputation {
+  ownerId    String
+  giverId    String
+  day        DateTime @db.Date
+  reputation Int      @default(0)
+
+  owner User @relation("DailyReputationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  giver User @relation("DailyReputationGiver", fields: [giverId], references: [id], onDelete: Cascade)
+
+  @@id([ownerId, giverId, day])
+  @@index([giverId])
+  @@index([day])
+  @@map("daily_giver_reputation")
+}
+
+/// A like or comment that counted for the economy, once per person per target ever. Milestones count these.
+model CountedInteraction {
+  kind       InteractionKind
+  targetType EconomySource
+  targetId   String
+  actorId    String
+  ownerId    String
+  createdAt  DateTime        @default(now())
+
+  actor User @relation("CountedInteractionActor", fields: [actorId], references: [id], onDelete: Cascade)
+  owner User @relation("CountedInteractionOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@id([kind, targetType, targetId, actorId])
+  @@index([kind, targetType, targetId])
+  @@index([actorId])
+  @@index([ownerId])
+  @@map("counted_interactions")
+}
+
+
+enum EnforcementScope {
+  COMMUNITY
+  PLATFORM
+}
+
+enum ViolationSeverity {
+  MINOR
+  MODERATE
+  SEVERE
+  CRITICAL
+}
+
+enum SanctionType {
+  WARNING
+  COMMUNITY_RESTRICTION
+  COMMUNITY_BAN
+  PLATFORM_SUSPENSION
+}
+
+enum SanctionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+enum AppealStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+model ContentEnforcement {
+  id String @id @default(cuid())
+  targetType ReportTargetType
+  targetId String
+  subjectId String
+  actorId String?
+  scope EnforcementScope
+  gameId String?
+  caseId String?
+  reason String @db.VarChar(1000)
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+  subject User @relation("EnforcementSubject", fields: [subjectId], references: [id], onDelete: Restrict)
+  actor User? @relation("EnforcementActor", fields: [actorId], references: [id], onDelete: SetNull)
+  game Game? @relation(fields: [gameId], references: [id], onDelete: Restrict)
+  case ModerationCase? @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  sanctions ModerationSanction[]
+  @@index([targetType, targetId, revokedAt])
+  @@index([subjectId, createdAt])
+  @@index([caseId, createdAt])
+  @@map("content_enforcements")
+}
+
+model ModerationViolation {
+  // Active-only uniqueness is enforced by the additive SQL partial indexes.
+  incidentKey String
+  id String @id @default(cuid())
+  caseId String
+  subjectId String
+  actorId String?
+  scope EnforcementScope
+  gameId String?
+  category ReportReason
+  severity ViolationSeverity
+  reason String @db.VarChar(1000)
+  createdAt DateTime @default(now())
+  reversedAt DateTime?
+  subject User @relation("ViolationSubject", fields: [subjectId], references: [id], onDelete: Restrict)
+  actor User? @relation("ViolationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  case ModerationCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  game Game? @relation(fields: [gameId], references: [id], onDelete: Restrict)
+  sanctions ModerationSanction[]
+  @@index([subjectId, scope, gameId, reversedAt, createdAt])
+  @@index([caseId])
+  @@index([incidentKey])
+  @@map("moderation_violations")
+}
+
+model ModerationSanction {
+  id String @id @default(cuid())
+  subjectId String
+  actorId String?
+  type SanctionType
+  scope EnforcementScope
+  gameId String?
+  caseId String?
+  violationId String?
+  enforcementId String?
+  reason String @db.VarChar(1000)
+  startsAt DateTime @default(now())
+  expiresAt DateTime?
+  status SanctionStatus @default(ACTIVE)
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  requestKey String @unique
+  requestHash String
+  subject User @relation("SanctionSubject", fields: [subjectId], references: [id], onDelete: Restrict)
+  actor User? @relation("SanctionActor", fields: [actorId], references: [id], onDelete: SetNull)
+  game Game? @relation(fields: [gameId], references: [id], onDelete: Restrict)
+  case ModerationCase? @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  violation ModerationViolation? @relation(fields: [violationId], references: [id], onDelete: Restrict)
+  enforcement ContentEnforcement? @relation(fields: [enforcementId], references: [id], onDelete: Restrict)
+  appeal ModerationAppeal?
+  @@index([subjectId, scope, gameId, status, expiresAt])
+  @@index([status, expiresAt])
+  @@index([subjectId, createdAt, id])
+  @@map("moderation_sanctions")
+}
+
+model ModerationAppeal {
+  id String @id @default(cuid())
+  sanctionId String @unique
+  statement String @db.VarChar(2000)
+  status AppealStatus @default(PENDING)
+  reviewerId String?
+  decisionReason String? @db.VarChar(1000)
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  sanction ModerationSanction @relation(fields: [sanctionId], references: [id], onDelete: Restrict)
+  reviewer User? @relation(fields: [reviewerId], references: [id], onDelete: SetNull)
+  @@index([status, createdAt, id])
+  @@map("moderation_appeals")
+}
+
+model ModerationDecisionAudit {
+  id String @id @default(cuid())
+  actorId String?
+  action String @db.VarChar(64)
+  entityId String
+  reason String @db.VarChar(1000)
+  previousState Json
+  resultingState Json
+  createdAt DateTime @default(now())
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  @@index([entityId, createdAt])
+  @@map("moderation_decision_audits")
+}
+
+// Definitions matching the existing shared cosmetics migration.
+enum CosmeticSlot {
+  FRAME
+  PROFILE_BACKGROUND
+  MINI_BACKGROUND
+  BANNER
+}
+
+enum Rarity {
+  DUST
+  GLINT
+  GLIMMER
+  RADIANT
+  PRISMATIC
+}
+
+enum CosmeticSource {
+  PULL
+  SPARK
+  ADMIN
+}
+
+model CosmeticItem {
+  id String @id
+  slug String @unique
+  name String
+  description String
+  slot CosmeticSlot
+  rarity Rarity
+  animated Boolean @default(false)
+  assetUrl String?
+  presetId String?
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  owners UserCosmetic[]
+  equippedBy EquippedCosmetic[]
+
+  @@index([slot, active])
+  @@map("cosmetic_items")
+}
+
+model UserCosmetic {
+  userId String
+  itemId String
+  source CosmeticSource
+  acquiredAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  item CosmeticItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@id([userId, itemId])
+  @@index([itemId])
+  @@map("user_cosmetics")
+}
+
+model EquippedCosmetic {
+  userId String
+  slot CosmeticSlot
+  itemId String
+  equippedAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  item CosmeticItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@id([userId, slot])
+  @@index([itemId])
+  @@map("equipped_cosmetics")
 }

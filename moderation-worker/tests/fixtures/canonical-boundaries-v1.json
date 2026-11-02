@@ -1,0 +1,58 @@
+[
+  {
+    "type": "POST",
+    "codepoint": "😀",
+    "length": 20000,
+    "retained": 20000,
+    "snapshotHash": "sha256:e7989e29314a12d4a6dd3d91dbc2271a53ce18d258890bc488dfbe404e1412b3"
+  },
+  {
+    "type": "POST",
+    "codepoint": "😀",
+    "length": 20001,
+    "retained": 20001,
+    "snapshotHash": "sha256:61a8d060c36d506dc88bcbec771551c53ff9d400f5393d6845ba65e1b254ab80"
+  },
+  {
+    "type": "POST",
+    "codepoint": "😀",
+    "length": 30000,
+    "retained": 30000,
+    "snapshotHash": "sha256:ebd55fdb0356ea1b2b5a0eb56c68b49640597b3038c64e902d3cc71696ccf990"
+  },
+  {
+    "type": "POST",
+    "codepoint": "😀",
+    "length": 30001,
+    "retained": 30000,
+    "snapshotHash": "sha256:ebd55fdb0356ea1b2b5a0eb56c68b49640597b3038c64e902d3cc71696ccf990"
+  },
+  {
+    "type": "COMMENT",
+    "codepoint": "😀",
+    "length": 20000,
+    "retained": 20000,
+    "snapshotHash": "sha256:cd7ef535f004a5f4ff3ec91c3407a17f026de9441d1036adb7e3326fe15e69a4"
+  },
+  {
+    "type": "COMMENT",
+    "codepoint": "😀",
+    "length": 20001,
+    "retained": 20001,
+    "snapshotHash": "sha256:d8ead9aff120dd0185432c2b617859e37e4b55c4b8be29420a4fbb42f06ecd30"
+  },
+  {
+    "type": "COMMENT",
+    "codepoint": "😀",
+    "length": 30000,
+    "retained": 30000,
+    "snapshotHash": "sha256:e862ec5ea1749fea47f9698ac58c733fa8cb7469180097bb79ebf0ab7650ca44"
+  },
+  {
+    "type": "COMMENT",
+    "codepoint": "😀",
+    "length": 30001,
+    "retained": 30000,
+    "snapshotHash": "sha256:e862ec5ea1749fea47f9698ac58c733fa8cb7469180097bb79ebf0ab7650ca44"
+  }
+]

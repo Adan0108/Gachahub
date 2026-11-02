@@ -1,0 +1,116 @@
+[
+  {
+    "name": "empty post",
+    "source": {
+      "type": "POST",
+      "title": "",
+      "content": ""
+    },
+    "input": {
+      "type": "POST",
+      "title": null,
+      "content": ""
+    },
+    "serialized": "{\"inputSchemaVersion\":1,\"input\":{\"type\":\"POST\",\"title\":null,\"content\":\"\"}}",
+    "snapshotHash": "sha256:695f19aef15c62e100ac69a3f7bcc5f0cda7687bea05d5f8386b4a2aa145bf28"
+  },
+  {
+    "name": "null title",
+    "source": {
+      "type": "POST",
+      "title": null,
+      "content": "hello"
+    },
+    "input": {
+      "type": "POST",
+      "title": null,
+      "content": "hello"
+    },
+    "serialized": "{\"inputSchemaVersion\":1,\"input\":{\"type\":\"POST\",\"title\":null,\"content\":\"hello\"}}",
+    "snapshotHash": "sha256:7495e6c60f9b5654435e6cfe8e4f40c4a635cc25edeb45e6525fd958dd8207f8"
+  },
+  {
+    "name": "Vietnamese NFC",
+    "source": {
+      "type": "POST",
+      "title": "  Tiếng Việt  ",
+      "content": "  Xin chào\r\nCafé\rbody  "
+    },
+    "input": {
+      "type": "POST",
+      "title": "Tiếng Việt",
+      "content": "Xin chào\nCafé\nbody"
+    },
+    "serialized": "{\"inputSchemaVersion\":1,\"input\":{\"type\":\"POST\",\"title\":\"Tiếng Việt\",\"content\":\"Xin chào\\nCafé\\nbody\"}}",
+    "snapshotHash": "sha256:3998dbfa2146c339e0ebdae24ec0ca84e0fd4f771bd1d6e5a560fb2e61e66544"
+  },
+  {
+    "name": "escaping",
+    "source": {
+      "type": "COMMENT",
+      "content": "quote \" slash \\ tab\t LF\n backspace\b formfeed\f <>&/"
+    },
+    "input": {
+      "type": "COMMENT",
+      "content": "quote \" slash \\ tab\t LF\n backspace\b formfeed\f <>&/"
+    },
+    "serialized": "{\"inputSchemaVersion\":1,\"input\":{\"type\":\"COMMENT\",\"content\":\"quote \\\" slash \\\\ tab\\t LF\\n backspace\\b formfeed\\f <>&/\"}}",
+    "snapshotHash": "sha256:77abe9cd38d87407e7b36e32422bdaec64aeb8e5f3465f7a7a1aa7d2c0e405f5"
+  },
+  {
+    "name": "emoji separators",
+    "source": {
+      "type": "POST",
+      "title": "😀",
+      "content": "a b 🚀"
+    },
+    "input": {
+      "type": "POST",
+      "title": "😀",
+      "content": "a b 🚀"
+    },
+    "serialized": "{\"inputSchemaVersion\":1,\"input\":{\"type\":\"POST\",\"title\":\"😀\",\"content\":\"a b 🚀\"}}",
+    "snapshotHash": "sha256:810cdc2396421d52f7c21670fc436bc78a7cf92bdc7afc58e9f84d88233c5a6b"
+  },
+  {
+    "name": "JS trim differs from Python",
+    "source": {
+      "type": "COMMENT",
+      "content": "﻿ inside ﻿"
+    },
+    "input": {
+      "type": "COMMENT",
+      "content": "inside"
+    },
+    "serialized": "{\"inputSchemaVersion\":1,\"input\":{\"type\":\"COMMENT\",\"content\":\"inside\"}}",
+    "snapshotHash": "sha256:6b0f4e5cd0e0da46224b05a91c8636cc88c2b56401ccb6c2e651aac65a841c59"
+  },
+  {
+    "name": "bounded prefix trailing space",
+    "source": {
+      "type": "POST",
+      "title": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa suffix",
+      "content": "body"
+    },
+    "input": {
+      "type": "POST",
+      "title": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+      "content": "body"
+    },
+    "serialized": "{\"inputSchemaVersion\":1,\"input\":{\"type\":\"POST\",\"title\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \",\"content\":\"body\"}}",
+    "snapshotHash": "sha256:e455ac00f15ae6c5af3e5e382015c7dbdcc56b8c8cd9bb1ba64f7bcd02611db5"
+  },
+  {
+    "name": "empty comment",
+    "source": {
+      "type": "COMMENT",
+      "content": " \r\n "
+    },
+    "input": {
+      "type": "COMMENT",
+      "content": ""
+    },
+    "serialized": "{\"inputSchemaVersion\":1,\"input\":{\"type\":\"COMMENT\",\"content\":\"\"}}",
+    "snapshotHash": "sha256:eaa45712369bca3ab58730d46d13fca71bd10c61b85afd56e3ac646ac92d9f11"
+  }
+]

@@ -29,6 +29,7 @@ interface UseDeviceIdentityResult {
 /** Ensures this browser device has a provisioned, backend-registered MLS identity for the signed-in user. */
 export function useDeviceIdentity(): UseDeviceIdentityResult {
   const { user, isAuthenticated } = useCurrentUser();
+  const writeRestricted = Boolean(user?.sanctions?.length);
   const [credential, setCredential] = useState<DeviceCredential | undefined>(undefined);
   const [error, setError] = useState<Error | undefined>(undefined);
   // Bumped to re-run the effect for the same user after a failed attempt.
@@ -36,7 +37,7 @@ export function useDeviceIdentity(): UseDeviceIdentityResult {
   const provisioningUserIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    if (!isAuthenticated || !user?.id) {
+    if (!isAuthenticated || !user?.id || writeRestricted) {
       return;
     }
     // Skips repeat calls for the same user on this hook instance.
@@ -53,7 +54,7 @@ export function useDeviceIdentity(): UseDeviceIdentityResult {
         setError(caughtError instanceof Error ? caughtError : new Error(String(caughtError)));
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- attempt is a pure retry trigger, not a real dependency
-  }, [isAuthenticated, user?.id, attempt]);
+  }, [isAuthenticated, user?.id, writeRestricted, attempt]);
 
   async function revokeDevice(): Promise<void> {
     await revokeDeviceEverywhere(getSharedDeviceIdentityStore());

@@ -26,7 +26,11 @@ describe('PostSaveRepository', () => {
     }).compile();
     repository = module.get(PostSaveRepository);
   });
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers({ now: new Date('2026-10-30T00:00:00Z') });
+  });
+  afterEach(() => jest.useRealTimers());
   it('inserts once using database duplicate suppression without modifying counts', async () => {
     prisma.postSave.createMany
       .mockResolvedValueOnce({ count: 1 })

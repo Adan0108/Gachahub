@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { claimUploadsForAttachment } from '../media/media.repository';
-import { viewablePostWhere } from '../post-visibility/visibility-where';
+import {
+  communityAccessWhere,
+  viewablePostWhere,
+} from '../post-visibility/visibility-where';
 
 export const postInclude = {
   author: {
@@ -699,6 +702,7 @@ export class PostsRepository {
 
     return this.prisma.post.findMany({
       where: {
+        ...communityAccessWhere(userId),
         id: {
           in: ids,
         },
@@ -800,6 +804,7 @@ export class PostsRepository {
       where: {
         AND: [
           where,
+          communityAccessWhere(userId),
           {
             id: {
               in: ids,

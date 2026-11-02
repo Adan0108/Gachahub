@@ -1,3 +1,5 @@
+import { Optional } from '@nestjs/common';
+import { EnforcementService } from '../../moderation-enforcement/enforcement.service';
 import {
   BadRequestException,
   ConflictException,
@@ -30,6 +32,7 @@ export class PostModerationService {
     private readonly gameModeratorsService: GameModeratorsService,
     private readonly auditLogService: AuditLogService,
     private readonly prisma: PrismaService,
+    @Optional() private readonly enforcement?: EnforcementService,
   ) {}
 
   async hideAsModerator(gameSlug: string, postId: string, moderatorId: string) {
@@ -130,6 +133,21 @@ export class PostModerationService {
     auditAction: PostAuditAction;
     rejectionMessage: string;
   }) {
+    if (this.enforcement) {
+      await this.enforcement.content(
+        params.moderatorId,
+        'POST',
+        params.postId,
+        params.to === 'HIDDEN',
+        params.to === 'HIDDEN'
+          ? 'Content hidden by moderator'
+          : 'Content restored by moderator',
+        params.gameSlug,
+      );
+      const post = await this.postsRepository.findById(params.postId);
+      if (!post) throw new NotFoundException('Post not found');
+      return formatPost(post);
+    }
     const {
       gameSlug,
       postId,

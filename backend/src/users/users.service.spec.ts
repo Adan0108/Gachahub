@@ -189,7 +189,22 @@ describe('UsersService', () => {
 
       await expect(service.getMe('user-1')).resolves.toEqual(liveRow);
       expect(prisma.user.findUnique).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'user-1' } }),
+        expect.objectContaining({
+          where: { id: 'user-1' },
+          select: expect.objectContaining({
+            sanctions: {
+              where: {
+                scope: 'PLATFORM',
+                status: 'ACTIVE',
+                type: { not: 'WARNING' },
+                startsAt: { lte: expect.any(Date) as Date },
+                expiresAt: { gt: expect.any(Date) as Date },
+              },
+              select: { type: true, expiresAt: true },
+              take: 4,
+            },
+          }) as object,
+        }),
       );
     });
   });

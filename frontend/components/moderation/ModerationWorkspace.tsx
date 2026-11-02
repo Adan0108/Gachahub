@@ -77,6 +77,7 @@ export function ModerationWorkspace({
               <Link href="/moderator">My communities</Link>
             </>
           )}
+          <Link href={gameSlug ? `/moderator/${encodeURIComponent(gameSlug)}/appeals` : "/moderation/appeals"}>Appeals</Link>
           {access.user.role === "ADMIN" && <Link href="/admin">Admin console</Link>}
         </nav>
       </div>

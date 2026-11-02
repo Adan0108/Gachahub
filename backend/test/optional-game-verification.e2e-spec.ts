@@ -1,3 +1,4 @@
+import { ModerationAnalysisScheduler } from '../src/moderation-analysis/moderation-analysis-scheduler.service';
 import { isolatedCaseDatabase } from './support/isolated-case-database';
 import { PlatformCaseModerationController } from '../src/reports/platform-moderation/platform-case-moderation.controller';
 jest.mock('@thallesp/nestjs-better-auth', () => {
@@ -239,6 +240,7 @@ describe('Optional-game comprehensive API/integration verification', () => {
         PostSaveService,
         PostSaveRepository,
         ReportsRepository,
+        ModerationAnalysisScheduler,
         ContentModerationService,
         FollowsService,
         FollowsRepository,
@@ -303,7 +305,9 @@ describe('Optional-game comprehensive API/integration verification', () => {
           ? null
           : (req.headers['x-test-user'] ?? author);
       req.user = id ? { id } : null;
-      req.session = id ? { user: { id } } : null;
+      req.session = id
+        ? { user: { id }, session: { id: `fixture-session-${id}` } }
+        : null;
       next();
     });
     const reflector = new Reflector();

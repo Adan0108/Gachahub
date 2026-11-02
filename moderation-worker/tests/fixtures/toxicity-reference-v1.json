@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "description": "Synthetic screening inputs; categories are observations, not score ground truth.",
+  "pairs": [
+    ["benign", "benign", "Hello, thanks for helping me today!", "Xin chào, cảm ơn bạn đã giúp mình hôm nay!"],
+    ["benign_gaming", "benign", "Which support character should I upgrade next? Thanks for the guide.", "Mình nên nâng nhân vật hỗ trợ nào tiếp theo? Cảm ơn bài hướng dẫn."],
+    ["competitive", "benign", "GG, that team played well. Let's improve our positioning next match.", "GG, team này đánh hay. Trận sau mình đứng vị trí tốt hơn nhé."],
+    ["boss", "gaming_violence", "Kill the boss before phase two.", "Giết boss này trước phase 2."],
+    ["raid_pvp", "gaming_violence", "Tonight let's log into the game, kill the boss and shoot the enemy team.", "Tối nay vào game giết boss rồi bắn hạ đội địch nhé."],
+    ["lore", "gaming_violence", "The villain kills everyone in the story.", "Nhân vật phản diện giết cả ngôi làng trong cốt truyện."],
+    ["mild_insult", "toxic", "That was a stupid idea.", "Ý tưởng đó thật ngu ngốc."],
+    ["strong_insult", "toxic", "You are a complete idiot. Get out of here, nobody wants you around.", "Đồ ngu, cút khỏi đây. Chẳng ai muốn thấy mày nữa."],
+    ["profanity", "toxic", "Fuck this shit, what a fucking mess.", "Địt mẹ, cái thứ chết tiệt này thật khốn nạn."],
+    ["direct_threat", "threat", "I will kill you.", "Tao sẽ giết mày ngoài đời."],
+    ["indirect_threat", "threat", "Keep talking about me and you won't get home alive tomorrow.", "Cứ nói về tao đi, ngày mai mày sẽ không sống sót mà về nhà đâu."],
+    ["quoted_threat", "other", "He messaged me saying 'I will kill you'. Please help me report this.", "Nó nhắn rằng: 'tao sẽ giết mày'. Giúp mình báo cáo tin nhắn này."],
+    ["identity_abuse", "toxic", "Women are inferior and should be driven out of our community.", "Phụ nữ là lũ thấp kém, phải đuổi hết chúng nó khỏi cộng đồng này."],
+    ["sexual", "toxic", "I want to fuck you and touch your naked genitals.", "Tao muốn đụ mày và sờ bộ phận sinh dục trần truồng của mày."],
+    ["severe", "toxic", "I will torture you, break your bones and kill your entire family.", "Tao sẽ tra tấn mày, bẻ gãy xương mày rồi giết cả nhà mày."],
+    ["mixed", "threat", "After the raid I'm coming to your house to kill you, you fucking idiot.", "Raid xong tao qua nhà giết mày, đồ ngu chó chết."],
+    ["unicode_emoji", "benign", "Great guide! 🎮😀 Thanks, café fans — let's play together.", "Hướng dẫn hay quá! 🎮😀 Cảm ơn bạn, cùng chơi nhé."],
+    ["diacritics", "benign", "The coffee shop has a useful guide and a friendly community.", "Tiếng Việt có dấu: cảm ơn, hướng dẫn, cộng đồng, chiến thuật."],
+    ["mixed_language", "benign", "Cảm ơn team, the support build is very helpful!", "Thanks bạn nhé, build này hỗ trợ team rất tốt!"],
+    ["punctuation", "other", "WHAT?! ... Really??? !!! -- ???", "GÌ CƠ?! ... Thật á??? !!! -- ???"],
+    ["links_mentions", "benign", "@player_123 see https://example.invalid/guide?boss=2 for the update.", "@nguoi_choi xem https://example.invalid/huong-dan để đọc bản cập nhật."],
+    ["newlines", "benign", "Thanks for the guide.\n\nTeam setup:\nhealer\nsupport\nGood luck!", "Cảm ơn bài hướng dẫn.\n\nĐội hình:\nhồi máu\nhỗ trợ\nChúc may mắn!"],
+    ["ambiguous", "other", "You'll see what happens tonight.", "Tối nay rồi mày sẽ biết."],
+    ["short_insult", "toxic", "Idiot.", "Đồ ngu."],
+    ["short_threat_like", "other", "Kill you.", "Giết mày."]
+  ],
+  "short": [
+    ["empty", ""], ["whitespace", " \t\r\n "], ["punctuation", "."],
+    ["emoji", "😀"], ["word_en", "Hello"], ["word_vi", "Chào"]
+  ],
+  "long_recipes": {
+    "neutral_en": "This guide discusses character equipment and resource planning. ",
+    "neutral_vi": "Bài hướng dẫn thảo luận về trang bị nhân vật và kế hoạch tài nguyên. ",
+    "toxic_en": "I will kill you and your family, you fucking idiot. ",
+    "toxic_vi": "Tao sẽ giết mày và cả nhà mày, đồ ngu chó chết. "
+  }
+}

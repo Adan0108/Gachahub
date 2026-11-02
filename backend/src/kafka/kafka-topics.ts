@@ -1,6 +1,8 @@
 import type { DomainEventType } from '../domain-events/domain-event.types';
 
 export const KAFKA_TOPICS = {
+  MODERATION_RESULTS: 'gachahub.moderation.results',
+  MODERATION_REQUESTS: 'gachahub.moderation.requests',
   POSTS: 'gachahub.posts',
   SOCIAL: 'gachahub.social',
   CHAT: 'gachahub.chat',
@@ -10,10 +12,13 @@ export type KafkaTopic = (typeof KAFKA_TOPICS)[keyof typeof KAFKA_TOPICS];
 
 export function resolveDomainEventTopic(type: DomainEventType): KafkaTopic {
   switch (type) {
+    case 'moderation.analysis.requested':
+      return KAFKA_TOPICS.MODERATION_REQUESTS;
     case 'post.liked':
     case 'comment.created':
       return KAFKA_TOPICS.POSTS;
 
+    case 'moderation.notice':
     case 'user.followed':
     case 'user.mentioned':
       return KAFKA_TOPICS.SOCIAL;
