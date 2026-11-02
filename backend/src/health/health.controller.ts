@@ -2,12 +2,19 @@ import { Controller, Get } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
 
-import { RedisService } from '../redis/redis.service';
+import { ReadinessService } from './readiness.service';
 
 @ApiTags('Health')
 @Controller('health')
 export class HealthController {
-  constructor(private readonly redisService: RedisService) {}
+  constructor(private readonly readinessService: ReadinessService) {}
+
+  @Get('readiness')
+  @AllowAnonymous()
+  @ApiOperation({ summary: 'Check required backend dependencies' })
+  ready() {
+    return this.readinessService.ready();
+  }
 
   @Get()
   @AllowAnonymous()
@@ -19,7 +26,7 @@ export class HealthController {
     };
     timestamp: string;
   }> {
-    await this.redisService.ping();
+    await this.readinessService.pingRedis();
 
     return {
       status: 'ok',

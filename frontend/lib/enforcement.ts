@@ -121,6 +121,6 @@ export type SanctionPage = {
   nextCursor: string | null;
 };
 export type AppealPage = {
-  items: (Appeal & { canReview: boolean; sanction: Sanction & { subjectId: string } })[];
+  items: (Appeal & { canReview: boolean; canReject?: boolean; sanction: Sanction & { subjectId: string } })[];
   nextCursor: string | null;
 };

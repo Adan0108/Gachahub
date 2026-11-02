@@ -92,6 +92,16 @@ it("keeps allegations, confirmed findings and user risk distinct", async () => {
   expect(screen.getByText(/Reports alone do not increase/)).toBeVisible();
   expect(screen.getByText(/Reports are allegations, not confirmed violations/)).toBeVisible();
 });
+it("keeps an expired sanction in history without offering to revoke or adjust it", async () => {
+  vi.mocked(api.getCaseEnforcement).mockResolvedValue({
+    ...overview,
+    sanctions: [{ ...sanction, status: "EXPIRED", effectiveStatus: "EXPIRED" }],
+  });
+  mount(<EnforcementPanel actorId="actor" caseId="case" />);
+  await screen.findByText("Restrictions and warnings");
+  expect(screen.queryByRole("button", { name: "Revoke restriction" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Adjust duration" })).not.toBeInTheDocument();
+});
 it("never offers permanent or unsupported sanctions, including a stale server response", async () => {
   vi.mocked(api.getCaseEnforcement).mockResolvedValue({
     ...overview,
@@ -269,6 +279,49 @@ it("only allows independent authorized appeal review and explains the reversal c
         reason: "The evidence supports the appeal",
         reverseViolation: true,
         restoreContent: true,
+      },
+      "",
+    ),
+  );
+});
+
+it("allows a prior sanction actor to accept an appeal while preventing rejection", async () => {
+  vi.spyOn(api, "listModerationAppeals").mockResolvedValue({
+    items: [
+      {
+        id: "appeal-self",
+        statement: "I believe this sanction was a mistake",
+        status: "PENDING",
+        createdAt: "2026-10-30T00:00:00Z",
+        decisionReason: null,
+        reviewedAt: null,
+        canReview: true,
+        canReject: false,
+        sanction: { ...sanction, subjectId: "author" },
+      },
+    ],
+    nextCursor: null,
+  });
+  mount(<AppealsQueue />);
+  expect(
+    await screen.findByText(/You may accept this appeal to overturn your prior decision/i),
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Review appeal" }));
+  const decisionSelect = screen.getByLabelText("Decision", { exact: true }) as HTMLSelectElement;
+  expect(decisionSelect.value).toBe("ACCEPTED");
+  expect(screen.queryByRole("option", { name: "Uphold original decision" })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Appeal decision reason"), {
+    target: { value: "Sanction was issued in error; overturning." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Record appeal decision" }));
+  await waitFor(() =>
+    expect(api.reviewModerationAppeal).toHaveBeenCalledWith(
+      "appeal-self",
+      {
+        decision: "ACCEPTED",
+        reason: "Sanction was issued in error; overturning.",
+        reverseViolation: false,
+        restoreContent: false,
       },
       "",
     ),

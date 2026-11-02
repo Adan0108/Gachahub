@@ -121,6 +121,11 @@ describe('policy execution orchestration', () => {
     expect(await runner.processNext()).toBe(false);
     expect(repository.loadAnalysis).not.toHaveBeenCalled();
   });
+  it('continues a batch after an exhausted candidate without evaluating it', async () => {
+    repository.claimNext.mockResolvedValueOnce({ exhausted: true });
+    expect(await runner.processNext()).toBe(true);
+    expect(repository.loadAnalysis).not.toHaveBeenCalled();
+  });
   it('polls after completion, never overlaps and stops cleanly while work is in flight', async () => {
     jest.useFakeTimers();
     let finish!: (value: null) => void;

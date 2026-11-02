@@ -1,3 +1,4 @@
+import { trustedApplicationOrigins } from '../common/security/request-origin.interceptor';
 import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { betterAuth } from 'better-auth';
@@ -140,5 +141,5 @@ export const auth = betterAuth({
     storeSessionInDatabase: true,
   },
 
-  trustedOrigins: [process.env.FRONTEND_URL || 'http://localhost:5173'],
+  trustedOrigins: trustedApplicationOrigins(),
 });

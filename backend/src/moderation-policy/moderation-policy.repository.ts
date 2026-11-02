@@ -37,7 +37,7 @@ export class ModerationPolicyRepository {
     });
   }
 
-  async claimNext(): Promise<PolicyClaim | null> {
+  async claimNext(): Promise<PolicyClaim | { exhausted: true } | null> {
     const token = randomUUID();
     const rows = await this.prisma.$queryRaw<
       Array<PolicyClaim & { status: string }>
@@ -65,7 +65,8 @@ export class ModerationPolicyRepository {
       FROM candidate WHERE e.id = candidate.id
       RETURNING e.id, e."analysisId", e."policyVersion", e."attemptCount", e."leaseToken", e.status
     `;
-    return rows[0]?.status === 'PENDING' ? rows[0] : null;
+    if (!rows.length) return null;
+    return rows[0].status === 'PENDING' ? rows[0] : { exhausted: true };
   }
 
   loadAnalysis(analysisId: string) {

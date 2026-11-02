@@ -195,26 +195,28 @@ export function EnforcementPanel({
                   ? `Ends ${formatDate(record.expiresAt)}`
                   : "Informational warning; no access restriction"}
               </p>
-              {data.permissions.canSanction && record.status !== "REVOKED" && (
-                <div className="case-actions">
-                  <button
-                    className="case-button case-button-secondary"
-                    type="button"
-                    onClick={() => setDecision({ kind: "revoke", id: record.id })}
-                  >
-                    Revoke restriction
-                  </button>
-                  {record.expiresAt && record.effectiveStatus === "ACTIVE" && (
+              {data.permissions.canSanction &&
+                record.status !== "REVOKED" &&
+                record.effectiveStatus !== "EXPIRED" && (
+                  <div className="case-actions">
                     <button
                       className="case-button case-button-secondary"
                       type="button"
-                      onClick={() => setDecision({ kind: "adjust", id: record.id })}
+                      onClick={() => setDecision({ kind: "revoke", id: record.id })}
                     >
-                      Adjust duration
+                      {record.type === "WARNING" ? "Withdraw warning" : "Revoke restriction"}
                     </button>
-                  )}
-                </div>
-              )}
+                    {record.expiresAt && record.effectiveStatus === "ACTIVE" && (
+                      <button
+                        className="case-button case-button-secondary"
+                        type="button"
+                        onClick={() => setDecision({ kind: "adjust", id: record.id })}
+                      >
+                        Adjust duration
+                      </button>
+                    )}
+                  </div>
+                )}
             </li>
           ))}
         </ul>

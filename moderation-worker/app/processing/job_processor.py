@@ -44,9 +44,14 @@ class JobProcessor:
         identity = {field: getattr(request, field) for field in
                     ["analysisJobId", "caseId", "generation", "snapshotHash", "classifierProfile"]}
         try:
-            output = ClassifierOutput.model_validate(self.classifier.classify(text))
+            cancellable = getattr(type(self.classifier), 'classify_cancellable', None)
+            result = (cancellable(self.classifier, text, cancelled) if callable(cancellable)
+                      else self.classifier.classify(text))
+            output = ClassifierOutput.model_validate(result)
             failure = False
             failure_code = "CLASSIFIER_ERROR"
+        except Cancelled:
+            raise
         except TimeoutError:
             failure = True
             failure_code = "CLASSIFIER_TIMEOUT"

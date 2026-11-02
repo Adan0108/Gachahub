@@ -93,6 +93,7 @@ export class ModerationPolicyRunner implements OnModuleInit, OnModuleDestroy {
   async processNext(): Promise<boolean> {
     const claim = await this.repository.claimNext();
     if (!claim) return false;
+    if ('exhausted' in claim) return true;
     // Database failures escape: retain the lease for crash recovery, never lose the source result.
     const analysis = await this.repository.loadAnalysis(claim.analysisId);
     let output: ModerationPolicyOutput;

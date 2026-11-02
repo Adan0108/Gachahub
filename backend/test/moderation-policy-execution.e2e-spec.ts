@@ -147,6 +147,12 @@ describe('Stage 2D.3 durable policy execution (isolated PostgreSQL)', () => {
     await ingestion.ingest(event);
     expect(await db.moderationPolicyEvaluation.count()).toBe(1);
   });
+  async function pendingClaim() {
+    const claim = await repository.claimNext();
+    if (!claim || 'exhausted' in claim)
+      throw new Error('Expected pending leased work');
+    return claim;
+  }
   it('claims once concurrently, recovers expiry, fences all stale-token writes and permits the current token', async () => {
     await accepted();
     const claims = await Promise.all([
@@ -154,6 +160,7 @@ describe('Stage 2D.3 durable policy execution (isolated PostgreSQL)', () => {
       repository.claimNext(),
     ]);
     const first = claims.find((claim) => claim !== null)!;
+    if ('exhausted' in first) throw new Error('Expected pending leased work');
     expect(claims.filter(Boolean)).toHaveLength(1);
     expect(first.attemptCount).toBe(1);
     expect(await repository.claimNext()).toBeNull();
@@ -165,7 +172,7 @@ describe('Stage 2D.3 durable policy execution (isolated PostgreSQL)', () => {
       ),
     );
     expect(await repository.succeed(first, output)).toBe(false);
-    const second = (await repository.claimNext())!;
+    const second = await pendingClaim();
     expect(second.leaseToken).not.toBe(first.leaseToken);
     expect(second.attemptCount).toBe(2);
     expect(await repository.succeed(first, output)).toBe(false);
@@ -279,16 +286,36 @@ describe('Stage 2D.3 durable policy execution (isolated PostgreSQL)', () => {
   it('exhausts a lease repeatedly abandoned by crashed runners without exceeding the attempt limit', async () => {
     await accepted();
     for (let index = 0; index < POLICY_MAX_ATTEMPTS; index++) {
-      const claim = (await repository.claimNext())!;
+      const claim = await pendingClaim();
       await expire(claim.id);
     }
-    expect(await repository.claimNext()).toBeNull();
+    expect(await repository.claimNext()).toEqual({ exhausted: true });
     expect(await evaluation()).toMatchObject({
       status: 'FAILED',
       attemptCount: POLICY_MAX_ATTEMPTS,
       errorCode: 'POLICY_ATTEMPTS_EXHAUSTED',
       leaseToken: null,
     });
+  });
+  it('continues within the same batch after finalizing an exhausted oldest candidate', async () => {
+    const first = await accepted();
+    const second = await accepted();
+    await db.moderationPolicyEvaluation.updateMany({
+      where: { analysisId: first.analysis.id },
+      data: {
+        attemptCount: POLICY_MAX_ATTEMPTS,
+        nextAttemptAt: null,
+        leaseExpiresAt: null,
+      },
+    });
+    const worker = runner();
+    expect(await worker.processNext()).toBe(true);
+    expect(await worker.processNext()).toBe(true);
+    expect(
+      await db.moderationPolicyEvaluation.findFirst({
+        where: { analysisId: second.analysis.id },
+      }),
+    ).toMatchObject({ status: 'SUCCEEDED' });
   });
   it('reconciles bounded PK pages, skips failed/pending analyses, and is idempotent under concurrent backfill', async () => {
     const first = await accepted();

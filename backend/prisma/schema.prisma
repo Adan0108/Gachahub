@@ -1138,7 +1138,7 @@ model Report {
 
 model ModerationCase {
   enforcementRecords ContentEnforcement[]
-  confirmedViolation ModerationViolation?
+  confirmedViolations ModerationViolation[]
   sanctions ModerationSanction[]
 
   id         String           @id @default(cuid())
@@ -1877,9 +1877,10 @@ model ContentEnforcement {
 }
 
 model ModerationViolation {
-  incidentKey String @unique
+  // Active-only uniqueness is enforced by the additive SQL partial indexes.
+  incidentKey String
   id String @id @default(cuid())
-  caseId String @unique
+  caseId String
   subjectId String
   actorId String?
   scope EnforcementScope
@@ -1895,6 +1896,8 @@ model ModerationViolation {
   game Game? @relation(fields: [gameId], references: [id], onDelete: Restrict)
   sanctions ModerationSanction[]
   @@index([subjectId, scope, gameId, reversedAt, createdAt])
+  @@index([caseId])
+  @@index([incidentKey])
   @@map("moderation_violations")
 }
 
