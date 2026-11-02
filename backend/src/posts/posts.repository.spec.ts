@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
 import type { Prisma } from '../generated/prisma/client';
 import { PostsRepository } from './posts.repository';
+import { EQUIPPED_FRAME_RELATION_SELECT } from '../cosmetics/cosmetic-starter-catalog';
 
 describe('PostsRepository - Latest feed', () => {
   const prisma = {
@@ -76,6 +77,7 @@ describe('PostsRepository - Latest feed', () => {
             id: true,
             name: true,
             image: true,
+            equippedCosmetics: EQUIPPED_FRAME_RELATION_SELECT,
           },
         },
         game: {

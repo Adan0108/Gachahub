@@ -8,6 +8,7 @@ import type { ClipboardEvent, DragEvent } from "react";
 import type { QueryKey } from "@tanstack/react-query";
 import type { ChatUser } from "../../lib/chat/chatDisplay";
 import type { ThreadMessage } from "../../hooks/chat/useThreadData";
+import type { EquippedCosmetic } from "../../lib/cosmetics";
 interface PickerUser {
   id: string;
   name: string;
@@ -72,6 +73,7 @@ import { LinkPreviewTray } from "../../components/chat/LinkPreviewTray";
 import { AttachmentLightbox } from "../../components/chat/AttachmentLightbox";
 import { AvatarFace } from "../../components/AvatarFace";
 import { PendingContent } from "../../components/chat/EnvelopeContent";
+import { ProfileHoverTrigger } from "../../components/profile/ProfileHoverCard";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useAttachmentPicker } from "../../hooks/chat/useAttachmentPicker";
 import { useDeviceIdentity } from "../../hooks/chat/useDeviceIdentity";
@@ -120,7 +122,7 @@ import {
 } from "../../lib/mls/media/attachmentView";
 import { AttachmentLightboxContext } from "../../lib/mls/media/attachmentLightboxContext";
 import { api } from "../../lib/api";
-import { queries, queryKeys } from "../../lib/queries";
+import { queries, queryKeys, type UserHoverCardData } from "../../lib/queries";
 import { typingSignal } from "../../lib/chat/chatTypingSignal";
 import { conversationMatches } from "../../lib/chat/conversationSearch";
 import { parseSearchQuery } from "../../lib/chat/searchFolding";
@@ -807,6 +809,13 @@ function ChatPageContent() {
         : "Verify end-to-end encryption";
   const activeConversationName = conversationDisplayName(activeConversation, user?.id);
   const activeConversationImage = conversationImage(activeConversation, user?.id);
+  const peerHeaderUserId = activeConversation?.type !== "GROUP" ? peer?.id : undefined;
+  const peerHeaderFrame =
+    (peer as { equipped?: { frame?: EquippedCosmetic | null } | null } | undefined)?.equipped?.frame ??
+    (peerHeaderUserId
+      ? queryClient.getQueryData<UserHoverCardData>(queryKeys.userCard(peerHeaderUserId))?.equipped?.frame
+      : null) ??
+    null;
   const activeGroupMembers = activeMembers(activeConversation);
   const myGroupParticipant = myParticipant(activeConversation, user?.id);
   // Sending is rejected unless ACTIVE (pending, removed, declined, blocked).
@@ -1141,14 +1150,22 @@ function ChatPageContent() {
                   >
                     <FiChevronLeft />
                   </button>
-                  <span className="avatar-with-presence">
-                    <span className="chat-avatar">
-                      <AvatarFace image={activeConversationImage} name={activeConversationName} />
+                  <ProfileHoverTrigger userId={peerHeaderUserId}>
+                    <span className="avatar-with-presence">
+                      <span className="chat-avatar">
+                        <AvatarFace
+                          frame={peerHeaderFrame}
+                          image={activeConversationImage}
+                          name={activeConversationName}
+                        />
+                      </span>
+                      <PresenceDot status={peerPresence} />
                     </span>
-                    <PresenceDot status={peerPresence} />
-                  </span>
+                  </ProfileHoverTrigger>
                   <span>
-                    <b>{activeConversationName}</b>
+                    <ProfileHoverTrigger userId={peerHeaderUserId}>
+                      <b>{activeConversationName}</b>
+                    </ProfileHoverTrigger>
                     <small>
                       {activeConversation.type === "GROUP" ? (
                         <>

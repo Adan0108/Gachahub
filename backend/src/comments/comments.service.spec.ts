@@ -91,8 +91,6 @@ describe('CommentsService', () => {
         recordComment: jest.fn(),
         revokeForContent: jest.fn(),
         restoreForContent: jest.fn(),
-        revokeForActor: jest.fn(),
-        restoreForActor: jest.fn(),
       } as unknown as EconomyService,
     );
   });

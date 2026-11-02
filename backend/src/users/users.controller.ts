@@ -85,6 +85,16 @@ export class UsersController {
     );
   }
 
+  @Get(':userId/card')
+  @OptionalAuth()
+  @ApiOperation({ summary: "Get a user's hover mini profile card" })
+  getUserHoverCard(
+    @Param('userId') userId: string,
+    @Session() session?: UserSession,
+  ) {
+    return this.profiles.getHoverCard(userId, session?.user.id);
+  }
+
   @Get(':userId')
   @OptionalAuth()
   @ApiOperation({ summary: "Get a user's public profile" })

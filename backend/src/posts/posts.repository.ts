@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { EQUIPPED_FRAME_RELATION_SELECT } from '../cosmetics/cosmetic-starter-catalog';
 import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { claimUploadsForAttachment } from '../media/media.repository';
@@ -13,6 +14,7 @@ export const postInclude = {
       id: true,
       name: true,
       image: true,
+      equippedCosmetics: EQUIPPED_FRAME_RELATION_SELECT,
     },
   },
   game: {

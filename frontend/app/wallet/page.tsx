@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FiAward, FiCheck, FiHexagon, FiLock } from "react-icons/fi";
 import { QueryNotice } from "../../components/QueryNotice";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
@@ -26,7 +26,7 @@ export default function WalletPage() {
   const queryClient = useQueryClient();
   const { notice, showNotice } = useToast();
   const wallet = useQuery({ ...queries.wallet(), enabled: isAuthenticated });
-  const ledger = useQuery({ ...queries.walletLedger(), enabled: isAuthenticated });
+  const ledger = useInfiniteQuery({ ...queries.walletLedger(), enabled: isAuthenticated });
   const checkIn = useMutation({
     mutationFn: () => api.checkIn() as Promise<{ shards: number }>,
     onSuccess: (result) =>
@@ -52,8 +52,10 @@ export default function WalletPage() {
   }
 
   const data = wallet.data as Wallet | undefined;
-  const items = ((ledger.data as { items?: LedgerItem[] } | undefined)?.items ?? []) as LedgerItem[];
-  const progress = data ? rankProgress(data.reputation90d, data.rank) : null;
+  const items = (ledger.data?.pages ?? []).flatMap(
+    (page) => ((page as { items?: LedgerItem[] }).items ?? []) as LedgerItem[],
+  );
+  const progress = data ? rankProgress(data.reputation, data.reputation90d, data.rank) : null;
 
   return (
     <div className="page wallet-page">
@@ -85,8 +87,12 @@ export default function WalletPage() {
             </div>
             <small>
               {progress.next
-                ? `${data.reputation90d.toLocaleString()} in the last 90 days · ${progress.needed.toLocaleString()} more for ${progress.next.name}`
-                : `${data.reputation90d.toLocaleString()} in the last 90 days · top rank`}
+                ? progress.needed > 0
+                  ? `${data.reputation.toLocaleString()} Reputation · ${progress.needed.toLocaleString()} more for ${progress.next.name}`
+                  : `${data.reputation.toLocaleString()} Reputation · earn ${progress.recentNeeded.toLocaleString()} more in the last 90 days for ${progress.next.name}`
+                : `${data.reputation.toLocaleString()} Reputation · top rank`}
+              {progress.current.keep90d > 0 &&
+                ` · keep ${progress.current.name} with ${progress.current.keep90d.toLocaleString()} in the last 90 days (you have ${data.reputation90d.toLocaleString()})`}
             </small>
           </section>
 
@@ -146,6 +152,19 @@ export default function WalletPage() {
             </li>
           ))}
         </ul>
+        {ledger.hasNextPage && (
+          <button
+            className="wallet-more"
+            disabled={ledger.isFetchingNextPage}
+            onClick={() => ledger.fetchNextPage()}
+            type="button"
+          >
+            {ledger.isFetchingNextPage ? "Loading..." : "Load more"}
+          </button>
+        )}
+        {ledger.isFetchNextPageError && (
+          <small>Could not load more. Try again.</small>
+        )}
       </section>
     </div>
   );

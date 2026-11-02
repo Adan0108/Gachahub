@@ -143,3 +143,17 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.wallet-more {
+  justify-self: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 16px;
+  background: transparent;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.wallet-more:hover:not(:disabled) {
+  border-color: var(--purple);
+}

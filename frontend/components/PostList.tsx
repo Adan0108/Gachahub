@@ -5,6 +5,7 @@ import { FieldLimit } from "./FieldLimit";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { EquippedCosmetic } from "../lib/cosmetics";
 
 export interface PostMediaRecord {
   id?: string;
@@ -18,7 +19,13 @@ export interface PostMediaRecord {
 interface CommentRecord {
   id: string;
   content: string;
-  author?: { id?: string; name?: string; username?: string };
+  author?: {
+    id?: string;
+    name?: string;
+    username?: string;
+    image?: string | null;
+    equipped?: { frame?: EquippedCosmetic | null } | null;
+  };
   createdAt?: string;
   mentions?: string[];
   replyCount?: number;
@@ -32,6 +39,7 @@ export interface PostRecord {
   author?: string;
   authorId?: string;
   authorImage?: string | null;
+  authorEquipped?: { frame?: EquippedCosmetic | null } | null;
   gameName?: string;
   time?: string;
   tag?: string;
@@ -72,6 +80,7 @@ import { AvatarFace } from "./AvatarFace";
 import { artTones, glyph } from "./constants";
 import { MentionInput } from "./MentionInput";
 import { MentionText } from "./MentionText";
+import { ProfileHoverTrigger } from "./profile/ProfileHoverCard";
 import "./profile/ProfileSocial.css";
 import { SharePostDialog } from "./SharePostDialog";
 
@@ -88,7 +97,7 @@ function videoMimeType(format?: string) {
   return normalizedFormat === "mov" ? "video/quicktime" : `video/${normalizedFormat}`;
 }
 
-/** A comment's author: name and handle, linking to their profile. */
+/** A comment's author: avatar with optional frame, name and handle, linking to their profile with hover card. */
 function CommentAuthor({ author }: { author?: CommentRecord["author"] }) {
   const label = (
     <>
@@ -97,9 +106,20 @@ function CommentAuthor({ author }: { author?: CommentRecord["author"] }) {
     </>
   );
   return (
-    <span className="post-comment-author">
-      {author?.id ? <Link href={`/user/${encodeURIComponent(author.id)}`}>{label}</Link> : label}
-    </span>
+    <ProfileHoverTrigger userId={author?.id}>
+      <span className="post-comment-author" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        {(author?.image || author?.equipped?.frame) && (
+          <span aria-hidden="true" style={{ width: 22, height: 22, display: "inline-flex" }}>
+            <AvatarFace
+              fallback={(author?.name || "G").charAt(0).toUpperCase()}
+              frame={author?.equipped?.frame ?? null}
+              image={author?.image}
+            />
+          </span>
+        )}
+        {author?.id ? <Link href={`/user/${encodeURIComponent(author.id)}`}>{label}</Link> : label}
+      </span>
+    </ProfileHoverTrigger>
   );
 }
 
@@ -536,16 +556,19 @@ export function PostItem({
       {!detail && !isFeed && <span className="rank">{index + 1}</span>}
       <div className={`post-thumb art-${artTones[index % artTones.length]}`}>
         {isFeed ? (
-          <Link
-            aria-label={`${post.author}'s profile`}
-            className="post-author-link"
-            href={`/user/${encodeURIComponent(post.authorId ?? "")}`}
-          >
-            <AvatarFace
-              fallback={(post.author || "G").charAt(0).toUpperCase()}
-              image={post.authorImage}
-            />
-          </Link>
+          <ProfileHoverTrigger userId={post.authorId}>
+            <Link
+              aria-label={`${post.author}'s profile`}
+              className="post-author-link"
+              href={`/user/${encodeURIComponent(post.authorId ?? "")}`}
+            >
+              <AvatarFace
+                fallback={(post.author || "G").charAt(0).toUpperCase()}
+                frame={post.authorEquipped?.frame ?? null}
+                image={post.authorImage}
+              />
+            </Link>
+          </ProfileHoverTrigger>
         ) : (
           glyph.sparkle
         )}
@@ -554,7 +577,10 @@ export function PostItem({
         <b>{post.title || post.content?.slice(0, 100)}</b>
         <small>
           {post.gameName ? `${post.gameName} - ` : ""}
-          {post.author} - {post.time}
+          <ProfileHoverTrigger userId={post.authorId}>
+            <span>{post.author}</span>
+          </ProfileHoverTrigger>{" "}
+          - {post.time}
         </small>
       </Link>
       <div className="post-head-actions">

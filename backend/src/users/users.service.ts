@@ -12,7 +12,7 @@ import { UsernameAvailabilityRateLimiterService } from './username-availability-
 import { SearchUsersQueryDto } from './dto/search-users-query.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CompleteOnboardingDto } from './dto/complete-onboarding.dto';
-import { ME_SELECT } from './me-select';
+import { ME_SELECT, mapMeEquipped } from './me-select';
 import { isReservedUsername } from './reserved-usernames';
 
 @Injectable()
@@ -97,11 +97,11 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    return user;
+    return mapMeEquipped(user);
   }
 
-  updateProfile(userId: string, dto: UpdateProfileDto) {
-    return this.prisma.user.update({
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const updated = await this.prisma.user.update({
       where: { id: userId },
       data: {
         name: dto.name,
@@ -113,6 +113,7 @@ export class UsersService {
       },
       select: ME_SELECT,
     });
+    return mapMeEquipped(updated);
   }
 
   /**
@@ -148,7 +149,7 @@ export class UsersService {
       throw new ConflictException('Profile already set up');
     }
 
-    return claimed[0];
+    return mapMeEquipped(claimed[0]);
   }
 
   /** The conditional write, kept apart so only the Prisma call sits inside the P2002 translation. */

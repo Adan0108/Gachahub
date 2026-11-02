@@ -74,6 +74,7 @@ export const backendRoutes = {
   userFollow: (userId: any) => `/users/${encodePathParam(userId)}/follow`,
   followStatus: (userId: any) => `/users/${encodePathParam(userId)}/follow-status`,
   userProfile: (userId: any) => `/users/${encodePathParam(userId)}`,
+  userCard: (userId: any) => `/users/${encodePathParam(userId)}/card`,
   userPosts: (userId: any) => `/users/${encodePathParam(userId)}/posts`,
   userFollowers: (userId: any) => `/users/${encodePathParam(userId)}/followers`,
   userFollowing: (userId: any) => `/users/${encodePathParam(userId)}/following`,
@@ -83,6 +84,14 @@ export const backendRoutes = {
   wallet: "/wallet",
   walletLedger: "/wallet/ledger",
   walletCheckIn: "/wallet/check-in",
+  myCosmetics: "/cosmetics/me",
+  equippedCosmetics: "/cosmetics/equipped",
+  adminCosmetics: "/admin/cosmetics",
+  adminCosmetic: (id: any) => `/admin/cosmetics/${encodePathParam(id)}`,
+  adminCosmeticDeactivate: (id: any) => `/admin/cosmetics/${encodePathParam(id)}/deactivate`,
+  adminUserCosmetics: (userId: any) => `/admin/users/${encodePathParam(userId)}/cosmetics`,
+  adminUserWallet: (userId: any) => `/admin/users/${encodePathParam(userId)}/wallet`,
+  adminUserWalletAdjust: (userId: any) => `/admin/users/${encodePathParam(userId)}/wallet/adjust`,
   reports: "/reports",
   notifications: "/notifications",
   notificationsUnreadCount: "/notifications/unread-count",
@@ -237,6 +246,7 @@ export function normalizePost(post: any) {
     author: post.author?.name || "Unknown user",
     authorId: post.author?.id || post.authorId,
     authorImage: post.author?.image || null,
+    authorEquipped: post.author?.equipped || null,
     time,
     tag: post.category?.name || post.tags?.[0]?.name || "Discussion",
     gameName: post.game?.name,
@@ -746,8 +756,27 @@ export const api = {
   unlikeComment: (commentId: string) =>
     mutation(backendRoutes.commentLike(commentId), undefined, { method: "DELETE" }),
   getWallet: (options: any = {}) => request(backendRoutes.wallet, options),
-  getWalletLedger: (options: any = {}) => request(backendRoutes.walletLedger, options),
+  getWalletLedger: (cursor?: string, options: any = {}) =>
+    request(withQuery(backendRoutes.walletLedger, cursor ? { cursor } : {}), options),
   checkIn: () => mutation(backendRoutes.walletCheckIn),
+  getMyCosmetics: (options: any = {}) => request(backendRoutes.myCosmetics, options),
+  equipCosmetic: (slot: string, itemId: string | null) =>
+    mutation(backendRoutes.equippedCosmetics, { slot, itemId }, { method: "PUT" }),
+  listAdminCosmetics: ({ slot, rarity, active, ...options }: any = {}) =>
+    request(withQuery(backendRoutes.adminCosmetics, { slot, rarity, active }), options),
+  createAdminCosmetic: (payload: any) => mutation(backendRoutes.adminCosmetics, payload),
+  updateAdminCosmetic: (id: string, payload: any) =>
+    mutation(backendRoutes.adminCosmetic(id), payload, { method: "PATCH" }),
+  deactivateAdminCosmetic: (id: string, reason?: string) =>
+    mutation(backendRoutes.adminCosmeticDeactivate(id), reason ? { reason } : {}),
+  getAdminUserCosmetics: (userId: string, options: any = {}) =>
+    request(backendRoutes.adminUserCosmetics(userId), options),
+  grantAdminUserCosmetic: (userId: string, itemId: string, reason?: string) =>
+    mutation(backendRoutes.adminUserCosmetics(userId), { itemId, ...(reason ? { reason } : {}) }),
+  getAdminUserWallet: (userId: string, options: any = {}) =>
+    request(backendRoutes.adminUserWallet(userId), options),
+  adjustAdminUserWallet: (userId: string, payload: { currency: string; delta: number; reason: string }) =>
+    mutation(backendRoutes.adminUserWalletAdjust(userId), payload),
   deletePost: (postId: string) =>
     mutation(backendRoutes.post(postId), undefined, { method: "DELETE" }),
   unlikePost: (postId: any) =>
@@ -756,6 +785,8 @@ export const api = {
     request(backendRoutes.followStatus(userId), options),
   getUserProfile: (userId: any, options: any = {}) =>
     request(backendRoutes.userProfile(userId), options),
+  getUserCard: (userId: any, options: any = {}) =>
+    request(backendRoutes.userCard(userId), options),
   getUserPosts: async (userId: any, query: any = {}, options: any = {}) => {
     const response = await request(withQuery(backendRoutes.userPosts(userId), query), options);
     const items = Array.isArray(response) ? response : response.items || [];

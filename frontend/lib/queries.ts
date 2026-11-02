@@ -2,6 +2,8 @@ import { keepPreviousData } from "@tanstack/react-query";
 import { cursorFeedOptions } from "./cursorFeed";
 import { api, fallbackCategories, fallbackGame, fallbackGames, fallbackPosts } from "./api";
 import { bindSignedInAccount } from "./mls/mlsAccountSession";
+import type { MyCosmeticsResponse, UserHoverCardData } from "./cosmetics";
+export type { UserHoverCardData } from "./cosmetics";
 // Normalizes an unpaginated, bare-array admin endpoint (categories, moderators) into the same
 // { items, meta } shape every paginated admin query already returns, so useAdminList's generic
 // `items: query.data?.items || []` reads correctly for these too.
@@ -35,6 +37,13 @@ export const queryKeys = {
   currentUser: ["current-user"],
   wallet: ["wallet"],
   walletLedger: ["wallet", "ledger"],
+  myCosmetics: ["cosmetics", "me"],
+  adminCosmetics: {
+    all: ["admin", "cosmetics"],
+    list: (filters: any = {}) => ["admin", "cosmetics", filters],
+  },
+  adminUserCosmetics: (userId: any) => ["admin", "users", userId, "cosmetics"],
+  adminUserWallet: (userId: any) => ["admin", "users", userId, "wallet"],
   bannerOptions: ["profile-banner-options"],
   myPosts: ["posts", "mine"],
   posts: (search: any) => ["posts", { search }],
@@ -46,6 +55,7 @@ export const queryKeys = {
   ) => ["game-feed", slug, { categorySlug, sort, type, userId }],
   followStatus: (userId: any) => ["follow-status", userId],
   userProfile: (userId: any) => ["users", userId, "profile"],
+  userCard: (userId: any) => ["users", userId, "card"],
   userPosts: (userId: any) => ["users", userId, "posts"],
   followList: (userId: any, kind: any) => ["users", userId, kind],
   comments: (postId: any) => ["comments", postId],
@@ -169,8 +179,32 @@ export const queries = {
   }),
   walletLedger: () => ({
     queryKey: queryKeys.walletLedger,
-    queryFn: ({ signal }: any) => api.getWalletLedger({ signal }),
+    queryFn: ({ pageParam, signal }: any) => api.getWalletLedger(pageParam, { signal }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: { nextCursor?: string | null }) => last.nextCursor ?? undefined,
     staleTime: 15000,
+  }),
+  myCosmetics: () => ({
+    queryKey: queryKeys.myCosmetics,
+    queryFn: ({ signal }: any): Promise<MyCosmeticsResponse> => api.getMyCosmetics({ signal }),
+    staleTime: 15000,
+  }),
+  adminCosmetics: (filters: any = {}) => ({
+    queryKey: queryKeys.adminCosmetics.list(filters),
+    queryFn: ({ signal }: any) => api.listAdminCosmetics({ ...filters, signal }),
+    staleTime: 15000,
+  }),
+  adminUserCosmetics: (userId: string) => ({
+    queryKey: queryKeys.adminUserCosmetics(userId),
+    queryFn: ({ signal }: any) => api.getAdminUserCosmetics(userId, { signal }),
+    enabled: Boolean(userId),
+    staleTime: 10000,
+  }),
+  adminUserWallet: (userId: string) => ({
+    queryKey: queryKeys.adminUserWallet(userId),
+    queryFn: ({ signal }: any) => api.getAdminUserWallet(userId, { signal }),
+    enabled: Boolean(userId),
+    staleTime: 10000,
   }),
   bannerOptions: () => ({
     queryKey: queryKeys.bannerOptions,
@@ -234,6 +268,13 @@ export const queries = {
   userProfile: (userId: any) => ({
     queryKey: queryKeys.userProfile(userId),
     queryFn: ({ signal }: any) => api.getUserProfile(userId, { signal }),
+    enabled: Boolean(userId),
+    retry: false,
+    staleTime: 30_000,
+  }),
+  userCard: (userId: any) => ({
+    queryKey: queryKeys.userCard(userId),
+    queryFn: ({ signal }: any): Promise<UserHoverCardData> => api.getUserCard(userId, { signal }),
     enabled: Boolean(userId),
     retry: false,
     staleTime: 30_000,

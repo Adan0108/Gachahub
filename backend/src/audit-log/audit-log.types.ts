@@ -77,10 +77,50 @@ export type WalletAuditMetadata = {
   delta: number;
   reason: string;
   ledgerEntryId: string;
+  balanceAfter?: number;
 };
 
 /** Stored shape of `metadata` for game entries. Rows are permanent - change by adding optional keys only. */
 export type GameAuditMetadata = { reason?: string };
+
+export type CosmeticCreatedAuditMetadata = {
+  slug: string;
+  name: string;
+  slot: 'FRAME' | 'PROFILE_BACKGROUND' | 'MINI_BACKGROUND' | 'BANNER';
+  rarity: 'DUST' | 'GLINT' | 'GLIMMER' | 'RADIANT' | 'PRISMATIC';
+  animated: boolean;
+  presetId: string | null;
+  assetUrl: string | null;
+};
+
+export type CosmeticUpdatedAuditMetadata = {
+  slug: string;
+  name?: string;
+  changes: Record<
+    string,
+    {
+      from: string | number | boolean | null;
+      to: string | number | boolean | null;
+    }
+  >;
+};
+
+export type CosmeticDeactivatedAuditMetadata = {
+  slug: string;
+  name: string;
+  rarity: 'DUST' | 'GLINT' | 'GLIMMER' | 'RADIANT' | 'PRISMATIC';
+  refundedOwners: number;
+  refundShardsPerOwner: number;
+  unequippedCount: number;
+  reason?: string;
+};
+
+export type CosmeticGrantedAuditMetadata = {
+  itemId: string;
+  slug: string;
+  name: string;
+  reason?: string;
+};
 
 interface AuditEntryBase {
   actorId: string;
@@ -151,5 +191,25 @@ export type AuditEntry = AuditEntryBase &
         action: 'CHAT_MESSAGE_REMOVED';
         targetType: 'CHAT_MESSAGE';
         metadata: ChatMessageAuditMetadata;
+      }
+    | {
+        action: 'COSMETIC_CREATED';
+        targetType: 'COSMETIC';
+        metadata: CosmeticCreatedAuditMetadata;
+      }
+    | {
+        action: 'COSMETIC_UPDATED';
+        targetType: 'COSMETIC';
+        metadata: CosmeticUpdatedAuditMetadata;
+      }
+    | {
+        action: 'COSMETIC_DEACTIVATED';
+        targetType: 'COSMETIC';
+        metadata: CosmeticDeactivatedAuditMetadata;
+      }
+    | {
+        action: 'COSMETIC_GRANTED';
+        targetType: 'USER';
+        metadata: CosmeticGrantedAuditMetadata;
       }
   );

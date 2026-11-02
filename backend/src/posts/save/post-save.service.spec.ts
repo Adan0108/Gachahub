@@ -57,7 +57,12 @@ describe('PostSaveService', () => {
         createdAt: savedAt,
         updatedAt: savedAt,
         deletedAt: null,
-        author: { id: 'author', name: 'Author', image: null },
+        author: {
+          id: 'author',
+          name: 'Author',
+          image: null,
+          equippedCosmetics: [],
+        },
         game: { id: 'game', name: 'Game', slug: 'game', iconUrl: null },
         category: null,
         media: [],

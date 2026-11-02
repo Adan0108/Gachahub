@@ -13,6 +13,7 @@ import type {
   LedgerReason,
   Prisma,
   RevokeCause,
+  UserWallet,
 } from '../generated/prisma/client';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { env } from '../config/env';
@@ -54,6 +55,11 @@ const BALANCE_FIELD = {
   PRISMS: 'prisms',
 } as const;
 
+const PUBLISHED_CONTENT = {
+  status: 'PUBLISHED',
+  deletedAt: null,
+} as const;
+
 type Credit = {
   userId: string;
   currency: Currency;
@@ -72,12 +78,15 @@ type Credit = {
  * when moderation hides content or bans the person who gave them. Rules and numbers: docs/plans/economy-and-cosmetics.md.
  *
  * Every write runs inside the caller's transaction, so a like and what it earned commit together.
- * Row locks are taken in a fixed order (day rows by user id, then wallets) so two transactions cannot deadlock.
+ * Row locks are taken in a fixed order (day rows by user id, then wallets by user id) so two transactions cannot deadlock.
  */
 @Injectable()
 export class EconomyService {
   private readonly trustSecret =
-    process.env.ECONOMY_TRUST_SECRET ?? env.betterAuthSecret ?? 'dev-only';
+    process.env.ECONOMY_TRUST_SECRET ||
+    (env.betterAuthSecret
+      ? `economy-trust:${env.betterAuthSecret}`
+      : 'dev-only-economy-trust-secret');
 
   constructor(
     private readonly prisma: PrismaService,
@@ -161,31 +170,18 @@ export class EconomyService {
     const [ownerDay] = await this.lockDays(tx, [ownerId], day);
     const keyBase = `like:${targetType}:${targetId}:${likerId}`;
 
-    if (await this.giverHasRoom(tx, ownerId, likerId, day)) {
-      const updated = await tx.dailyEarning.update({
-        where: { userId_day: { userId: ownerId, day } },
-        data: { likesCounted: { increment: 1 } },
-      });
-      const reputation =
-        reputationFromLikes(updated.likesCounted) - updated.repFromLikes;
-      if (reputation > 0) {
-        await tx.dailyEarning.update({
-          where: { userId_day: { userId: ownerId, day } },
-          data: { repFromLikes: { increment: reputation } },
-        });
-        await this.recordGiven(tx, ownerId, likerId, day, reputation);
-        await this.credit(tx, {
-          userId: ownerId,
-          currency: 'REPUTATION',
-          delta: reputation,
-          reason: 'LIKE_RECEIVED',
-          key: `${keyBase}:rep`,
-          sourceType: targetType,
-          sourceId: targetId,
-          actorId: likerId,
-        });
-      }
-    }
+    await this.awardSteppedReputation(tx, {
+      ownerId,
+      giverId: likerId,
+      day,
+      countField: 'likesCounted',
+      repField: 'repFromLikes',
+      stepFn: reputationFromLikes,
+      reason: 'LIKE_RECEIVED',
+      key: `${keyBase}:rep`,
+      sourceType: targetType,
+      sourceId: targetId,
+    });
 
     await this.creditCappedShards(
       tx,
@@ -235,8 +231,17 @@ export class EconomyService {
     const { commentId, postId, postOwnerId, commenterId } = comment;
     if (postOwnerId === commenterId) return;
 
+    const { owner, actor } = await this.loadInteractionUsers(
+      tx,
+      postOwnerId,
+      commenterId,
+    );
+    if (actor?.status !== 'ACTIVE') return;
+
     const day = economyDay(now);
     const days = await this.lockDays(tx, [commenterId, postOwnerId], day);
+    // Lock both wallets in ascending user-id order before crediting either user, preventing AB-BA deadlocks.
+    await this.lockWallets(tx, [commenterId, postOwnerId]);
     const commenterDay = days.find((row) => row.userId === commenterId)!;
     const ownerDay = days.find((row) => row.userId === postOwnerId)!;
 
@@ -250,10 +255,26 @@ export class EconomyService {
         key: `comment-written:${commentId}`,
         sourceType: 'COMMENT',
         sourceId: commentId,
+        actorId: commenterId,
       });
     }
 
-    if (!(await this.canEarnFrom(tx, postOwnerId, commenterId, now))) return;
+    if (
+      owner?.status !== 'ACTIVE' ||
+      !isEstablished(
+        {
+          status: actor.status,
+          createdAt: actor.createdAt,
+          postCount: actor._count.posts,
+          commentCount: actor._count.comments,
+        },
+        trustThresholds(this.trustSecret, commenterId),
+        now,
+      )
+    ) {
+      return;
+    }
+
     const counted = await tx.countedInteraction.createMany({
       data: [
         {
@@ -269,32 +290,18 @@ export class EconomyService {
     if (counted.count === 0) return;
 
     const keyBase = `comment:${postId}:${commenterId}`;
-    if (await this.giverHasRoom(tx, postOwnerId, commenterId, day)) {
-      const updated = await tx.dailyEarning.update({
-        where: { userId_day: { userId: postOwnerId, day } },
-        data: { commentsCounted: { increment: 1 } },
-      });
-      const reputation =
-        reputationFromComments(updated.commentsCounted) -
-        updated.repFromComments;
-      if (reputation > 0) {
-        await tx.dailyEarning.update({
-          where: { userId_day: { userId: postOwnerId, day } },
-          data: { repFromComments: { increment: reputation } },
-        });
-        await this.recordGiven(tx, postOwnerId, commenterId, day, reputation);
-        await this.credit(tx, {
-          userId: postOwnerId,
-          currency: 'REPUTATION',
-          delta: reputation,
-          reason: 'COMMENT_RECEIVED',
-          key: `${keyBase}:rep`,
-          sourceType: 'COMMENT',
-          sourceId: commentId,
-          actorId: commenterId,
-        });
-      }
-    }
+    await this.awardSteppedReputation(tx, {
+      ownerId: postOwnerId,
+      giverId: commenterId,
+      day,
+      countField: 'commentsCounted',
+      repField: 'repFromComments',
+      stepFn: reputationFromComments,
+      reason: 'COMMENT_RECEIVED',
+      key: `${keyBase}:rep`,
+      sourceType: 'COMMENT',
+      sourceId: commentId,
+    });
 
     await this.creditCappedShards(
       tx,
@@ -365,54 +372,12 @@ export class EconomyService {
     await this.revoke(tx, awards, 'CONTENT');
   }
 
-  /** Gives back what hiding took, except awards from people who are banned now (those wait for an unban). */
+  /** Gives back exactly what hiding took. */
   async restoreForContent(tx: Tx, sourceType: EconomySource, sourceId: string) {
     const awards = await tx.ledgerEntry.findMany({
       where: { sourceType, sourceId, revokedCause: 'CONTENT' },
     });
-    const bannedActors = await this.bannedAmong(tx, awards);
-    await this.restore(
-      tx,
-      awards.filter((award) => !bannedActors.has(award.actorId ?? '')),
-    );
-    const stillBlocked = awards.filter((award) =>
-      bannedActors.has(award.actorId ?? ''),
-    );
-    if (stillBlocked.length > 0) {
-      await tx.ledgerEntry.updateMany({
-        where: { id: { in: stillBlocked.map((award) => award.id) } },
-        data: { revokedCause: 'ACTOR' },
-      });
-    }
-  }
-
-  /** Takes back everything this person's likes and comments earned others (they were banned). */
-  async revokeForActor(tx: Tx, actorId: string) {
-    const awards = await tx.ledgerEntry.findMany({
-      where: { actorId, reason: { in: AWARD_REASONS }, revokedAt: null },
-    });
-    await this.revoke(tx, awards, 'ACTOR');
-  }
-
-  /** Gives back what a ban took, except awards whose post or comment is hidden now (those wait for a restore). */
-  async restoreForActor(tx: Tx, actorId: string) {
-    const awards = await tx.ledgerEntry.findMany({
-      where: { actorId, revokedCause: 'ACTOR' },
-    });
-    const hidden = await this.hiddenSources(tx, awards);
-    const isHidden = (award: (typeof awards)[number]) =>
-      hidden.has(`${award.sourceType}:${award.sourceId}`);
-    await this.restore(
-      tx,
-      awards.filter((award) => !isHidden(award)),
-    );
-    const stillBlocked = awards.filter(isHidden);
-    if (stillBlocked.length > 0) {
-      await tx.ledgerEntry.updateMany({
-        where: { id: { in: stillBlocked.map((award) => award.id) } },
-        data: { revokedCause: 'CONTENT' },
-      });
-    }
+    await this.restore(tx, awards);
   }
 
   /** An admin's correction, with a reason; cannot take a balance below 0. */
@@ -451,7 +416,13 @@ export class EconomyService {
           actorId: adminId,
           targetType: 'USER',
           targetId: userId,
-          metadata: { currency, delta, reason, ledgerEntryId: entry.id },
+          metadata: {
+            currency,
+            delta,
+            balanceAfter: entry.balanceAfter,
+            reason,
+            ledgerEntryId: entry.id,
+          },
         },
         tx,
       );
@@ -459,11 +430,62 @@ export class EconomyService {
     });
   }
 
-  /** Nightly: ranks of people whose old Reputation may have left the 90-day window. */
+  /**
+   * Compensates owners of a deactivated cosmetic item with its duplicate Shard value (Section 6.6).
+   * Locks all owner wallets in ascending user-id order and writes one TAKEDOWN_REFUND ledger row per owner.
+   */
+  async creditTakedownRefunds(
+    tx: Tx,
+    params: {
+      userIds: string[];
+      itemId: string;
+      amount: number;
+      actorId: string;
+    },
+  ): Promise<number> {
+    const { userIds, itemId, amount, actorId } = params;
+    if (amount <= 0 || userIds.length === 0) return 0;
+    const ordered = [...new Set(userIds)].sort();
+    await this.lockWallets(tx, ordered);
+    let refunded = 0;
+    for (const userId of ordered) {
+      const key = `takedown:${itemId}:${userId}`;
+      const existing = await tx.ledgerEntry.findUnique({
+        where: { idempotencyKey: key },
+        select: { id: true },
+      });
+      if (existing) continue;
+      await this.credit(tx, {
+        userId,
+        currency: 'SHARDS',
+        delta: amount,
+        reason: 'TAKEDOWN_REFUND',
+        key,
+        sourceType: 'COSMETIC',
+        sourceId: itemId,
+        actorId,
+      });
+      refunded++;
+    }
+    return refunded;
+  }
+
+  /** Nightly: the per-giver limit only ever reads today's rows, so earlier days are dead weight. */
+  async pruneOldGiverDays(now = new Date()) {
+    const { count } = await this.prisma.dailyGiverReputation.deleteMany({
+      where: { day: { lt: economyDay(now) } },
+    });
+    return count;
+  }
+
+  /** Nightly: ranks of people whose old Reputation may have left the 90-day window (only the top two ranks can slip, but anyone with recent Reputation is rechecked). */
   async refreshStaleRanks(now = new Date()) {
     const stale = await this.prisma.userWallet.findMany({
       where: {
-        reputation90d: { gt: 0 },
+        OR: [
+          { reputation90d: { gt: 0 } },
+          { rank: { in: ['SUPERNOVA', 'GALAXY'] } },
+        ],
         rankUpdatedAt: { lt: new Date(now.getTime() - 12 * 60 * 60 * 1000) },
       },
       select: { userId: true },
@@ -476,26 +498,96 @@ export class EconomyService {
 
   /** Recomputes the 90-day Reputation and rank from the ledger; the nightly job runs it as old awards leave the window. */
   async refreshRank(userId: string, now = new Date()) {
+    await this.recountRank(this.prisma, userId, now);
+  }
+
+  /** Sets reputation90d and the rank from the ledger itself, so they are exact whatever happened before. */
+  private async recountRank(db: Tx, userId: string, now = new Date()) {
     const since = new Date(now.getTime() - RANK_WINDOW_DAYS * 86_400_000);
-    const sum = await this.prisma.ledgerEntry.aggregate({
-      where: {
-        userId,
-        currency: 'REPUTATION',
-        reason: { in: AWARD_REASONS },
-        revokedAt: null,
-        createdAt: { gte: since },
-      },
-      _sum: { delta: true },
-    });
-    const reputation90d = sum._sum.delta ?? 0;
-    await this.prisma.userWallet.update({
+    const [sum, wallet] = await Promise.all([
+      db.ledgerEntry.aggregate({
+        where: {
+          userId,
+          currency: 'REPUTATION',
+          reason: { in: AWARD_REASONS },
+          revokedAt: null,
+          createdAt: { gte: since },
+        },
+        _sum: { delta: true },
+      }),
+      db.userWallet.findUnique({
+        where: { userId },
+        select: { reputation: true },
+      }),
+    ]);
+    const reputation90d = Math.max(0, sum._sum.delta ?? 0);
+    await db.userWallet.update({
       where: { userId },
       data: {
         reputation90d,
-        rank: rankFor(reputation90d),
+        rank: rankFor(wallet?.reputation ?? 0, reputation90d),
         rankUpdatedAt: now,
       },
     });
+  }
+
+  /** Nightly check: wallets whose cached balances differ from their ledger. One statement, so it reads one consistent snapshot. */
+  async verifyWalletBalances() {
+    const rows = await this.prisma.$queryRaw<
+      {
+        userId: string;
+        reputation: number;
+        shards: number;
+        prisms: number;
+        ledgerReputation: number;
+        ledgerShards: number;
+        ledgerPrisms: number;
+      }[]
+    >`
+      SELECT w."userId", w."reputation", w."shards", w."prisms",
+             COALESCE(SUM(l."delta") FILTER (WHERE l."currency" = 'REPUTATION'), 0)::int AS "ledgerReputation",
+             COALESCE(SUM(l."delta") FILTER (WHERE l."currency" = 'SHARDS'), 0)::int AS "ledgerShards",
+             COALESCE(SUM(l."delta") FILTER (WHERE l."currency" = 'PRISMS'), 0)::int AS "ledgerPrisms"
+      FROM "user_wallets" w
+      LEFT JOIN "ledger_entries" l ON l."userId" = w."userId"
+      GROUP BY w."userId"
+      HAVING w."reputation" <> COALESCE(SUM(l."delta") FILTER (WHERE l."currency" = 'REPUTATION'), 0)
+          OR w."shards" <> COALESCE(SUM(l."delta") FILTER (WHERE l."currency" = 'SHARDS'), 0)
+          OR w."prisms" <> COALESCE(SUM(l."delta") FILTER (WHERE l."currency" = 'PRISMS'), 0)
+    `;
+    return rows.map((row) => ({
+      userId: row.userId,
+      wallet: {
+        reputation: row.reputation,
+        shards: row.shards,
+        prisms: row.prisms,
+      },
+      ledger: {
+        reputation: row.ledgerReputation,
+        shards: row.ledgerShards,
+        prisms: row.ledgerPrisms,
+      },
+    }));
+  }
+
+  private async loadInteractionUsers(tx: Tx, ownerId: string, actorId: string) {
+    const [owner, actor] = await Promise.all([
+      tx.user.findUnique({ where: { id: ownerId }, select: { status: true } }),
+      tx.user.findUnique({
+        where: { id: actorId },
+        select: {
+          status: true,
+          createdAt: true,
+          _count: {
+            select: {
+              posts: { where: PUBLISHED_CONTENT },
+              comments: { where: PUBLISHED_CONTENT },
+            },
+          },
+        },
+      }),
+    ]);
+    return { owner, actor };
   }
 
   private async canEarnFrom(
@@ -504,17 +596,11 @@ export class EconomyService {
     giverId: string,
     now: Date,
   ): Promise<boolean> {
-    const [owner, giver] = await Promise.all([
-      tx.user.findUnique({ where: { id: ownerId }, select: { status: true } }),
-      tx.user.findUnique({
-        where: { id: giverId },
-        select: {
-          status: true,
-          createdAt: true,
-          _count: { select: { posts: true, comments: true } },
-        },
-      }),
-    ]);
+    const { owner, actor: giver } = await this.loadInteractionUsers(
+      tx,
+      ownerId,
+      giverId,
+    );
     if (owner?.status !== 'ACTIVE' || !giver) return false;
     return isEstablished(
       {
@@ -526,6 +612,59 @@ export class EconomyService {
       trustThresholds(this.trustSecret, giverId),
       now,
     );
+  }
+
+  private async awardSteppedReputation(
+    tx: Tx,
+    params: {
+      ownerId: string;
+      giverId: string;
+      day: Date;
+      countField: 'likesCounted' | 'commentsCounted';
+      repField: 'repFromLikes' | 'repFromComments';
+      stepFn: (count: number) => number;
+      reason: 'LIKE_RECEIVED' | 'COMMENT_RECEIVED';
+      key: string;
+      sourceType: EconomySource;
+      sourceId: string;
+    },
+  ) {
+    const {
+      ownerId,
+      giverId,
+      day,
+      countField,
+      repField,
+      stepFn,
+      reason,
+      key,
+      sourceType,
+      sourceId,
+    } = params;
+    if (!(await this.giverHasRoom(tx, ownerId, giverId, day))) return;
+
+    const updated = await tx.dailyEarning.update({
+      where: { userId_day: { userId: ownerId, day } },
+      data: { [countField]: { increment: 1 } },
+    });
+    const reputation = stepFn(updated[countField]) - updated[repField];
+    if (reputation <= 0) return;
+
+    await tx.dailyEarning.update({
+      where: { userId_day: { userId: ownerId, day } },
+      data: { [repField]: { increment: reputation } },
+    });
+    await this.recordGiven(tx, ownerId, giverId, day, reputation);
+    await this.credit(tx, {
+      userId: ownerId,
+      currency: 'REPUTATION',
+      delta: reputation,
+      reason,
+      key,
+      sourceType,
+      sourceId,
+      actorId: giverId,
+    });
   }
 
   /** Creates and locks the day rows for these users, always in user-id order. */
@@ -540,6 +679,15 @@ export class EconomyService {
           update: { userId },
         }),
       );
+    }
+    return userIds.map((id) => rows.find((row) => row.userId === id)!);
+  }
+
+  /** Creates and locks the wallet rows for these users, always in user-id order. */
+  private async lockWallets(tx: Tx, userIds: string[]) {
+    const rows: UserWallet[] = [];
+    for (const userId of [...new Set(userIds)].sort()) {
+      rows.push(await this.lockWallet(tx, userId));
     }
     return userIds.map((id) => rows.find((row) => row.userId === id)!);
   }
@@ -610,20 +758,19 @@ export class EconomyService {
       credit.currency === 'REPUTATION' && AWARD_REASONS.includes(credit.reason)
         ? credit.delta
         : 0;
-    await this.lockWallet(tx, credit.userId);
+    const current = await this.lockWallet(tx, credit.userId);
+    const nextBalance = current[field] + credit.delta;
+    const nextRep90d = Math.max(0, current.reputation90d + rankDelta);
     const wallet = await tx.userWallet.update({
       where: { userId: credit.userId },
       data: {
         [field]: { increment: credit.delta },
         ...(rankDelta ? { reputation90d: { increment: rankDelta } } : {}),
+        ...(credit.currency === 'REPUTATION'
+          ? { rank: rankFor(nextBalance, nextRep90d) }
+          : {}),
       },
     });
-    if (rankDelta) {
-      await tx.userWallet.update({
-        where: { userId: credit.userId },
-        data: { rank: rankFor(wallet.reputation90d) },
-      });
-    }
     return tx.ledgerEntry.create({
       data: {
         userId: credit.userId,
@@ -643,7 +790,6 @@ export class EconomyService {
 
   private async revoke(tx: Tx, awards: LedgerEntry[], cause: RevokeCause) {
     const now = new Date();
-    const windowStart = now.getTime() - RANK_WINDOW_DAYS * 86_400_000;
     // Wallets in user-id order, same as every other writer.
     const ordered = [...awards].sort((a, b) =>
       a.userId === b.userId
@@ -661,22 +807,10 @@ export class EconomyService {
       const wallet = await this.lockWallet(tx, award.userId);
       // Never below 0; what could not be taken is recorded, the rest is gone (decided: no debt).
       const taken = Math.min(award.delta, wallet[field]);
-      const inWindow =
-        award.currency === 'REPUTATION' &&
-        award.createdAt.getTime() >= windowStart;
       const updated = await tx.userWallet.update({
         where: { userId: award.userId },
-        data: {
-          [field]: { decrement: taken },
-          ...(inWindow ? { reputation90d: { decrement: award.delta } } : {}),
-        },
+        data: { [field]: { decrement: taken } },
       });
-      if (inWindow) {
-        await tx.userWallet.update({
-          where: { userId: award.userId },
-          data: { rank: rankFor(updated.reputation90d) },
-        });
-      }
       await tx.ledgerEntry.update({
         where: { id: award.id },
         data: { revokedAmount: taken },
@@ -700,16 +834,29 @@ export class EconomyService {
         },
       });
     }
+    await this.recountRanksOf(tx, ordered);
+  }
+
+  /** After taking back or giving back Reputation, the 90-day total and rank are recounted from the ledger. */
+  private async recountRanksOf(tx: Tx, awards: LedgerEntry[]) {
+    const userIds = new Set(
+      awards
+        .filter((award) => award.currency === 'REPUTATION')
+        .map((award) => award.userId),
+    );
+    for (const userId of [...userIds].sort()) {
+      await this.recountRank(tx, userId);
+    }
   }
 
   private async restore(tx: Tx, awards: LedgerEntry[]) {
-    const windowStart = Date.now() - RANK_WINDOW_DAYS * 86_400_000;
     const ordered = [...awards].sort((a, b) =>
       a.userId === b.userId
         ? a.id.localeCompare(b.id)
         : a.userId.localeCompare(b.userId),
     );
     for (const award of ordered) {
+      const given = award.revokedAmount ?? 0;
       const claimed = await tx.ledgerEntry.updateMany({
         where: { id: award.id, revokedAt: { not: null } },
         data: { revokedAt: null, revokedCause: null, revokedAmount: null },
@@ -717,24 +864,11 @@ export class EconomyService {
       if (claimed.count === 0) continue;
 
       const field = BALANCE_FIELD[award.currency];
-      const given = award.revokedAmount ?? 0;
-      const inWindow =
-        award.currency === 'REPUTATION' &&
-        award.createdAt.getTime() >= windowStart;
       await this.lockWallet(tx, award.userId);
       const updated = await tx.userWallet.update({
         where: { userId: award.userId },
-        data: {
-          [field]: { increment: given },
-          ...(inWindow ? { reputation90d: { increment: award.delta } } : {}),
-        },
+        data: { [field]: { increment: given } },
       });
-      if (inWindow) {
-        await tx.userWallet.update({
-          where: { userId: award.userId },
-          data: { rank: rankFor(updated.reputation90d) },
-        });
-      }
       await tx.ledgerEntry.create({
         data: {
           userId: award.userId,
@@ -750,47 +884,7 @@ export class EconomyService {
         },
       });
     }
+    await this.recountRanksOf(tx, ordered);
   }
 
-  private async bannedAmong(
-    tx: Tx,
-    awards: { actorId: string | null }[],
-  ): Promise<Set<string>> {
-    const actorIds = [
-      ...new Set(awards.map((award) => award.actorId).filter(Boolean)),
-    ] as string[];
-    if (actorIds.length === 0) return new Set();
-    const banned = await tx.user.findMany({
-      where: { id: { in: actorIds }, status: 'BANNED' },
-      select: { id: true },
-    });
-    return new Set(banned.map((user) => user.id));
-  }
-
-  private async hiddenSources(
-    tx: Tx,
-    awards: { sourceType: EconomySource | null; sourceId: string | null }[],
-  ): Promise<Set<string>> {
-    const ids = (type: EconomySource) => [
-      ...new Set(
-        awards
-          .filter((award) => award.sourceType === type && award.sourceId)
-          .map((award) => award.sourceId!),
-      ),
-    ];
-    const [posts, comments] = await Promise.all([
-      tx.post.findMany({
-        where: { id: { in: ids('POST') }, status: 'HIDDEN' },
-        select: { id: true },
-      }),
-      tx.comment.findMany({
-        where: { id: { in: ids('COMMENT') }, status: 'HIDDEN' },
-        select: { id: true },
-      }),
-    ]);
-    return new Set([
-      ...posts.map((post) => `POST:${post.id}`),
-      ...comments.map((comment) => `COMMENT:${comment.id}`),
-    ]);
-  }
 }

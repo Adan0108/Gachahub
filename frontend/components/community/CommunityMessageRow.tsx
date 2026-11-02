@@ -5,6 +5,7 @@ import { FiCornerUpLeft } from "react-icons/fi";
 import { AvatarFace } from "../AvatarFace";
 import { MessageActions } from "../chat/MessageActions";
 import { ReactionChips } from "../chat/ReactionChips";
+import { ProfileHoverTrigger } from "../profile/ProfileHoverCard";
 import {
   COMMUNITY_MESSAGE_MAX_CHARS,
   canEditCommunityMessage,
@@ -24,7 +25,9 @@ const fullFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeS
 function Author({ author }: { author: CommunityMessage["author"] }) {
   return (
     <>
-      <b className="community-author">{author?.name ?? "Deleted user"}</b>
+      <ProfileHoverTrigger userId={author?.id}>
+        <b className="community-author">{author?.name ?? "Deleted user"}</b>
+      </ProfileHoverTrigger>
       {author?.badge && (
         <span className={`community-badge ${author.badge.toLowerCase()}`}>
           {BADGE_LABEL[author.badge]}
@@ -155,9 +158,11 @@ export function CommunityMessageRow({
     >
       <div className="community-gutter">
         {showHeader ? (
-          <span className="community-msg-avatar">
-            <AvatarFace image={message.author?.image} name={message.author?.name} />
-          </span>
+          <ProfileHoverTrigger userId={message.author?.id}>
+            <span className="community-msg-avatar">
+              <AvatarFace image={message.author?.image} name={message.author?.name} />
+            </span>
+          </ProfileHoverTrigger>
         ) : (
           <time
             className="community-hover-time"

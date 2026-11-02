@@ -42,13 +42,13 @@ type Step = { upToPoints: number; perPoint: number };
 
 /** Each step pays 1 point per `perPoint` interactions until the total reaches `upToPoints`. */
 const LIKE_STEPS: Step[] = [
-  { upToPoints: 200, perPoint: 1 },
+  { upToPoints: 100, perPoint: 1 },
   { upToPoints: 1000, perPoint: 10 },
   { upToPoints: Infinity, perPoint: 100 },
 ];
 const COMMENT_STEPS: Step[] = [
-  { upToPoints: 100, perPoint: 1 },
-  { upToPoints: 500, perPoint: 5 },
+  { upToPoints: 20, perPoint: 1 },
+  { upToPoints: 150, perPoint: 5 },
   { upToPoints: Infinity, perPoint: 20 },
 ];
 
@@ -88,16 +88,26 @@ export function shardsToCredit(
   return Math.max(0, target - creditedToday);
 }
 
-const RANKS: [number, ReputationRank][] = [
-  [10_000, 'GALAXY'],
-  [4_000, 'SUPERNOVA'],
-  [1_500, 'NOVA'],
-  [500, 'COMET'],
-  [100, 'METEOR'],
+/** Highest first. `lifetime` is what earns the rank; `keep90d` is what only the two top ranks also need to hold it. */
+const RANKS: { rank: ReputationRank; lifetime: number; keep90d: number }[] = [
+  { rank: 'GALAXY', lifetime: 75_000, keep90d: 4_000 },
+  { rank: 'SUPERNOVA', lifetime: 30_000, keep90d: 1_000 },
+  { rank: 'NOVA', lifetime: 12_000, keep90d: 0 },
+  { rank: 'COMET', lifetime: 4_000, keep90d: 0 },
+  { rank: 'METEOR', lifetime: 1_000, keep90d: 0 },
 ];
 
-export function rankFor(reputation90d: number): ReputationRank {
-  return RANKS.find(([min]) => reputation90d >= min)?.[1] ?? 'STARGAZER';
+/** From lifetime Reputation; Supernova and Galaxy also need recent Reputation, and step down (never below Nova) without it. */
+export function rankFor(
+  lifetimeReputation: number,
+  reputation90d: number,
+): ReputationRank {
+  return (
+    RANKS.find(
+      (entry) =>
+        lifetimeReputation >= entry.lifetime && reputation90d >= entry.keep90d,
+    )?.rank ?? 'STARGAZER'
+  );
 }
 
 export type TrustThresholds = {

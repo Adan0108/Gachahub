@@ -15,6 +15,7 @@ import {
   FiFlag,
   FiGrid,
   FiShield,
+  FiStar,
   FiUsers,
 } from "react-icons/fi";
 import { BrandMark } from "../BrandMark";
@@ -26,6 +27,7 @@ const navigation: NavItem[] = [
   { href: "/admin", label: "Overview", icon: FiGrid, exact: true },
   { href: "/admin/communities", label: "Communities", icon: FiActivity },
   { href: "/admin/content", label: "Content", icon: FiFileText },
+  { href: "/admin/cosmetics", label: "Cosmetics", icon: FiStar },
   { href: "/admin/moderation", label: "Moderation", icon: FiShield },
   { href: "/admin/users", label: "Users", icon: FiUsers },
   { href: "/admin/moderators", label: "Moderators", icon: FiFlag },

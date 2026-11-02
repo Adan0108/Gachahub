@@ -27,7 +27,7 @@ Status: **planned, not started** (decided 2026-10-29).
 | Term | Meaning |
 |---|---|
 | **Reputation** | Social standing. Earned from likes and comments received; shown on the profile; never bought, never spent in the MVP; never decays. |
-| **Rank** | Stargazer → Meteor → Comet → Nova → Supernova → Galaxy, from Reputation earned in the last 90 days. Drops when inactive. |
+| **Rank** | Stargazer → Meteor → Comet → Nova → Supernova → Galaxy, from lifetime Reputation. Up to Nova it never drops; Supernova and Galaxy also need recent activity (last 90 days) and step down when it stops. |
 | **Shards** | Free currency. Earned slowly; spent on Shard pulls. Never bought. |
 | **Prisms** | VIP currency. Only from Gachahub+ (300 per month). Spent on Prism pulls. |
 | **Aura** | Post-MVP prediction score. Nothing built now. |
@@ -66,8 +66,8 @@ Integer amounts only. Every change is one ledger row with a reason and an idempo
 
 | Source | Step 1 | Step 2 | Step 3 |
 |---|---|---|---|
-| Counted likes received | 1 point per like, up to 200 points | 1 point per 10 likes, up to 1,000 points | 1 point per 100 likes after that |
-| Counted comments received | 1 point per comment, up to 100 points | 1 point per 5 comments, up to 500 points | 1 point per 20 comments after that |
+| Counted likes received | 1 point per like, up to 100 points | 1 point per 10 likes, up to 1,000 points | 1 point per 100 likes after that |
+| Counted comments received | 1 point per comment, up to 20 points | 1 point per 5 comments, up to 150 points | 1 point per 20 comments after that |
 
 - No hard daily cap: a viral day keeps paying, just slower (1M likes in a day ≈ 11k Reputation).
 - **Per-liker brake:** one person can give the same author at most **5 Reputation per day** (likes and comments together). Likes/comments past that still count socially and for milestones. It is per author, so liking 5 posts by 5 different people never "uses up" anything for a 6th author.
@@ -115,7 +115,7 @@ Shards keep a hard daily cap because they buy things.
 | Unlike after it earned | No clawback | Lets a liker grief someone by un-liking; amount is 1 |
 | Daily Shard cap reached | Like still counts socially; Reputation still awarded; no Shards, no Shard ledger row | Shard cap only limits currency |
 | One person already gave you 5 Reputation today | Their likes/comments still count socially and toward Shard milestones; no Reputation from them until tomorrow (UTC+7 day) | Per-liker brake, per author |
-| You pass 200 like-points in a day | Next likes pay 1 point per 10 likes; after 1,000 points, 1 per 100; resets next day | Daily steps |
+| You pass 100 like-points in a day | Next likes pay 1 point per 10 likes; after 1,000 points, 1 per 100; resets next day | Daily steps |
 | Same person comments 5 times on one post | Only their first comment counts | Comment spam |
 | Post owner replies in their own thread | Never counts | Self-farming |
 | Commenter deletes their comment | No clawback | Small, and avoids griefing |
@@ -136,29 +136,32 @@ Shards keep a hard daily cap because they buy things.
 
 ### 4.6 Ranks
 
-Lifetime Reputation never decays: it is what you earned. The **rank** is seasonal and needs activity, like a ranked game.
+Lifetime Reputation never decays: it is what you earned. Rank climbs with it. Only the two top ranks need ongoing activity, like holding a high rank in a ranked game; everything below is permanent.
 
-| Rank | Reputation earned in the last 90 days |
-|---|---|
-| Stargazer | < 100 (starting rank) |
-| Meteor | 100 |
-| Comet | 500 |
-| Nova | 1,500 |
-| Supernova | 4,000 |
-| Galaxy | 10,000 |
+| Rank | Lifetime Reputation to reach it | To keep it: Reputation earned in the last 90 days |
+|---|---|---|
+| Stargazer | < 1,000 (starting rank) | none |
+| Meteor | 1,000 | none |
+| Comet | 4,000 | none |
+| Nova | 12,000 | none |
+| Supernova | 30,000 | 1,000 |
+| Galaxy | 75,000 | 4,000 |
 
 Names are celestial on purpose: they must never sound like the item rarities (Dust … Prismatic).
 
 - Shown on the profile and hover card next to lifetime Reputation (rank icon + name).
-- Rolling 90-day window: inactive people slide down as old Reputation leaves the window; their lifetime number stays.
-- Recomputed when Reputation is credited or clawed back, and by a nightly job for people whose old points just left the window.
+- **Rank is the highest rank whose lifetime line you have passed.** For Supernova and Galaxy the 90-day keep-line must also hold; if it does not, you show as the next rank down whose line you meet, never below Nova. Lifetime Reputation stays the same, and the rank comes back as soon as activity does.
+- **Pacing:** the top rank should take a really dedicated person about a year. 75,000 in 365 days is about 205 Reputation a day, for example around 1,000 likes and 100 comments received a day from at least ~45 different people (the 5-per-giver brake, 4.1). Someone earning about 30 a day reaches Meteor in about a month and Comet in about 4½ months.
+- Recomputed when Reputation is credited or clawed back, and by a nightly job for people whose old points just left the 90-day window (this only matters for Supernova and Galaxy).
 
 | Case | What happens |
 |---|---|
-| Inactive for months | Rank drops step by step to Stargazer; lifetime Reputation unchanged |
-| Clawback | Lowers the 90-day sum too, so the rank can drop immediately |
-| One viral day | Can jump several ranks at once, then slides back if nothing follows (intended) |
-| Brand-new account | Stargazer until 100 in 90 days |
+| Inactive for months, rank Nova or below | Nothing: rank stays, lifetime Reputation unchanged |
+| Inactive for months, Galaxy | Drops to Supernova if its keep-line (1,000) still holds, otherwise to Nova |
+| Inactive for months, Supernova | Drops to Nova |
+| Clawback | Lowers lifetime and the 90-day sum, so the rank can drop immediately at any level |
+| One viral day | Can jump several ranks at once if lifetime crosses their lines; Supernova and Galaxy also need their keep-line, which a big day can meet |
+| Brand-new account | Stargazer until 1,000 lifetime Reputation |
 
 Numbers are a first guess; tune them once real data exists.
 
@@ -170,7 +173,7 @@ Comments have **no likes today** (only `PostLike`). The MVP adds `CommentLike` (
 - Moderation hide/restore (posts and comments) and ban/unban call the economy service inside their own transactions.
 - Row locks are always taken in the same order (day rows by user id, then wallets), so concurrent likes queue instead of deadlocking; milestones are exact under concurrency (tested).
 - Milestone Shards are **not** limited by the daily Shard cap: they are rare and paid once ever, and losing one to the cap would be permanent.
-- The rank is kept in step on every award and take-back; a nightly job (03:00) recomputes it from the ledger as old Reputation leaves the 90-day window.
+- The rank is kept in step on every award and take-back; a nightly job (03:00) recomputes it from the ledger as old Reputation leaves the 90-day window (this only affects Supernova and Galaxy, section 4.6).
 
 ---
 
@@ -465,7 +468,7 @@ model DailyEarning {
 }
 
 // Rank cache; the ledger stays the truth.
-// UserWallet also gets: reputation90d Int, rank String, rankUpdatedAt DateTime
+// UserWallet also gets: reputation90d Int (the Supernova/Galaxy keep-line), rank String, rankUpdatedAt DateTime; lifetime Reputation sets the rank itself
 
 model LikerDailyReputation {   // per-liker cap: one liker → one author → one day
   authorId   String
@@ -622,7 +625,7 @@ Each phase ships on its own and is hand-tested before the next.
 - `UserWallet`, `LedgerEntry`, `DailyEarning`, `CommentLike`; comment like UI.
 - Economy consumer for post/comment likes, milestones, caps, hidden established rule.
 - Daily check-in, wallet chip and page.
-- Reputation and rank (90-day window, nightly job) on profile and in the ledger; clawback/restore on moderation; ban clawback job.
+- Reputation and rank (lifetime lines; 90-day keep-line for Supernova and Galaxy; nightly job) on profile and in the ledger; clawback/restore on moderation; ban clawback job.
 - Admin wallet view and adjustment.
 - *Done when:* liking from an established account moves the author's balances once; caps hold; hide/restore round-trips exactly; tests for every row in 4.5.
 
@@ -667,3 +670,5 @@ Each phase ships on its own and is hand-tested before the next.
 - 2026-10-29: No hard daily Reputation cap. Daily steps per author instead (likes 1:1 to 200, 1:10 to 1,000, then 1:100; comments 1:1 to 100, 1:5 to 500, then 1:20), max 5 Reputation per (liker, author) per day. Comments received earn Reputation (first comment per commenter per post). Liking/commenting never earns the actor Reputation; first 3 comments a day earn 1 Shard each. Shards keep the daily cap. (Supersedes the per-post 100 / big-milestone idea.)
 - 2026-10-29: Seasonal ranks Stargazer → Meteor → Comet → Nova → Supernova → Galaxy from Reputation earned in the last 90 days; lifetime Reputation never decays.
 - 2026-10-29: Free preset banners stay free; their look can change.
+- 2026-10-30: Daily Reputation steps tightened: counted likes 1:1 to 100 points (was 200), counted comments 1:1 to 20 points (was 100) and 1:5 to 150 points (was 500). Later steps unchanged.
+- 2026-10-30: Ranks now come from lifetime Reputation (Meteor 1,000; Comet 4,000; Nova 12,000; Supernova 30,000; Galaxy 75,000), so the top rank takes a really dedicated person about a year. Only Supernova and Galaxy decay: they also need 1,000 / 4,000 Reputation in the last 90 days, else they step down (never below Nova). Supersedes the 2026-10-29 rolling-window rank rule.

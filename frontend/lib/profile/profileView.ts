@@ -1,3 +1,5 @@
+import type { EquippedCosmeticsMap } from "../cosmetics";
+
 /** Someone's profile as GET /users/:id answers it. */
 export interface UserProfile {
   id: string;
@@ -14,10 +16,15 @@ export interface UserProfile {
   isPrivate?: boolean;
   reputation?: number;
   rank?: string;
+  premium?: boolean;
+  equipped?: EquippedCosmeticsMap | null;
 }
 
 /** Your own account, as far as a profile needs it. */
-export type ProfileOwner = Pick<UserProfile, "id" | "name" | "username" | "image" | "bannerPresetId" | "bio">;
+export type ProfileOwner = Pick<
+  UserProfile,
+  "id" | "name" | "username" | "image" | "bannerPresetId" | "bio" | "premium" | "equipped"
+>;
 
 /** The profile to draw: your own comes from your live account (so a new picture or bio shows at once), anyone else's as the server sent it. */
 export function profileToShow(
@@ -33,6 +40,8 @@ export function profileToShow(
     image: me.image,
     bannerPresetId: me.bannerPresetId,
     bio: me.bio ?? null,
+    premium: me.premium ?? profile.premium,
+    equipped: me.equipped ?? profile.equipped,
   };
 }
 

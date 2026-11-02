@@ -9,6 +9,7 @@ import { floatingPortal } from "../../hooks/chat/useFloatingPosition";
 import { useModalFocusTrap } from "../../hooks/chat/useModalFocusTrap";
 import { AvatarFace } from "../AvatarFace";
 import { FollowButton } from "./FollowButton";
+import { ProfileHoverTrigger } from "./ProfileHoverCard";
 import "./ProfileSocial.css";
 
 export type FollowListKind = "followers" | "following";
@@ -54,15 +55,17 @@ export function FollowListDialog({
         <ul className="follow-list">
           {list.people.map((person) => (
             <li key={person.id}>
-              <Link className="follow-list-person" href={`/user/${person.id}`} onClick={onClose}>
-                <span className="follow-list-avatar">
-                  <AvatarFace image={person.image} name={person.name} />
-                </span>
-                <span className="follow-list-text">
-                  <b>{person.name}</b>
-                  {person.username && <small>@{person.username}</small>}
-                </span>
-              </Link>
+              <ProfileHoverTrigger userId={person.id}>
+                <Link className="follow-list-person" href={`/user/${person.id}`} onClick={onClose}>
+                  <span className="follow-list-avatar">
+                    <AvatarFace image={person.image} name={person.name} />
+                  </span>
+                  <span className="follow-list-text">
+                    <b>{person.name}</b>
+                    {person.username && <small>@{person.username}</small>}
+                  </span>
+                </Link>
+              </ProfileHoverTrigger>
               {person.id !== me?.id && (
                 <FollowButton
                   compact

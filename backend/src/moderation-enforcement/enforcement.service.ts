@@ -8,6 +8,7 @@ import {
 import { createHash } from 'node:crypto';
 import { Prisma, type EnforcementScope } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { EconomyService } from '../economy/economy.service';
 import { OutboxEventPublisher } from '../outbox/outbox-event.publisher';
 import { lockModerationActor } from '../common/moderation/lock-moderation-actor';
 import { PostsRepository } from '../posts/posts.repository';
@@ -67,6 +68,8 @@ export class EnforcementService {
     private readonly events: OutboxEventPublisher,
     private readonly posts: PostsRepository,
     private readonly comments: CommentsRepository,
+    // Hiding takes back what the content earned; restoring gives it back.
+    private readonly economy: EconomyService,
   ) {
     durationPolicy();
     riskPolicy(); // Invalid operational policy must fail startup, rather than silently change risk.
@@ -427,6 +430,8 @@ export class EnforcementService {
         throw new ConflictException(
           'Content changed while it was being reviewed',
         );
+      if (hidden) await this.economy.revokeForContent(tx, targetType, targetId);
+      else await this.economy.restoreForContent(tx, targetType, targetId);
     }
     return { targetId, targetType, status: to };
   }
@@ -1123,6 +1128,12 @@ export class EnforcementService {
         restored = true;
       }
     }
+    if (restored)
+      await this.economy.restoreForContent(
+        tx,
+        record.targetType,
+        record.targetId,
+      );
     await this.audit(
       tx,
       actorId,

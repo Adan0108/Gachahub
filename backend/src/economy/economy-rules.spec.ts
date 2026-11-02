@@ -22,23 +22,23 @@ describe('economy rules', () => {
     ).toBe('2026-10-29T17:00:00.000Z');
   });
 
-  it('pays likes 1:1 to 200, then 1 per 10 to 1,000, then 1 per 100', () => {
+  it('pays likes 1:1 to 100, then 1 per 10 to 1,000, then 1 per 100', () => {
     expect(reputationFromLikes(0)).toBe(0);
-    expect(reputationFromLikes(200)).toBe(200);
-    expect(reputationFromLikes(209)).toBe(200);
-    expect(reputationFromLikes(210)).toBe(201);
-    expect(reputationFromLikes(200 + 8000)).toBe(1000);
-    expect(reputationFromLikes(200 + 8000 + 99)).toBe(1000);
-    expect(reputationFromLikes(200 + 8000 + 100)).toBe(1001);
-    expect(reputationFromLikes(1_000_000)).toBe(1000 + 9918);
+    expect(reputationFromLikes(100)).toBe(100);
+    expect(reputationFromLikes(109)).toBe(100);
+    expect(reputationFromLikes(110)).toBe(101);
+    expect(reputationFromLikes(100 + 9000)).toBe(1000);
+    expect(reputationFromLikes(100 + 9000 + 99)).toBe(1000);
+    expect(reputationFromLikes(100 + 9000 + 100)).toBe(1001);
+    expect(reputationFromLikes(1_000_000)).toBe(1000 + 9909);
   });
 
-  it('pays comments 1:1 to 100, then 1 per 5 to 500, then 1 per 20', () => {
-    expect(reputationFromComments(100)).toBe(100);
-    expect(reputationFromComments(104)).toBe(100);
-    expect(reputationFromComments(105)).toBe(101);
-    expect(reputationFromComments(100 + 2000)).toBe(500);
-    expect(reputationFromComments(100 + 2000 + 20)).toBe(501);
+  it('pays comments 1:1 to 20, then 1 per 5 to 150, then 1 per 20', () => {
+    expect(reputationFromComments(20)).toBe(20);
+    expect(reputationFromComments(24)).toBe(20);
+    expect(reputationFromComments(25)).toBe(21);
+    expect(reputationFromComments(20 + 650)).toBe(150);
+    expect(reputationFromComments(20 + 650 + 20)).toBe(151);
   });
 
   it('caps shards per day and spreads a 1.5x multiplier over whole shards', () => {
@@ -49,12 +49,22 @@ describe('economy rules', () => {
     expect(shardsToCredit(100, 80, 1.5)).toBe(10);
   });
 
-  it('ranks by reputation in the window', () => {
-    expect(rankFor(0)).toBe('STARGAZER');
-    expect(rankFor(99)).toBe('STARGAZER');
-    expect(rankFor(100)).toBe('METEOR');
-    expect(rankFor(4_000)).toBe('SUPERNOVA');
-    expect(rankFor(50_000)).toBe('GALAXY');
+  it('ranks by lifetime reputation, with no decay up to Nova', () => {
+    expect(rankFor(0, 0)).toBe('STARGAZER');
+    expect(rankFor(999, 999)).toBe('STARGAZER');
+    expect(rankFor(1_000, 0)).toBe('METEOR');
+    expect(rankFor(4_000, 0)).toBe('COMET');
+    expect(rankFor(12_000, 0)).toBe('NOVA');
+    expect(rankFor(29_999, 0)).toBe('NOVA');
+  });
+
+  it('lets Supernova and Galaxy slip when recent reputation dries up, never below Nova', () => {
+    expect(rankFor(30_000, 1_000)).toBe('SUPERNOVA');
+    expect(rankFor(30_000, 999)).toBe('NOVA');
+    expect(rankFor(75_000, 4_000)).toBe('GALAXY');
+    expect(rankFor(75_000, 3_999)).toBe('SUPERNOVA');
+    expect(rankFor(75_000, 999)).toBe('NOVA');
+    expect(rankFor(75_000, 0)).toBe('NOVA');
   });
 
   it('gives each account its own thresholds inside the ranges', () => {

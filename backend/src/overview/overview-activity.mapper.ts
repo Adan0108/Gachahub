@@ -2,6 +2,9 @@ import { AuditTargetType } from '../generated/prisma/client';
 import type {
   ChatChannelAuditMetadata,
   CommentAuditMetadata,
+  CosmeticCreatedAuditMetadata,
+  CosmeticDeactivatedAuditMetadata,
+  CosmeticUpdatedAuditMetadata,
   PostAuditMetadata,
   ReportAuditMetadata,
   CaseAuditMetadata,
@@ -81,9 +84,14 @@ function resolveTargetName(
     case AuditTargetType.CHAT_MESSAGE:
       // A message has no title of its own; the room it was in is the useful context.
       return null;
-    case AuditTargetType.COSMETIC:
-      // Cosmetic audit metadata has no established name snapshot; retain the ID fallback.
-      return null;
+    case AuditTargetType.COSMETIC: {
+      const metadata = entry.metadata as
+        | CosmeticCreatedAuditMetadata
+        | CosmeticUpdatedAuditMetadata
+        | CosmeticDeactivatedAuditMetadata
+        | null;
+      return metadata?.name ?? metadata?.slug ?? null;
+    }
     default: {
       const exhaustiveCheck: never = entry.targetType;
       return exhaustiveCheck;

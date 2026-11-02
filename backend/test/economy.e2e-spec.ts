@@ -155,35 +155,6 @@ describe('Economy (local test database)', () => {
     expect(await wallet(owner)).toMatchObject({ reputation: 2, shards: 1 });
   });
 
-  it('a ban takes back what that person gave; restoring hidden content skips them until unbanned', async () => {
-    const owner = await established();
-    const post = await postBy(owner);
-    const fan = await established();
-    await like(owner, post, fan);
-
-    await prisma.user.update({
-      where: { id: fan },
-      data: { status: 'BANNED' },
-    });
-    await prisma.$transaction((tx) => economy.revokeForActor(tx, fan));
-    expect(await wallet(owner)).toMatchObject({ reputation: 0 });
-
-    await prisma.$transaction((tx) =>
-      economy.revokeForContent(tx, 'POST', post),
-    );
-    await prisma.$transaction((tx) =>
-      economy.restoreForContent(tx, 'POST', post),
-    );
-    expect(await wallet(owner)).toMatchObject({ reputation: 0 });
-
-    await prisma.user.update({
-      where: { id: fan },
-      data: { status: 'ACTIVE' },
-    });
-    await prisma.$transaction((tx) => economy.restoreForActor(tx, fan));
-    expect(await wallet(owner)).toMatchObject({ reputation: 1, shards: 1 });
-  });
-
   it('counts only the first comment per person per post, and pays the writer for 3 comments a day', async () => {
     const owner = await established();
     const post = await postBy(owner);
@@ -212,12 +183,12 @@ describe('Economy (local test database)', () => {
     expect(await wallet(user)).toMatchObject({ shards: 10 });
   });
 
-  it('ranks up from Reputation earned and keeps the rank in step with the ledger', async () => {
+  it('keeps lifetime and 90-day Reputation in step with the ledger, and the rank at Stargazer below 1,000', async () => {
     const owner = await established();
     const fans = await Promise.all(
       Array.from({ length: 21 }, () => established()),
     );
-    // 21 fans x 5 posts each = 105 Reputation (5 per fan per day).
+    // 21 fans x 5 posts = 105 counted likes; the first 100 pay 1 each, the next 5 fall in the 1-per-10 step.
     const posts = await Promise.all(
       Array.from({ length: 5 }, () => postBy(owner)),
     );
@@ -225,15 +196,79 @@ describe('Economy (local test database)', () => {
       for (const post of posts) await like(owner, post, fan);
     }
     expect(await wallet(owner)).toMatchObject({
-      reputation: 105,
-      reputation90d: 105,
-      rank: 'METEOR',
+      reputation: 100,
+      reputation90d: 100,
+      rank: 'STARGAZER',
     });
 
     await economy.refreshRank(owner);
     expect(await wallet(owner)).toMatchObject({
-      reputation90d: 105,
-      rank: 'METEOR',
+      reputation: 100,
+      reputation90d: 100,
+      rank: 'STARGAZER',
     });
+  });
+
+  it('removes counted likes and per-giver rows together with either account', async () => {
+    const owner = await established();
+    const fan = await established();
+    await like(owner, await postBy(owner), fan);
+    const rows = () =>
+      Promise.all([
+        prisma.countedInteraction.count({ where: { actorId: fan } }),
+        prisma.dailyGiverReputation.count({ where: { giverId: fan } }),
+      ]);
+    expect(await rows()).toEqual([1, 1]);
+
+    await prisma.user.delete({ where: { id: fan } });
+
+    expect(await rows()).toEqual([0, 0]);
+  });
+
+  it("clears per-giver rows from earlier days and keeps today's", async () => {
+    const owner = await established();
+    const fan = await established();
+    await like(owner, await postBy(owner), fan);
+    await prisma.dailyGiverReputation.create({
+      data: {
+        ownerId: owner,
+        giverId: fan,
+        day: new Date('2020-01-01T00:00:00Z'),
+        reputation: 5,
+      },
+    });
+
+    await economy.pruneOldGiverDays();
+
+    const left = await prisma.dailyGiverReputation.findMany({
+      where: { ownerId: owner },
+    });
+    expect(left).toHaveLength(1);
+    expect(left[0].day.getTime()).toBeGreaterThan(
+      new Date('2020-01-02T00:00:00Z').getTime(),
+    );
+  });
+
+  it('reports only wallets whose cached balance differs from the ledger', async () => {
+    const user = await established();
+    await economy.checkIn(user);
+    const mine = async () =>
+      (await economy.verifyWalletBalances()).filter(
+        (row) => row.userId === user,
+      );
+    expect(await mine()).toEqual([]);
+
+    await prisma.userWallet.update({
+      where: { userId: user },
+      data: { shards: 999 },
+    });
+
+    expect(await mine()).toEqual([
+      {
+        userId: user,
+        wallet: { reputation: 0, shards: 999, prisms: 0 },
+        ledger: { reputation: 0, shards: 10, prisms: 0 },
+      },
+    ]);
   });
 });

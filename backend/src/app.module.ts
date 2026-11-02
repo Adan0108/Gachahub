@@ -13,7 +13,9 @@ import { CommonModule } from './common/common.module';
 import { env } from './config/env';
 import { CommentsModule } from './comments/comments.module';
 import { ContentModerationModule } from './content-moderation/content-moderation.module';
+import { CosmeticsModule } from './cosmetics/cosmetics.module';
 import { DevModule } from './dev/dev.module';
+import { EconomyModule } from './economy/economy.module';
 import { FeedModule } from './feed/feed.module';
 import { FollowsModule } from './follows/follows.module';
 import { GameCategoriesModule } from './game-categories/game-categories.module';
@@ -56,6 +58,8 @@ import { ModerationResultsModule } from './moderation-analysis/moderation-result
     AuthModule.forRoot({ auth, bodyParser: { json: { limit: '2mb' } } }),
     HealthModule,
     UsersModule,
+    EconomyModule,
+    CosmeticsModule,
 
     GamesModule,
     GameCategoriesModule,

@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { FiAward, FiEdit3, FiGrid, FiLock, FiShare2, FiStar } from "react-icons/fi";
 import { useToast } from "../../hooks/useToast";
 import { queries } from "../../lib/queries";
-import { bannerColor } from "../../lib/profileBanners";
+import { bannerSurface, cosmeticSurface, resolveBanner } from "../../lib/cosmetics";
 import {
   accountAge,
   compactCount,
@@ -54,7 +54,19 @@ export function ProfileView({
   const posts = useQuery(isSelf ? queries.myPosts() : queries.userPosts(profile.id));
   const items = posts.data?.items || [];
   const counts = profile.counts;
-  const bannerFill = bannerColor(shown.bannerPresetId);
+
+  const equippedProfileBg = shown.equipped?.profileBackground ?? null;
+  const { className: profileBgPresetClass, style: profileBgStyle } = cosmeticSurface(equippedProfileBg);
+
+  const resolvedBanner = resolveBanner({
+    premium: shown.premium,
+    equippedBanner: shown.equipped?.banner ?? null,
+    bannerPresetId: shown.bannerPresetId,
+  });
+
+  const { className: bannerPresetClass, style: bannerStyle } = bannerSurface(resolvedBanner);
+  const hasBannerFill = resolvedBanner.kind !== "default";
+
   const comingSoon = (what: string) => showNotice(`${what}: coming soon`);
 
   const shareProfile = async () => {
@@ -71,10 +83,21 @@ export function ProfileView({
       <div className="toast-slot" aria-live="polite">
         {notice}
       </div>
-      <div className="profile-v2-body" aria-hidden={editing ? "true" : undefined}>
+      <div
+        className={`profile-v2-body ${equippedProfileBg ? `profile-surface-has-bg ${profileBgPresetClass}` : ""}`.trim()}
+        aria-hidden={editing ? "true" : undefined}
+        style={profileBgStyle}
+      >
+        {equippedProfileBg && <div className="profile-surface-scrim" aria-hidden="true" />}
         <section className="profile-card">
-          <div className="profile-cover" style={bannerFill ? { backgroundColor: bannerFill } : undefined}>
-            {bannerFill ? null : <Art tone="indigo">{glyph.sparkle}</Art>}
+          <div
+            className={`profile-cover ${resolvedBanner.kind === "cosmetic" ? `has-cosmetic-banner ${bannerPresetClass}` : ""}`.trim()}
+            style={bannerStyle}
+          >
+            {resolvedBanner.kind === "cosmetic" && (
+              <div className="profile-cover-scrim" aria-hidden="true" />
+            )}
+            {hasBannerFill ? null : <Art tone="indigo">{glyph.sparkle}</Art>}
             <div className="profile-cover-actions">
               <button
                 aria-label="Copy profile link"
@@ -102,6 +125,7 @@ export function ProfileView({
               <div className="profile-card-avatar">
                 <AvatarFace
                   fallback={<Art tone="blue">{shown.name?.charAt(0).toUpperCase() || "R"}</Art>}
+                  frame={shown.equipped?.frame ?? null}
                   image={shown.image}
                 />
               </div>

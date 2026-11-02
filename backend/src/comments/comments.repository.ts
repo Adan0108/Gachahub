@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { EQUIPPED_FRAME_RELATION_SELECT } from '../cosmetics/cosmetic-starter-catalog';
 import { PrismaService } from '../prisma/prisma.service';
 import type { Prisma } from '../generated/prisma/client';
 
@@ -9,6 +10,7 @@ const commentInclude = {
       image: true,
       name: true,
       username: true,
+      equippedCosmetics: EQUIPPED_FRAME_RELATION_SELECT,
     },
   },
 } as const;

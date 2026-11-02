@@ -208,7 +208,13 @@ const enabled =
       new ModerationAnalysisScheduler(publisher),
     );
     const visibility = new PostVisibilityService(
-      new FollowsService(new FollowsRepository(db), publisher, db),
+      new FollowsService(
+        new FollowsRepository(db),
+        publisher,
+        db,
+        {} as never, // BlocksService: not reached by visibility checks
+        {} as never, // ProfileAccessService: same
+      ),
     );
     const reports = new ReportsService(
       repository,

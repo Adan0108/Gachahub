@@ -1,0 +1,644 @@
+/* ==========================================================================
+   Phase 2: Cosmetics, 20 CSS Starter Presets, Hover Mini Profile & Scrims
+   (docs/plans/economy-and-cosmetics.md Sections 6 & 8)
+   ========================================================================== */
+
+/* --- Framed Avatar Wrapper --- */
+.avatar-framed-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.avatar-frame-overlay {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 2;
+  box-sizing: border-box;
+}
+
+.avatar-frame-overlay > img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* --- 6 Starter Avatar Frames --- */
+/* 1. Starlight Ring (3★ GLIMMER) */
+.cosmetic-preset-frame-starlight-ring {
+  border: 2px solid #60a5fa;
+  box-shadow:
+    0 0 0 1px rgba(147, 197, 253, 0.55),
+    0 0 10px rgba(59, 130, 246, 0.55),
+    inset 0 0 6px rgba(96, 165, 250, 0.45);
+}
+
+/* 2. Verdant Bloom (3★ GLIMMER) */
+.cosmetic-preset-frame-verdant-bloom {
+  border: 2px solid #34d399;
+  box-shadow:
+    0 0 0 1px rgba(110, 231, 183, 0.5),
+    0 0 10px rgba(16, 185, 129, 0.5),
+    inset 0 0 6px rgba(52, 211, 153, 0.4);
+}
+
+/* 3. Ember Crest (3★ GLIMMER) */
+.cosmetic-preset-frame-ember-crest {
+  border: 2px solid #f59e0b;
+  box-shadow:
+    0 0 0 1px rgba(251, 191, 36, 0.55),
+    0 0 10px rgba(234, 88, 12, 0.55),
+    inset 0 0 6px rgba(245, 158, 11, 0.45);
+}
+
+/* 4. Astral Orbit (4★ RADIANT - Animated) */
+.cosmetic-preset-frame-astral-orbit {
+  border: 2px solid #a855f7;
+  box-shadow:
+    0 0 0 1.5px rgba(56, 189, 248, 0.7),
+    0 0 14px rgba(168, 85, 247, 0.75),
+    inset 0 0 8px rgba(56, 189, 248, 0.5);
+  animation: cosmeticPulseOrbit 3.8s ease-in-out infinite;
+}
+
+/* 5. Nebula Halo (4★ RADIANT - Animated) */
+.cosmetic-preset-frame-nebula-halo {
+  border: 2px solid #ec4899;
+  box-shadow:
+    0 0 0 1.5px rgba(192, 132, 252, 0.75),
+    0 0 14px rgba(236, 72, 153, 0.75),
+    inset 0 0 8px rgba(168, 85, 247, 0.55);
+  animation: cosmeticPulseNebula 4.2s ease-in-out infinite;
+}
+
+/* 6. Prismatic Crown (5★ PRISMATIC - Animated) */
+.cosmetic-preset-frame-prismatic-crown {
+  border: 2.5px solid #fbbf24;
+  box-shadow:
+    0 0 0 1.5px rgba(244, 114, 182, 0.8),
+    0 0 16px rgba(251, 191, 36, 0.88),
+    0 0 24px rgba(168, 85, 247, 0.55),
+    inset 0 0 8px rgba(253, 224, 71, 0.65);
+  animation: cosmeticPulsePrismatic 3.4s ease-in-out infinite;
+}
+
+/* --- 6 Starter Profile Backgrounds --- */
+.cosmetic-preset-pbg-twilight-observatory {
+  background-color: #161b36;
+  background-image:
+    radial-gradient(circle at 20% 18%, rgba(96, 165, 250, 0.28), transparent 48%),
+    radial-gradient(circle at 82% 72%, rgba(129, 140, 248, 0.24), transparent 52%),
+    linear-gradient(145deg, #131832 0%, #1e254a 52%, #11162b 100%);
+}
+
+.cosmetic-preset-pbg-seafoam-sanctuary {
+  background-color: #0f292e;
+  background-image:
+    radial-gradient(circle at 18% 24%, rgba(45, 212, 191, 0.26), transparent 48%),
+    radial-gradient(circle at 80% 70%, rgba(56, 189, 248, 0.22), transparent 52%),
+    linear-gradient(145deg, #0d2428 0%, #15383f 55%, #0c1f24 100%);
+}
+
+.cosmetic-preset-pbg-crimson-archive {
+  background-color: #2b1420;
+  background-image:
+    radial-gradient(circle at 22% 20%, rgba(244, 63, 94, 0.25), transparent 48%),
+    radial-gradient(circle at 78% 75%, rgba(245, 158, 11, 0.2), transparent 50%),
+    linear-gradient(145deg, #24101a 0%, #381827 52%, #1b0c14 100%);
+}
+
+.cosmetic-preset-pbg-aurora-drift {
+  background-color: #132238;
+  background-image:
+    radial-gradient(ellipse at 25% 15%, rgba(52, 211, 153, 0.34), transparent 55%),
+    radial-gradient(ellipse at 75% 80%, rgba(168, 85, 247, 0.32), transparent 55%),
+    linear-gradient(135deg, #0f1e32 0%, #1b2d48 50%, #161b33 100%);
+  background-size: 160% 160%;
+  animation: cosmeticBgDrift 12s ease-in-out infinite;
+}
+
+.cosmetic-preset-pbg-void-constellation {
+  background-color: #1a1230;
+  background-image:
+    radial-gradient(circle at 30% 25%, rgba(192, 132, 252, 0.32), transparent 50%),
+    radial-gradient(circle at 72% 68%, rgba(99, 102, 241, 0.3), transparent 52%),
+    linear-gradient(140deg, #140d26 0%, #241742 52%, #110b20 100%);
+  background-size: 150% 150%;
+  animation: cosmeticBgDrift 14s ease-in-out infinite;
+}
+
+.cosmetic-preset-pbg-celestial-convergence {
+  background-color: #231829;
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(251, 191, 36, 0.35), transparent 50%),
+    radial-gradient(circle at 80% 30%, rgba(236, 72, 153, 0.3), transparent 52%),
+    radial-gradient(circle at 50% 85%, rgba(96, 165, 250, 0.28), transparent 55%),
+    linear-gradient(135deg, #1f1627 0%, #2c1d38 48%, #181326 100%);
+  background-size: 165% 165%;
+  animation: cosmeticBgDrift 10s ease-in-out infinite;
+}
+
+/* --- 4 Starter Mini Backgrounds --- */
+.cosmetic-preset-mbg-cobalt-dusk {
+  background-color: #17233b;
+  background-image:
+    radial-gradient(circle at 85% 20%, rgba(96, 165, 250, 0.28), transparent 55%),
+    linear-gradient(155deg, #152036 0%, #1e2e4d 100%);
+}
+
+.cosmetic-preset-mbg-rose-quartz {
+  background-color: #2c1928;
+  background-image:
+    radial-gradient(circle at 80% 22%, rgba(244, 114, 182, 0.28), transparent 55%),
+    linear-gradient(155deg, #271523 0%, #381f33 100%);
+}
+
+.cosmetic-preset-mbg-starfall-veil {
+  background-color: #1e1638;
+  background-image:
+    radial-gradient(circle at 20% 25%, rgba(168, 85, 247, 0.35), transparent 52%),
+    radial-gradient(circle at 82% 78%, rgba(56, 189, 248, 0.28), transparent 52%),
+    linear-gradient(145deg, #18112e 0%, #271b47 100%);
+  background-size: 150% 150%;
+  animation: cosmeticBgDrift 11s ease-in-out infinite;
+}
+
+.cosmetic-preset-mbg-sovereign-aether {
+  background-color: #291d24;
+  background-image:
+    radial-gradient(circle at 18% 20%, rgba(251, 191, 36, 0.38), transparent 52%),
+    radial-gradient(circle at 85% 75%, rgba(236, 72, 153, 0.32), transparent 52%),
+    linear-gradient(145deg, #241920 0%, #332230 55%, #1c1626 100%);
+  background-size: 160% 160%;
+  animation: cosmeticBgDrift 9.5s ease-in-out infinite;
+}
+
+/* --- 4 Starter Banners --- */
+.cosmetic-preset-bnr-horizon-stride {
+  background-color: #254078;
+  background-image:
+    radial-gradient(circle at 82% 28%, rgba(147, 197, 253, 0.42), transparent 48%),
+    linear-gradient(120deg, #1e3a8a 0%, #3b82f6 52%, #4f46e5 100%);
+}
+
+.cosmetic-preset-bnr-gilded-dawn {
+  background-color: #7c3f1d;
+  background-image:
+    radial-gradient(circle at 76% 30%, rgba(253, 224, 71, 0.4), transparent 50%),
+    linear-gradient(120deg, #7c2d12 0%, #d97706 52%, #b45309 100%);
+}
+
+.cosmetic-preset-bnr-eclipse-corona {
+  background-color: #311952;
+  background-image:
+    radial-gradient(circle at 50% 50%, #0f071e 0%, #0f071e 20%, rgba(192, 132, 252, 0.65) 32%, transparent 62%),
+    linear-gradient(120deg, #1e1035 0%, #4c1d95 50%, #2e1065 100%);
+  background-size: 140% 140%;
+  animation: cosmeticBgDrift 9s ease-in-out infinite;
+}
+
+.cosmetic-preset-bnr-supernova-anthem {
+  background-color: #4a2040;
+  background-image:
+    radial-gradient(circle at 28% 40%, rgba(251, 191, 36, 0.65), transparent 48%),
+    radial-gradient(circle at 75% 55%, rgba(244, 114, 182, 0.6), transparent 52%),
+    linear-gradient(120deg, #78350f 0%, #be185d 50%, #4c1d95 100%);
+  background-size: 155% 155%;
+  animation: cosmeticBgDrift 8s ease-in-out infinite;
+}
+
+/* --- Keyframes & Reduced Motion (Section 6.4) --- */
+@keyframes cosmeticPulseOrbit {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1.5px rgba(56, 189, 248, 0.7),
+      0 0 12px rgba(168, 85, 247, 0.7),
+      inset 0 0 6px rgba(56, 189, 248, 0.45);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px rgba(168, 85, 247, 0.85),
+      0 0 18px rgba(56, 189, 248, 0.85),
+      inset 0 0 10px rgba(168, 85, 247, 0.65);
+  }
+}
+
+@keyframes cosmeticPulseNebula {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1.5px rgba(192, 132, 252, 0.7),
+      0 0 12px rgba(236, 72, 153, 0.7),
+      inset 0 0 6px rgba(168, 85, 247, 0.5);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px rgba(244, 114, 182, 0.9),
+      0 0 18px rgba(192, 132, 252, 0.9),
+      inset 0 0 10px rgba(236, 72, 153, 0.65);
+  }
+}
+
+@keyframes cosmeticPulsePrismatic {
+  0%, 100% {
+    border-color: #fbbf24;
+    box-shadow:
+      0 0 0 1.5px rgba(244, 114, 182, 0.8),
+      0 0 15px rgba(251, 191, 36, 0.85),
+      0 0 24px rgba(168, 85, 247, 0.55);
+  }
+  50% {
+    border-color: #f472b6;
+    box-shadow:
+      0 0 0 2px rgba(56, 189, 248, 0.85),
+      0 0 20px rgba(244, 114, 182, 0.92),
+      0 0 28px rgba(251, 191, 36, 0.7);
+  }
+}
+
+@keyframes cosmeticBgDrift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cosmetic-preset-frame-astral-orbit,
+  .cosmetic-preset-frame-nebula-halo,
+  .cosmetic-preset-frame-prismatic-crown,
+  .cosmetic-preset-pbg-aurora-drift,
+  .cosmetic-preset-pbg-void-constellation,
+  .cosmetic-preset-pbg-celestial-convergence,
+  .cosmetic-preset-mbg-starfall-veil,
+  .cosmetic-preset-mbg-sovereign-aether,
+  .cosmetic-preset-bnr-eclipse-corona,
+  .cosmetic-preset-bnr-supernova-anthem {
+    animation: none !important;
+  }
+}
+
+/* --- Profile Background Surface & Scrim (Section 6.4) --- */
+.profile-surface-has-bg {
+  position: relative;
+  border-radius: 18px;
+  padding: 14px;
+  overflow: hidden;
+  background-size: cover;
+  background-position: center;
+}
+
+.profile-surface-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(13, 16, 28, 0.52);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+[data-theme="light"] .profile-surface-scrim {
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.profile-surface-has-bg > *:not(.profile-surface-scrim) {
+  position: relative;
+  z-index: 1;
+}
+
+.profile-cover.has-cosmetic-banner {
+  position: relative;
+  overflow: hidden;
+  background-size: cover;
+  background-position: center;
+}
+
+.profile-cover-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(10, 12, 22, 0.14) 0%,
+    rgba(10, 12, 22, 0.42) 100%
+  );
+  pointer-events: none;
+}
+
+/* --- Hover Mini Profile Card (Section 8) --- */
+.profile-hover-trigger {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+}
+
+.profile-hover-popover {
+  position: fixed;
+  z-index: 1300;
+  width: 310px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
+  overflow: hidden;
+  animation: hoverCardFadeIn 0.14s ease-out;
+}
+
+@keyframes hoverCardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.profile-hover-popover.has-mini-bg {
+  background-size: cover;
+  background-position: center;
+}
+
+.profile-hover-mini-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(14, 17, 29, 0.68);
+  pointer-events: none;
+  z-index: 0;
+}
+
+[data-theme="light"] .profile-hover-mini-scrim {
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.profile-hover-banner {
+  position: relative;
+  z-index: 1;
+  height: 72px;
+  background: linear-gradient(125deg, #3b336a 0%, #24345a 100%);
+  background-size: cover;
+  background-position: center;
+}
+
+.profile-hover-body {
+  position: relative;
+  z-index: 1;
+  padding: 0 16px 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.profile-hover-top-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-top: -28px;
+  gap: 10px;
+}
+
+.profile-hover-avatar-link {
+  display: inline-flex;
+  border-radius: 50%;
+  background: var(--panel);
+  padding: 3px;
+  text-decoration: none;
+}
+
+.profile-hover-identity {
+  display: grid;
+  gap: 2px;
+}
+
+.profile-hover-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.profile-hover-name {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.profile-hover-name:hover {
+  text-decoration: underline;
+}
+
+.profile-hover-supporter-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.16);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+
+.profile-hover-handle-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.profile-hover-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 12.5px;
+  color: var(--muted-strong);
+}
+
+.profile-hover-rank-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.profile-hover-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.profile-hover-view-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.profile-hover-view-btn:hover {
+  border-color: var(--purple);
+}
+
+.profile-hover-unavailable,
+.profile-hover-blocked-note {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* --- Edit Profile Dialog Tabs & Cosmetics Picker (Section 6.5) --- */
+.edit-profile-tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+}
+
+.edit-profile-tab-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.edit-profile-tab-btn.active {
+  background: var(--panel2);
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.cosmetics-tab-layout {
+  display: grid;
+  gap: 14px;
+}
+
+.cosmetics-live-preview {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--panel2);
+}
+
+.cosmetics-live-preview-banner {
+  height: 58px;
+  background: linear-gradient(125deg, #3b336a 0%, #24345a 100%);
+  background-size: cover;
+  background-position: center;
+  position: relative;
+  z-index: 1;
+}
+
+.cosmetics-live-preview-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px 12px;
+}
+
+.cosmetics-slot-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cosmetics-slot-pill {
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cosmetics-slot-pill.active {
+  border-color: var(--purple);
+  color: var(--text);
+}
+
+.cosmetics-owned-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+  gap: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.cosmetic-choice-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.cosmetic-choice-card:hover {
+  border-color: var(--muted);
+}
+
+.cosmetic-choice-card.selected {
+  border-color: var(--purple);
+  box-shadow: 0 0 0 1px var(--purple);
+}
+
+.cosmetic-choice-swatch {
+  height: 44px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  background: var(--panel);
+}
+
+.cosmetic-choice-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.cosmetic-choice-rarity {
+  font-size: 11px;
+  font-weight: 700;
+}

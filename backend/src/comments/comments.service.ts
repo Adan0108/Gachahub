@@ -15,6 +15,7 @@ import { EventPublisherPort } from '../domain-events/event-publisher.port';
 import { PrismaService } from '../prisma/prisma.service';
 import { MentionsService } from '../mentions/mentions.service';
 import { EconomyService } from '../economy/economy.service';
+import { mapAuthorEquippedFrame } from '../posts/post.mapper';
 
 @Injectable()
 export class CommentsService {
@@ -393,10 +394,11 @@ export class CommentsService {
       };
     },
   >(comment: T, mentions: string[] = []) {
-    const { _count, ...rest } = comment;
+    const { _count, author, ...rest } = comment;
 
     return {
       ...rest,
+      author: mapAuthorEquippedFrame(author),
 
       // Preserve the thread when a parent comment is deleted or hidden,
       // but do not expose its old content.
